@@ -104,6 +104,10 @@ comment on table public.clientes is
 -- ---------------------------------------------------------------------------
 -- 4 · Interacciones — cada intento cuenta
 -- ---------------------------------------------------------------------------
+do $$ begin
+  create type public.tipo_interaccion as enum ('visita','cancelacion');
+exception when duplicate_object then null; end $$;
+
 create table public.interacciones (
   id                       uuid primary key default gen_random_uuid(),
   tipo                     public.tipo_interaccion not null,
@@ -125,7 +129,6 @@ create table public.interacciones (
   fecha_visita_actualizada date,
 
   ubicacion                text,
-  ubicacion_verificada     boolean not null default false,
   ubicacion_verificada     boolean not null default false,
   evidencia_path           text,
   calificacion             text check (calificacion is null or calificacion in ('A','B','C','D','E')),
@@ -209,7 +212,6 @@ begin
   -- La ubicación se captura una sola vez y no se puede alterar después.
   if tg_op = 'UPDATE' then
     new.ubicacion      := old.ubicacion;
-    new.ubicacion_verificada := old.ubicacion_verificada;
     new.ubicacion_verificada := old.ubicacion_verificada;
     new.customer_id    := old.customer_id;
     new.correo_stratis := old.correo_stratis;
