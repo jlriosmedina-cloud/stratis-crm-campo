@@ -1025,7 +1025,7 @@ function viewCartera(){
     String(c.razon_social||"").toLowerCase().includes(q));
   if (S.fRubro !== "todos")      lista = lista.filter(c => c.rubro === S.fRubro);
   if (S.fDistrito !== "todos")   lista = lista.filter(c => c.distrito === S.fDistrito);
-  if (S.fEstadoCli !== "todos")  lista = lista.filter(c => c.estado === S.fEstadoCli);
+  if (S.fEstadoCli !== "todos")  lista = lista.filter(c => (c.estado || "NUEVO") === S.fEstadoCli);
   if (S.fContacto !== "todos") lista = lista.filter(c => {
     const b = c._base || RULES.recomputarBase(c.customer_id);
     if (S.fContacto === "sin")     return b._intentos === 0;
@@ -1077,7 +1077,7 @@ function viewCartera(){
 
     <div class="sel-row">
       <label class="fsel"><span>Estado</span>
-        <select data-f="estadocli">${opciones(S.fEstadoCli, "Todo estado", ESTADOS_CLIENTE.map(e => [e, e === "ACTIVO" ? "Activos" : "Dados de baja"]))}</select></label>
+        <select data-f="estadocli">${opciones(S.fEstadoCli, "Todo estado", ESTADOS_CLIENTE.map(e => [e, e === "ACTIVO" ? "Activos" : "Dados de baja"]).concat([["NUEVO","Clientes nuevos"]]))}</select></label>
       <label class="fsel"><span>Rubro</span>
         <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`, rubrosUsados.map(r => [r.codigo, r.nombre]))}</select></label>
       <label class="fsel"><span>Distrito</span>
@@ -1110,7 +1110,7 @@ function cardCliente(c){
     <span class="av" style="background:${userColor(c.asignado)}">${iniciales(nombreCliente(c))}</span>
     <div class="body">
       <div class="name">${esc(titulo(nombreCliente(c)))}</div>
-      <div class="sub">${esc(claveCliente(c))} · ${esc(titulo(c.distrito))}</div>
+      <div class="sub">${esc(claveCliente(c))}${c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</div>
       <div class="meta">
         <span class="chip info">${esc(rubroLabel(c))}</span>
         <span class="chip ${st.chip}">${st.label}</span>
@@ -1147,7 +1147,8 @@ function viewFicha(c){
         <div class="cl-meta" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:9px">
           <span class="chip info">${esc(rubroLabel(c))}</span>
           <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
-          <span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>
+          ${c.estado ? `<span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>` : ""}
+          ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span>` : ""}
         </div>
       </div>
     </div>
@@ -1164,26 +1165,23 @@ function viewFicha(c){
       ${esClienteNuevo(c) ? `
         <div class="kv"><dt>RUC</dt><dd class="mono">${esc(c.ruc)}</dd></div>
         <div class="kv"><dt>Razón social</dt><dd>${esc(c.razon_social) || "—"}</dd></div>
-        <div class="kv"><dt>Contacto</dt><dd>${esc(titulo(c.contacto_nombre)) || "—"}
-          ${c.contacto_celular ? `<div class="mono" style="font-size:12.5px">${esc(c.contacto_celular)}</div>` : ""}
-          ${c.contacto_correo ? `<div style="font-size:12.5px">${esc(c.contacto_correo)}</div>` : ""}
-          ${c.contacto_celular ? `<div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap">
-            <a class="btn ghost sm" href="tel:${esc(c.contacto_celular)}">Llamar</a>
-            <a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/51${esc(c.contacto_celular)}">WhatsApp</a></div>` : ""}
-        </dd></div>`
-      : `<div class="kv"><dt>Customer ID</dt><dd class="mono">${esc(c.customer_id)}</dd></div>`}
-      <div class="kv"><dt>Nombre</dt><dd>${esc(titulo(c.nombre_comercio)) || '<span style="color:var(--muted)">—</span>'}</dd></div>
-      <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
-      <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
-      <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
-      <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>
+        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>`
+      : `
+        <div class="kv"><dt>Customer ID</dt><dd class="mono">${esc(c.customer_id)}</dd></div>
+        <div class="kv"><dt>Nombre</dt><dd>${esc(titulo(c.nombre_comercio)) || '<span style="color:var(--muted)">—</span>'}</dd></div>
+        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
+        <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
+        <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
+        <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>`}
       <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
         <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>
+      ${c.comentario_cliente   ? `<div class="kv"><dt>Comentario del cliente</dt><dd>${esc(c.comentario_cliente)}</dd></div>` : ""}
+      ${c.comentario_ejecutivo ? `<div class="kv"><dt>Comentario del ejecutivo</dt><dd>${esc(c.comentario_ejecutivo)}</dd></div>` : ""}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
-      <div style="margin-top:11px">
+      ${c.direccion ? `<div style="margin-top:11px">
         <a class="btn ghost sm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((c.direccion||"")+", "+(c.distrito||"")+", Lima, Perú")}" target="_blank" rel="noopener">Ver en el mapa</a>
-      </div>
+      </div>` : ""}
     </div>
 
    </div>
@@ -1191,7 +1189,7 @@ function viewFicha(c){
    <div>
     <div class="card nota-ficha">
       <div class="note">${esClienteNuevo(c)
-        ? `Este es un <b>cliente nuevo que trae Stratis</b>: guarda RUC, razón social y contacto porque BBVA los necesita para afiliarlo. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
+        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
         : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
     </div>
     <div class="card">
@@ -1260,10 +1258,10 @@ function itemTimeline(r){
 function nuevoFormCliente(){
   return {
     tipo_registro:"CARTERA", customer_id:"", ruc:"", razon_social:"",
-    contacto_nombre:"", contacto_celular:"", contacto_correo:"",
     nombre_comercio:"", rubro:"", rubro_otro:"",
     distrito:"", direccion:"", estado:"ACTIVO",
-    resultado_gestion:"PENDIENTE", observacion:""
+    resultado_gestion:"PENDIENTE", observacion:"",
+    comentario_cliente:"", comentario_ejecutivo:""
   };
 }
 
@@ -1272,14 +1270,14 @@ function formDeCliente(c){
     tipo_registro: c.tipo_registro || "CARTERA",
     customer_id: c.customer_id,
     ruc: c.ruc || "", razon_social: c.razon_social || "",
-    contacto_nombre: c.contacto_nombre || "", contacto_celular: c.contacto_celular || "",
-    contacto_correo: c.contacto_correo || "",
     nombre_comercio: c.nombre_comercio || "",
     rubro: c.rubro, rubro_otro: c.rubro_otro || "",
     distrito: c.distrito || "", direccion: c.direccion || "",
     estado: c.estado || "ACTIVO",
     resultado_gestion: c.resultado_gestion || "PENDIENTE",
-    observacion: c.observacion || ""
+    observacion: c.observacion || "",
+    comentario_cliente: c.comentario_cliente || "",
+    comentario_ejecutivo: c.comentario_ejecutivo || ""
   };
 }
 
@@ -1327,7 +1325,7 @@ function renderFormCliente(){
   <div class="card">
     <h3>Identificación</h3>
     <div id="boxIdent"></div>
-    <div class="field">
+    <div class="field" id="fldNombre">
       <label>Nombre del comercio <span class="req">*</span> <span class="hint">— el que tú uses para reconocerlo</span></label>
       <input type="text" data-c="nombre_comercio" value="${esc(f.nombre_comercio)}"
              placeholder="Ej.: Bodega de la esquina, Av. Perú">
@@ -1340,7 +1338,7 @@ function renderFormCliente(){
       </select>
     </div>
     <div id="rubroOtro"></div>
-    <div class="field">
+    <div class="field" id="fldEstado">
       <label>Estado del cliente <span class="req">*</span></label>
       <div class="opts">
         ${ESTADOS_CLIENTE.map(e => `
@@ -1352,7 +1350,7 @@ function renderFormCliente(){
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="cardUbicacion">
     <h3>Ubicación del comercio</h3>
     <div class="field">
       <label>Distrito <span class="req">*</span></label>
@@ -1380,11 +1378,8 @@ function renderFormCliente(){
   </div>
 
   <div class="card">
-    <h3>Observación</h3>
-    <div class="field" style="margin-bottom:0">
-      <label>Nota interna <span class="hint">— opcional</span></label>
-      <textarea data-c="observacion" placeholder="Ej.: El local abre solo por las tardes; conviene ir después de las 3.">${esc(f.observacion)}</textarea>
-    </div>
+    <h3 id="tituloNotas">Observación</h3>
+    <div id="boxNotas"></div>
     <div id="notaDatos" style="margin-top:11px"></div>
   </div>
 
@@ -1421,8 +1416,8 @@ function renderFormCliente(){
   pintarRubroOtro(); pintarIdentificacion();
 }
 
-/* La identificación cambia según el origen: Customer ID o RUC + datos del
-   titular, que BBVA necesita para poder afiliarlo. */
+/* La identificación cambia según el origen: Customer ID, o RUC y razón social
+   para una venta nueva que BBVA todavía no tiene afiliada. */
 function pintarIdentificacion(){
   const f = S.formCli, box = $("#boxIdent"), editando = !!S.editCli;
   if (!box) return;
@@ -1440,16 +1435,9 @@ function pintarIdentificacion(){
         <label>Razón social <span class="req">*</span></label>
         <input type="text" data-c="razon_social" value="${esc(f.razon_social)}"
                placeholder="Tal como figura en SUNAT">
-      </div>
-      <div class="row2">
-        <div class="field"><label>Contacto</label>
-          <input type="text" data-c="contacto_nombre" value="${esc(f.contacto_nombre)}" placeholder="Nombre de quien decide"></div>
-        <div class="field"><label>Celular <span class="req">*</span></label>
-          <input type="tel" data-c="contacto_celular" value="${esc(f.contacto_celular)}" inputmode="tel" placeholder="9XXXXXXXX"></div>
-      </div>
-      <div class="field">
-        <label>Correo <span class="hint">— celular o correo, al menos uno</span></label>
-        <input type="email" data-c="contacto_correo" value="${esc(f.contacto_correo)}" inputmode="email" autocapitalize="off" placeholder="correo@dominio.com">
+        <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
+          Con este nombre aparecerá el comercio en tu cartera.
+        </div>
       </div>`;
   } else {
     box.innerHTML = `
@@ -1463,15 +1451,53 @@ function pintarIdentificacion(){
       </div>`;
   }
   box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
+  camposSegunOrigen();
+  pintarNotas();
   pintarNotaDatos();
+}
+
+/* Una venta nueva se registra con lo mínimo: RUC, razón social y rubro. La
+   dirección, el distrito y el estado son de la cartera de BBVA — un comercio
+   que recién se afilia todavía no tiene estado que reportar. */
+function camposSegunOrigen(){
+  const nuevo = S.formCli.tipo_registro === "NUEVO";
+  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo]]
+    .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
+}
+
+/* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
+   comentarios de siempre, los mismos que se piden en cada gestión. */
+function pintarNotas(){
+  const f = S.formCli, box = $("#boxNotas"), tit = $("#tituloNotas");
+  if (!box) return;
+  if (f.tipo_registro === "NUEVO"){
+    if (tit) tit.textContent = "Comentarios";
+    box.innerHTML = `
+      <div class="field">
+        <label>Comentario del cliente <span class="hint">— lo que él dijo</span></label>
+        <textarea data-c="comentario_cliente" placeholder="Ej.: Le interesa el POS pero quiere comparar comisiones.">${esc(f.comentario_cliente)}</textarea>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label>Comentario del ejecutivo <span class="hint">— tu lectura</span></label>
+        <textarea data-c="comentario_ejecutivo" placeholder="Ej.: Cierre probable esta semana; se derivó a BBVA para la afiliación.">${esc(f.comentario_ejecutivo)}</textarea>
+      </div>`;
+  } else {
+    if (tit) tit.textContent = "Observación";
+    box.innerHTML = `
+      <div class="field" style="margin-bottom:0">
+        <label>Nota interna <span class="hint">— opcional</span></label>
+        <textarea data-c="observacion" placeholder="Ej.: El local abre solo por las tardes; conviene ir después de las 3.">${esc(f.observacion)}</textarea>
+      </div>`;
+  }
+  box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
 }
 
 function pintarNotaDatos(){
   const f = S.formCli, box = $("#notaDatos");
   if (!box) return;
   box.innerHTML = f.tipo_registro === "NUEVO"
-    ? `<div class="note warn">De los <b>clientes nuevos</b> sí se guardan RUC, razón social y un contacto:
-       sin eso BBVA no puede afiliarlos. De la cartera del banco no se guarda ninguno de esos datos.</div>`
+    ? `<div class="note warn">De un <b>cliente nuevo</b> solo se guardan RUC, razón social y rubro.
+       El resto del onboarding —representante legal, DNI, cuenta y POS— lo hace BBVA por su canal.</div>`
     : `<div class="note">Esta base <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>
        de la cartera de BBVA. Si los necesitas, están en la base del banco y se cruzan por Customer ID.</div>`;
 }
@@ -1505,17 +1531,13 @@ async function guardarCliente(){
   }
   if (nuevo){
     if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
-    const cel = String(f.contacto_celular).replace(/[^0-9]/g, "");
-    const cor = String(f.contacto_correo).trim();
-    if (!cel && !cor) errores.push("Deja al menos un contacto: celular o correo.");
-    if (cel && cel.length < 9) errores.push("El celular debe tener 9 dígitos.");
-    if (cor && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cor)) errores.push("El correo del contacto no parece válido.");
+  } else {
+    if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
+    if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
+    if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
   }
-  if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
   if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
   if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
-  if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
-  if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
 
   if (errores.length){
     $("#errCli").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
@@ -1528,24 +1550,31 @@ async function guardarCliente(){
 
   const fila = {
     tipo_registro: f.tipo_registro,
-    nombre_comercio: String(f.nombre_comercio).trim(),
     rubro: f.rubro,
     rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
-    distrito: String(f.distrito).trim().toUpperCase(),
-    direccion: String(f.direccion).trim(),
-    estado: f.estado,
-    resultado_gestion: f.resultado_gestion || "PENDIENTE",
-    observacion: String(f.observacion).trim() || null
+    resultado_gestion: f.resultado_gestion || "PENDIENTE"
   };
   if (nuevo){
-    fila.ruc = ruc;
-    fila.razon_social     = String(f.razon_social).trim();
-    fila.contacto_nombre  = String(f.contacto_nombre).trim() || null;
-    fila.contacto_celular = String(f.contacto_celular).replace(/[^0-9]/g, "") || null;
-    fila.contacto_correo  = String(f.contacto_correo).trim().toLowerCase() || null;
+    // Ficha mínima: el resto del onboarding lo hace BBVA por su canal.
+    fila.ruc                  = ruc;
+    fila.razon_social         = String(f.razon_social).trim();
+    fila.nombre_comercio      = String(f.razon_social).trim();
+    fila.distrito             = null;
+    fila.direccion            = null;
+    fila.estado               = null;
+    fila.observacion          = null;
+    fila.comentario_cliente   = String(f.comentario_cliente).trim() || null;
+    fila.comentario_ejecutivo = String(f.comentario_ejecutivo).trim() || null;
     if (!editando) fila.customer_id = "NUEVO-" + ruc;
-  } else if (!editando) {
-    fila.customer_id = cid;
+  } else {
+    fila.nombre_comercio      = String(f.nombre_comercio).trim();
+    fila.distrito             = String(f.distrito).trim().toUpperCase();
+    fila.direccion            = String(f.direccion).trim();
+    fila.estado               = f.estado;
+    fila.observacion          = String(f.observacion).trim() || null;
+    fila.comentario_cliente   = null;
+    fila.comentario_ejecutivo = null;
+    if (!editando) fila.customer_id = cid;
   }
 
   try {
@@ -2390,7 +2419,7 @@ function filasBase(){
     const b = RULES.recomputarBase(c.customer_id);
     return [c.customer_id, esClienteNuevo(c) ? "Cliente nuevo" : "Cartera BBVA",
       c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
-      c.estado, (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
+      c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
       c.asignado, c.asignado_correo,
       String(c.creado_en || "").slice(0,10)]
       .concat([b._intentos, b._efectivos,
@@ -2398,7 +2427,9 @@ function filasBase(){
         b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
-        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""]);
+        b.Comentario_Ejecutivo || c.comentario_ejecutivo || "",
+        b.Comentario_Cliente   || c.comentario_cliente   || "",
+        c.observacion || ""]);
   });
 }
 
@@ -2493,7 +2524,7 @@ const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_c
   gasto_total:"Monto de viáticos", gastos_paths:"Comprobantes de gasto",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
-  observacion:"Observación" };
+  observacion:"Observación", ruc:"RUC", razon_social:"Razón social" };
 const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
@@ -2582,10 +2613,9 @@ function filasBBVA(extra){
   });
 }
 
-const COLS_NUEVOS = ["RUC","Razón social","Nombre del comercio","Rubro","Dirección","Distrito",
-  "Contacto","Celular","Correo","Gestión","Fecha de la venta","Visitas","Llamadas",
-  "Contactado (Si/No)","Cumple_Visita","Comentario de Cliente","Comentario del Ejecutivo",
-  "Ejecutivo_Stratis","Volumen_Comercio"];
+const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta",
+  "Visitas","Llamadas","Contactado (Si/No)","Cumple_Visita",
+  "Comentario de Cliente","Comentario del Ejecutivo","Ejecutivo_Stratis","Volumen_Comercio"];
 
 /* Los clientes nuevos no tienen Customer ID, así que no se pueden pegar en el
    archivo de la cartera: BBVA primero tiene que afiliarlos. Van en su propia
@@ -2596,10 +2626,12 @@ function filasNuevos(){
     const efectivos = regs.filter(r => esEfectivo(r.Resultado));
     const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
     const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+    // El comentario de la ficha es el del alta; si después hubo gestiones,
+    // manda el más reciente de ellas.
+    const comCliente = ultimo("Comentario_Cliente")   || c.comentario_cliente   || "";
+    const comEjec    = ultimo("Comentario_Ejecutivo") || c.comentario_ejecutivo || "";
     return [
-      c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c),
-      c.direccion || "", titulo(c.distrito || ""),
-      titulo(c.contacto_nombre || ""), c.contacto_celular || "", c.contacto_correo || "",
+      c.ruc || "", c.razon_social || "", rubroLabel(c),
       gestionCumplida(c) ? "SI" : "NO",
       cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto)
         : (regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : ""),
@@ -2607,7 +2639,7 @@ function filasNuevos(){
       regs.filter(r => r.Tipo_Contacto === "llamada").length,
       efectivos.length ? "SI" : "NO",
       cumplidas.length ? "SI" : "NO",
-      ultimo("Comentario_Cliente"), ultimo("Comentario_Ejecutivo"),
+      comCliente, comEjec,
       c.asignado || "", ""
     ];
   });
@@ -2615,7 +2647,7 @@ function filasNuevos(){
 
 function hojaNuevos(){
   const ws = hoja(COLS_NUEVOS, filasNuevos());
-  ws["!cols"] = COLS_NUEVOS.map(c => ({ wch: /Comentario|Razón|Dirección/.test(c) ? 40 : Math.min(26, Math.max(12, c.length + 3)) }));
+  ws["!cols"] = COLS_NUEVOS.map(c => ({ wch: /Comentario|Razón/.test(c) ? 40 : Math.min(26, Math.max(12, c.length + 3)) }));
   return ws;
 }
 
