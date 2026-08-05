@@ -1115,8 +1115,8 @@ function cardCliente(c){
         <span class="chip info">${esc(rubroLabel(c))}</span>
         <span class="chip ${st.chip}">${st.label}</span>
         ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
-        ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span>` : ""}
-        ${gestionCumplida(c) ? `<span class="chip ok">${c.resultado_gestion === "VENTA" ? "Venta" : "Retenido"}</span>` : ""}
+        ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span><span class="chip ok">Derivado a BBVA</span>` : ""}
+        ${!esClienteNuevo(c) && gestionCumplida(c) ? `<span class="chip ok">${c.resultado_gestion === "VENTA" ? "Venta" : "Retenido"}</span>` : ""}
         ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
       </div>
     </div>
@@ -1173,8 +1173,12 @@ function viewFicha(c){
         <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
         <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
         <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>`}
-      <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>
+      ${esClienteNuevo(c)
+        ? `<div class="kv"><dt>Estado</dt><dd><span class="chip ok">Derivado a BBVA</span>
+             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Cuenta como venta · Para BBVA · Gestión = SI</div>
+             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div></dd></div>`
+        : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
+             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>`}
       ${c.comentario_cliente   ? `<div class="kv"><dt>Comentario del cliente</dt><dd>${esc(c.comentario_cliente)}</dd></div>` : ""}
       ${c.comentario_ejecutivo ? `<div class="kv"><dt>Comentario del ejecutivo</dt><dd>${esc(c.comentario_ejecutivo)}</dd></div>` : ""}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
@@ -1189,7 +1193,7 @@ function viewFicha(c){
    <div>
     <div class="card nota-ficha">
       <div class="note">${esClienteNuevo(c)
-        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
+        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro, y la derivación ya cuenta como venta. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
         : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
     </div>
     <div class="card">
@@ -1364,7 +1368,7 @@ function renderFormCliente(){
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="cardGestion">
     <h3>Resultado de la gestión</h3>
     <div class="note" style="margin-bottom:11px">
       Márcalo cuando cierres con el comercio. Es lo que BBVA lee como
@@ -1461,8 +1465,12 @@ function pintarIdentificacion(){
    que recién se afilia todavía no tiene estado que reportar. */
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
-  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo]]
+  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo], ["#cardGestion", nuevo]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
+  // Una venta nueva es una derivación: el resultado lo confirma BBVA en el
+  // siguiente corte. Para el ejecutivo la derivación ya cuenta, así que va
+  // como venta y no se pregunta.
+  if (nuevo) S.formCli.resultado_gestion = "VENTA";
 }
 
 /* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
@@ -1497,7 +1505,9 @@ function pintarNotaDatos(){
   if (!box) return;
   box.innerHTML = f.tipo_registro === "NUEVO"
     ? `<div class="note warn">De un <b>cliente nuevo</b> solo se guardan RUC, razón social y rubro.
-       El resto del onboarding —representante legal, DNI, cuenta y POS— lo hace BBVA por su canal.</div>`
+       El resto del onboarding —representante legal, DNI, cuenta y POS— lo hace BBVA por su canal.
+       <br><br>No se pide resultado de la gestión: la <b>derivación ya cuenta como venta</b>, y si BBVA
+       llega a afiliarlo lo verás en la cartera del siguiente corte.</div>`
     : `<div class="note">Esta base <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>
        de la cartera de BBVA. Si los necesitas, están en la base del banco y se cruzan por Customer ID.</div>`;
 }
@@ -1552,7 +1562,7 @@ async function guardarCliente(){
     tipo_registro: f.tipo_registro,
     rubro: f.rubro,
     rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
-    resultado_gestion: f.resultado_gestion || "PENDIENTE"
+    resultado_gestion: nuevo ? "VENTA" : (f.resultado_gestion || "PENDIENTE")
   };
   if (nuevo){
     // Ficha mínima: el resto del onboarding lo hace BBVA por su canal.
@@ -2632,9 +2642,10 @@ function filasNuevos(){
     const comEjec    = ultimo("Comentario_Ejecutivo") || c.comentario_ejecutivo || "";
     return [
       c.ruc || "", c.razon_social || "", rubroLabel(c),
-      gestionCumplida(c) ? "SI" : "NO",
+      "SI",                                     // la derivación ya cuenta como venta
       cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto)
-        : (regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : ""),
+        : (regs[0] ? fmtFecha(regs[0].Fecha_Contacto)
+                   : fmtFecha(String(c.creado_en || "").slice(0,10))),
       regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
       regs.filter(r => r.Tipo_Contacto === "llamada").length,
       efectivos.length ? "SI" : "NO",
