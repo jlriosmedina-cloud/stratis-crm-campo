@@ -22,8 +22,8 @@
 --      comercio. Solo "habló con el contacto" cuenta como logrado.
 --    · Al editar una interacción, la base restaura medio, resultado, fecha y
 --      ubicación: solo se pueden corregir comentarios y calificación.
+--    · No hay módulo de cancelaciones ni control de entrega de POS.
 --    · Un registro no puede declararse con GPS verificado sin coordenadas.
---    · El retiro del POS tras una cancelación vence a las 72 horas útiles.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -102,15 +102,10 @@ comment on table public.clientes is
   'Cartera en campo sin datos sensibles. El customer_id es el único nexo con BBVA; el nombre del comercio lo escribe el ejecutivo.';
 
 -- ---------------------------------------------------------------------------
--- 4 · Interacciones — cada intento cuenta
+-- 3 · Interacciones — cada intento de comunicación cuenta
 -- ---------------------------------------------------------------------------
-do $$ begin
-  create type public.tipo_interaccion as enum ('visita','cancelacion');
-exception when duplicate_object then null; end $$;
-
 create table public.interacciones (
   id                       uuid primary key default gen_random_uuid(),
-  tipo                     public.tipo_interaccion not null,
   customer_id              text not null references public.clientes(customer_id) on delete cascade,
   correo_stratis           text not null references public.usuarios(correo),
   ejecutivo                text not null,
@@ -135,13 +130,6 @@ create table public.interacciones (
   comentario_ejecutivo     text not null,
   comentario_cliente       text,
 
-  motivo_cancelacion       text,
-  cancelara_pos            text,
-  fecha_limite_pos         timestamp,
-  pos_entregado            text default 'NO' check (pos_entregado in ('SI','NO')),
-  fecha_entrega_pos        date,
-  hora_entrega_pos         time,
-  entrego_pos_72hrs        text,
 
   creado_en                timestamptz not null default now(),
   modificado_en            timestamptz not null default now(),
@@ -150,15 +138,10 @@ create table public.interacciones (
   -- que lo está, el texto tiene que tener forma de coordenadas.
   constraint ck_ubicacion_verificada check (
     ubicacion_verificada = false
-    or ubicacion ~ '^-?[0-9]{1,3}\.[0-9]+, *-?[0-9]{1,3}\.[0-9]+'),
-  constraint ck_cancelacion_con_motivo check (
-    tipo <> 'cancelacion' or coalesce(motivo_cancelacion,'') <> ''),
-  constraint ck_entrega_con_fecha check (
-    pos_entregado <> 'SI' or fecha_entrega_pos is not null)
+    or ubicacion ~ '^-?[0-9]{1,3}\.[0-9]+, *-?[0-9]{1,3}\.[0-9]+')
 );
 create index ix_inter_cliente on public.interacciones(customer_id, fecha_contacto desc, hora_contacto desc);
 create index ix_inter_correo  on public.interacciones(correo_stratis);
-create index ix_inter_tipo    on public.interacciones(tipo);
 create index ix_inter_result  on public.interacciones(resultado);
 
 comment on column public.interacciones.resultado is
@@ -172,13 +155,11 @@ returns trigger language plpgsql as $$
 declare
   v_presencial boolean;
   v_virtual    boolean;
-  v_dias       int;
 begin
   -- Lo que quedó registrado no se toca. Al editar solo se pueden corregir
-  -- comentarios, calificación y la entrega del POS; todo lo demás se restaura
-  -- desde la fila original, venga de donde venga la petición.
+  -- los comentarios y la calificación; todo lo demás se restaura desde la
+  -- fila original, venga de donde venga la petición.
   if tg_op = 'UPDATE' then
-    new.tipo               := old.tipo;
     new.customer_id        := old.customer_id;
     new.correo_stratis     := old.correo_stratis;
     new.ejecutivo          := old.ejecutivo;
@@ -189,7 +170,6 @@ begin
     new.ubicacion          := old.ubicacion;
     new.ubicacion_verificada := old.ubicacion_verificada;
     new.evidencia_path     := old.evidencia_path;
-    new.motivo_cancelacion := old.motivo_cancelacion;
     new.creado_en          := old.creado_en;
   end if;
 
@@ -203,26 +183,6 @@ begin
   new.fecha_visita_actualizada :=
     case when new.cumple_visita = 'SI' then new.fecha_contacto else null end;
 
-  if new.tipo = 'cancelacion' then
-    new.cancelara_pos := 'SI';
-    v_dias := greatest(1, (public.cfg('horas_utiles_pos')::numeric
-                         / public.cfg('horas_utiles_por_dia')::numeric)::int);
-    new.fecha_limite_pos := public.sumar_dias_habiles(
-      (new.fecha_contacto + new.hora_contacto)::timestamp, v_dias);
-    new.entrego_pos_72hrs := case
-      when new.pos_entregado = 'SI' and new.fecha_entrega_pos is not null then
-        case when (new.fecha_entrega_pos + coalesce(new.hora_entrega_pos,'23:59'::time))
-                  <= new.fecha_limite_pos then 'SI' else 'NO' end
-      when public.ahora_lima() > new.fecha_limite_pos then 'NO'
-      else 'PENDIENTE' end;
-  else
-    new.cancelara_pos     := null;
-    new.fecha_limite_pos  := null;
-    new.entrego_pos_72hrs := null;
-    new.pos_entregado     := 'NO';
-    new.fecha_entrega_pos := null;
-    new.hora_entrega_pos  := null;
-  end if;
 
   if tg_op = 'INSERT' and auth.role() = 'authenticated' then
     new.correo_stratis := public.correo_actual();
@@ -293,7 +253,7 @@ drop policy if exists p_clientes_delete on public.clientes;
 create policy p_clientes_delete on public.clientes for delete to authenticated
   using ( public.es_usuario_activo() and asignado_correo = public.correo_actual() );
 
--- Contactos --------------------------------------------------------------
+-- Interacciones ----------------------------------------------------------
 drop policy if exists p_inter_select on public.interacciones;
 create policy p_inter_select on public.interacciones for select to authenticated
   using ( public.es_usuario_activo()
@@ -322,7 +282,6 @@ create policy p_inter_delete on public.interacciones for delete to authenticated
 drop view if exists public.v_avance        cascade;
 drop view if exists public.v_base          cascade;
 drop view if exists public.v_visitas       cascade;
-drop view if exists public.v_cancelaciones cascade;
 drop view if exists public.v_efectividad   cascade;
 
 create view public.v_base with (security_invoker = on) as
@@ -338,8 +297,6 @@ select c.customer_id,
          where i.customer_id = c.customer_id and i.cumple_visita = 'SI') as visitas_validas,
        (select max(i.fecha_contacto) from public.interacciones i
          where i.customer_id = c.customer_id) as ultimo_contacto,
-       exists (select 1 from public.interacciones i
-                where i.customer_id = c.customer_id and i.tipo = 'cancelacion') as tiene_cancelacion,
        c.creado_en
   from public.clientes c
   join public.rubros r on r.codigo = c.rubro;

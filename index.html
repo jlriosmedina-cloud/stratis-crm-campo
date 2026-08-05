@@ -262,11 +262,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";  // 
 
 const CONFIG = {
   dominio: "mystratis.com",
-  horasUtilesPOS: 72,
-  horasUtilesPorDia: 24,
-  alertaPorVencerHrs: 24,
-  cumpleVisitaHistorico: true,
-  feriados: []
+  cumpleVisitaHistorico: true
 };
 
 let sb = null;
@@ -308,12 +304,6 @@ const CALIFICACIONES = [
   { id:"E", label:"E — Perdido",        desc:"Decidido a retirarse o ya migró" }
 ];
 
-const MOTIVOS_CANCELACION = [
-  "Comisión / tarifa muy alta","Mejor oferta de la competencia","Bajo uso del POS",
-  "Problemas técnicos del equipo","Demora en abonos / liquidación",
-  "Mala atención o soporte","Cierre o traslado del negocio","Cambio de razón social","Otro"
-];
-
 const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
 
 /* Sugerencias de distrito — el campo acepta cualquier texto */
@@ -337,15 +327,14 @@ const rubroLabel = c => {
 };
 
 const DB = {
-  visitas: [], cancelaciones: [],
-  todos(){ return this.visitas.concat(this.cancelaciones); },
+  visitas: [],
+  todos(){ return this.visitas; },
   delCliente(cid){
     return this.todos().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
   },
   buscar(id){ return this.todos().find(r => r._id === id) || null; },
   cargar(filas){
-    this.visitas = []; this.cancelaciones = [];
-    filas.forEach(f => (f.tipo === "cancelacion" ? this.cancelaciones : this.visitas).push(deDB(f)));
+    this.visitas = filas.map(deDB);
   }
 };
 
@@ -353,7 +342,7 @@ const DB = {
 function deDB(f){
   const c = byId[String(f.customer_id)] || {};
   return {
-    _id: f.id, _tipo: f.tipo,
+    _id: f.id,
     Fecha_Contacto: f.fecha_contacto, Hora_Contacto: (f.hora_contacto || "").slice(0,5),
     Ejecutivo: f.ejecutivo, Correo_Stratis: f.correo_stratis,
     Customer_id: f.customer_id,
@@ -367,17 +356,12 @@ function deDB(f){
     Evidencia_Path: f.evidencia_path || "", Evidencia: "",
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
-    Motivo_Cancelacion: f.motivo_cancelacion || "",
-    Cancelara_POS: f.cancelara_pos, Fecha_Limite_POS: f.fecha_limite_pos,
-    POS_Entregado: f.pos_entregado || "NO",
-    Fecha_Entrega_POS: f.fecha_entrega_pos || "", Hora_Entrega_POS: (f.hora_entrega_pos || "").slice(0,5),
-    Entrego_POS_72hrs: f.entrego_pos_72hrs
   };
 }
 
-function aDB(f, c, kind){
+function aDB(f, c){
   const base = {
-    tipo: kind, customer_id: String(c.customer_id),
+    customer_id: String(c.customer_id),
     correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
     fecha_contacto: f.Fecha_Contacto, hora_contacto: f.Hora_Contacto,
     tipo_contacto: f.Tipo_Contacto,
@@ -389,12 +373,6 @@ function aDB(f, c, kind){
     comentario_ejecutivo: f.Comentario_Ejecutivo,
     comentario_cliente: f.Comentario_Cliente || null
   };
-  if (kind === "cancelacion"){
-    base.motivo_cancelacion = f.Motivo_Cancelacion;
-    base.pos_entregado = f.POS_Entregado || "NO";
-    base.fecha_entrega_pos = f.POS_Entregado === "SI" ? f.Fecha_Entrega_POS : null;
-    base.hora_entrega_pos  = f.POS_Entregado === "SI" ? (f.Hora_Entrega_POS || null) : null;
-  }
   return base;
 }
 
@@ -412,27 +390,7 @@ const ts = r => parseDT(r.Fecha_Contacto, r.Hora_Contacto).getTime();
 const fmtFecha = f => { if(!f) return "—"; const [y,m,d] = String(f).slice(0,10).split("-"); return `${d}/${m}/${y}`; };
 const fmtDT = (f,h) => `${fmtFecha(f)}${h ? " · " + h : ""}`;
 const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-const esFeriado = d => CONFIG.feriados.includes(isoDe(d));
-const esHabil = d => d.getDay() !== 0 && d.getDay() !== 6 && !esFeriado(d);
 
-function sumarHorasUtiles(desde, horas, horasPorDia){
-  let d = new Date(desde.getTime());
-  let n = Math.max(1, Math.round(horas / (horasPorDia || 24)));
-  while (n > 0){ d.setDate(d.getDate()+1); if (esHabil(d)) n--; }
-  while (!esHabil(d)) d.setDate(d.getDate()+1);
-  return d;
-}
-function diasHabilesEntre(a, b){
-  let n = 0, d = new Date(a.getTime()); d.setHours(0,0,0,0);
-  const fin = new Date(b.getTime()); fin.setHours(0,0,0,0);
-  while (d < fin){ d.setDate(d.getDate()+1); if (esHabil(d)) n++; }
-  return n;
-}
-function humanizarRestante(ms){
-  const abs = Math.abs(ms), h = Math.floor(abs/3600000), m = Math.floor((abs%3600000)/60000);
-  if (h >= 24) return `${Math.floor(h/24)} d ${h%24} h`;
-  return h >= 1 ? `${h} h ${m} min` : `${m} min`;
-}
 
 /* =========================================================================
    REGLAS DE NEGOCIO
@@ -447,31 +405,6 @@ const RULES = {
   visitaVirtual(id){ const t = tipoById(id); return (t && t.modo === "virtual") ? "SI" : "No"; },
   requiereUbicacion(id){ const t = tipoById(id); return !!(t && t.gps); },
 
-  fechaLimitePOS(fecha, hora){
-    return sumarHorasUtiles(parseDT(fecha, hora), CONFIG.horasUtilesPOS, CONFIG.horasUtilesPorDia);
-  },
-
-  estadoPOS(reg, ahora){
-    const now = ahora || ahoraLima();
-    const limite = reg.Fecha_Limite_POS ? new Date(reg.Fecha_Limite_POS)
-                 : this.fechaLimitePOS(reg.Fecha_Contacto, reg.Hora_Contacto);
-    const hstr = `${fmtFecha(isoDe(limite))} ${pad(limite.getHours())}:${pad(limite.getMinutes())}`;
-    if (reg.POS_Entregado === "SI" && reg.Fecha_Entrega_POS){
-      const ent = parseDT(String(reg.Fecha_Entrega_POS).slice(0,10), reg.Hora_Entrega_POS || "23:59");
-      const enPlazo = ent <= limite;
-      return { limite, entregado:true, enPlazo, code: enPlazo?"entregado_plazo":"entregado_fuera",
-        chip: enPlazo?"ok":"serious", label: enPlazo?"Entregado en plazo":"Entregado fuera de plazo",
-        detalle:`Entregado el ${fmtFecha(reg.Fecha_Entrega_POS)} · límite ${hstr}`,
-        valorBase: enPlazo?"SI":"NO" };
-    }
-    const restante = limite - now;
-    if (restante < 0) return { limite, entregado:false, code:"vencido", chip:"crit", label:"Vencido",
-      detalle:`Venció hace ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"NO" };
-    if (restante <= CONFIG.alertaPorVencerHrs*3600000) return { limite, entregado:false, code:"por_vencer",
-      chip:"warn", label:"Por vencer", detalle:`Quedan ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"PENDIENTE" };
-    return { limite, entregado:false, code:"en_plazo", chip:"info", label:"En plazo",
-      detalle:`Quedan ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"PENDIENTE" };
-  },
 
   /* Resumen por cliente. Cada interacción cuenta como intento; solo el
      resultado "efectivo" cuenta como comunicación lograda. */
@@ -481,12 +414,12 @@ const RULES = {
     const regs = DB.delCliente(cid);
     const b = {
       Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
-      Fecha_Visita_Actualizada:"", Cancelara_POS:"No", Entrego_POS_72hrs:"",
+      Fecha_Visita_Actualizada:"",
       Comentario_Ejecutivo:"", Comentario_Cliente:"",
       _n: regs.length,
       _intentos: regs.length,
       _efectivos: regs.filter(r => esEfectivo(r.Resultado)).length,
-      _ultimo:null, _cancelacion:null, _pos:null
+      _ultimo:null
     };
     if (!regs.length){ c._base = b; return b; }
 
@@ -507,13 +440,6 @@ const RULES = {
       b.Fecha_Visita_Actualizada = ult.Cumple_Visita === "SI" ? ult.Fecha_Contacto : "";
     }
 
-    const cancel = regs.filter(r => r._tipo === "cancelacion");
-    if (cancel.length){
-      const uc = cancel[0];
-      b._cancelacion = uc; b.Cancelara_POS = "SI";
-      const st = this.estadoPOS(uc);
-      b._pos = st; b.Entrego_POS_72hrs = st.valorBase;
-    }
     c._base = b;
     return b;
   }
@@ -774,7 +700,7 @@ function pantallaCarga(msg){
 async function salir(){
   if (sb) await sb.auth.signOut();
   S.user = null; S.entrando = false;
-  CLIENTES = []; byId = {}; DB.visitas = []; DB.cancelaciones = [];
+  CLIENTES = []; byId = {}; DB.visitas = [];
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
   renderLogin();
@@ -783,11 +709,10 @@ async function salir(){
 /* ---- Carga de datos ----------------------------------------------------- */
 async function cargarDatos(){
   pantallaCarga("Cargando tu cartera…");
-  const [cli, inter, usr, fer, cfg, rub] = await Promise.all([
+  const [cli, inter, usr, cfg, rub] = await Promise.all([
     sb.from("clientes").select("*").limit(5000),
     sb.from("interacciones").select("*").limit(20000),
     sb.from("usuarios").select("*").order("rol"),
-    sb.from("feriados").select("fecha"),
     sb.from("config").select("*"),
     sb.from("rubros").select("*").order("orden")
   ]);
@@ -799,11 +724,7 @@ async function cargarDatos(){
   byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
   USUARIOS = (usr.data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
     nombreCompleto: u.nombre, correo:u.correo, rol:u.rol, activo:u.activo }));
-  CONFIG.feriados = (fer.data || []).map(f => String(f.fecha).slice(0,10));
   (cfg.data || []).forEach(({clave, valor}) => {
-    if (clave === "horas_utiles_pos")      CONFIG.horasUtilesPOS = Number(valor);
-    if (clave === "horas_utiles_por_dia")  CONFIG.horasUtilesPorDia = Number(valor);
-    if (clave === "alerta_por_vencer_h")   CONFIG.alertaPorVencerHrs = Number(valor);
     if (clave === "cumple_visita_historico") CONFIG.cumpleVisitaHistorico = valor === "true";
     if (clave === "dominio_permitido")     CONFIG.dominio = valor;
   });
@@ -889,8 +810,7 @@ function modoDemo(){
     estado:"ACTIVO", asignado:"Modo demostración", asignado_correo:S.user.correo,
     creado_en:new Date().toISOString() }];
   byId = { "40000001": CLIENTES[0] };
-  CONFIG.feriados = ["2026-07-28","2026-07-29","2026-08-06","2026-08-30"];
-  DB.visitas = []; DB.cancelaciones = [];
+  DB.visitas = [];
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
@@ -904,18 +824,14 @@ function modoDemo(){
 const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
   { id:"registros",ic:"≡", label:"Registros" },
-  { id:"pos",      ic:"◷", label:"POS 72h" },
   { id:"panel",    ic:"◕", label:"Panel" },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
 
 function renderNav(){
-  const vencidos = misCancelaciones().filter(r => {
-    const st = RULES.estadoPOS(r).code; return st === "vencido" || st === "por_vencer"; }).length;
   $("#nav").innerHTML = NAV.map(n => `
     <button data-tab="${n.id}" class="${S.tab === n.id ? "on" : ""}">
       <span class="ic">${n.ic}</span>${n.label}
-      ${n.id === "pos" && vencidos ? `<span class="dot">${vencidos}</span>` : ""}
     </button>`).join("");
   $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.tab));
 }
@@ -938,11 +854,6 @@ function modal(html){
 }
 const cerrarModal = () => $("#overlay").innerHTML = "";
 
-function misCancelaciones(){
-  if (!S.user) return [];
-  const vis = new Set(cartera().map(c => String(c.customer_id)));
-  return DB.cancelaciones.filter(r => vis.has(String(r.Customer_id)));
-}
 
 /* =========================================================================
    Render principal
@@ -954,11 +865,9 @@ function render(){
   const v = $("#view");
   if (S.tab === "form_cliente")           return renderFormCliente();
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
-  else if (S.tab === "form_visita")       return renderFormulario("visita");
-  else if (S.tab === "form_cancelacion")  return renderFormulario("cancelacion");
+  else if (S.tab === "form_visita")       return renderFormulario();
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
-  else if (S.tab === "pos")               v.innerHTML = viewPOS();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
@@ -985,7 +894,6 @@ function bindComunes(){
    ========================================================================= */
 function estadoCliente(c){
   const b = c._base || RULES.recomputarBase(c.customer_id);
-  if (b._cancelacion) return { chip:"crit", label:"Cancelación" };
   if (b.Cumple_Visita === "SI") return { chip:"ok", label:"Visita cumplida" };
   if (b._efectivos > 0) return { chip:"warn", label:"Contactado" };
   if (b._intentos > 0)  return { chip:"serious", label:"Solo intentos" };
@@ -1011,7 +919,6 @@ function viewCartera(){
     if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
-    if (S.fContacto === "cancela") return b.Cancelara_POS === "SI";
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -1020,7 +927,6 @@ function viewCartera(){
   const total = base.length;
   const conEf = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id))._efectivos > 0).length;
   const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
-  const canc  = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cancelara_POS === "SI").length;
   const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
   const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
   const mostrar = lista.slice(0, S.limite);
@@ -1030,7 +936,6 @@ function viewCartera(){
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados por ${S.user.rol === "Ejecutivo" ? "ti" : "el equipo"}</div></div>
     <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% con comunicación lograda</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${canc}</div><div class="sub">POS por retirar</div></div>
   </div>
 
   <button class="btn block" data-go="form_cliente" style="margin-bottom:14px">＋ Registrar nuevo comercio</button>
@@ -1040,7 +945,7 @@ function viewCartera(){
       <input type="search" id="q" placeholder="Customer ID, comercio, distrito…" value="${esc(S.q)}"></div>
   </div>
   <div class="pills">
-    ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"],["cancela","Cancelaciones"]]
+    ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"]]
       .map(([k,l]) => `<button class="pill ${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
   </div>
   <div class="pills">
@@ -1082,7 +987,6 @@ function cardCliente(c){
         <span class="chip info">${esc(rubroLabel(c))}</span>
         <span class="chip ${st.chip}">${st.label}</span>
         ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
-        ${b._pos ? `<span class="chip ${b._pos.chip}">POS: ${b._pos.label}</span>` : ""}
         ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
       </div>
     </div>
@@ -1114,7 +1018,6 @@ function viewFicha(c){
           <span class="chip info">${esc(rubroLabel(c))}</span>
           <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
           <span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>
-          ${b._pos ? `<span class="chip ${b._pos.chip}">POS ${b._pos.label}</span>` : ""}
         </div>
       </div>
     </div>
@@ -1150,7 +1053,6 @@ function viewFicha(c){
    </div>
 
    <div>
-    ${b._cancelacion ? bloquePOS(b._cancelacion) : ""}
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -1168,21 +1070,19 @@ function viewFicha(c){
 
   ${mio ? `<div class="sticky-actions">
     <button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>
-    <button class="btn ghost" data-go="form_cancelacion|${c.customer_id}">Cancelación</button>
   </div>` : ""}`;
 }
 
 function itemTimeline(r){
   const t = tipoById(r.Tipo_Contacto);
   const res = resultadoById(r.Resultado);
-  const esCancel = r._tipo === "cancelacion";
   const editable = puedeEditar(r);
   return `
-  <div class="tl-item ${esCancel ? "cancel" : ""}">
+  <div class="tl-item">
     <div class="card" style="margin-bottom:0">
       <div class="tl-h">
         <div>
-          <div class="who">${esCancel ? "⚠ Cancelación · " : ""}${esc(t ? t.label : r.Tipo_Contacto || "Contacto")}</div>
+          <div class="who">${esc(t ? t.label : r.Tipo_Contacto || "Contacto")}</div>
           <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
         </div>
         <span class="chip ${r.Cumple_Visita === "SI" ? "ok" : "no"}">${r.Cumple_Visita === "SI" ? "Cumple visita" : "No cumple"}</span>
@@ -1194,7 +1094,6 @@ function itemTimeline(r){
         ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
         : sinUbicacionVerificada(r)
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>` : ""}
-      ${r.Motivo_Cancelacion ? `<div style="margin-top:7px"><span class="chip crit">Motivo: ${esc(r.Motivo_Cancelacion)}</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
@@ -1208,23 +1107,6 @@ function itemTimeline(r){
   </div>`;
 }
 
-function bloquePOS(reg){
-  const st = RULES.estadoPOS(reg);
-  const lim = st.limite;
-  return `
-  <div class="card" style="border-color:${st.code==="vencido"?"var(--crit)":"var(--ring)"}">
-    <h3>Seguimiento de retiro de POS</h3>
-    <div class="note ${st.chip==="ok"?"ok":st.chip==="crit"?"crit":st.chip==="warn"||st.chip==="serious"?"warn":""}">
-      <b>${st.label}.</b> ${esc(st.detalle)}
-    </div>
-    <div class="kv" style="margin-top:9px"><dt>Cancelará POS</dt><dd><span class="chip crit">SI</span></dd></div>
-    <div class="kv"><dt>Contacto</dt><dd>${fmtDT(reg.Fecha_Contacto, reg.Hora_Contacto)}</dd></div>
-    <div class="kv"><dt>Plazo (72 h útiles)</dt><dd class="mono">${fmtFecha(isoDe(lim))} · ${pad(lim.getHours())}:${pad(lim.getMinutes())}</dd></div>
-    <div class="kv"><dt>Entrega registrada</dt><dd>${reg.POS_Entregado === "SI" ? fmtDT(reg.Fecha_Entrega_POS, reg.Hora_Entrega_POS) : "Pendiente"}</dd></div>
-    <div class="kv"><dt>Entregó en 72 h</dt><dd><span class="chip ${st.valorBase==="SI"?"ok":st.valorBase==="NO"?"crit":"warn"}">${st.valorBase}</span></dd></div>
-    ${puedeEditar(reg) ? `<div style="margin-top:11px"><button class="btn block" data-edit="${reg._id}">${reg.POS_Entregado==="SI"?"Editar entrega":"Marcar entrega del POS"}</button></div>` : ""}
-  </div>`;
-}
 
 /* =========================================================================
    Alta y edición del comercio — la cartera se construye en campo
@@ -1466,31 +1348,28 @@ function confirmarEliminarCliente(cid){
 }
 
 /* =========================================================================
-   Formularios: registro de Visitas y Cancelaciones
+   Formulario: registro de cada contacto o intento de comunicación
    ========================================================================= */
-function nuevoForm(cliente, kind){
+function nuevoForm(){
   return {
-    kind,
     Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
-    Comentario_Ejecutivo: "", Comentario_Cliente: "",
-    Motivo_Cancelacion: "", POS_Entregado: "NO", Fecha_Entrega_POS: "", Hora_Entrega_POS: ""
+    Comentario_Ejecutivo: "", Comentario_Cliente: ""
   };
 }
 
-function renderFormulario(kind){
+function renderFormulario(){
   const c = byId[S.cid];
   if (!c) return go("cartera");
-  if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId), { kind }) : nuevoForm(c, kind);
-  const f = S.form, esCancel = kind === "cancelacion";
+  if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId)) : nuevoForm();
+  const f = S.form;
 
   $("#view").innerHTML = `
   <button class="back" data-back>‹ ${esc(titulo(nombreCliente(c)))}</button>
   <div class="card">
-    <h3 style="margin-bottom:4px">${S.editId ? "Editar" : "Registrar"} ${esCancel ? "cancelación" : "contacto / intento"}</h3>
+    <h3 style="margin-bottom:4px">${S.editId ? "Editar" : "Registrar"} contacto / intento</h3>
     <div style="font-size:13px;color:var(--muted)">${esc(titulo(nombreCliente(c)))} · ID ${esc(c.customer_id)} · ${esc(titulo(c.distrito))}</div>
-    ${esCancel ? `<div class="note crit" style="margin-top:11px"><b>Cancelara_POS = SI.</b> Al guardar, este comercio queda marcado como cancelación y se activa el control de entrega de POS en 72 horas útiles.</div>` : ""}
     ${S.editId ? `<div class="note" style="margin-top:11px">La <b>ubicación capturada no se puede modificar</b>: queda como constancia del lugar donde se hizo el registro.</div>` : ""}
   </div>
 
@@ -1543,17 +1422,6 @@ function renderFormulario(kind){
   <div id="boxGps"></div>
 
 
-  ${esCancel ? `
-  <div class="card">
-    <h3>Detalle de la cancelación</h3>
-    <div class="field"><label>Motivo declarado por el cliente <span class="req">*</span></label>
-      <select data-f="Motivo_Cancelacion">
-        <option value="">Seleccionar…</option>
-        ${MOTIVOS_CANCELACION.map(m => `<option ${f.Motivo_Cancelacion===m?"selected":""}>${m}</option>`).join("")}
-      </select>
-    </div>
-    <div id="posBox"></div>
-  </div>` : ""}
 
   <div class="card">
     <h3>Evidencia del contacto <span class="req">*</span></h3>
@@ -1580,10 +1448,10 @@ function renderFormulario(kind){
     <button class="btn ghost" data-back>Cancelar</button>
   </div>`;
 
-  bindForm(c, kind);
+  bindForm(c);
 }
 
-function bindForm(c, kind){
+function bindForm(c){
   const f = S.form;
   $("#view").querySelectorAll("[data-back]").forEach(b => b.onclick = () => {
     S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id); render(); });
@@ -1600,8 +1468,8 @@ function bindForm(c, kind){
     $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
     pintarDerivado();
   });
-  $("#guardar").onclick = () => guardar(c, kind);
-  pintarDerivado(); pintarGps(); pintarEvidencia(); if (kind === "cancelacion") pintarPOS();
+  $("#guardar").onclick = () => guardar(c);
+  pintarDerivado(); pintarGps(); pintarEvidencia();
 }
 
 function pintarDerivado(){
@@ -1757,53 +1625,9 @@ function comprimir(file, cb){
   rd.readAsDataURL(file);
 }
 
-function pintarPOS(){
-  const f = S.form, box = $("#posBox");
-  if (!box) return;
-  const lim = RULES.fechaLimitePOS(f.Fecha_Contacto, f.Hora_Contacto);
-  box.innerHTML = `
-    <div class="note warn"><b>Plazo automático de retiro de POS:</b> ${fmtFecha(isoDe(lim))} a las ${pad(lim.getHours())}:${pad(lim.getMinutes())}
-      <div style="margin-top:4px;font-size:12px">${CONFIG.horasUtilesPOS} horas útiles desde el contacto (${diasHabilesEntre(parseDT(f.Fecha_Contacto,f.Hora_Contacto), lim)} días hábiles, sin contar sábados, domingos ni feriados).</div>
-    </div>
-    <div class="field" style="margin-top:12px"><label>¿Ya se entregó el POS?</label>
-      <div class="opts">
-        <div class="opt ${f.POS_Entregado==="NO"?"on":""}" data-pos="NO"><span class="rd"></span><span><b>Todavía no</b><span>Queda en seguimiento hasta el vencimiento del plazo</span></span></div>
-        <div class="opt ${f.POS_Entregado==="SI"?"on":""}" data-pos="SI"><span class="rd"></span><span><b>Sí, ya se entregó</b><span>Registra la fecha para evaluar el cumplimiento</span></span></div>
-      </div>
-    </div>
-    <div id="posFecha"></div>`;
-  box.querySelectorAll("[data-pos]").forEach(el => el.onclick = () => {
-    f.POS_Entregado = el.dataset.pos;
-    box.querySelectorAll("[data-pos]").forEach(x => x.classList.toggle("on", x.dataset.pos === f.POS_Entregado));
-    pintarPosFecha();
-  });
-  pintarPosFecha();
-}
-
-function pintarPosFecha(){
-  const f = S.form, box = $("#posFecha");
-  if (!box) return;
-  if (f.POS_Entregado !== "SI"){ box.innerHTML = ""; return; }
-  if (!f.Fecha_Entrega_POS) f.Fecha_Entrega_POS = hoyISO();
-  if (!f.Hora_Entrega_POS)  f.Hora_Entrega_POS  = horaISO();
-  box.innerHTML = `
-    <div class="row2">
-      <div class="field"><label>Fecha de entrega <span class="req">*</span></label><input type="date" data-f2="Fecha_Entrega_POS" value="${f.Fecha_Entrega_POS}"></div>
-      <div class="field"><label>Hora</label><input type="time" data-f2="Hora_Entrega_POS" value="${f.Hora_Entrega_POS}"></div>
-    </div>
-    <div id="posEval"></div>`;
-  box.querySelectorAll("[data-f2]").forEach(el => el.oninput = el.onchange = () => { f[el.dataset.f2] = el.value; evalPOS(); });
-  evalPOS();
-}
-function evalPOS(){
-  const f = S.form, box = $("#posEval");
-  if (!box) return;
-  const st = RULES.estadoPOS(f);
-  box.innerHTML = `<div class="note ${st.chip==="ok"?"ok":"warn"}"><b>Entrego_POS_72hrs = ${st.valorBase}.</b> ${esc(st.detalle)}</div>`;
-}
 
 /* ---- Guardar ----------------------------------------------------------- */
-async function guardar(c, kind){
+async function guardar(c){
   const f = S.form, errores = [];
   if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
@@ -1812,8 +1636,6 @@ async function guardar(c, kind){
     errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
   if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
-  if (kind === "cancelacion" && !f.Motivo_Cancelacion) errores.push("Indica el motivo de la cancelación.");
-  if (kind === "cancelacion" && f.POS_Entregado === "SI" && !f.Fecha_Entrega_POS) errores.push("Indica la fecha de entrega del POS.");
   if (errores.length){
     $("#errBox").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
     $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
@@ -1822,23 +1644,13 @@ async function guardar(c, kind){
   const btn = $("#guardar");
   btn.disabled = true; btn.textContent = "Guardando…";
   try {
-    if (S.demo){
-      const reg = Object.assign({ _id:"D"+Date.now(), _tipo:kind, Ejecutivo:S.user.nombre,
-        Correo_Stratis:S.user.correo, Customer_id:c.customer_id,
-        Visita_Presencial:RULES.visitaPresencial(f.Tipo_Contacto),
-        Visita_virtual:RULES.visitaVirtual(f.Tipo_Contacto),
-        Cumple_Visita:RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado) }, f);
-      if (kind === "cancelacion") reg.Cancelara_POS = "SI";
-      (kind === "cancelacion" ? DB.cancelaciones : DB.visitas).push(reg);
-      CLIENTES.forEach(x => x._base = null);
-      RULES.recomputarBase(c.customer_id);
-    } else {
+    {
       // La evidencia va al bucket privado; en la fila solo queda la ruta.
       if (f.Evidencia && !f.Evidencia_Path){
         const ruta = await subirEvidencia(f.Evidencia);
         if (ruta) f.Evidencia_Path = ruta;
       }
-      const fila = aDB(f, c, kind);
+      const fila = aDB(f, c);
       const { error } = S.editId
         ? await sb.from("interacciones").update(fila).eq("id", S.editId)
         : await sb.from("interacciones").insert(fila);
@@ -1852,9 +1664,7 @@ async function guardar(c, kind){
     return;
   }
 
-  toast(S.editId ? "Registro actualizado"
-       : kind === "cancelacion" ? "Cancelación registrada · plazo POS activado"
-       : "Contacto registrado en el histórico");
+  toast(S.editId ? "Registro actualizado" : "Contacto registrado en el histórico");
   S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id);
   window.scrollTo(0,0);
   render();
@@ -1865,7 +1675,7 @@ function editarRegistro(id){
   if (!r) return;
   if (!puedeEditar(r)) return toast("Solo puedes editar tus propios registros");
   S.editId = id; S.cid = String(r.Customer_id); S.form = null;
-  S.tab = r._tipo === "cancelacion" ? "form_cancelacion" : "form_visita";
+  S.tab = "form_visita";
   window.scrollTo(0,0);
   render();
 }
@@ -1885,12 +1695,7 @@ function confirmarEliminar(id){
     </div>`);
   $("#okDel").onclick = async () => {
     const cid = r.Customer_id;
-    if (S.demo){
-      let k = DB.visitas.findIndex(x => x._id === id);
-      if (k >= 0) DB.visitas.splice(k,1);
-      else { k = DB.cancelaciones.findIndex(x => x._id === id); if (k >= 0) DB.cancelaciones.splice(k,1); }
-      CLIENTES.forEach(x => x._base = null); RULES.recomputarBase(cid);
-    } else {
+    {
       const { error } = await sb.from("interacciones").delete().eq("id", id);
       if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
       await refrescar(); await cargarAuditoria();
@@ -1900,7 +1705,7 @@ function confirmarEliminar(id){
 }
 
 /* =========================================================================
-   Pantallas: Registros, Seguimiento POS, Panel y Ajustes
+   Pantallas: Registros, Panel y Ajustes
    ========================================================================= */
 
 /* Imagen de ejemplo para probar el flujo de evidencia sin cámara */
@@ -1929,8 +1734,6 @@ function viewRegistros(){
     : DB.todos();
   todos.sort((a,b) => ts(b) - ts(a));
 
-  const visitas = todos.filter(r => r._tipo === "visita").length;
-  const cancel  = todos.filter(r => r._tipo === "cancelacion").length;
   const efect   = todos.filter(r => esEfectivo(r.Resultado)).length;
 
   let lista = todos;
@@ -1946,7 +1749,6 @@ function viewRegistros(){
   });
   if (S.fResultado === "efectivos")      lista = lista.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")  lista = lista.filter(r => !esEfectivo(r.Resultado));
-  else if (S.fResultado === "cancelaciones") lista = lista.filter(r => r._tipo === "cancelacion");
   else if (S.fResultado === "sin_ubicacion") lista = lista.filter(sinUbicacionVerificada);
   else if (S.fResultado !== "todos")     lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
@@ -1959,8 +1761,7 @@ function viewRegistros(){
   <div class="stat-row">
     <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
     <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de efectividad</div></div>
-    <div class="stat"><div class="lbl">Visitas</div><div class="val">${visitas}</div><div class="sub">hoja Visitas</div></div>
-    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${cancel}</div><div class="sub">hoja Cancelaciones</div></div>
+    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${todos.filter(r=>r.Cumple_Visita==="SI").length}</div><div class="sub">presenciales o virtuales logradas</div></div>
   </div>
 
   <div class="toolbar">
@@ -1968,7 +1769,7 @@ function viewRegistros(){
       <input type="search" id="qReg" placeholder="Comercio, Customer ID, distrito, comentario…" value="${esc(S.qReg)}"></div>
   </div>
   <div class="pills">
-    ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"],["cancelaciones","Cancelaciones"]]
+    ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"]]
       .map(([k,l]) => `<button class="pill ${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
     ${RESULTADOS.filter(x => !x.ok && todos.some(r => r.Resultado === x.id))
       .map(x => `<button class="pill ${S.fResultado===x.id?"on":""}" data-fr="${x.id}">${esc(x.label)}</button>`).join("")}
@@ -1988,7 +1789,7 @@ function viewRegistros(){
   ${mostrar.length ? `<div class="tl">${mostrar.map(r => {
       const c = byId[String(r.Customer_id)];
       const res = resultadoById(r.Resultado);
-      return `<div class="tl-item ${r._tipo==="cancelacion"?"cancel":""}">
+      return `<div class="tl-item">
         <div class="card" style="margin-bottom:0">
           <div class="tl-h">
             <div>
@@ -2013,61 +1814,11 @@ function viewRegistros(){
 
   <div class="card" style="margin-top:14px">
     <div class="note"><b>Editar no suma un intento.</b> El contador solo sube cuando registras un contacto
-    nuevo desde la ficha del comercio. Al editar solo puedes corregir comentarios, calificación y la
-    entrega del POS: el medio, el resultado y la fecha quedan fijos.</div>
+    nuevo desde la ficha del comercio. Al editar solo puedes corregir comentarios y calificación:
+    el medio, el resultado, la fecha y la ubicación quedan fijos.</div>
   </div>`;
 }
 
-/* ---------- Seguimiento de entrega de POS ------------------------------- */
-function viewPOS(){
-  const lista = misCancelaciones().map(r => ({ r, st: RULES.estadoPOS(r) }));
-  const orden = { vencido:0, por_vencer:1, en_plazo:2, entregado_fuera:3, entregado_plazo:4 };
-  lista.sort((a,b) => (orden[a.st.code] - orden[b.st.code]) || (a.st.limite - b.st.limite));
-  const n = c => lista.filter(x => x.st.code === c).length;
-  const entregados = n("entregado_plazo") + n("entregado_fuera");
-  const cumplimiento = entregados ? Math.round(n("entregado_plazo") / entregados * 100) : 0;
-
-  return `
-  <div class="stat-row">
-    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${lista.length}</div><div class="sub">POS por retirar</div></div>
-    <div class="stat"><div class="lbl">Vencidos</div><div class="val" style="color:var(--crit-ink)">${n("vencido")}</div><div class="sub">fuera de las 72 h útiles</div></div>
-    <div class="stat"><div class="lbl">Por vencer</div><div class="val" style="color:var(--warn-ink)">${n("por_vencer")}</div><div class="sub">menos de ${CONFIG.alertaPorVencerHrs} h</div></div>
-    <div class="stat"><div class="lbl">Cumplimiento</div><div class="val" style="color:var(--good-ink)">${cumplimiento}%</div><div class="sub">${n("entregado_plazo")} de ${entregados} entregados en plazo</div></div>
-  </div>
-
-  <div class="card">
-    <h3>Cómo se calcula el plazo</h3>
-    <div class="note">El reloj arranca en la <b>fecha y hora del contacto</b> donde el cliente declaró la cancelación y corre
-    <b>${CONFIG.horasUtilesPOS} horas útiles</b> (${CONFIG.horasUtilesPOS/CONFIG.horasUtilesPorDia} días hábiles), saltando sábados, domingos y feriados del Perú.
-    El ejecutivo solo marca <b>si entregó y en qué fecha</b>; el estado y la columna <b>Entrego_POS_72hrs</b> se calculan solos.</div>
-    <div class="legend">
-      <span><i style="background:var(--crit)"></i>Vencido</span>
-      <span><i style="background:var(--warn)"></i>Por vencer</span>
-      <span><i style="background:var(--s1)"></i>En plazo</span>
-      <span><i style="background:var(--serious)"></i>Entregado fuera de plazo</span>
-      <span><i style="background:var(--good)"></i>Entregado en plazo</span>
-    </div>
-  </div>
-
-  ${lista.length ? lista.map(({r,st}) => {
-    const c = byId[String(r.Customer_id)];
-    return `
-    <div class="card" style="border-left:4px solid ${
-      st.chip==="crit"?"var(--crit)":st.chip==="warn"?"var(--warn)":st.chip==="ok"?"var(--good)":st.chip==="serious"?"var(--serious)":"var(--s1)"}">
-      <div class="tl-h">
-        <div>
-          <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
-          <div class="dt">ID ${esc(r.Customer_id)} · ${esc(r.Ejecutivo)} · ${esc(r.Motivo_Cancelacion||"")}</div>
-        </div>
-        <span class="chip ${st.chip}">${st.label}</span>
-      </div>
-      <div class="kv" style="margin-top:8px"><dt>Contacto</dt><dd>${fmtDT(r.Fecha_Contacto,r.Hora_Contacto)}</dd></div>
-      <div class="kv"><dt>Límite 72 h útiles</dt><dd class="mono">${fmtFecha(isoDe(st.limite))} · ${pad(st.limite.getHours())}:${pad(st.limite.getMinutes())}</dd></div>
-      <div class="kv"><dt>Entrego_POS_72hrs</dt><dd><span class="chip ${st.valorBase==="SI"?"ok":st.valorBase==="NO"?"crit":"warn"}">${st.valorBase}</span></dd></div>
-      ${puedeEditar(r)?`<button class="btn ${st.code==="vencido"?"":"ghost"} block sm" data-edit="${r._id}" style="margin-top:10px">${r.POS_Entregado==="SI"?"Editar entrega":"Marcar entrega del POS"}</button>`:""}
-    </div>`;
-  }).join("") : `<div class="empty"><div class="big">◷</div>No hay cancelaciones registradas.<br>Los plazos aparecerán aquí en cuanto registres una.</div>`}`;
-}
 
 /* ---------- Panel de avance y efectividad -------------------------------- */
 function viewPanel(){
@@ -2076,7 +1827,6 @@ function viewPanel(){
   const total = base.length;
   const conEf = base.filter(c => c._base._efectivos > 0).length;
   const cumple = base.filter(c => c._base.Cumple_Visita === "SI").length;
-  const canc = base.filter(c => c._base.Cancelara_POS === "SI").length;
 
   const visibles = new Set(base.map(c => String(c.customer_id)));
   const regs = DB.todos().filter(r => visibles.has(String(r.Customer_id)));
@@ -2123,22 +1873,13 @@ function viewPanel(){
     .map(n => ({ nombre:n, n: sinUbi.filter(r => r.Ejecutivo === n).length }))
     .sort((a,b) => b.n - a.n);
 
-  const cancels = misCancelaciones().map(r => RULES.estadoPOS(r).code);
-  const posDist = [
-    { label:"Entregado en plazo", color:"var(--good)",    n:cancels.filter(x=>x==="entregado_plazo").length },
-    { label:"En plazo",           color:"var(--s1)",      n:cancels.filter(x=>x==="en_plazo").length },
-    { label:"Por vencer",         color:"var(--warn)",    n:cancels.filter(x=>x==="por_vencer").length },
-    { label:"Fuera de plazo",     color:"var(--serious)", n:cancels.filter(x=>x==="entregado_fuera").length },
-    { label:"Vencido",            color:"var(--crit)",    n:cancels.filter(x=>x==="vencido").length }
-  ].filter(x => x.n > 0);
-  const maxPos = Math.max(1, ...posDist.map(p => p.n));
 
   return `
   <div class="stat-row">
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
     <div class="stat"><div class="lbl">Efectividad</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} lograron contacto</div></div>
-    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${canc}</div><div class="sub">${conEf?Math.round(canc/conEf*100):0}% de los contactados</div></div>
+    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumple}</div><div class="sub">${total?Math.round(cumple/total*100):0}% de la cartera</div></div>
   </div>
 
   <div class="grid2">
@@ -2218,15 +1959,6 @@ function viewPanel(){
       : `<div class="note">Aún no hay visitas presenciales registradas.</div>`}
     </div>
 
-    <div class="card">
-      <h3>Estado de entrega de POS</h3>
-      ${posDist.length ? posDist.map(p => `
-        <div class="bar-row">
-          <span class="nm"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${p.color};margin-right:6px"></i>${p.label}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${(p.n/maxPos*100).toFixed(1)}%;background:${p.color}"></span></span>
-          <span class="bar-val">${p.n}</span>
-        </div>`).join("") : `<div class="note">Sin cancelaciones registradas.</div>`}
-    </div>
    </div>
   </div>
 
@@ -2244,17 +1976,12 @@ const COLS_BASE = ["customer_id","Nombre_Comercio","Rubro","Distrito","Direccion
   "Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Intentos","Contactos_Efectivos","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
-  "Cancelara_POS","Entrego_POS_72hrs","Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
+  "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
 
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Contacto_Logrado",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
   "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
-
-const COLS_CANCEL = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
-  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Motivo_Cancelacion",
-  "Cancelara_POS","Fecha_Limite_POS","POS_Entregado","Fecha_Entrega_POS","Entrego_POS_72hrs","Estado_POS",
-  "Ubicacion","Ubicacion_Verificada","Cumple_Visita","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
 const marcaUbicacion = r => !RULES.requiereUbicacion(r.Tipo_Contacto) ? ""
@@ -2273,7 +2000,6 @@ function filasBase(){
         DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
         b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
-        b.Cancelara_POS, b.Entrego_POS_72hrs,
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
         b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""]);
   });
@@ -2289,19 +2015,6 @@ function filasVisitas(){
     r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
 }
 
-function filasCancel(){
-  return DB.cancelaciones.slice().sort((a,b) => ts(a) - ts(b)).map(r => {
-    const st = RULES.estadoPOS(r);
-    return [r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis, r.Customer_id,
-      r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
-      r.Motivo_Cancelacion, "SI",
-      fmtFecha(isoDe(st.limite)) + " " + pad(st.limite.getHours()) + ":" + pad(st.limite.getMinutes()),
-      r.POS_Entregado, r.Fecha_Entrega_POS || "", st.valorBase, st.label,
-      r.Ubicacion, marcaUbicacion(r), r.Cumple_Visita, r.Evidencia_Path || "", r.Calificacion,
-      r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id];
-  });
-}
-
 const hoja = (cols, filas) => {
   const ws = XLSX.utils.aoa_to_sheet([cols].concat(filas));
   ws["!cols"] = cols.map(c => ({ wch: Math.min(32, Math.max(11, String(c).length + 3)) }));
@@ -2313,40 +2026,22 @@ const hoja = (cols, filas) => {
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
   const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Contactos efectivos",
-                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada","Cancelaciones","POS vencidos","POS en plazo"];
+                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
     const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
     cs.forEach(c => RULES.recomputarBase(c.customer_id));
     const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
-    const canc = DB.cancelaciones.filter(r => r.Correo_Stratis === u.correo);
     const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
     return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length, ef,
       rs.length ? Math.round(ef/rs.length*100)/100 : 0,
       cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
       rs.filter(r => r.Cumple_Visita === "SI").length,
       rs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto)).length,
-      rs.filter(sinUbicacionVerificada).length, canc.length,
-      canc.filter(r => RULES.estadoPOS(r).code === "vencido").length,
-      canc.filter(r => RULES.estadoPOS(r).code === "entregado_plazo").length];
+      rs.filter(sinUbicacionVerificada).length];
   });
   const ws = hoja(cols, filas);
   filas.forEach((_,i) => { const c = ws["F"+(i+2)]; if (c) c.z = "0%"; });
   return ws;
-}
-
-function hojaSeguimientoPOS(){
-  const cols = ["Comercio","customer_id","Ejecutivo","Fecha contacto","Motivo","Fecha límite (72 h útiles)",
-                "¿Entregado?","Fecha de entrega","Entrego_POS_72hrs","Estado"];
-  const filas = DB.cancelaciones.slice()
-    .map(r => ({ r, st: RULES.estadoPOS(r) }))
-    .sort((a,b) => a.st.limite - b.st.limite)
-    .map(({r,st}) => {
-      const c = byId[String(r.Customer_id)] || {};
-      return [titulo(nombreCliente(c)), r.Customer_id, r.Ejecutivo, fmtDT(r.Fecha_Contacto, r.Hora_Contacto),
-        r.Motivo_Cancelacion, fmtFecha(isoDe(st.limite)) + " " + pad(st.limite.getHours()) + ":" + pad(st.limite.getMinutes()),
-        r.POS_Entregado, r.Fecha_Entrega_POS ? fmtFecha(r.Fecha_Entrega_POS) : "", st.valorBase, st.label];
-    });
-  return hoja(cols, filas);
 }
 
 function hojaEfectividad(){
@@ -2377,9 +2072,7 @@ function hojaRubros(){
 }
 
 const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
-  calificacion:"Calificación", contacto_id:"Contacto asociado", evidencia_path:"Evidencia",
-  pos_entregado:"POS entregado", fecha_entrega_pos:"Fecha de entrega POS", hora_entrega_pos:"Hora de entrega POS",
-  motivo_cancelacion:"Motivo de cancelación", nombre_comercio:"Nombre del comercio",
+  calificacion:"Calificación", evidencia_path:"Evidencia", nombre_comercio:"Nombre del comercio",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", observacion:"Observación" };
 const nomCampo = k => CAMPO_ES[k] || k;
@@ -2428,8 +2121,7 @@ function hojaReporte(admin){
     ["Contactos efectivos", ef],
     ["% Efectividad", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
-    ["Cancelaciones", DB.cancelaciones.length],
-    ["POS vencidos", DB.cancelaciones.filter(r => RULES.estadoPOS(r).code === "vencido").length], [],
+    ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length], [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
     ["", "La columna Evidencia guarda la ruta del archivo en el bucket privado; las imágenes solo se abren desde el CRM."],
@@ -2450,11 +2142,9 @@ async function exportarExcel(btn){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hoja(COLS_BASE, filasBase()), "Base");
   XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
-  XLSX.utils.book_append_sheet(wb, hoja(COLS_CANCEL, filasCancel()), "Cancelaciones");
 
   if (admin){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
-    XLSX.utils.book_append_sheet(wb, hojaSeguimientoPOS(), "Seguimiento POS");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Efectividad de contacto");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
@@ -2468,13 +2158,12 @@ async function exportarExcel(btn){
 
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   toast(admin ? `Excel completo generado · ${wb.SheetNames.length} hojas`
-              : "Excel de tu cartera generado · 4 hojas");
+              : "Excel de tu cartera generado · 3 hojas");
 }
 
 function exportarCSV(que){
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
-                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
-                 cancelaciones:[COLS_CANCEL, filasCancel(), "Cancelaciones"] };
+                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"] };
   const [cols, filas, nombre] = mapa[que];
   const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
   const csv = "\ufeff" + [cols.map(q).join(";")].concat(filas.map(f => f.map(q).join(";"))).join("\r\n");
@@ -2525,15 +2214,13 @@ function viewAyuda(){
     <h3>Descargar la base</h3>
     <div class="note" style="margin-bottom:12px">
       Como <b>${esc(S.user.rol)}</b> descargas la campaña completa con los datos actualizados
-      al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Cancelaciones</b>,
-      <b>Avance por ejecutivo</b>, <b>Seguimiento POS</b>, <b>Efectividad de contacto</b>,
-      <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
+      al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Avance por ejecutivo</b>,
+      <b>Efectividad de contacto</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
     </div>
-    <button class="btn block" id="expXlsx">Descargar Excel completo (10 hojas)</button>
+    <button class="btn block" id="expXlsx">Descargar Excel completo (8 hojas)</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
       <button class="btn ghost sm" data-exp="base">Base en CSV</button>
       <button class="btn ghost sm" data-exp="visitas">Visitas en CSV</button>
-      <button class="btn ghost sm" data-exp="cancelaciones">Cancelaciones en CSV</button>
     </div>
   </div>` : ""}
 
@@ -2542,15 +2229,12 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:11px">Estas reglas viven en la base de datos, no en esta pantalla. Aunque alguien manipulara el navegador, Postgres las vuelve a aplicar al guardar.</div>
     <div class="kv"><dt>Dominio permitido</dt><dd>@${esc(CONFIG.dominio)}</dd></div>
     <div class="kv"><dt>Alta de comercios</dt><dd>La hace el ejecutivo en campo; el customer_id es único en toda la campaña</dd></div>
-    <div class="kv"><dt>Contactos por comercio</dt><dd>Máximo 4, cada uno con celular o correo</dd></div>
+    <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan razón social, RUC, teléfonos ni personas de contacto</dd></div>
     <div class="kv"><dt>Cumple_Visita</dt><dd>SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar</dd></div>
     <div class="kv"><dt>Intentos</dt><dd>Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio</dd></div>
     <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
     <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
-    <div class="kv"><dt>Cancelara_POS</dt><dd>SI automático al registrar una cancelación</dd></div>
-    <div class="kv"><dt>Plazo POS</dt><dd>${CONFIG.horasUtilesPOS} horas útiles = ${Math.round(CONFIG.horasUtilesPOS/CONFIG.horasUtilesPorDia)} días hábiles, sin sábados, domingos ni feriados</dd></div>
     
-    <div class="kv"><dt>Feriados cargados</dt><dd>${CONFIG.feriados.length} fechas del Perú</dd></div>
     <div class="kv"><dt>Zona horaria</dt><dd>America/Lima — fechas, horas y plazos se calculan en hora de Lima</dd></div>
     ${admin ? `<div class="note" style="margin-top:11px">Para cambiar cualquiera de estas reglas, edita la tabla <b>config</b> en Supabase. No hay que tocar la aplicación.</div>` : ""}
   </div>
