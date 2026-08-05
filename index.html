@@ -2,6 +2,7 @@
 <html lang="es" data-theme="light">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b2545">
 <title>Stratis CRM — BBVA Adquirencia</title>
@@ -144,7 +145,7 @@ nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-widt
 .cl{display:flex;gap:11px;align-items:flex-start;background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px;margin-bottom:9px;cursor:pointer;box-shadow:var(--sh)}
 .cl:active{transform:scale(.995)}
 .cl .body{flex:1;min-width:0}
-.cl .name{font-weight:670;font-size:14.5px;letter-spacing:-.15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl .name{font-weight:670;font-size:14.5px;letter-spacing:-.15px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2}
 .cl .sub{font-size:12.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cl .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
 .cl .rt{text-align:right;flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
@@ -214,6 +215,10 @@ table.tbl tr:last-child td{border-bottom:0}
 .mono{font-variant-numeric:tabular-nums}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+/* La lista de comercios se acomoda al ancho disponible */
+.cl-grid{display:grid;gap:9px}
+.cl-grid .cl{margin-bottom:0}
+
 @media(min-width:760px){
   body{font-size:15.5px}
   main{max-width:1080px;margin:0 auto;width:100%;padding:20px 20px 40px}
@@ -229,6 +234,37 @@ table.tbl tr:last-child td{border-bottom:0}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px;align-items:start}
   .bar-row{grid-template-columns:158px 1fr 46px}
   .bar-sub{margin-left:167px}
+}
+
+/* ---------- LAPTOP: se aprovecha el ancho de la ventana ---------- */
+@media(min-width:1180px){
+  main{max-width:1240px;padding:24px 24px 48px}
+  .card{padding:16px 18px}
+  .cl-grid{grid-template-columns:repeat(2,1fr);gap:11px}
+  .cl{padding:14px 15px}
+
+  /* Los formularios dejan de ser una columna larga: fluyen en dos, sin huecos.
+     Las tarjetas nunca se parten a la mitad. */
+  .view-form{column-count:2;column-gap:16px}
+  .view-form > *{break-inside:avoid}
+  .view-form > .back,
+  .view-form > .sticky-actions{column-span:all}
+  .view-form > .card:first-of-type{column-span:all}
+  .view-form .sticky-actions{position:static;justify-content:flex-end;
+    background:none;border-top:1px solid var(--grid);padding-top:14px}
+  .view-form .sticky-actions .btn{flex:none;min-width:210px}
+
+  /* El texto largo no se estira de lado a lado: cansa leerlo */
+  .tl-lectura{max-width:900px}
+  .note, .quote{max-width:760px}
+  .view-form .note, .view-form .quote{max-width:none}
+  .ev-thumb{max-width:420px}
+}
+
+@media(min-width:1560px){
+  main{max-width:1480px}
+  .cl-grid{grid-template-columns:repeat(3,1fr)}
+  .stat .val{font-size:28px}
 }
 </style>
 </head>
@@ -461,7 +497,10 @@ const esc = s => String(s == null ? "" : s)
   .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
   .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 const iniciales = n => String(n||"").trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase();
-const titulo = s => String(s||"").toLowerCase().replace(/\b[a-záéíóúñ]/g, m => m.toUpperCase());
+/* \b de JavaScript no entiende acentos y partía palabras como "doña" en
+   "DoÑA". Capitalizamos solo después de un separador real. */
+const titulo = s => String(s||"").toLowerCase()
+  .replace(/(^|[\s\-—–/(.,;:"'¿¡])([a-záéíóúüñ])/g, (m, sep, l) => sep + l.toUpperCase());
 const userColor = n => { const i = USUARIOS.findIndex(u => u.nombre === n); return COLORES[i < 0 ? 0 : i % COLORES.length]; };
 const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio " + c.customer_id) : "";
 
@@ -863,6 +902,7 @@ function render(){
   $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
   renderNav();
   const v = $("#view");
+  v.className = /^form_/.test(S.tab) ? "view-form" : "";
   if (S.tab === "form_cliente")           return renderFormCliente();
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
   else if (S.tab === "form_visita")       return renderFormulario();
@@ -966,7 +1006,7 @@ function viewCartera(){
   </div>` : ""}
 
   <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
-  ${mostrar.length ? mostrar.map(cardCliente).join("")
+  ${mostrar.length ? `<div class="cl-grid">${mostrar.map(cardCliente).join("")}</div>`
     : total === 0
       ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
       : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.</div>`}
@@ -1786,7 +1826,7 @@ function viewRegistros(){
   </div>` : ""}
 
   <div class="sec-title">${lista.length} registro${lista.length===1?"":"s"}${S.user.rol==="Ejecutivo"?" — míos":" — todo el equipo"}</div>
-  ${mostrar.length ? `<div class="tl">${mostrar.map(r => {
+  ${mostrar.length ? `<div class="tl tl-lectura">${mostrar.map(r => {
       const c = byId[String(r.Customer_id)];
       const res = resultadoById(r.Resultado);
       return `<div class="tl-item">
