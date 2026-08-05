@@ -1,0 +1,2943 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b2545">
+<title>Stratis CRM — BBVA Adquirencia</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stratis CRM">
+<link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%20%22Stratis%20CRM%20%E2%80%94%20BBVA%20Adquirencia%22%2C%20%22short_name%22%3A%20%22Stratis%20CRM%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22scope%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%230b2545%22%2C%20%22theme_color%22%3A%20%22%230b2545%22%2C%20%22orientation%22%3A%20%22portrait%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%3Bcharset%3Dutf-8%2C%253Csvg%2520xmlns%253D%2527http%253A//www.w3.org/2000/svg%2527%2520width%253D%2527512%2527%2520height%253D%2527512%2527%253E%253Crect%2520width%253D%2527512%2527%2520height%253D%2527512%2527%2520rx%253D%252796%2527%2520fill%253D%2527%25230b2545%2527/%253E%253Ctext%2520x%253D%2527256%2527%2520y%253D%2527340%2527%2520font-family%253D%2527system-ui%252Csans-serif%2527%2520font-size%253D%2527280%2527%2520font-weight%253D%2527800%2527%2520fill%253D%2527%2523ffffff%2527%2520text-anchor%253D%2527middle%2527%253ES%253C/text%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22512x512%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%2C%20%22purpose%22%3A%20%22any%20maskable%22%7D%5D%7D">
+
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb; --plane:#f3f4f1; --card:#ffffff;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --line:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --brand:#0b2545; --brand-2:#2a78d6;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-ink:#006300; --crit-ink:#a32626; --warn-ink:#8a6100; --serious-ink:#9c4a25;
+  --good-bg:#e8f6e8; --warn-bg:#fef3d9; --serious-bg:#fdeade; --crit-bg:#fbe6e6; --info-bg:#e7f0fc;
+  --r:14px; --r-sm:9px;
+  --sh:0 1px 2px rgba(11,11,11,.05), 0 4px 14px rgba(11,11,11,.05);
+  --nav-h:62px;
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19; --plane:#0d0d0d; --card:#1a1a19;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --line:#383835; --ring:rgba(255,255,255,.10);
+  --brand:#0f1c2e; --brand-2:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --good-ink:#0ca30c; --crit-ink:#e66767; --warn-ink:#fab219; --serious-ink:#ec835a;
+  --good-bg:#122b12; --warn-bg:#33280a; --serious-bg:#33200f; --crit-bg:#331414; --info-bg:#0f2137;
+  --sh:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--plane); color:var(--ink);
+  font-size:15px; line-height:1.45; overscroll-behavior-y:none;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--brand-2)}
+.hidden{display:none !important}
+
+/* ---------- LOGIN ---------- */
+#login{
+  min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:22px;
+  background:linear-gradient(160deg,#0b2545 0%,#123a63 48%,#1b5183 100%);
+}
+.lg-card{width:100%;max-width:412px;background:var(--card);border-radius:20px;padding:30px 26px 26px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.lg-logo{display:flex;align-items:center;gap:11px;margin-bottom:22px}
+.lg-mark{width:42px;height:42px;border-radius:11px;background:linear-gradient(140deg,#0b2545,#2a78d6);display:grid;place-items:center;color:#fff;font-weight:800;font-size:17px;letter-spacing:-.5px;flex:none}
+.lg-logo h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.3px}
+.lg-logo p{margin:1px 0 0;font-size:12.5px;color:var(--muted)}
+.ms-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer;font-weight:600;font-size:14.5px;margin-bottom:8px}
+.ms-btn:hover{background:var(--plane)}
+.ms-tiles{width:19px;height:19px;display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:none}
+.ms-tiles i{display:block;border-radius:1px}
+.divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin:16px 0}
+.divider:before,.divider:after{content:"";flex:1;height:1px;background:var(--grid)}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+.field .hint{font-weight:400;color:var(--muted)}
+input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],input[type=number],input[type=search],select,textarea{
+  width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--surface-1);outline:none;font-size:16px;
+}
+textarea{resize:vertical;min-height:78px;line-height:1.45}
+input:focus,select:focus,textarea:focus{border-color:var(--brand-2);box-shadow:0 0 0 3px rgba(42,120,214,.16)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:var(--brand-2);color:#fff;font-weight:650;cursor:pointer;font-size:14.5px}
+.btn:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.block{width:100%}
+.btn.ghost{background:transparent;border-color:var(--line);color:var(--ink)}
+.btn.ghost:hover{background:var(--plane)}
+.btn.danger{background:var(--crit)}
+.btn.sm{padding:8px 12px;font-size:13px;border-radius:8px}
+.err{background:var(--crit-bg);color:var(--crit-ink);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+.demo-users{margin-top:14px;border-top:1px solid var(--grid);padding-top:13px}
+.demo-users p{margin:0 0 8px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+.du{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 9px;border:1px solid transparent;border-radius:9px;background:transparent;cursor:pointer;margin-bottom:2px}
+.du:hover{background:var(--plane);border-color:var(--grid)}
+.av{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:#fff;flex:none;background:var(--s1)}
+.du b{display:block;font-size:13.5px;font-weight:600}
+.du span{display:block;font-size:11.5px;color:var(--muted)}
+
+/* ---------- APP SHELL ---------- */
+#app{min-height:100dvh;display:flex;flex-direction:column}
+header.top{
+  position:sticky;top:0;z-index:40;background:var(--brand);color:#fff;
+  padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;display:flex;align-items:center;gap:11px
+}
+header.top .mark{width:31px;height:31px;border-radius:8px;background:rgba(255,255,255,.15);display:grid;place-items:center;font-weight:800;font-size:12.5px;flex:none}
+header.top h1{margin:0;font-size:15px;font-weight:700;letter-spacing:-.2px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header.top h1 small{display:block;font-size:11px;font-weight:500;opacity:.72;letter-spacing:0}
+.icon-btn{background:rgba(255,255,255,.13);border:0;color:#fff;width:33px;height:33px;border-radius:9px;display:grid;place-items:center;cursor:pointer;flex:none;font-size:15px}
+.icon-btn:hover{background:rgba(255,255,255,.24)}
+main{flex:1;padding:13px 13px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px)}
+nav.bottom{
+  position:fixed;left:0;right:0;bottom:0;z-index:45;background:var(--card);
+  border-top:1px solid var(--grid);display:flex;padding-bottom:env(safe-area-inset-bottom)
+}
+nav.bottom button{
+  flex:1;background:none;border:0;padding:8px 2px 7px;cursor:pointer;color:var(--muted);
+  display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;position:relative
+}
+nav.bottom button .ic{font-size:18px;line-height:1}
+nav.bottom button.on{color:var(--brand-2)}
+nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-width:16px;height:16px;border-radius:8px;background:var(--crit);color:#fff;font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700}
+
+/* ---------- COMPONENTS ---------- */
+.card{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);box-shadow:var(--sh);padding:14px;margin-bottom:11px}
+.card h3{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--ink-2)}
+.sec-title{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:16px 2px 8px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:650;line-height:1.6;white-space:nowrap}
+.chip.p1{background:#fbe6e6;color:#a32626} .chip.p2{background:#fdeade;color:#9c4a25}
+.chip.p3{background:#fef3d9;color:#8a6100} .chip.p4{background:#eceae4;color:#52514e}
+:root[data-theme=dark] .chip.p1{background:#331414;color:#e66767}
+:root[data-theme=dark] .chip.p2{background:#33200f;color:#ec835a}
+:root[data-theme=dark] .chip.p3{background:#33280a;color:#fab219}
+:root[data-theme=dark] .chip.p4{background:#2c2c2a;color:#c3c2b7}
+.chip.ok{background:var(--good-bg);color:var(--good-ink)}
+.chip.no{background:var(--plane);color:var(--muted);border:1px solid var(--grid)}
+.chip.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.chip.crit{background:var(--crit-bg);color:var(--crit-ink)}
+.chip.serious{background:var(--serious-bg);color:var(--serious-ink)}
+.chip.info{background:var(--info-bg);color:var(--brand-2)}
+.toolbar{display:flex;gap:8px;margin-bottom:11px;align-items:center;flex-wrap:wrap}
+.search{flex:1;min-width:180px;position:relative}
+.search input{padding-left:34px;border-radius:11px}
+.search .mag{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px;pointer-events:none}
+.pills{display:flex;gap:6px;overflow-x:auto;padding:1px 1px 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.pills::-webkit-scrollbar{display:none}
+.pill{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;color:var(--ink-2)}
+.pill.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
+.cl{display:flex;gap:11px;align-items:flex-start;background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px;margin-bottom:9px;cursor:pointer;box-shadow:var(--sh)}
+.cl:active{transform:scale(.995)}
+.cl .body{flex:1;min-width:0}
+.cl .name{font-weight:670;font-size:14.5px;letter-spacing:-.15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl .sub{font-size:12.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.cl .rt{text-align:right;flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.cl .amt{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.cl .amt small{display:block;font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.3px}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:3px 10px;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--grid)}
+.kv:last-child{border-bottom:0}
+.kv dt{color:var(--muted);font-size:12.5px}
+.kv dd{margin:0;word-break:break-word}
+.kv dd.upd{color:var(--good-ink);font-weight:600}
+.stat-row{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:11px}
+.stat{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px 13px;box-shadow:var(--sh)}
+.stat .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.stat .val{font-size:25px;font-weight:730;letter-spacing:-.8px;margin-top:3px;line-height:1.1}
+.stat .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.empty{text-align:center;padding:44px 20px;color:var(--muted)}
+.empty .big{font-size:34px;margin-bottom:9px;opacity:.6}
+.tl{position:relative;padding-left:26px}
+.tl:before{content:"";position:absolute;left:8px;top:6px;bottom:6px;width:2px;background:var(--grid)}
+.tl-item{position:relative;margin-bottom:11px}
+.tl-item:before{content:"";position:absolute;left:-22px;top:15px;width:11px;height:11px;border-radius:50%;background:var(--s1);border:2px solid var(--card);box-shadow:0 0 0 2px var(--grid)}
+.tl-item.cancel:before{background:var(--crit)}
+.tl-h{display:flex;justify-content:space-between;align-items:flex-start;gap:9px;margin-bottom:6px}
+.tl-h .dt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tl-h .who{font-weight:660;font-size:13.5px}
+.quote{border-left:3px solid var(--grid);padding:2px 0 2px 10px;margin:7px 0 0;font-size:13px;color:var(--ink-2)}
+.quote b{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;font-weight:700}
+.ev-thumb{width:100%;max-height:190px;object-fit:cover;border-radius:10px;border:1px solid var(--ring);margin-top:9px;display:block;cursor:pointer}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opts{display:grid;gap:7px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--surface-1)}
+.opt.on{border-color:var(--brand-2);background:var(--info-bg);box-shadow:0 0 0 2px rgba(42,120,214,.14)}
+.opt .rd{width:18px;height:18px;border-radius:50%;border:2px solid var(--line);flex:none;margin-top:1px;display:grid;place-items:center}
+.opt.on .rd{border-color:var(--brand-2)}
+.opt.on .rd:after{content:"";width:9px;height:9px;border-radius:50%;background:var(--brand-2)}
+.opt b{font-size:14px;font-weight:620;display:block}
+.opt span{font-size:12px;color:var(--muted);display:block;margin-top:1px}
+.note{background:var(--info-bg);border-radius:10px;padding:11px 12px;font-size:12.8px;color:var(--ink-2);line-height:1.5}
+.note b{color:var(--ink)}
+.note.ok{background:var(--good-bg);color:var(--good-ink)} .note.ok b{color:var(--good-ink)}
+.note.warn{background:var(--warn-bg);color:var(--warn-ink)} .note.warn b{color:var(--warn-ink)}
+.note.crit{background:var(--crit-bg);color:var(--crit-ink)} .note.crit b{color:var(--crit-ink)}
+.sticky-actions{position:sticky;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--plane) 62%,transparent);padding:12px 0 4px;display:flex;gap:9px;margin-top:14px}
+.sticky-actions .btn{flex:1}
+.drop{border:1.5px dashed var(--line);border-radius:11px;padding:20px 14px;text-align:center;cursor:pointer;background:var(--surface-1)}
+.drop:hover{border-color:var(--brand-2);background:var(--info-bg)}
+.drop .big{font-size:26px;opacity:.55}
+.drop p{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.bar-row{display:grid;grid-template-columns:112px 1fr 46px;align-items:center;gap:9px;margin-bottom:9px;font-size:13px}
+.bar-track{display:block;height:9px;background:var(--grid);border-radius:5px;overflow:hidden}
+.bar-fill{display:block;height:9px;border-radius:5px;background:var(--s1);min-width:2px}
+.bar-val{text-align:right;font-variant-numeric:tabular-nums;font-weight:670;font-size:12.5px}
+.bar-row .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.bar-sub{font-size:11.5px;color:var(--muted);margin:-5px 0 11px 121px}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tbl td{padding:8px;border-bottom:1px solid var(--grid);vertical-align:top}
+table.tbl tr:last-child td{border-bottom:0}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -14px;padding:0 14px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:0}
+.modal{background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88dvh;overflow:auto;padding:20px 17px calc(20px + env(safe-area-inset-bottom))}
+.modal h3{margin:0 0 6px;font-size:17px;text-transform:none;letter-spacing:-.2px}
+.modal p{margin:0 0 15px;font-size:13.5px;color:var(--ink-2)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 22px);background:#0b0b0b;color:#fff;padding:11px 17px;border-radius:11px;font-size:13.5px;font-weight:600;z-index:90;box-shadow:0 8px 26px rgba(0,0,0,.34);max-width:90vw;text-align:center}
+.back{display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--brand-2);font-weight:650;font-size:13.5px;cursor:pointer;padding:2px 0;margin-bottom:9px}
+.req{color:var(--crit)}
+.mono{font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+@media(min-width:760px){
+  body{font-size:15.5px}
+  main{max-width:1080px;margin:0 auto;width:100%;padding:20px 20px 40px}
+  nav.bottom{position:static;border-top:0;border-bottom:1px solid var(--grid);justify-content:center;gap:4px;padding:7px 10px}
+  nav.bottom button{flex:none;flex-direction:row;gap:7px;padding:9px 15px;border-radius:9px;font-size:13.5px}
+  nav.bottom button.on{background:var(--info-bg)}
+  nav.bottom button .dot{position:static;margin-left:1px}
+  .stat-row{grid-template-columns:repeat(4,1fr)}
+  .sticky-actions{bottom:0}
+  .tbl-wrap{margin:0;padding:0}
+  .modal-bg{align-items:center;padding:22px}
+  .modal{border-radius:18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px;align-items:start}
+  .bar-row{grid-template-columns:158px 1fr 46px}
+  .bar-sub{margin-left:167px}
+}
+</style>
+</head>
+<body>
+<div id="login"></div>
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="mark">S</div>
+    <h1 id="topTitle">Stratis CRM<small id="topSub">BBVA Adquirencia</small></h1>
+    <button class="icon-btn" id="btnTheme" title="Tema">◐</button>
+    <button class="icon-btn" id="btnUser" title="Cuenta">▾</button>
+  </header>
+  <nav class="bottom" id="nav"></nav>
+  <main id="view"></main>
+</div>
+<div id="overlay"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* =========================================================================
+   STRATIS CRM — Campaña BBVA Adquirencia
+   Núcleo: conexión a Supabase, reglas de negocio y estado
+
+   v2 — la cartera la construye cada ejecutivo en campo. Ya no hay base
+   precargada: el ejecutivo da de alta al comercio digitando su customer_id.
+   ========================================================================= */
+"use strict";
+
+const SUPABASE_URL      = "https://ljypfsvmoymbhybpkrim.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_spNoHfQLCAcUR0nX7CefVw_e22si7tX";  // publishable — pública por diseño
+
+const CONFIG = {
+  dominio: "mystratis.com",
+  horasUtilesPOS: 72,
+  horasUtilesPorDia: 24,
+  alertaPorVencerHrs: 24,
+  cumpleVisitaHistorico: true,
+  feriados: []
+};
+
+let sb = null;
+
+/* ---- Medio de contacto (los ids coinciden con el trigger en SQL) -------- */
+const TIPOS_CONTACTO = [
+  { id:"visita_presencial", label:"Visita presencial",   desc:"En el local del comercio",                 modo:"presencial", cumple:true,  gps:true  },
+  { id:"reunion_presencial",label:"Reunión presencial",  desc:"Reunión fuera del local (oficina, café)",  modo:"presencial", cumple:true,  gps:true  },
+  { id:"reunion_virtual",   label:"Reunión virtual",     desc:"Teams, Meet o Zoom con cámara",            modo:"virtual",    cumple:true,  gps:false },
+  { id:"videollamada",      label:"Videollamada",        desc:"Videollamada por WhatsApp u otro",         modo:"virtual",    cumple:true,  gps:false },
+  { id:"llamada",           label:"Llamada telefónica",  desc:"Solo audio — no califica como visita",     modo:"otro",       cumple:false, gps:false },
+  { id:"whatsapp",          label:"Mensaje WhatsApp",    desc:"Chat — no califica como visita",           modo:"otro",       cumple:false, gps:false },
+  { id:"correo",            label:"Correo electrónico",  desc:"No califica como visita",                  modo:"otro",       cumple:false, gps:false }
+];
+const tipoById = id => TIPOS_CONTACTO.find(t => t.id === id) || null;
+
+/* ---- Resultado del intento — es lo que separa intentar de lograr ------- */
+const RESULTADOS = [
+  { id:"efectivo",        label:"Habló con el contacto", desc:"Se logró la comunicación",           ok:true  },
+  { id:"no_contesta",     label:"No contestó",           desc:"Llamó o escribió y no hubo respuesta", ok:false },
+  { id:"local_cerrado",   label:"Local cerrado",         desc:"Fue al local y estaba cerrado",      ok:false },
+  { id:"titular_ausente", label:"Titular ausente",       desc:"Atendió otra persona, no el contacto", ok:false },
+  { id:"datos_errados",   label:"Datos errados",         desc:"Teléfono o dirección equivocada",    ok:false },
+  { id:"rechazo",         label:"No quiso atender",      desc:"Se negó a la conversación",          ok:false }
+];
+const resultadoById = id => RESULTADOS.find(r => r.id === id) || null;
+const esEfectivo = id => id === "efectivo";
+
+/* Un registro presencial solo tiene respaldo si el GPS del equipo entregó las
+   coordenadas. Si el ejecutivo tuvo que guardar sin señal, queda marcado. */
+const sinUbicacionVerificada = r =>
+  RULES.requiereUbicacion(r.Tipo_Contacto) && r.Ubicacion_Verificada !== true;
+
+const CALIFICACIONES = [
+  { id:"A", label:"A — Muy interesado", desc:"Cliente receptivo, alta probabilidad de retención" },
+  { id:"B", label:"B — Interesado",     desc:"Abierto a la propuesta, requiere seguimiento" },
+  { id:"C", label:"C — Neutral",        desc:"Escucha pero no se compromete" },
+  { id:"D", label:"D — En riesgo",      desc:"Manifiesta molestia o evalúa a la competencia" },
+  { id:"E", label:"E — Perdido",        desc:"Decidido a retirarse o ya migró" }
+];
+
+const MOTIVOS_CANCELACION = [
+  "Comisión / tarifa muy alta","Mejor oferta de la competencia","Bajo uso del POS",
+  "Problemas técnicos del equipo","Demora en abonos / liquidación",
+  "Mala atención o soporte","Cierre o traslado del negocio","Cambio de razón social","Otro"
+];
+
+const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
+
+/* Sugerencias de distrito — el campo acepta cualquier texto */
+const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO","CARABAYLLO",
+ "CERCADO DE LIMA","CHACLACAYO","CHORRILLOS","CIENEGUILLA","COMAS","EL AGUSTINO","INDEPENDENCIA",
+ "JESUS MARIA","LA MOLINA","LA PERLA","LA PUNTA","LA VICTORIA","LINCE","LOS OLIVOS","LURIGANCHO",
+ "LURIN","MAGDALENA DEL MAR","MIRAFLORES","PACHACAMAC","PUEBLO LIBRE","PUENTE PIEDRA","PUNTA HERMOSA",
+ "RIMAC","SAN BARTOLO","SAN BORJA","SAN ISIDRO","SAN JUAN DE LURIGANCHO","SAN JUAN DE MIRAFLORES",
+ "SAN LUIS","SAN MARTIN DE PORRES","SAN MIGUEL","SANTA ANITA","SANTIAGO DE SURCO","SURQUILLO",
+ "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO"];
+
+/* ---- Datos en memoria --------------------------------------------------- */
+let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [];
+const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
+
+const rubroLabel = c => {
+  if (!c) return "";
+  if (c.rubro === "otro" && c.rubro_otro) return c.rubro_otro;
+  const r = RUBROS.find(x => x.codigo === c.rubro);
+  return r ? r.nombre : (c.rubro || "");
+};
+
+const DB = {
+  visitas: [], cancelaciones: [],
+  todos(){ return this.visitas.concat(this.cancelaciones); },
+  delCliente(cid){
+    return this.todos().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
+  },
+  buscar(id){ return this.todos().find(r => r._id === id) || null; },
+  cargar(filas){
+    this.visitas = []; this.cancelaciones = [];
+    filas.forEach(f => (f.tipo === "cancelacion" ? this.cancelaciones : this.visitas).push(deDB(f)));
+  }
+};
+
+/* ---- Conversión entre la fila de Postgres y el objeto de la interfaz ---- */
+function deDB(f){
+  const c = byId[String(f.customer_id)] || {};
+  return {
+    _id: f.id, _tipo: f.tipo,
+    Fecha_Contacto: f.fecha_contacto, Hora_Contacto: (f.hora_contacto || "").slice(0,5),
+    Ejecutivo: f.ejecutivo, Correo_Stratis: f.correo_stratis,
+    Customer_id: f.customer_id,
+    Nombre_Comercio: c.nombre_comercio || "", Rubro: rubroLabel(c), Distrito: c.distrito || "",
+    Tipo_Contacto: f.tipo_contacto,
+    Resultado: f.resultado || "efectivo",
+    Visita_Presencial: f.visita_presencial, Visita_virtual: f.visita_virtual,
+    Cumple_Visita: f.cumple_visita, Fecha_Visita_Actualizada: f.fecha_visita_actualizada,
+    Ubicacion: f.ubicacion || "",
+    Ubicacion_Verificada: f.ubicacion_verificada === true,
+    Evidencia_Path: f.evidencia_path || "", Evidencia: "",
+    Calificacion: f.calificacion || "",
+    Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
+    Motivo_Cancelacion: f.motivo_cancelacion || "",
+    Cancelara_POS: f.cancelara_pos, Fecha_Limite_POS: f.fecha_limite_pos,
+    POS_Entregado: f.pos_entregado || "NO",
+    Fecha_Entrega_POS: f.fecha_entrega_pos || "", Hora_Entrega_POS: (f.hora_entrega_pos || "").slice(0,5),
+    Entrego_POS_72hrs: f.entrego_pos_72hrs
+  };
+}
+
+function aDB(f, c, kind){
+  const base = {
+    tipo: kind, customer_id: String(c.customer_id),
+    correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+    fecha_contacto: f.Fecha_Contacto, hora_contacto: f.Hora_Contacto,
+    tipo_contacto: f.Tipo_Contacto,
+    resultado: f.Resultado || "efectivo",
+    ubicacion: f.Ubicacion || null,
+    ubicacion_verificada: !!f.Ubicacion_Verificada,
+    evidencia_path: f.Evidencia_Path || null,
+    calificacion: f.Calificacion || null,
+    comentario_ejecutivo: f.Comentario_Ejecutivo,
+    comentario_cliente: f.Comentario_Cliente || null
+  };
+  if (kind === "cancelacion"){
+    base.motivo_cancelacion = f.Motivo_Cancelacion;
+    base.pos_entregado = f.POS_Entregado || "NO";
+    base.fecha_entrega_pos = f.POS_Entregado === "SI" ? f.Fecha_Entrega_POS : null;
+    base.hora_entrega_pos  = f.POS_Entregado === "SI" ? (f.Hora_Entrega_POS || null) : null;
+  }
+  return base;
+}
+
+/* =========================================================================
+   Utilidades de fecha
+   ========================================================================= */
+const TZ = "America/Lima";
+const pad = n => String(n).padStart(2,"0");
+const ahoraLima = () => new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+const fmtLima = d => d.toLocaleString("es-PE", { timeZone: TZ });
+const hoyISO = () => { const d = ahoraLima(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const horaISO = () => { const d = ahoraLima(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const parseDT = (f,h) => new Date(`${f}T${(h||"00:00")}:00`);
+const ts = r => parseDT(r.Fecha_Contacto, r.Hora_Contacto).getTime();
+const fmtFecha = f => { if(!f) return "—"; const [y,m,d] = String(f).slice(0,10).split("-"); return `${d}/${m}/${y}`; };
+const fmtDT = (f,h) => `${fmtFecha(f)}${h ? " · " + h : ""}`;
+const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const esFeriado = d => CONFIG.feriados.includes(isoDe(d));
+const esHabil = d => d.getDay() !== 0 && d.getDay() !== 6 && !esFeriado(d);
+
+function sumarHorasUtiles(desde, horas, horasPorDia){
+  let d = new Date(desde.getTime());
+  let n = Math.max(1, Math.round(horas / (horasPorDia || 24)));
+  while (n > 0){ d.setDate(d.getDate()+1); if (esHabil(d)) n--; }
+  while (!esHabil(d)) d.setDate(d.getDate()+1);
+  return d;
+}
+function diasHabilesEntre(a, b){
+  let n = 0, d = new Date(a.getTime()); d.setHours(0,0,0,0);
+  const fin = new Date(b.getTime()); fin.setHours(0,0,0,0);
+  while (d < fin){ d.setDate(d.getDate()+1); if (esHabil(d)) n++; }
+  return n;
+}
+function humanizarRestante(ms){
+  const abs = Math.abs(ms), h = Math.floor(abs/3600000), m = Math.floor((abs%3600000)/60000);
+  if (h >= 24) return `${Math.floor(h/24)} d ${h%24} h`;
+  return h >= 1 ? `${h} h ${m} min` : `${m} min`;
+}
+
+/* =========================================================================
+   REGLAS DE NEGOCIO
+   Las autoritativas viven en Postgres. Estas son el espejo en pantalla.
+   ========================================================================= */
+const RULES = {
+  cumpleVisita(id, resultado){
+    const t = tipoById(id);
+    return (t && t.cumple && esEfectivo(resultado || "efectivo")) ? "SI" : "No";
+  },
+  visitaPresencial(id){ const t = tipoById(id); return (t && t.modo === "presencial") ? "SI" : "No"; },
+  visitaVirtual(id){ const t = tipoById(id); return (t && t.modo === "virtual") ? "SI" : "No"; },
+  requiereUbicacion(id){ const t = tipoById(id); return !!(t && t.gps); },
+
+  fechaLimitePOS(fecha, hora){
+    return sumarHorasUtiles(parseDT(fecha, hora), CONFIG.horasUtilesPOS, CONFIG.horasUtilesPorDia);
+  },
+
+  estadoPOS(reg, ahora){
+    const now = ahora || ahoraLima();
+    const limite = reg.Fecha_Limite_POS ? new Date(reg.Fecha_Limite_POS)
+                 : this.fechaLimitePOS(reg.Fecha_Contacto, reg.Hora_Contacto);
+    const hstr = `${fmtFecha(isoDe(limite))} ${pad(limite.getHours())}:${pad(limite.getMinutes())}`;
+    if (reg.POS_Entregado === "SI" && reg.Fecha_Entrega_POS){
+      const ent = parseDT(String(reg.Fecha_Entrega_POS).slice(0,10), reg.Hora_Entrega_POS || "23:59");
+      const enPlazo = ent <= limite;
+      return { limite, entregado:true, enPlazo, code: enPlazo?"entregado_plazo":"entregado_fuera",
+        chip: enPlazo?"ok":"serious", label: enPlazo?"Entregado en plazo":"Entregado fuera de plazo",
+        detalle:`Entregado el ${fmtFecha(reg.Fecha_Entrega_POS)} · límite ${hstr}`,
+        valorBase: enPlazo?"SI":"NO" };
+    }
+    const restante = limite - now;
+    if (restante < 0) return { limite, entregado:false, code:"vencido", chip:"crit", label:"Vencido",
+      detalle:`Venció hace ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"NO" };
+    if (restante <= CONFIG.alertaPorVencerHrs*3600000) return { limite, entregado:false, code:"por_vencer",
+      chip:"warn", label:"Por vencer", detalle:`Quedan ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"PENDIENTE" };
+    return { limite, entregado:false, code:"en_plazo", chip:"info", label:"En plazo",
+      detalle:`Quedan ${humanizarRestante(restante)} · límite ${hstr}`, valorBase:"PENDIENTE" };
+  },
+
+  /* Resumen por cliente. Cada interacción cuenta como intento; solo el
+     resultado "efectivo" cuenta como comunicación lograda. */
+  recomputarBase(cid){
+    const c = byId[String(cid)];
+    if (!c) return null;
+    const regs = DB.delCliente(cid);
+    const b = {
+      Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
+      Fecha_Visita_Actualizada:"", Cancelara_POS:"No", Entrego_POS_72hrs:"",
+      Comentario_Ejecutivo:"", Comentario_Cliente:"",
+      _n: regs.length,
+      _intentos: regs.length,
+      _efectivos: regs.filter(r => esEfectivo(r.Resultado)).length,
+      _ultimo:null, _cancelacion:null, _pos:null
+    };
+    if (!regs.length){ c._base = b; return b; }
+
+    const ult = regs[0];
+    b._ultimo = ult;
+    b.Contactado = b._efectivos > 0 ? "Si" : "Intentado";
+    b.Visita_Presencial = ult.Visita_Presencial || "No";
+    b.Visita_Virtual    = ult.Visita_virtual    || "No";
+    b.Comentario_Ejecutivo = ult.Comentario_Ejecutivo || "";
+    b.Comentario_Cliente   = ult.Comentario_Cliente   || "";
+
+    const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
+    if (CONFIG.cumpleVisitaHistorico){
+      b.Cumple_Visita = cumplidas.length ? "SI" : "No";
+      b.Fecha_Visita_Actualizada = cumplidas.length ? cumplidas[0].Fecha_Contacto : "";
+    } else {
+      b.Cumple_Visita = ult.Cumple_Visita || "No";
+      b.Fecha_Visita_Actualizada = ult.Cumple_Visita === "SI" ? ult.Fecha_Contacto : "";
+    }
+
+    const cancel = regs.filter(r => r._tipo === "cancelacion");
+    if (cancel.length){
+      const uc = cancel[0];
+      b._cancelacion = uc; b.Cancelara_POS = "SI";
+      const st = this.estadoPOS(uc);
+      b._pos = st; b.Entrego_POS_72hrs = st.valorBase;
+    }
+    c._base = b;
+    return b;
+  }
+};
+
+/* =========================================================================
+   Estado
+   ========================================================================= */
+const S = {
+  user:null, tab:"cartera", cid:null, editId:null, form:null, formCli:null, editCli:null,
+  q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
+  qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
+  limite:40, cargando:false
+};
+
+let AUDITORIA = [];
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+const iniciales = n => String(n||"").trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase();
+const titulo = s => String(s||"").toLowerCase().replace(/\b[a-záéíóúñ]/g, m => m.toUpperCase());
+const userColor = n => { const i = USUARIOS.findIndex(u => u.nombre === n); return COLORES[i < 0 ? 0 : i % COLORES.length]; };
+const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio " + c.customer_id) : "";
+
+function cartera(){
+  if (!S.user) return [];
+  if (S.user.rol === "Ejecutivo") return CLIENTES;      // la base ya filtró por RLS
+  if (S.fEjecutivo !== "todos")   return CLIENTES.filter(c => c.asignado === S.fEjecutivo);
+  return CLIENTES;
+}
+function puedeEditar(reg){
+  if (!S.user) return false;
+  return S.user.rol !== "Ejecutivo" || reg.Correo_Stratis === S.user.correo;
+}
+function esMiCliente(c){
+  return !!(S.user && c && c.asignado_correo === S.user.correo);
+}
+
+/* =========================================================================
+   Acceso con enlace mágico y carga de datos desde Supabase
+   ========================================================================= */
+const $ = s => document.querySelector(s);
+const EVID_URL = {};                 // cache de enlaces firmados
+
+function configurado(){ return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
+
+async function iniciarSupabase(){
+  if (!configurado()) return false;
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+  });
+  return true;
+}
+
+/* ---- Pantalla de acceso ------------------------------------------------- */
+function renderLogin(estado){
+  const tiles = '<span class="ms-tiles"><i style="background:#f25022"></i><i style="background:#7fba00"></i><i style="background:#00a4ef"></i><i style="background:#ffb900"></i></span>';
+  const cab = `
+    <div class="lg-logo">
+      <div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div>
+    </div>`;
+
+  if (!configurado()){
+    $("#login").innerHTML = `<div class="lg-card">${cab}
+      <div class="err"><b>Falta configurar la conexión.</b><br>
+      Abre este archivo con un editor de texto y completa las dos líneas
+      <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> al inicio del bloque
+      &lt;script&gt;. Las encuentras en tu proyecto Supabase, en
+      <b>Project Settings → API</b>.</div>
+      <div class="note">Mientras tanto puedes revisar la interfaz en modo demostración, con datos de prueba que no salen de este navegador.</div>
+      <button class="btn block" id="demo" style="margin-top:12px">Entrar en modo demostración</button>
+    </div>`;
+    $("#demo").onclick = () => modoDemo();
+    return;
+  }
+
+  const e = estado || {};
+  $("#login").innerHTML = `<div class="lg-card">${cab}
+    ${e.error ? `<div class="err">${e.error}</div>` : ""}
+    <div class="field">
+      <label for="mail">Correo corporativo <span class="hint">— solo @${CONFIG.dominio}</span></label>
+      <input type="email" id="mail" placeholder="nombre.apellido@${CONFIG.dominio}"
+             value="${esc(e.mail || "")}"
+             autocomplete="username" inputmode="email" autocapitalize="off">
+    </div>
+    <div class="field">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn block" id="doLogin">${tiles} Entrar al CRM</button>
+    <div class="note" style="margin-top:13px">
+      La sesión queda guardada en este dispositivo por varias semanas, así que en la práctica
+      escribes la contraseña una sola vez. En tu primer ingreso el CRM te pedirá cambiarla
+      por una que solo tú conozcas.
+    </div>
+    <div class="note" style="margin-top:9px">
+      ¿Olvidaste tu contraseña? Escríbele a <b>jose.rios@${CONFIG.dominio}</b> y te asigna una nueva.
+    </div>
+  </div>`;
+
+  const entrarConClave = async () => {
+    const m = ($("#mail").value || "").trim().toLowerCase();
+    const p = $("#clave").value || "";
+    if (!m) return renderLogin({ error:"Escribe tu correo corporativo." });
+    if (!m.endsWith("@" + CONFIG.dominio))
+      return renderLogin({ error:`Acceso restringido a cuentas @${CONFIG.dominio}. El correo “${esc(m)}” no pertenece a Stratis.` });
+    if (!p) return renderLogin({ error:"Escribe tu contraseña.", mail:m });
+
+    $("#doLogin").disabled = true; $("#doLogin").textContent = "Entrando…";
+    const { data, error } = await sb.auth.signInWithPassword({ email:m, password:p });
+    if (error){
+      const msg = error.message || "";
+      if (/invalid login credentials/i.test(msg))
+        return renderLogin({ error:"Correo o contraseña incorrectos. Revisa que no haya quedado un espacio al final.", mail:m });
+      if (/email not confirmed/i.test(msg))
+        return renderLogin({ error:`La cuenta ${esc(m)} todavía no está habilitada. Avísale al administrador.`, mail:m });
+      if (/rate limit|too many/i.test(msg))
+        return renderLogin({ error:"Demasiados intentos seguidos. Espera un minuto y vuelve a intentar.", mail:m });
+      return renderLogin({ error:`No se pudo entrar: ${esc(msg)}`, mail:m });
+    }
+    await entrar(data.session).catch(x => renderLogin({ error:x.message, mail:m }));
+  };
+
+  $("#doLogin").onclick = entrarConClave;
+  $("#mail").onkeydown  = ev => { if (ev.key === "Enter") $("#clave").focus(); };
+  $("#clave").onkeydown = ev => { if (ev.key === "Enter") entrarConClave(); };
+}
+
+/* ---- Cambio de contraseña obligatorio en el primer ingreso -------------- */
+function pantallaClaveInicial(estado){
+  const e = estado || {};
+  $("#login").classList.remove("hidden");
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Crea tu contraseña</h1><p>${esc(S.user ? S.user.correo : "")}</p></div></div>
+    ${e.error ? `<div class="err">${esc(e.error)}</div>` : ""}
+    <div class="note" style="margin-bottom:13px">
+      Esta es la primera vez que entras. Elige una contraseña que solo tú conozcas:
+      la que te dieron deja de funcionar en cuanto guardes esta.
+    </div>
+    <div class="field">
+      <label for="cl1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
+      <input type="password" id="cl1" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="cl2">Repítela</label>
+      <input type="password" id="cl2" autocomplete="new-password">
+    </div>
+    <button class="btn block" id="guardarClave">Guardar y entrar</button>
+    <button class="btn ghost block" id="salirClave" style="margin-top:8px">Cerrar sesión</button>
+  </div>`;
+
+  $("#salirClave").onclick = () => salir();
+  const guardar = async () => {
+    const a = $("#cl1").value || "", b = $("#cl2").value || "";
+    if (a.length < 8) return pantallaClaveInicial({ error:"La contraseña debe tener al menos 8 caracteres." });
+    if (a !== b)      return pantallaClaveInicial({ error:"Las dos contraseñas no coinciden." });
+    $("#guardarClave").disabled = true; $("#guardarClave").textContent = "Guardando…";
+    const { error } = await sb.auth.updateUser({ password:a, data:{ debe_cambiar:false } });
+    if (error) return pantallaClaveInicial({ error:"No se pudo guardar: " + error.message });
+    await abrirApp().catch(x => pantallaClaveInicial({ error:x.message }));
+  };
+  $("#guardarClave").onclick = guardar;
+  $("#cl2").onkeydown = ev => { if (ev.key === "Enter") guardar(); };
+}
+
+/* ---- Entrar pegando el enlace del correo -------------------------------
+   Sirve cuando el enlace abre una página en blanco o con texto: basta con
+   copiar la dirección de la barra del navegador y pegarla aquí. --------- */
+function pantallaPegar(estado){
+  const e = estado || {};
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Pegar el enlace</h1><p>Cuando el enlace no abre la aplicación</p></div></div>
+    ${e.error ? `<div class="err">${esc(e.error)}</div>` : ""}
+    <div class="note" style="margin-bottom:13px">
+      Abre el enlace que te llegó al correo. Si ves una página en blanco o con texto raro,
+      <b>copia la dirección completa de la barra del navegador</b> y pégala aquí.
+    </div>
+    <div class="field">
+      <label>Dirección copiada</label>
+      <textarea id="pegado" placeholder="https://…#access_token=…" style="font-size:13px;min-height:96px"></textarea>
+    </div>
+    <button class="btn block" id="entrarPegado">Entrar</button>
+    <button class="btn ghost block" id="volverLogin" style="margin-top:8px">Volver</button>
+  </div>`;
+  $("#volverLogin").onclick = () => renderLogin();
+  $("#entrarPegado").onclick = async () => {
+    const txt = ($("#pegado").value || "").trim();
+    if (!txt) return pantallaPegar({ error:"Pega la dirección que copiaste." });
+    const frag = txt.includes("#") ? txt.slice(txt.indexOf("#") + 1) : txt;
+    const p = new URLSearchParams(frag.replace(/^\/?\??/, ""));
+    const at = p.get("access_token"), rt = p.get("refresh_token");
+    if (!at || !rt){
+      const err = p.get("error_description") || p.get("error");
+      return pantallaPegar({ error: err
+        ? `El enlace trae un error: ${err.replace(/\+/g," ")}. Pide uno nuevo.`
+        : "Esa dirección no contiene los datos de acceso. Debe incluir “access_token”." });
+    }
+    $("#entrarPegado").disabled = true; $("#entrarPegado").textContent = "Entrando…";
+    const { data, error } = await sb.auth.setSession({ access_token: at, refresh_token: rt });
+    if (error || !data.session) return pantallaPegar({ error: (error && error.message) || "No se pudo abrir la sesión. El enlace pudo vencer." });
+    await entrar(data.session).catch(x => pantallaPegar({ error:x.message }));
+  };
+}
+
+/* ---- Sesión ------------------------------------------------------------- */
+async function comprobarSesion(){
+  if (!sb) return renderLogin();
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) return renderLogin();
+  await entrar(session);
+}
+
+async function entrar(session){
+  if (S.entrando || S.user) return;      // evita que se ejecute dos veces
+  S.entrando = true;
+  try {
+    const correo = (session.user.email || "").toLowerCase();
+    pantallaCarga("Verificando tu acceso…");
+    const { data: yo, error } = await sb.from("usuarios").select("*").eq("correo", correo).maybeSingle();
+    if (error || !yo || !yo.activo){
+      await sb.auth.signOut();
+      return renderLogin({ error: yo && !yo.activo
+        ? `Tu acceso al CRM está desactivado. Comunícate con el administrador.`
+        : `La cuenta ${esc(correo)} no figura en la lista de usuarios del CRM.` });
+    }
+    S.user = { correo: yo.correo, nombre: yo.nombre_corto || yo.nombre,
+               nombreCompleto: yo.nombre, rol: yo.rol };
+
+    if ((session.user.user_metadata || {}).debe_cambiar) return pantallaClaveInicial();
+    await abrirApp();
+  } finally { S.entrando = false; }
+}
+
+async function abrirApp(){
+  await cargarDatos();
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  S.tab = "cartera"; S.cid = null;
+  render();
+}
+
+function pantallaCarga(msg){
+  $("#login").innerHTML = `<div class="lg-card" style="text-align:center;padding:44px 26px">
+    <div class="lg-mark" style="margin:0 auto 16px">S</div>
+    <div style="font-weight:650">${esc(msg)}</div>
+    <div style="margin-top:16px;height:4px;background:var(--grid);border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:40%;background:var(--brand-2);border-radius:3px;animation:barra 1.1s ease-in-out infinite"></div>
+    </div>
+    <style>@keyframes barra{0%{margin-left:-40%}100%{margin-left:100%}}</style>
+  </div>`;
+  $("#login").classList.remove("hidden");
+}
+
+async function salir(){
+  if (sb) await sb.auth.signOut();
+  S.user = null; S.entrando = false;
+  CLIENTES = []; byId = {}; DB.visitas = []; DB.cancelaciones = [];
+  $("#app").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+  renderLogin();
+}
+
+/* ---- Carga de datos ----------------------------------------------------- */
+async function cargarDatos(){
+  pantallaCarga("Cargando tu cartera…");
+  const [cli, inter, usr, fer, cfg, rub] = await Promise.all([
+    sb.from("clientes").select("*").limit(5000),
+    sb.from("interacciones").select("*").limit(20000),
+    sb.from("usuarios").select("*").order("rol"),
+    sb.from("feriados").select("fecha"),
+    sb.from("config").select("*"),
+    sb.from("rubros").select("*").order("orden")
+  ]);
+  const fallo = [cli, inter, usr].find(r => r.error);
+  if (fallo) throw new Error(fallo.error.message);
+
+  RUBROS = rub.data || [];
+  CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
+  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
+  USUARIOS = (usr.data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
+    nombreCompleto: u.nombre, correo:u.correo, rol:u.rol, activo:u.activo }));
+  CONFIG.feriados = (fer.data || []).map(f => String(f.fecha).slice(0,10));
+  (cfg.data || []).forEach(({clave, valor}) => {
+    if (clave === "horas_utiles_pos")      CONFIG.horasUtilesPOS = Number(valor);
+    if (clave === "horas_utiles_por_dia")  CONFIG.horasUtilesPorDia = Number(valor);
+    if (clave === "alerta_por_vencer_h")   CONFIG.alertaPorVencerHrs = Number(valor);
+    if (clave === "cumple_visita_historico") CONFIG.cumpleVisitaHistorico = valor === "true";
+    if (clave === "dominio_permitido")     CONFIG.dominio = valor;
+  });
+
+  DB.cargar(inter.data || []);
+  await firmarEvidencias();
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  await cargarAuditoria();
+}
+
+/* Bitácora de cambios — la base solo la devuelve a Analista y Manager */
+async function cargarAuditoria(){
+  AUDITORIA = [];
+  if (!S.user || S.user.rol === "Ejecutivo" || S.demo) return;
+  const { data, error } = await sb.from("auditoria").select("*")
+    .order("creado_en", { ascending:false }).limit(2000);
+  if (!error) AUDITORIA = data || [];
+}
+
+async function firmarEvidencias(){
+  const paths = [...new Set(DB.todos().map(r => r.Evidencia_Path).filter(p => p && !EVID_URL[p]))];
+  if (!paths.length) return aplicarEvidencias();
+  for (let i = 0; i < paths.length; i += 90){
+    const lote = paths.slice(i, i+90);
+    const { data } = await sb.storage.from("evidencias").createSignedUrls(lote, 3600);
+    (data || []).forEach(d => { if (d.signedUrl) EVID_URL[d.path] = d.signedUrl; });
+  }
+  aplicarEvidencias();
+}
+const aplicarEvidencias = () =>
+  DB.todos().forEach(r => { if (r.Evidencia_Path) r.Evidencia = EVID_URL[r.Evidencia_Path] || ""; });
+
+async function refrescar(){
+  const { data, error } = await sb.from("interacciones").select("*").limit(20000);
+  if (error) return toast("No se pudo actualizar: " + error.message);
+  DB.cargar(data || []);
+  await firmarEvidencias();
+  CLIENTES.forEach(c => c._base = null);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+}
+
+/* Recarga la cartera tras un alta, edición o borrado */
+async function recargarCartera(){
+  const cli = await sb.from("clientes").select("*").limit(5000);
+  if (cli.error) throw new Error(cli.error.message);
+  CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
+  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+}
+
+/* ---- Subida de evidencias ---------------------------------------------- */
+function dataURLaBlob(d){
+  const [cab, b64] = d.split(",");
+  const mime = (cab.match(/:(.*?);/) || [,"image/jpeg"])[1];
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Blob([u8], { type:mime });
+}
+
+async function subirEvidencia(dataUrl){
+  if (!dataUrl) return null;
+  if (dataUrl.startsWith("http")) return null;                 // ya estaba subida
+  const blob = dataURLaBlob(dataUrl);
+  const nombre = `${S.user.correo}/${Date.now()}-${Math.floor(Math.random()*1e6)}.jpg`;
+  const { error } = await sb.storage.from("evidencias")
+    .upload(nombre, blob, { contentType:"image/jpeg", upsert:false });
+  if (error) throw new Error("No se pudo subir la evidencia: " + error.message);
+  const { data } = await sb.storage.from("evidencias").createSignedUrl(nombre, 3600);
+  if (data) EVID_URL[nombre] = data.signedUrl;
+  return nombre;
+}
+
+/* ---- Modo demostración (sin Supabase) ---------------------------------- */
+function modoDemo(){
+  S.demo = true;
+  S.user = { correo:"demo@"+CONFIG.dominio, nombre:"Modo demostración",
+    nombreCompleto:"Modo demostración", rol:"Manager" };
+  USUARIOS = [S.user];
+  RUBROS = [{ codigo:"bodega", nombre:"Bodega / Minimarket", orden:1 },
+            { codigo:"otro", nombre:"Otro", orden:99 }];
+  CLIENTES = [{ _i:0, customer_id:"40000001", nombre_comercio:"Comercio de ejemplo",
+    rubro:"bodega", rubro_otro:null, distrito:"SAN ISIDRO", direccion:"Av. Ejemplo 123",
+    estado:"ACTIVO", asignado:"Modo demostración", asignado_correo:S.user.correo,
+    creado_en:new Date().toISOString() }];
+  byId = { "40000001": CLIENTES[0] };
+  CONFIG.feriados = ["2026-07-28","2026-07-29","2026-08-06","2026-08-30"];
+  DB.visitas = []; DB.cancelaciones = [];
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  S.tab = "cartera"; render();
+  toast("Modo demostración: nada se guarda");
+}
+
+/* =========================================================================
+   Shell de navegación y pantallas de cartera
+   ========================================================================= */
+const NAV = [
+  { id:"cartera",  ic:"◱", label:"Cartera" },
+  { id:"registros",ic:"≡", label:"Registros" },
+  { id:"pos",      ic:"◷", label:"POS 72h" },
+  { id:"panel",    ic:"◕", label:"Panel" },
+  { id:"ayuda",    ic:"⚙", label:"Ajustes" }
+];
+
+function renderNav(){
+  const vencidos = misCancelaciones().filter(r => {
+    const st = RULES.estadoPOS(r).code; return st === "vencido" || st === "por_vencer"; }).length;
+  $("#nav").innerHTML = NAV.map(n => `
+    <button data-tab="${n.id}" class="${S.tab === n.id ? "on" : ""}">
+      <span class="ic">${n.ic}</span>${n.label}
+      ${n.id === "pos" && vencidos ? `<span class="dot">${vencidos}</span>` : ""}
+    </button>`).join("");
+  $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.tab));
+}
+function go(tab, cid){
+  S.tab = tab; S.cid = cid || null;
+  S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
+  window.scrollTo(0,0);
+  render();
+}
+function toast(msg){
+  const old = document.querySelector(".toast"); if (old) old.remove();
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2900);
+}
+function modal(html){
+  $("#overlay").innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
+  $("#overlay").querySelector(".modal-bg").onclick = e => { if (e.target.classList.contains("modal-bg")) cerrarModal(); };
+}
+const cerrarModal = () => $("#overlay").innerHTML = "";
+
+function misCancelaciones(){
+  if (!S.user) return [];
+  const vis = new Set(cartera().map(c => String(c.customer_id)));
+  return DB.cancelaciones.filter(r => vis.has(String(r.Customer_id)));
+}
+
+/* =========================================================================
+   Render principal
+   ========================================================================= */
+function render(){
+  if (!S.user) return renderLogin();
+  $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
+  renderNav();
+  const v = $("#view");
+  if (S.tab === "form_cliente")           return renderFormCliente();
+  if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
+  else if (S.tab === "form_visita")       return renderFormulario("visita");
+  else if (S.tab === "form_cancelacion")  return renderFormulario("cancelacion");
+  else if (S.tab === "cartera")           v.innerHTML = viewCartera();
+  else if (S.tab === "registros")         v.innerHTML = viewRegistros();
+  else if (S.tab === "pos")               v.innerHTML = viewPOS();
+  else if (S.tab === "panel")             v.innerHTML = viewPanel();
+  else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
+  bindComunes();
+}
+
+function bindComunes(){
+  document.querySelectorAll("[data-go]").forEach(el => el.onclick = () => {
+    const [t,c] = el.dataset.go.split("|"); go(t, c || null);
+  });
+  document.querySelectorAll("[data-cid]").forEach(el => el.onclick = () => { S.tab="cartera"; S.cid = el.dataset.cid; window.scrollTo(0,0); render(); });
+  document.querySelectorAll("[data-del]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminar(el.dataset.del); });
+  document.querySelectorAll("[data-edit]").forEach(el => el.onclick = e => { e.stopPropagation(); editarRegistro(el.dataset.edit); });
+  document.querySelectorAll("[data-editcli]").forEach(el => el.onclick = e => { e.stopPropagation(); editarCliente(el.dataset.editcli); });
+  document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
+  document.querySelectorAll("[data-img]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    modal(`<h3>Evidencia del contacto</h3><img src="${el.dataset.img}" style="width:100%;border-radius:11px;border:1px solid var(--ring)"><div style="margin-top:14px"><button class="btn ghost block" onclick="cerrarModal()">Cerrar</button></div>`);
+  });
+  if (typeof bindExtras === "function") bindExtras();
+}
+
+/* =========================================================================
+   Pantalla: Cartera
+   ========================================================================= */
+function estadoCliente(c){
+  const b = c._base || RULES.recomputarBase(c.customer_id);
+  if (b._cancelacion) return { chip:"crit", label:"Cancelación" };
+  if (b.Cumple_Visita === "SI") return { chip:"ok", label:"Visita cumplida" };
+  if (b._efectivos > 0) return { chip:"warn", label:"Contactado" };
+  if (b._intentos > 0)  return { chip:"serious", label:"Solo intentos" };
+  return { chip:"no", label:"Sin contactar" };
+}
+
+function viewCartera(){
+  let lista = cartera();
+  const q = S.q.trim().toLowerCase();
+  if (q) lista = lista.filter(c =>
+    String(c.customer_id).toLowerCase().includes(q) ||
+    String(c.nombre_comercio||"").toLowerCase().includes(q) ||
+    String(c.distrito||"").toLowerCase().includes(q) ||
+    String(c.direccion||"").toLowerCase().includes(q) ||
+    rubroLabel(c).toLowerCase().includes(q) ||
+    String(c.direccion||"").toLowerCase().includes(q));
+  if (S.fRubro !== "todos")      lista = lista.filter(c => c.rubro === S.fRubro);
+  if (S.fDistrito !== "todos")   lista = lista.filter(c => c.distrito === S.fDistrito);
+  if (S.fEstadoCli !== "todos")  lista = lista.filter(c => c.estado === S.fEstadoCli);
+  if (S.fContacto !== "todos") lista = lista.filter(c => {
+    const b = c._base || RULES.recomputarBase(c.customer_id);
+    if (S.fContacto === "sin")     return b._intentos === 0;
+    if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
+    if (S.fContacto === "con")     return b._efectivos > 0;
+    if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
+    if (S.fContacto === "cancela") return b.Cancelara_POS === "SI";
+    return true;
+  });
+  lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
+
+  const base = cartera();
+  const total = base.length;
+  const conEf = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id))._efectivos > 0).length;
+  const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
+  const canc  = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cancelara_POS === "SI").length;
+  const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
+  const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
+  const mostrar = lista.slice(0, S.limite);
+
+  return `
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados por ${S.user.rol === "Ejecutivo" ? "ti" : "el equipo"}</div></div>
+    <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% con comunicación lograda</div></div>
+    <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
+    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${canc}</div><div class="sub">POS por retirar</div></div>
+  </div>
+
+  <button class="btn block" data-go="form_cliente" style="margin-bottom:14px">＋ Registrar nuevo comercio</button>
+
+  <div class="toolbar">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="q" placeholder="Customer ID, comercio, distrito…" value="${esc(S.q)}"></div>
+  </div>
+  <div class="pills">
+    ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"],["cancela","Cancelaciones"]]
+      .map(([k,l]) => `<button class="pill ${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
+  </div>
+  <div class="pills">
+    <button class="pill ${S.fEstadoCli==="todos"?"on":""}" data-f="estadocli" data-v="todos">Todo estado</button>
+    ${ESTADOS_CLIENTE.map(e => `<button class="pill ${S.fEstadoCli===e?"on":""}" data-f="estadocli" data-v="${e}">${e === "ACTIVO" ? "Activos" : "Dados de baja"}</button>`).join("")}
+  </div>
+  ${rubrosUsados.length ? `<div class="pills">
+    <button class="pill ${S.fRubro==="todos"?"on":""}" data-f="rubro" data-v="todos">Todos los rubros</button>
+    ${rubrosUsados.map(r => `<button class="pill ${S.fRubro===r.codigo?"on":""}" data-f="rubro" data-v="${r.codigo}">${esc(r.nombre)}</button>`).join("")}
+  </div>` : ""}
+  ${S.user.rol !== "Ejecutivo" ? `<div class="pills">
+    <button class="pill ${S.fEjecutivo==="todos"?"on":""}" data-f="ejecutivo" data-v="todos">Todos los ejecutivos</button>
+    ${USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => `<button class="pill ${S.fEjecutivo===u.nombre?"on":""}" data-f="ejecutivo" data-v="${esc(u.nombre)}">${esc(u.nombre)}</button>`).join("")}
+  </div>` : ""}
+  ${distritos.length > 1 ? `<div class="pills">
+    <button class="pill ${S.fDistrito==="todos"?"on":""}" data-f="distrito" data-v="todos">Todos los distritos</button>
+    ${distritos.map(d => `<button class="pill ${S.fDistrito===d?"on":""}" data-f="distrito" data-v="${esc(d)}">${esc(titulo(d))}</button>`).join("")}
+  </div>` : ""}
+
+  <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
+  ${mostrar.length ? mostrar.map(cardCliente).join("")
+    : total === 0
+      ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
+      : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.</div>`}
+  ${lista.length > mostrar.length ? `<button class="btn ghost block" id="mas">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}`;
+}
+
+function cardCliente(c){
+  const b = c._base || RULES.recomputarBase(c.customer_id);
+  const st = estadoCliente(c);
+  const ult = b._ultimo;
+  return `
+  <div class="cl" data-cid="${c.customer_id}">
+    <span class="av" style="background:${userColor(c.asignado)}">${iniciales(nombreCliente(c))}</span>
+    <div class="body">
+      <div class="name">${esc(titulo(nombreCliente(c)))}</div>
+      <div class="sub">ID ${esc(c.customer_id)} · ${esc(titulo(c.distrito))}</div>
+      <div class="meta">
+        <span class="chip info">${esc(rubroLabel(c))}</span>
+        <span class="chip ${st.chip}">${st.label}</span>
+        ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
+        ${b._pos ? `<span class="chip ${b._pos.chip}">POS: ${b._pos.label}</span>` : ""}
+        ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
+      </div>
+    </div>
+    <div class="rt">
+      <div class="amt">${b._intentos}<small>INTENTOS</small></div>
+      <div class="amt" style="font-size:11.5px;color:var(--muted)">${b._efectivos} efectivo${b._efectivos===1?"":"s"}</div>
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   Pantalla: Ficha del comercio
+   ========================================================================= */
+function viewFicha(c){
+  if (!c) return `<div class="empty">Comercio no encontrado.</div>`;
+  const b = RULES.recomputarBase(c.customer_id);
+  const regs = DB.delCliente(c.customer_id);
+  const mio = esMiCliente(c);
+
+  return `
+  <button class="back" data-go="cartera">‹ Volver a la cartera</button>
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span class="av" style="width:44px;height:44px;font-size:14px;background:${userColor(c.asignado)}">${iniciales(nombreCliente(c))}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:700;letter-spacing:-.3px">${esc(titulo(nombreCliente(c)))}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px">Customer ID ${esc(c.customer_id)}</div>
+        <div class="cl-meta" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:9px">
+          <span class="chip info">${esc(rubroLabel(c))}</span>
+          <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
+          <span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>
+          ${b._pos ? `<span class="chip ${b._pos.chip}">POS ${b._pos.label}</span>` : ""}
+        </div>
+      </div>
+    </div>
+    ${mio ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
+      <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>
+    </div>` : ""}
+  </div>
+
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Datos del comercio</h3>
+      <div class="kv"><dt>Customer ID</dt><dd class="mono">${esc(c.customer_id)}</dd></div>
+      <div class="kv"><dt>Nombre</dt><dd>${esc(titulo(c.nombre_comercio)) || '<span style="color:var(--muted)">—</span>'}</dd></div>
+      <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
+      <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
+      <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
+      <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>
+      ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
+      <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
+      <div style="margin-top:11px">
+        <a class="btn ghost sm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((c.direccion||"")+", "+(c.distrito||"")+", Lima, Perú")}" target="_blank" rel="noopener">Ver en el mapa</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Qué guarda esta ficha</h3>
+      <div class="note">Esta base <b>no almacena razón social, RUC, teléfonos ni personas de contacto</b>.
+      El único dato que viene de BBVA es el Customer ID. Si necesitas los datos del titular,
+      están en la base de BBVA y se cruzan por ese código.</div>
+    </div>
+   </div>
+
+   <div>
+    ${b._cancelacion ? bloquePOS(b._cancelacion) : ""}
+    <div class="card">
+      <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
+      <div class="stat-row" style="margin-bottom:0">
+        <div class="stat"><div class="lbl">Intentos</div><div class="val">${b._intentos}</div><div class="sub">registros de contacto</div></div>
+        <div class="stat"><div class="lbl">Efectivos</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de efectividad</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Línea de tiempo</h3>
+      ${regs.length ? `<div class="tl">${regs.map(itemTimeline).join("")}</div>`
+        : `<div class="empty" style="padding:26px 10px"><div class="big">◷</div>Aún no hay contactos registrados para este comercio.</div>`}
+    </div>
+   </div>
+  </div>
+
+  ${mio ? `<div class="sticky-actions">
+    <button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>
+    <button class="btn ghost" data-go="form_cancelacion|${c.customer_id}">Cancelación</button>
+  </div>` : ""}`;
+}
+
+function itemTimeline(r){
+  const t = tipoById(r.Tipo_Contacto);
+  const res = resultadoById(r.Resultado);
+  const esCancel = r._tipo === "cancelacion";
+  const editable = puedeEditar(r);
+  return `
+  <div class="tl-item ${esCancel ? "cancel" : ""}">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">${esCancel ? "⚠ Cancelación · " : ""}${esc(t ? t.label : r.Tipo_Contacto || "Contacto")}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
+        </div>
+        <span class="chip ${r.Cumple_Visita === "SI" ? "ok" : "no"}">${r.Cumple_Visita === "SI" ? "Cumple visita" : "No cumple"}</span>
+      </div>
+      <div style="margin-top:7px">
+        <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res ? res.label : r.Resultado)}</span>
+      </div>
+      ${r.Ubicacion_Verificada
+        ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
+        : sinUbicacionVerificada(r)
+          ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>` : ""}
+      ${r.Motivo_Cancelacion ? `<div style="margin-top:7px"><span class="chip crit">Motivo: ${esc(r.Motivo_Cancelacion)}</span></div>` : ""}
+      ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
+      ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
+      ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+      ${r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`
+        : `<div style="margin-top:8px"><span class="chip warn">Sin evidencia adjunta</span></div>`}
+      ${editable ? `<div style="display:flex;gap:7px;margin-top:11px">
+        <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
+        <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
+      </div>` : ""}
+    </div>
+  </div>`;
+}
+
+function bloquePOS(reg){
+  const st = RULES.estadoPOS(reg);
+  const lim = st.limite;
+  return `
+  <div class="card" style="border-color:${st.code==="vencido"?"var(--crit)":"var(--ring)"}">
+    <h3>Seguimiento de retiro de POS</h3>
+    <div class="note ${st.chip==="ok"?"ok":st.chip==="crit"?"crit":st.chip==="warn"||st.chip==="serious"?"warn":""}">
+      <b>${st.label}.</b> ${esc(st.detalle)}
+    </div>
+    <div class="kv" style="margin-top:9px"><dt>Cancelará POS</dt><dd><span class="chip crit">SI</span></dd></div>
+    <div class="kv"><dt>Contacto</dt><dd>${fmtDT(reg.Fecha_Contacto, reg.Hora_Contacto)}</dd></div>
+    <div class="kv"><dt>Plazo (72 h útiles)</dt><dd class="mono">${fmtFecha(isoDe(lim))} · ${pad(lim.getHours())}:${pad(lim.getMinutes())}</dd></div>
+    <div class="kv"><dt>Entrega registrada</dt><dd>${reg.POS_Entregado === "SI" ? fmtDT(reg.Fecha_Entrega_POS, reg.Hora_Entrega_POS) : "Pendiente"}</dd></div>
+    <div class="kv"><dt>Entregó en 72 h</dt><dd><span class="chip ${st.valorBase==="SI"?"ok":st.valorBase==="NO"?"crit":"warn"}">${st.valorBase}</span></dd></div>
+    ${puedeEditar(reg) ? `<div style="margin-top:11px"><button class="btn block" data-edit="${reg._id}">${reg.POS_Entregado==="SI"?"Editar entrega":"Marcar entrega del POS"}</button></div>` : ""}
+  </div>`;
+}
+
+/* =========================================================================
+   Alta y edición del comercio — la cartera se construye en campo
+
+   Modelo sin datos sensibles: el único dato que viene de BBVA es el
+   customer_id, que el ejecutivo digita. El nombre lo pone él mismo para
+   reconocer el local; no es la razón social.
+   ========================================================================= */
+function nuevoFormCliente(){
+  return {
+    customer_id:"", nombre_comercio:"", rubro:"", rubro_otro:"",
+    distrito:"", direccion:"", estado:"ACTIVO", observacion:""
+  };
+}
+
+function formDeCliente(c){
+  return {
+    customer_id: c.customer_id,
+    nombre_comercio: c.nombre_comercio || "",
+    rubro: c.rubro, rubro_otro: c.rubro_otro || "",
+    distrito: c.distrito || "", direccion: c.direccion || "",
+    estado: c.estado || "ACTIVO",
+    observacion: c.observacion || ""
+  };
+}
+
+function editarCliente(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  if (!esMiCliente(c)) return toast("Solo puedes editar los comercios que tú registraste");
+  S.editCli = String(cid);
+  S.formCli = formDeCliente(c);
+  S.tab = "form_cliente";
+  window.scrollTo(0,0);
+  render();
+}
+
+function renderFormCliente(){
+  if (!S.formCli) S.formCli = nuevoFormCliente();
+  const f = S.formCli, editando = !!S.editCli;
+
+  $("#view").innerHTML = `
+  <button class="back" data-backcli>‹ ${editando ? "Volver al comercio" : "Volver a la cartera"}</button>
+
+  <div class="card">
+    <h3 style="margin-bottom:4px">${editando ? "Editar comercio" : "Registrar nuevo comercio"}</h3>
+    <div style="font-size:13px;color:var(--muted)">
+      ${editando ? "El Customer ID y el ejecutivo asignado no se pueden cambiar."
+                 : "El comercio queda a tu nombre. Un mismo Customer ID solo puede estar registrado una vez en toda la campaña."}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Identificación</h3>
+    <div class="field">
+      <label>Customer ID <span class="req">*</span> <span class="hint">— el código del comercio en BBVA</span></label>
+      <input type="text" data-c="customer_id" value="${esc(f.customer_id)}" ${editando ? "disabled" : ""}
+             inputmode="numeric" autocapitalize="characters" placeholder="Ej.: 40218755">
+      <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
+        Es el único dato que conecta este registro con la base de BBVA.
+      </div>
+    </div>
+    <div class="field">
+      <label>Nombre del comercio <span class="req">*</span> <span class="hint">— el que tú uses para reconocerlo</span></label>
+      <input type="text" data-c="nombre_comercio" value="${esc(f.nombre_comercio)}"
+             placeholder="Ej.: Bodega de la esquina, Av. Perú">
+      <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
+        No hace falta la razón social. Ponle el nombre con el que lo ubiques en la calle.
+      </div>
+    </div>
+    <div class="field">
+      <label>Rubro del comercio <span class="req">*</span></label>
+      <select data-c="rubro">
+        <option value="">Seleccionar…</option>
+        ${RUBROS.map(r => `<option value="${r.codigo}" ${f.rubro===r.codigo?"selected":""}>${esc(r.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <div id="rubroOtro"></div>
+    <div class="field">
+      <label>Estado del cliente <span class="req">*</span></label>
+      <div class="opts">
+        ${ESTADOS_CLIENTE.map(e => `
+          <div class="opt ${f.estado===e?"on":""}" data-estado="${e}">
+            <span class="rd"></span><span><b>${e === "ACTIVO" ? "Activo" : "Dado de baja"}</b>
+            <span>${e === "ACTIVO" ? "Opera con normalidad" : "Ya no opera o se retiró del servicio"}</span></span>
+          </div>`).join("")}
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Ubicación del comercio</h3>
+    <div class="field">
+      <label>Distrito <span class="req">*</span></label>
+      <input type="text" data-c="distrito" list="dlDistritos" value="${esc(f.distrito)}"
+             autocapitalize="characters" placeholder="Ej.: SAN MIGUEL">
+      <datalist id="dlDistritos">${DISTRITOS_LIMA.map(d => `<option value="${d}">`).join("")}</datalist>
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Dirección <span class="req">*</span></label>
+      <input type="text" data-c="direccion" value="${esc(f.direccion)}" placeholder="Ej.: Av. La Marina 1520, int. 3">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Observación</h3>
+    <div class="field" style="margin-bottom:0">
+      <label>Nota interna <span class="hint">— opcional</span></label>
+      <textarea data-c="observacion" placeholder="Ej.: El local abre solo por las tardes; conviene ir después de las 3.">${esc(f.observacion)}</textarea>
+    </div>
+    <div class="note" style="margin-top:11px">
+      Esta base <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>.
+      Si necesitas esos datos, están en la base de BBVA y se cruzan por Customer ID.
+    </div>
+  </div>
+
+  <div id="errCli"></div>
+  <div class="sticky-actions">
+    <button class="btn" id="guardarCli">${editando ? "Guardar cambios" : "Registrar comercio"}</button>
+    <button class="btn ghost" data-backcli>Cancelar</button>
+  </div>
+  `;
+
+  $("#view").querySelectorAll("[data-backcli]").forEach(b => b.onclick = () => {
+    const volver = S.editCli;
+    S.formCli = null; S.editCli = null; S.tab = "cartera"; S.cid = volver || null;
+    render();
+  });
+  $("#view").querySelectorAll("[data-c]").forEach(el => {
+    el.oninput = el.onchange = () => {
+      f[el.dataset.c] = el.value;
+      if (el.dataset.c === "rubro") pintarRubroOtro();
+    };
+  });
+  $("#view").querySelectorAll("[data-estado]").forEach(el => el.onclick = () => {
+    f.estado = el.dataset.estado;
+    $("#view").querySelectorAll("[data-estado]").forEach(x => x.classList.toggle("on", x.dataset.estado === f.estado));
+  });
+  $("#guardarCli").onclick = guardarCliente;
+  pintarRubroOtro();
+}
+
+function pintarRubroOtro(){
+  const f = S.formCli, box = $("#rubroOtro");
+  if (!box) return;
+  if (f.rubro !== "otro"){ box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="field">
+    <label>¿Qué rubro? <span class="req">*</span></label>
+    <input type="text" id="rubroOtroTxt" value="${esc(f.rubro_otro)}" placeholder="Escribe el rubro del comercio">
+  </div>`;
+  $("#rubroOtroTxt").oninput = e => f.rubro_otro = e.target.value;
+}
+
+/* ---- Guardar ------------------------------------------------------------ */
+async function guardarCliente(){
+  const f = S.formCli, editando = !!S.editCli, errores = [];
+  const cid = String(f.customer_id || "").trim().toUpperCase();
+
+  if (!editando){
+    if (cid.length < 3) errores.push("Escribe el Customer ID del comercio (mínimo 3 caracteres).");
+    if (byId[cid]) errores.push(`El Customer ID ${cid} ya está registrado en tu cartera.`);
+  }
+  if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
+  if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
+  if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
+  if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
+  if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
+
+  if (errores.length){
+    $("#errCli").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    $("#errCli").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarCli");
+  btn.disabled = true; btn.textContent = "Guardando…";
+
+  const fila = {
+    customer_id: editando ? S.editCli : cid,
+    nombre_comercio: String(f.nombre_comercio).trim(),
+    rubro: f.rubro,
+    rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
+    distrito: String(f.distrito).trim().toUpperCase(),
+    direccion: String(f.direccion).trim(),
+    estado: f.estado,
+    observacion: String(f.observacion).trim() || null
+  };
+
+  try {
+    if (editando){
+      const { error } = await sb.from("clientes").update(fila).eq("customer_id", S.editCli);
+      if (error) throw error;
+    } else {
+      fila.asignado = S.user.nombre;
+      fila.asignado_correo = S.user.correo;
+      const { error } = await sb.from("clientes").insert(fila);
+      if (error) throw error;
+    }
+    const destino = editando ? S.editCli : cid;
+    await recargarCartera(); await cargarAuditoria();
+    toast(editando ? "Comercio actualizado" : "Comercio registrado");
+    S.formCli = null; S.editCli = null; S.tab = "cartera"; S.cid = destino;
+    window.scrollTo(0,0);
+    render();
+  } catch (err){
+    btn.disabled = false; btn.textContent = editando ? "Guardar cambios" : "Registrar comercio";
+    const msg = String(err.message || err);
+    const amable = /duplicate key|clientes_pkey|23505/i.test(msg)
+      ? `El Customer ID <b>${esc(cid)}</b> ya está registrado por otro ejecutivo de la campaña. Cada comercio pertenece a quien lo registró primero — coordínalo con tu supervisor.`
+      : /violates row-level security|permission/i.test(msg)
+      ? "La base rechazó el registro: solo puedes crear y editar comercios a tu propio nombre."
+      : esc(msg);
+    $("#errCli").innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${amable}</div>`;
+    $("#errCli").scrollIntoView({ behavior:"smooth", block:"center" });
+  }
+}
+
+function confirmarEliminarCliente(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  if (!esMiCliente(c)) return toast("Solo puedes eliminar los comercios que tú registraste");
+  const n = DB.delCliente(cid).length;
+  modal(`
+    <h3>Eliminar comercio</h3>
+    <p>Se eliminará <b>${esc(titulo(nombreCliente(c)))}</b> (ID ${esc(c.customer_id)})
+    ${n ? `junto con sus <b>${n}</b> registro${n===1?"":"s"} de contacto` : ""}.
+    Esta acción no se puede deshacer.</p>
+    <div style="display:flex;gap:9px">
+      <button class="btn danger" id="okDelCli" style="flex:1">Eliminar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Conservar</button>
+    </div>`);
+  $("#okDelCli").onclick = async () => {
+    const { error } = await sb.from("clientes").delete().eq("customer_id", String(cid));
+    if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
+    await recargarCartera(); await cargarAuditoria();
+    cerrarModal(); toast("Comercio eliminado");
+    S.cid = null; S.tab = "cartera"; render();
+  };
+}
+
+/* =========================================================================
+   Formularios: registro de Visitas y Cancelaciones
+   ========================================================================= */
+function nuevoForm(cliente, kind){
+  return {
+    kind,
+    Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
+    Tipo_Contacto: "", Resultado: "efectivo",
+    Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
+    Comentario_Ejecutivo: "", Comentario_Cliente: "",
+    Motivo_Cancelacion: "", POS_Entregado: "NO", Fecha_Entrega_POS: "", Hora_Entrega_POS: ""
+  };
+}
+
+function renderFormulario(kind){
+  const c = byId[S.cid];
+  if (!c) return go("cartera");
+  if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId), { kind }) : nuevoForm(c, kind);
+  const f = S.form, esCancel = kind === "cancelacion";
+
+  $("#view").innerHTML = `
+  <button class="back" data-back>‹ ${esc(titulo(nombreCliente(c)))}</button>
+  <div class="card">
+    <h3 style="margin-bottom:4px">${S.editId ? "Editar" : "Registrar"} ${esCancel ? "cancelación" : "contacto / intento"}</h3>
+    <div style="font-size:13px;color:var(--muted)">${esc(titulo(nombreCliente(c)))} · ID ${esc(c.customer_id)} · ${esc(titulo(c.distrito))}</div>
+    ${esCancel ? `<div class="note crit" style="margin-top:11px"><b>Cancelara_POS = SI.</b> Al guardar, este comercio queda marcado como cancelación y se activa el control de entrega de POS en 72 horas útiles.</div>` : ""}
+    ${S.editId ? `<div class="note" style="margin-top:11px">La <b>ubicación capturada no se puede modificar</b>: queda como constancia del lugar donde se hizo el registro.</div>` : ""}
+  </div>
+
+  ${S.editId ? "" : `
+  <div class="card">
+    <h3>Fecha y hora del contacto</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
+      <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
+    </div>
+    <div class="note" style="margin-top:4px">Se registra automáticamente a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> (${esc(S.user.correo)}).</div>
+  </div>`}
+
+  ${S.editId ? `
+  <div class="card">
+    <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
+    <div class="note warn" style="margin-bottom:11px">
+      El medio de contacto, el resultado y la fecha <b>no se pueden cambiar</b>: son los que alimentan
+      el conteo de intentos y la efectividad. Si te equivocaste al elegirlos, elimina este registro y
+      créalo de nuevo — la eliminación queda en la bitácora.
+    </div>
+    <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
+    <div class="kv"><dt>Medio de contacto</dt><dd>${esc((tipoById(f.Tipo_Contacto)||{}).label || f.Tipo_Contacto)}</dd></div>
+    <div class="kv"><dt>Resultado</dt><dd><span class="chip ${esEfectivo(f.Resultado)?"ok":"serious"}">${esc((resultadoById(f.Resultado)||{}).label || f.Resultado)}</span></dd></div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+  ` : `
+  <div class="card">
+    <h3>¿Cómo se contactó al cliente? <span class="req">*</span></h3>
+    <div class="opts">
+      ${TIPOS_CONTACTO.map(t => `
+        <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-tipo="${t.id}">
+          <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+
+  <div class="card">
+    <h3>¿Cuál fue el resultado? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">Todo registro cuenta como intento de comunicación. Solo <b>“Habló con el contacto”</b> cuenta como contacto logrado y puede calificar como visita.</div>
+    <div class="opts">
+      ${RESULTADOS.map(r => `
+        <div class="opt ${f.Resultado === r.id ? "on" : ""}" data-res="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>`}
+
+  <div id="boxGps"></div>
+
+
+  ${esCancel ? `
+  <div class="card">
+    <h3>Detalle de la cancelación</h3>
+    <div class="field"><label>Motivo declarado por el cliente <span class="req">*</span></label>
+      <select data-f="Motivo_Cancelacion">
+        <option value="">Seleccionar…</option>
+        ${MOTIVOS_CANCELACION.map(m => `<option ${f.Motivo_Cancelacion===m?"selected":""}>${m}</option>`).join("")}
+      </select>
+    </div>
+    <div id="posBox"></div>
+  </div>` : ""}
+
+  <div class="card">
+    <h3>Evidencia del contacto <span class="req">*</span></h3>
+    <div id="evBox"></div>
+  </div>
+
+  <div class="card">
+    <h3>Comentarios</h3>
+    <div class="field"><label>Calificación del cliente</label>
+      <select data-f="Calificacion">
+        <option value="">Seleccionar…</option>
+        ${CALIFICACIONES.map(k => `<option value="${k.id}" ${f.Calificacion===k.id?"selected":""}>${k.label}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field"><label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— cómo calificas al cliente</span></label>
+      <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
+    <div class="field" style="margin-bottom:0"><label>Comentario del cliente <span class="hint">— el sentir del cliente, en sus palabras</span></label>
+      <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea></div>
+  </div>
+
+  <div id="errBox"></div>
+  <div class="sticky-actions">
+    <button class="btn" id="guardar">${S.editId ? "Guardar cambios" : "Registrar"}</button>
+    <button class="btn ghost" data-back>Cancelar</button>
+  </div>`;
+
+  bindForm(c, kind);
+}
+
+function bindForm(c, kind){
+  const f = S.form;
+  $("#view").querySelectorAll("[data-back]").forEach(b => b.onclick = () => {
+    S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id); render(); });
+  $("#view").querySelectorAll("[data-f]").forEach(el => {
+    el.oninput = el.onchange = () => { f[el.dataset.f] = el.value; };
+  });
+  $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
+    f.Tipo_Contacto = el.dataset.tipo;
+    $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
+    pintarDerivado(); pintarGps();
+  });
+  $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
+    f.Resultado = el.dataset.res;
+    $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
+    pintarDerivado();
+  });
+  $("#guardar").onclick = () => guardar(c, kind);
+  pintarDerivado(); pintarGps(); pintarEvidencia(); if (kind === "cancelacion") pintarPOS();
+}
+
+function pintarDerivado(){
+  const f = S.form, box = $("#derivado");
+  if (!box) return;
+  if (!f.Tipo_Contacto){ box.innerHTML = `<div class="note">Selecciona el medio de contacto para calcular <b>Cumple_Visita</b>.</div>`; return; }
+  const cumple = RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado);
+  const efectivo = esEfectivo(f.Resultado);
+  box.innerHTML = `
+    <div class="note ${cumple === "SI" ? "ok" : "warn"}">
+      <b>Cumple_Visita = ${cumple}.</b>
+      ${cumple === "SI"
+        ? `El contacto es ${RULES.visitaPresencial(f.Tipo_Contacto)==="SI" ? "presencial" : "virtual"} y se logró la comunicación, por lo que califica como visita válida.`
+        : !efectivo
+          ? `El registro queda como <b>intento</b>: no se logró la comunicación, así que no califica como visita cumplida.`
+          : `Este medio no califica como visita presencial ni virtual. La interacción igual cuenta como intento y queda en el histórico.`}
+      <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
+        <span class="chip ${RULES.visitaPresencial(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_Presencial: ${RULES.visitaPresencial(f.Tipo_Contacto)}</span>
+        <span class="chip ${RULES.visitaVirtual(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_virtual: ${RULES.visitaVirtual(f.Tipo_Contacto)}</span>
+        <span class="chip ${efectivo?"ok":"serious"}">${efectivo ? "Contacto logrado" : "Solo intento"}</span>
+        <span class="chip ${cumple==="SI"?"ok":"no"}">Cumple_Visita: ${cumple}</span>
+      </div>
+    </div>`;
+}
+
+function pintarGps(){
+  const f = S.form, box = $("#boxGps");
+  if (!box) return;
+  if (!RULES.requiereUbicacion(f.Tipo_Contacto)){ box.innerHTML = ""; return; }
+
+  if (S.editId){
+    const ok = f.Ubicacion_Verificada === true;
+    box.innerHTML = `
+    <div class="card">
+      <h3>Ubicación capturada</h3>
+      <div class="note"><b>Este dato no se puede modificar.</b> La ubicación la tomó el GPS del equipo en el momento de la visita y sirve como constancia auditable; la base rechaza cualquier intento de cambiarla.</div>
+      ${ok ? `
+      <div class="kv" style="margin-top:9px"><dt>Coordenadas</dt><dd class="mono">${esc(f.Ubicacion) || "—"}</dd></div>
+      ${/^-?\d+\.\d+,\s*-?\d+\.\d+/.test(f.Ubicacion||"") ? `<div style="margin-top:9px">
+        <a class="btn ghost sm" target="_blank" rel="noopener"
+           href="https://www.google.com/maps?q=${encodeURIComponent(String(f.Ubicacion).split("(")[0].trim())}">Ver en el mapa</a></div>` : ""}`
+      : `<div class="note warn" style="margin-top:9px"><b>Sin ubicación verificada.</b> Este registro se guardó sin señal de GPS, así que no tiene respaldo del lugar. La marca es permanente.</div>`}
+    </div>`;
+    return;
+  }
+
+  const cap = f.Ubicacion_Verificada === true;
+  box.innerHTML = `
+  <div class="card">
+    <h3>Ubicación del registro <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Obligatoria para contactos presenciales: deja constancia auditable de dónde se realizó la visita.
+      Las coordenadas <b>las toma el GPS del equipo</b> — no se escriben ni se pueden corregir, ni antes
+      ni después de guardar.
+    </div>
+    <button class="btn ${cap ? "ghost" : ""} block" id="gps">📍 ${cap ? "Volver a capturar" : "Capturar mi ubicación actual"}</button>
+    <div id="gpsVal" style="margin-top:11px">${cap ? tarjetaUbicacion(f.Ubicacion) : ""}</div>
+    <div id="gpsMsg"></div>
+    ${f._sinUbicacion ? notaSinUbicacion() : ""}
+  </div>`;
+
+  $("#gps").onclick = () => {
+    const msg = $("#gpsMsg");
+    if (!navigator.geolocation){ return fallaGps("Este dispositivo no permite obtener la ubicación."); }
+    msg.innerHTML = `<div class="note" style="margin-top:9px">Obteniendo ubicación…</div>`;
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        f.Ubicacion = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)} m)`;
+        f.Ubicacion_Verificada = true;
+        f._sinUbicacion = false;
+        pintarGps();
+        $("#gpsMsg").innerHTML = `<div class="note ok" style="margin-top:9px"><b>Ubicación capturada.</b> Precisión ±${Math.round(p.coords.accuracy)} m.</div>`;
+      },
+      e => fallaGps(e.message),
+      { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
+  };
+
+  function fallaGps(motivo){
+    f.Ubicacion = ""; f.Ubicacion_Verificada = false;
+    $("#gpsVal").innerHTML = "";
+    $("#gpsMsg").innerHTML = `
+      <div class="note warn" style="margin-top:9px">
+        <b>No se pudo obtener la ubicación.</b> ${esc(motivo || "")}
+        <div style="margin-top:5px;font-size:12px">Revisa que el GPS del celular esté encendido y que el navegador
+        tenga permiso de ubicación. Vuelve a intentarlo desde el botón de arriba.</div>
+        <button class="btn ghost sm block" id="gpsOmitir" style="margin-top:9px">Registrar sin ubicación verificada</button>
+      </div>`;
+    $("#gpsOmitir").onclick = () => {
+      f._sinUbicacion = true;
+      pintarGps();
+    };
+  }
+}
+
+function tarjetaUbicacion(v){
+  const coord = String(v || "").split("(")[0].trim();
+  return `
+    <div class="note ok">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;opacity:.75">Coordenadas capturadas · no editables</div>
+      <div class="mono" style="font-size:15px;margin-top:3px">${esc(v)}</div>
+      ${coord ? `<a class="btn ghost sm" style="margin-top:8px" target="_blank" rel="noopener"
+         href="https://www.google.com/maps?q=${encodeURIComponent(coord)}">Ver en el mapa</a>` : ""}
+    </div>`;
+}
+
+function notaSinUbicacion(){
+  return `
+    <div class="note crit" style="margin-top:11px">
+      <b>Se guardará como “Sin ubicación verificada”.</b> El registro es válido y cuenta como intento,
+      pero queda marcado en la ficha, en el panel y en el Excel para que se vea que no tiene respaldo
+      de GPS. Si recuperas señal, vuelve a capturar antes de guardar.
+    </div>`;
+}
+
+function pintarEvidencia(){
+  const f = S.form, box = $("#evBox");
+  if (!box) return;
+  box.innerHTML = f.Evidencia ? `
+    <img class="ev-thumb" src="${f.Evidencia}" alt="Evidencia">
+    <div style="display:flex;gap:8px;margin-top:9px">
+      <button class="btn ghost sm" id="evChange">Reemplazar</button>
+      <button class="btn ghost sm" id="evDel" style="color:var(--crit-ink)">Quitar</button>
+    </div>` : `
+    <div class="drop" id="evDrop">
+      <div class="big">📷</div>
+      <p><b>Toca para tomar una foto</b> o adjuntar un print de pantalla</p>
+      <p style="font-size:11.5px">JPG o PNG · se comprime automáticamente</p>
+    </div>
+    ${S.demo ? '<button class="btn ghost sm block" id="evDemo" style="margin-top:9px">Usar imagen de ejemplo</button>' : ""}`;
+  box.insertAdjacentHTML("beforeend", `<input type="file" id="evFile" accept="image/*" capture="environment" class="hidden">`);
+  const file = $("#evFile");
+  file.onchange = e => { const fl = e.target.files[0]; if (fl) comprimir(fl, d => { f.Evidencia = d; pintarEvidencia(); }); };
+  if ($("#evDrop"))   $("#evDrop").onclick = () => file.click();
+  if ($("#evChange")) $("#evChange").onclick = () => file.click();
+  if ($("#evDel"))    $("#evDel").onclick = () => { f.Evidencia = ""; pintarEvidencia(); };
+  if ($("#evDemo"))   $("#evDemo").onclick = () => { f.Evidencia = EVIDENCIA_DEMO; pintarEvidencia(); };
+}
+
+function comprimir(file, cb){
+  const rd = new FileReader();
+  rd.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 1100, r = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * r); cv.height = Math.round(img.height * r);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      cb(cv.toDataURL("image/jpeg", 0.72));
+    };
+    img.onerror = () => cb(rd.result);
+    img.src = rd.result;
+  };
+  rd.readAsDataURL(file);
+}
+
+function pintarPOS(){
+  const f = S.form, box = $("#posBox");
+  if (!box) return;
+  const lim = RULES.fechaLimitePOS(f.Fecha_Contacto, f.Hora_Contacto);
+  box.innerHTML = `
+    <div class="note warn"><b>Plazo automático de retiro de POS:</b> ${fmtFecha(isoDe(lim))} a las ${pad(lim.getHours())}:${pad(lim.getMinutes())}
+      <div style="margin-top:4px;font-size:12px">${CONFIG.horasUtilesPOS} horas útiles desde el contacto (${diasHabilesEntre(parseDT(f.Fecha_Contacto,f.Hora_Contacto), lim)} días hábiles, sin contar sábados, domingos ni feriados).</div>
+    </div>
+    <div class="field" style="margin-top:12px"><label>¿Ya se entregó el POS?</label>
+      <div class="opts">
+        <div class="opt ${f.POS_Entregado==="NO"?"on":""}" data-pos="NO"><span class="rd"></span><span><b>Todavía no</b><span>Queda en seguimiento hasta el vencimiento del plazo</span></span></div>
+        <div class="opt ${f.POS_Entregado==="SI"?"on":""}" data-pos="SI"><span class="rd"></span><span><b>Sí, ya se entregó</b><span>Registra la fecha para evaluar el cumplimiento</span></span></div>
+      </div>
+    </div>
+    <div id="posFecha"></div>`;
+  box.querySelectorAll("[data-pos]").forEach(el => el.onclick = () => {
+    f.POS_Entregado = el.dataset.pos;
+    box.querySelectorAll("[data-pos]").forEach(x => x.classList.toggle("on", x.dataset.pos === f.POS_Entregado));
+    pintarPosFecha();
+  });
+  pintarPosFecha();
+}
+
+function pintarPosFecha(){
+  const f = S.form, box = $("#posFecha");
+  if (!box) return;
+  if (f.POS_Entregado !== "SI"){ box.innerHTML = ""; return; }
+  if (!f.Fecha_Entrega_POS) f.Fecha_Entrega_POS = hoyISO();
+  if (!f.Hora_Entrega_POS)  f.Hora_Entrega_POS  = horaISO();
+  box.innerHTML = `
+    <div class="row2">
+      <div class="field"><label>Fecha de entrega <span class="req">*</span></label><input type="date" data-f2="Fecha_Entrega_POS" value="${f.Fecha_Entrega_POS}"></div>
+      <div class="field"><label>Hora</label><input type="time" data-f2="Hora_Entrega_POS" value="${f.Hora_Entrega_POS}"></div>
+    </div>
+    <div id="posEval"></div>`;
+  box.querySelectorAll("[data-f2]").forEach(el => el.oninput = el.onchange = () => { f[el.dataset.f2] = el.value; evalPOS(); });
+  evalPOS();
+}
+function evalPOS(){
+  const f = S.form, box = $("#posEval");
+  if (!box) return;
+  const st = RULES.estadoPOS(f);
+  box.innerHTML = `<div class="note ${st.chip==="ok"?"ok":"warn"}"><b>Entrego_POS_72hrs = ${st.valorBase}.</b> ${esc(st.detalle)}</div>`;
+}
+
+/* ---- Guardar ----------------------------------------------------------- */
+async function guardar(c, kind){
+  const f = S.form, errores = [];
+  if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
+  if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
+  if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
+  if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
+    errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
+  if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
+  if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
+  if (kind === "cancelacion" && !f.Motivo_Cancelacion) errores.push("Indica el motivo de la cancelación.");
+  if (kind === "cancelacion" && f.POS_Entregado === "SI" && !f.Fecha_Entrega_POS) errores.push("Indica la fecha de entrega del POS.");
+  if (errores.length){
+    $("#errBox").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+  const btn = $("#guardar");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    if (S.demo){
+      const reg = Object.assign({ _id:"D"+Date.now(), _tipo:kind, Ejecutivo:S.user.nombre,
+        Correo_Stratis:S.user.correo, Customer_id:c.customer_id,
+        Visita_Presencial:RULES.visitaPresencial(f.Tipo_Contacto),
+        Visita_virtual:RULES.visitaVirtual(f.Tipo_Contacto),
+        Cumple_Visita:RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado) }, f);
+      if (kind === "cancelacion") reg.Cancelara_POS = "SI";
+      (kind === "cancelacion" ? DB.cancelaciones : DB.visitas).push(reg);
+      CLIENTES.forEach(x => x._base = null);
+      RULES.recomputarBase(c.customer_id);
+    } else {
+      // La evidencia va al bucket privado; en la fila solo queda la ruta.
+      if (f.Evidencia && !f.Evidencia_Path){
+        const ruta = await subirEvidencia(f.Evidencia);
+        if (ruta) f.Evidencia_Path = ruta;
+      }
+      const fila = aDB(f, c, kind);
+      const { error } = S.editId
+        ? await sb.from("interacciones").update(fila).eq("id", S.editId)
+        : await sb.from("interacciones").insert(fila);
+      if (error) throw new Error(error.message);
+      await refrescar(); await cargarAuditoria();
+    }
+  } catch (err) {
+    btn.disabled = false; btn.textContent = S.editId ? "Guardar cambios" : "Registrar";
+    $("#errBox").innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(err.message)}</div>`;
+    $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  toast(S.editId ? "Registro actualizado"
+       : kind === "cancelacion" ? "Cancelación registrada · plazo POS activado"
+       : "Contacto registrado en el histórico");
+  S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id);
+  window.scrollTo(0,0);
+  render();
+}
+
+function editarRegistro(id){
+  const r = DB.buscar(id);
+  if (!r) return;
+  if (!puedeEditar(r)) return toast("Solo puedes editar tus propios registros");
+  S.editId = id; S.cid = String(r.Customer_id); S.form = null;
+  S.tab = r._tipo === "cancelacion" ? "form_cancelacion" : "form_visita";
+  window.scrollTo(0,0);
+  render();
+}
+
+function confirmarEliminar(id){
+  const r = DB.buscar(id);
+  if (!r) return;
+  if (!puedeEditar(r)) return toast("Solo puedes eliminar tus propios registros");
+  const c = byId[String(r.Customer_id)];
+  modal(`
+    <h3>Eliminar registro</h3>
+    <p>Se eliminará el contacto del <b>${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}</b> con
+    <b>${esc(titulo(c ? nombreCliente(c) : ""))}</b>. El conteo de intentos y la efectividad se recalculan. Esta acción no se puede deshacer.</p>
+    <div style="display:flex;gap:9px">
+      <button class="btn danger" id="okDel" style="flex:1">Eliminar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Conservar</button>
+    </div>`);
+  $("#okDel").onclick = async () => {
+    const cid = r.Customer_id;
+    if (S.demo){
+      let k = DB.visitas.findIndex(x => x._id === id);
+      if (k >= 0) DB.visitas.splice(k,1);
+      else { k = DB.cancelaciones.findIndex(x => x._id === id); if (k >= 0) DB.cancelaciones.splice(k,1); }
+      CLIENTES.forEach(x => x._base = null); RULES.recomputarBase(cid);
+    } else {
+      const { error } = await sb.from("interacciones").delete().eq("id", id);
+      if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
+      await refrescar(); await cargarAuditoria();
+    }
+    cerrarModal(); toast("Registro eliminado"); render();
+  };
+}
+
+/* =========================================================================
+   Pantallas: Registros, Seguimiento POS, Panel y Ajustes
+   ========================================================================= */
+
+/* Imagen de ejemplo para probar el flujo de evidencia sin cámara */
+const EVIDENCIA_DEMO = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="380" viewBox="0 0 620 380">
+<rect width="620" height="380" fill="#e9e3db"/>
+<rect width="620" height="54" fill="#0b2545"/>
+<circle cx="34" cy="27" r="15" fill="#3987e5"/>
+<text x="60" y="26" font-family="system-ui" font-size="15" fill="#fff" font-weight="600">Cliente — Representante legal</text>
+<text x="60" y="43" font-family="system-ui" font-size="11.5" fill="#9fc0e8">en línea</text>
+<rect x="26" y="80" width="330" height="62" rx="12" fill="#fff"/>
+<text x="42" y="106" font-family="system-ui" font-size="13.5" fill="#1a1a19">Buenos días, le escribo de Stratis por su</text>
+<text x="42" y="126" font-family="system-ui" font-size="13.5" fill="#1a1a19">POS BBVA. ¿Puedo visitarlo hoy?</text>
+<rect x="250" y="158" width="344" height="62" rx="12" fill="#d6f2c8"/>
+<text x="266" y="184" font-family="system-ui" font-size="13.5" fill="#1a1a19">Claro, lo espero en el local a las 4 pm.</text>
+<text x="266" y="204" font-family="system-ui" font-size="13.5" fill="#1a1a19">Pregunte por mí en caja.</text>
+<rect x="26" y="236" width="300" height="42" rx="12" fill="#fff"/>
+<text x="42" y="262" font-family="system-ui" font-size="13.5" fill="#1a1a19">Perfecto, confirmado. Gracias.</text>
+<text x="26" y="330" font-family="system-ui" font-size="12" fill="#7a736a">Evidencia de ejemplo — reemplázala con tu captura real</text>
+</svg>`);
+
+/* ---------- Registros: historial con buscador y filtros ------------------ */
+function viewRegistros(){
+  let todos = S.user.rol === "Ejecutivo"
+    ? DB.todos().filter(r => r.Correo_Stratis === S.user.correo)
+    : DB.todos();
+  todos.sort((a,b) => ts(b) - ts(a));
+
+  const visitas = todos.filter(r => r._tipo === "visita").length;
+  const cancel  = todos.filter(r => r._tipo === "cancelacion").length;
+  const efect   = todos.filter(r => esEfectivo(r.Resultado)).length;
+
+  let lista = todos;
+  const q = S.qReg.trim().toLowerCase();
+  if (q) lista = lista.filter(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return String(r.Customer_id).toLowerCase().includes(q)
+        || String(c.nombre_comercio||"").toLowerCase().includes(q)
+        || String(c.distrito||"").toLowerCase().includes(q)
+        || String(r.Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q);
+  });
+  if (S.fResultado === "efectivos")      lista = lista.filter(r => esEfectivo(r.Resultado));
+  else if (S.fResultado === "fallidos")  lista = lista.filter(r => !esEfectivo(r.Resultado));
+  else if (S.fResultado === "cancelaciones") lista = lista.filter(r => r._tipo === "cancelacion");
+  else if (S.fResultado === "sin_ubicacion") lista = lista.filter(sinUbicacionVerificada);
+  else if (S.fResultado !== "todos")     lista = lista.filter(r => r.Resultado === S.fResultado);
+  if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
+  if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
+
+  const medios = TIPOS_CONTACTO.filter(t => todos.some(r => r.Tipo_Contacto === t.id));
+  const mostrar = lista.slice(0, S.limiteReg);
+
+  return `
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
+    <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de efectividad</div></div>
+    <div class="stat"><div class="lbl">Visitas</div><div class="val">${visitas}</div><div class="sub">hoja Visitas</div></div>
+    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${cancel}</div><div class="sub">hoja Cancelaciones</div></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="qReg" placeholder="Comercio, Customer ID, distrito, comentario…" value="${esc(S.qReg)}"></div>
+  </div>
+  <div class="pills">
+    ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"],["cancelaciones","Cancelaciones"]]
+      .map(([k,l]) => `<button class="pill ${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
+    ${RESULTADOS.filter(x => !x.ok && todos.some(r => r.Resultado === x.id))
+      .map(x => `<button class="pill ${S.fResultado===x.id?"on":""}" data-fr="${x.id}">${esc(x.label)}</button>`).join("")}
+    ${todos.some(sinUbicacionVerificada)
+      ? `<button class="pill ${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">📍 Sin ubicación verificada</button>` : ""}
+  </div>
+  ${medios.length > 1 ? `<div class="pills">
+    <button class="pill ${S.fMedio==="todos"?"on":""}" data-fm="todos">Todos los medios</button>
+    ${medios.map(t => `<button class="pill ${S.fMedio===t.id?"on":""}" data-fm="${t.id}">${esc(t.label)}</button>`).join("")}
+  </div>` : ""}
+  ${S.user.rol !== "Ejecutivo" ? `<div class="pills">
+    <button class="pill ${S.fEjecReg==="todos"?"on":""}" data-fe="todos">Todo el equipo</button>
+    ${USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => `<button class="pill ${S.fEjecReg===u.nombre?"on":""}" data-fe="${esc(u.nombre)}">${esc(u.nombre)}</button>`).join("")}
+  </div>` : ""}
+
+  <div class="sec-title">${lista.length} registro${lista.length===1?"":"s"}${S.user.rol==="Ejecutivo"?" — míos":" — todo el equipo"}</div>
+  ${mostrar.length ? `<div class="tl">${mostrar.map(r => {
+      const c = byId[String(r.Customer_id)];
+      const res = resultadoById(r.Resultado);
+      return `<div class="tl-item ${r._tipo==="cancelacion"?"cancel":""}">
+        <div class="card" style="margin-bottom:0">
+          <div class="tl-h">
+            <div>
+              <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
+              <div class="dt">${fmtDT(r.Fecha_Contacto,r.Hora_Contacto)} · ${esc((tipoById(r.Tipo_Contacto)||{}).label||"")} · ${esc(r.Ejecutivo)}</div>
+            </div>
+            <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res?res.label:r.Resultado)}</span>
+          </div>
+          ${sinUbicacionVerificada(r)?`<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>`:""}
+          ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
+          ${puedeEditar(r)?`<div style="display:flex;gap:7px;margin-top:11px">
+            <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
+            <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
+            <button class="btn ghost sm" data-cid="${r.Customer_id}">Ver ficha</button></div>`:""}
+        </div></div>`;
+    }).join("")}</div>`
+    : todos.length
+      ? `<div class="empty"><div class="big">⌕</div>No hay registros con estos filtros.</div>`
+      : `<div class="empty"><div class="big">≡</div>Todavía no has registrado contactos.<br><br>
+         <button class="btn" data-go="cartera">Ir a mi cartera</button></div>`}
+  ${lista.length > mostrar.length ? `<button class="btn ghost block" id="masReg">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}
+
+  <div class="card" style="margin-top:14px">
+    <div class="note"><b>Editar no suma un intento.</b> El contador solo sube cuando registras un contacto
+    nuevo desde la ficha del comercio. Al editar solo puedes corregir comentarios, calificación y la
+    entrega del POS: el medio, el resultado y la fecha quedan fijos.</div>
+  </div>`;
+}
+
+/* ---------- Seguimiento de entrega de POS ------------------------------- */
+function viewPOS(){
+  const lista = misCancelaciones().map(r => ({ r, st: RULES.estadoPOS(r) }));
+  const orden = { vencido:0, por_vencer:1, en_plazo:2, entregado_fuera:3, entregado_plazo:4 };
+  lista.sort((a,b) => (orden[a.st.code] - orden[b.st.code]) || (a.st.limite - b.st.limite));
+  const n = c => lista.filter(x => x.st.code === c).length;
+  const entregados = n("entregado_plazo") + n("entregado_fuera");
+  const cumplimiento = entregados ? Math.round(n("entregado_plazo") / entregados * 100) : 0;
+
+  return `
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${lista.length}</div><div class="sub">POS por retirar</div></div>
+    <div class="stat"><div class="lbl">Vencidos</div><div class="val" style="color:var(--crit-ink)">${n("vencido")}</div><div class="sub">fuera de las 72 h útiles</div></div>
+    <div class="stat"><div class="lbl">Por vencer</div><div class="val" style="color:var(--warn-ink)">${n("por_vencer")}</div><div class="sub">menos de ${CONFIG.alertaPorVencerHrs} h</div></div>
+    <div class="stat"><div class="lbl">Cumplimiento</div><div class="val" style="color:var(--good-ink)">${cumplimiento}%</div><div class="sub">${n("entregado_plazo")} de ${entregados} entregados en plazo</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Cómo se calcula el plazo</h3>
+    <div class="note">El reloj arranca en la <b>fecha y hora del contacto</b> donde el cliente declaró la cancelación y corre
+    <b>${CONFIG.horasUtilesPOS} horas útiles</b> (${CONFIG.horasUtilesPOS/CONFIG.horasUtilesPorDia} días hábiles), saltando sábados, domingos y feriados del Perú.
+    El ejecutivo solo marca <b>si entregó y en qué fecha</b>; el estado y la columna <b>Entrego_POS_72hrs</b> se calculan solos.</div>
+    <div class="legend">
+      <span><i style="background:var(--crit)"></i>Vencido</span>
+      <span><i style="background:var(--warn)"></i>Por vencer</span>
+      <span><i style="background:var(--s1)"></i>En plazo</span>
+      <span><i style="background:var(--serious)"></i>Entregado fuera de plazo</span>
+      <span><i style="background:var(--good)"></i>Entregado en plazo</span>
+    </div>
+  </div>
+
+  ${lista.length ? lista.map(({r,st}) => {
+    const c = byId[String(r.Customer_id)];
+    return `
+    <div class="card" style="border-left:4px solid ${
+      st.chip==="crit"?"var(--crit)":st.chip==="warn"?"var(--warn)":st.chip==="ok"?"var(--good)":st.chip==="serious"?"var(--serious)":"var(--s1)"}">
+      <div class="tl-h">
+        <div>
+          <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
+          <div class="dt">ID ${esc(r.Customer_id)} · ${esc(r.Ejecutivo)} · ${esc(r.Motivo_Cancelacion||"")}</div>
+        </div>
+        <span class="chip ${st.chip}">${st.label}</span>
+      </div>
+      <div class="kv" style="margin-top:8px"><dt>Contacto</dt><dd>${fmtDT(r.Fecha_Contacto,r.Hora_Contacto)}</dd></div>
+      <div class="kv"><dt>Límite 72 h útiles</dt><dd class="mono">${fmtFecha(isoDe(st.limite))} · ${pad(st.limite.getHours())}:${pad(st.limite.getMinutes())}</dd></div>
+      <div class="kv"><dt>Entrego_POS_72hrs</dt><dd><span class="chip ${st.valorBase==="SI"?"ok":st.valorBase==="NO"?"crit":"warn"}">${st.valorBase}</span></dd></div>
+      ${puedeEditar(r)?`<button class="btn ${st.code==="vencido"?"":"ghost"} block sm" data-edit="${r._id}" style="margin-top:10px">${r.POS_Entregado==="SI"?"Editar entrega":"Marcar entrega del POS"}</button>`:""}
+    </div>`;
+  }).join("") : `<div class="empty"><div class="big">◷</div>No hay cancelaciones registradas.<br>Los plazos aparecerán aquí en cuanto registres una.</div>`}`;
+}
+
+/* ---------- Panel de avance y efectividad -------------------------------- */
+function viewPanel(){
+  const base = cartera();
+  base.forEach(c => RULES.recomputarBase(c.customer_id));
+  const total = base.length;
+  const conEf = base.filter(c => c._base._efectivos > 0).length;
+  const cumple = base.filter(c => c._base.Cumple_Visita === "SI").length;
+  const canc = base.filter(c => c._base.Cancelara_POS === "SI").length;
+
+  const visibles = new Set(base.map(c => String(c.customer_id)));
+  const regs = DB.todos().filter(r => visibles.has(String(r.Customer_id)));
+  const intentos = regs.length;
+  const efectivos = regs.filter(r => esEfectivo(r.Resultado)).length;
+  const pctEf = intentos ? Math.round(efectivos / intentos * 100) : 0;
+
+  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
+    const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
+    cs.forEach(c => RULES.recomputarBase(c.customer_id));
+    const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
+    const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
+    return { nombre:u.nombre, clientes:cs.length, intentos:rs.length, efectivos:ef,
+      cumple: rs.filter(r => r.Cumple_Visita === "SI").length,
+      trabajados: new Set(rs.map(r => String(r.Customer_id))).size,
+      pct: rs.length ? ef / rs.length * 100 : 0 };
+  }).filter(e => e.clientes || e.intentos).sort((a,b) => b.pct - a.pct);
+
+  const porResultado = RESULTADOS.map(x => ({ label:x.label, ok:x.ok,
+    n: regs.filter(r => r.Resultado === x.id).length })).filter(x => x.n > 0);
+  const maxRes = Math.max(1, ...porResultado.map(x => x.n));
+
+  const tipos = TIPOS_CONTACTO.map(t => ({ label:t.label, n: regs.filter(r => r.Tipo_Contacto === t.id).length }))
+    .filter(x => x.n > 0).sort((a,b) => b.n - a.n);
+  const maxTipo = Math.max(1, ...tipos.map(t => t.n));
+
+  const rubros = RUBROS.map(r => {
+    const cs = base.filter(c => c.rubro === r.codigo);
+    const ct = cs.filter(c => c._base._efectivos > 0).length;
+    return { label:r.nombre, total:cs.length, cont:ct, pct: cs.length ? ct/cs.length*100 : 0 };
+  }).filter(x => x.total > 0).sort((a,b) => b.total - a.total);
+
+  const insistencia = [1,2,3].map(k => ({ k,
+    n: base.filter(c => c._base._intentos === k).length }))
+    .concat([{ k:"4+", n: base.filter(c => c._base._intentos >= 4).length }])
+    .filter(x => x.n > 0);
+  const maxIns = Math.max(1, ...insistencia.map(x => x.n));
+
+  // Respaldo de ubicación: cuántos registros presenciales tienen coordenadas de GPS
+  const presenciales = regs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto));
+  const sinUbi = presenciales.filter(r => r.Ubicacion_Verificada !== true);
+  const pctUbi = presenciales.length ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
+  const sinUbiEjec = [...new Set(sinUbi.map(r => r.Ejecutivo))]
+    .map(n => ({ nombre:n, n: sinUbi.filter(r => r.Ejecutivo === n).length }))
+    .sort((a,b) => b.n - a.n);
+
+  const cancels = misCancelaciones().map(r => RULES.estadoPOS(r).code);
+  const posDist = [
+    { label:"Entregado en plazo", color:"var(--good)",    n:cancels.filter(x=>x==="entregado_plazo").length },
+    { label:"En plazo",           color:"var(--s1)",      n:cancels.filter(x=>x==="en_plazo").length },
+    { label:"Por vencer",         color:"var(--warn)",    n:cancels.filter(x=>x==="por_vencer").length },
+    { label:"Fuera de plazo",     color:"var(--serious)", n:cancels.filter(x=>x==="entregado_fuera").length },
+    { label:"Vencido",            color:"var(--crit)",    n:cancels.filter(x=>x==="vencido").length }
+  ].filter(x => x.n > 0);
+  const maxPos = Math.max(1, ...posDist.map(p => p.n));
+
+  return `
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
+    <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
+    <div class="stat"><div class="lbl">Efectividad</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} lograron contacto</div></div>
+    <div class="stat"><div class="lbl">Cancelaciones</div><div class="val">${canc}</div><div class="sub">${conEf?Math.round(canc/conEf*100):0}% de los contactados</div></div>
+  </div>
+
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Efectividad por ejecutivo · % de intentos que lograron contacto</h3>
+      ${ejecutivos.length ? ejecutivos.map(e => `
+        <div class="bar-row">
+          <span class="nm">${esc(e.nombre)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${e.pct.toFixed(1)}%"></span></span>
+          <span class="bar-val">${Math.round(e.pct)}%</span>
+        </div>
+        <div class="bar-sub">${e.clientes} comercios · ${e.intentos} intentos · ${e.efectivos} efectivos · ${e.cumple} visitas válidas</div>
+      `).join("") : `<div class="note">Todavía no hay actividad registrada en la campaña.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Resultado de los intentos</h3>
+      ${porResultado.length ? porResultado.map(x => `
+        <div class="bar-row">
+          <span class="nm">${esc(x.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxRes*100).toFixed(1)}%;background:${x.ok?"var(--good)":"var(--serious)"}"></span></span>
+          <span class="bar-val">${x.n}</span>
+        </div>`).join("") : `<div class="note">Aún no hay intentos registrados.</div>`}
+      <div class="note" style="margin-top:9px">Cada registro cuenta como intento, aunque sea el cuarto con el mismo comercio. Solo el resultado <b>“Habló con el contacto”</b> suma como comunicación lograda.</div>
+    </div>
+
+    <div class="card">
+      <h3>Insistencia · comercios por cantidad de intentos</h3>
+      ${insistencia.length ? insistencia.map(x => `
+        <div class="bar-row">
+          <span class="nm">${x.k} intento${x.k===1?"":"s"}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxIns*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${x.n}</span>
+        </div>`).join("") : `<div class="note">Sin datos todavía.</div>`}
+    </div>
+   </div>
+
+   <div>
+    <div class="card">
+      <h3>Medio de contacto utilizado</h3>
+      ${tipos.length ? tipos.map(t => `
+        <div class="bar-row">
+          <span class="nm">${esc(t.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(t.n/maxTipo*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${t.n}</span>
+        </div>`).join("") : `<div class="note">Aún no hay contactos registrados.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Cartera por rubro · % contactado</h3>
+      ${rubros.length ? rubros.map(r => `
+        <div class="bar-row">
+          <span class="nm">${esc(r.label)} <span style="color:var(--muted)">(${r.total})</span></span>
+          <span class="bar-track"><span class="bar-fill" style="width:${r.pct.toFixed(1)}%"></span></span>
+          <span class="bar-val">${Math.round(r.pct)}%</span>
+        </div>`).join("") : `<div class="note">Todavía no hay comercios registrados.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Respaldo de ubicación · visitas presenciales</h3>
+      ${presenciales.length ? `
+        <div class="bar-row">
+          <span class="nm">Con GPS verificado</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${pctUbi}%;background:var(--good)"></span></span>
+          <span class="bar-val">${presenciales.length - sinUbi.length}</span>
+        </div>
+        ${sinUbi.length ? `<div class="bar-row">
+          <span class="nm">Sin ubicación verificada</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${100-pctUbi}%;background:var(--crit)"></span></span>
+          <span class="bar-val">${sinUbi.length}</span>
+        </div>
+        <div class="bar-sub">${sinUbiEjec.map(e => `${esc(e.nombre)} (${e.n})`).join(" · ")}</div>
+        <div class="note warn" style="margin-top:9px">Las coordenadas siempre las toma el GPS del equipo: nadie las escribe
+        ni las corrige. Un registro sin verificar significa que en ese momento no hubo señal o permiso de ubicación.</div>`
+        : `<div class="note ok" style="margin-top:9px">Todas las visitas presenciales tienen coordenadas tomadas por GPS.</div>`}`
+      : `<div class="note">Aún no hay visitas presenciales registradas.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Estado de entrega de POS</h3>
+      ${posDist.length ? posDist.map(p => `
+        <div class="bar-row">
+          <span class="nm"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${p.color};margin-right:6px"></i>${p.label}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(p.n/maxPos*100).toFixed(1)}%;background:${p.color}"></span></span>
+          <span class="bar-val">${p.n}</span>
+        </div>`).join("") : `<div class="note">Sin cancelaciones registradas.</div>`}
+    </div>
+   </div>
+  </div>
+
+  ${S.user.rol !== "Ejecutivo" ? `<div class="card">
+    <h3>Descargar la base</h3>
+    <div class="note" style="margin-bottom:11px">Excel completo con los datos actualizados al momento de generarlo.</div>
+    <button class="btn block" id="expXlsx2">Descargar Excel completo</button>
+  </div>` : ""}`;
+}
+
+/* =========================================================================
+   Exportación a Excel — estructura v3 (cartera en campo, sin datos sensibles)
+   ========================================================================= */
+const COLS_BASE = ["customer_id","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
+  "Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Intentos","Contactos_Efectivos","Visitas_Validas","Contactado (Si/No)",
+  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
+  "Cancelara_POS","Entrego_POS_72hrs","Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
+
+const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
+  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Contacto_Logrado",
+  "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
+  "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+
+const COLS_CANCEL = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
+  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Motivo_Cancelacion",
+  "Cancelara_POS","Fecha_Limite_POS","POS_Entregado","Fecha_Entrega_POS","Entrego_POS_72hrs","Estado_POS",
+  "Ubicacion","Ubicacion_Verificada","Cumple_Visita","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+
+/* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
+const marcaUbicacion = r => !RULES.requiereUbicacion(r.Tipo_Contacto) ? ""
+  : (r.Ubicacion_Verificada === true ? "SI" : "NO — sin ubicación verificada");
+
+const nomTipo = id => (tipoById(id) || {}).label || id || "";
+const nomResultado = id => (resultadoById(id) || {}).label || id || "";
+
+function filasBase(){
+  return cartera().map(c => {
+    const b = RULES.recomputarBase(c.customer_id);
+    return [c.customer_id, c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
+      c.estado, c.asignado, c.asignado_correo,
+      String(c.creado_en || "").slice(0,10)]
+      .concat([b._intentos, b._efectivos,
+        DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
+        b._efectivos > 0 ? "Si" : "No",
+        b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
+        b.Cancelara_POS, b.Entrego_POS_72hrs,
+        b._ultimo ? b._ultimo.Fecha_Contacto : "",
+        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""]);
+  });
+}
+
+function filasVisitas(){
+  return DB.todos().sort((a,b) => ts(a) - ts(b)).map(r => [
+    r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis, r.Customer_id,
+    r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
+    esEfectivo(r.Resultado) ? "SI" : "NO",
+    r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
+    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "", r.Calificacion,
+    r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
+}
+
+function filasCancel(){
+  return DB.cancelaciones.slice().sort((a,b) => ts(a) - ts(b)).map(r => {
+    const st = RULES.estadoPOS(r);
+    return [r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis, r.Customer_id,
+      r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
+      r.Motivo_Cancelacion, "SI",
+      fmtFecha(isoDe(st.limite)) + " " + pad(st.limite.getHours()) + ":" + pad(st.limite.getMinutes()),
+      r.POS_Entregado, r.Fecha_Entrega_POS || "", st.valorBase, st.label,
+      r.Ubicacion, marcaUbicacion(r), r.Cumple_Visita, r.Evidencia_Path || "", r.Calificacion,
+      r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id];
+  });
+}
+
+const hoja = (cols, filas) => {
+  const ws = XLSX.utils.aoa_to_sheet([cols].concat(filas));
+  ws["!cols"] = cols.map(c => ({ wch: Math.min(32, Math.max(11, String(c).length + 3)) }));
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:filas.length, c:cols.length-1} }) };
+  ws["!freeze"] = { xSplit:0, ySplit:1 };
+  return ws;
+};
+
+/* Hojas exclusivas del Analista y del Manager -------------------------- */
+function hojaAvance(){
+  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Contactos efectivos",
+                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada","Cancelaciones","POS vencidos","POS en plazo"];
+  const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
+    const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
+    cs.forEach(c => RULES.recomputarBase(c.customer_id));
+    const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
+    const canc = DB.cancelaciones.filter(r => r.Correo_Stratis === u.correo);
+    const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
+    return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length, ef,
+      rs.length ? Math.round(ef/rs.length*100)/100 : 0,
+      cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
+      rs.filter(r => r.Cumple_Visita === "SI").length,
+      rs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto)).length,
+      rs.filter(sinUbicacionVerificada).length, canc.length,
+      canc.filter(r => RULES.estadoPOS(r).code === "vencido").length,
+      canc.filter(r => RULES.estadoPOS(r).code === "entregado_plazo").length];
+  });
+  const ws = hoja(cols, filas);
+  filas.forEach((_,i) => { const c = ws["F"+(i+2)]; if (c) c.z = "0%"; });
+  return ws;
+}
+
+function hojaSeguimientoPOS(){
+  const cols = ["Comercio","customer_id","Ejecutivo","Fecha contacto","Motivo","Fecha límite (72 h útiles)",
+                "¿Entregado?","Fecha de entrega","Entrego_POS_72hrs","Estado"];
+  const filas = DB.cancelaciones.slice()
+    .map(r => ({ r, st: RULES.estadoPOS(r) }))
+    .sort((a,b) => a.st.limite - b.st.limite)
+    .map(({r,st}) => {
+      const c = byId[String(r.Customer_id)] || {};
+      return [titulo(nombreCliente(c)), r.Customer_id, r.Ejecutivo, fmtDT(r.Fecha_Contacto, r.Hora_Contacto),
+        r.Motivo_Cancelacion, fmtFecha(isoDe(st.limite)) + " " + pad(st.limite.getHours()) + ":" + pad(st.limite.getMinutes()),
+        r.POS_Entregado, r.Fecha_Entrega_POS ? fmtFecha(r.Fecha_Entrega_POS) : "", st.valorBase, st.label];
+    });
+  return hoja(cols, filas);
+}
+
+function hojaEfectividad(){
+  const regs = DB.todos();
+  const filas = RESULTADOS.map(x => {
+    const n = regs.filter(r => r.Resultado === x.id).length;
+    return [x.label, x.ok ? "Contacto logrado" : "Intento sin contacto", n,
+      regs.length ? Math.round(n/regs.length*100) + "%" : "—"];
+  });
+  filas.push([]);
+  filas.push(["TOTAL DE INTENTOS", "", regs.length, "100%"]);
+  filas.push(["CONTACTOS LOGRADOS", "", regs.filter(r => esEfectivo(r.Resultado)).length,
+    regs.length ? Math.round(regs.filter(r => esEfectivo(r.Resultado)).length/regs.length*100) + "%" : "—"]);
+  return hoja(["Resultado","Clasificación","Registros","% del total"], filas);
+}
+
+function hojaRubros(){
+  const filas = RUBROS.map(r => {
+    const cs = cartera().filter(c => c.rubro === r.codigo);
+    if (!cs.length) return null;
+    cs.forEach(c => RULES.recomputarBase(c.customer_id));
+    const ct = cs.filter(c => c._base._efectivos > 0).length;
+    return [r.nombre, cs.length, ct, Math.round(ct/cs.length*100) + "%",
+      cs.reduce((a,c) => a + c._base._intentos, 0),
+      cs.filter(c => c.estado === "DE BAJA").length];
+  }).filter(Boolean).sort((a,b) => b[1] - a[1]);
+  return hoja(["Rubro","Comercios","Contactados","% Contactado","Intentos","Dados de baja"], filas);
+}
+
+const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
+  calificacion:"Calificación", contacto_id:"Contacto asociado", evidencia_path:"Evidencia",
+  pos_entregado:"POS entregado", fecha_entrega_pos:"Fecha de entrega POS", hora_entrega_pos:"Hora de entrega POS",
+  motivo_cancelacion:"Motivo de cancelación", nombre_comercio:"Nombre del comercio",
+  rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
+  estado:"Estado del cliente", observacion:"Observación" };
+const nomCampo = k => CAMPO_ES[k] || k;
+const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
+
+function resumenAuditoria(a){
+  if (a.accion === "eliminar")
+    return a.tabla === "clientes" ? "Eliminó el comercio completo"
+         : `Eliminó un registro del ${fmtFecha(a.detalle && a.detalle.fecha)} (${nomResultado((a.detalle||{}).resultado)})`;
+  const d = a.detalle || {};
+  return Object.keys(d).map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`).join(" · ");
+}
+
+function hojaBitacora(){
+  const filas = AUDITORIA.map(a => [
+    String(a.creado_en||"").slice(0,10), String(a.creado_en||"").slice(11,16),
+    a.ejecutivo || "", a.correo || "",
+    a.tabla === "clientes" ? "Comercio" : "Registro de contacto",
+    a.accion === "editar" ? "Editó" : "Eliminó",
+    a.comercio || "", a.customer_id || "", resumenAuditoria(a)]);
+  return hoja(["Fecha","Hora","Quién","Correo","Qué","Acción","Comercio","customer_id","Detalle del cambio"], filas);
+}
+
+function hojaUsuarios(){
+  return hoja(["Ejecutivo","Nombre completo","Correo Stratis","Rol","Activo","Comercios","Registros"],
+    USUARIOS.map(u => [u.nombre, u.nombreCompleto || u.nombre, u.correo, u.rol, u.activo === false ? "NO" : "SI",
+      CLIENTES.filter(c => c.asignado_correo === u.correo).length,
+      DB.todos().filter(r => r.Correo_Stratis === u.correo).length]));
+}
+
+function hojaReporte(admin){
+  const base = cartera();
+  base.forEach(c => RULES.recomputarBase(c.customer_id));
+  const cont = base.filter(c => c._base._efectivos > 0).length;
+  const regs = DB.todos();
+  const ef = regs.filter(r => esEfectivo(r.Resultado)).length;
+  const filas = [["CRM Stratis — Campaña BBVA Adquirencia"], [],
+    ["Generado", fmtLima(new Date()) + " (hora de Lima)"],
+    ["Generado por", (S.user.nombreCompleto || S.user.nombre) + " (" + S.user.correo + ")"],
+    ["Perfil", S.user.rol],
+    ["Alcance del archivo", admin ? "Campaña completa — todos los ejecutivos" : "Cartera propia únicamente"], [],
+    ["Comercios registrados", base.length],
+    ["Comercios contactados", cont],
+    ["% Contactado", base.length ? Math.round(cont/base.length*100) + "%" : "0%"],
+    ["Intentos de comunicación", regs.length],
+    ["Contactos efectivos", ef],
+    ["% Efectividad", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"],
+    ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
+    ["Cancelaciones", DB.cancelaciones.length],
+    ["POS vencidos", DB.cancelaciones.filter(r => RULES.estadoPOS(r).code === "vencido").length], [],
+    ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
+    ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
+    ["", "La columna Evidencia guarda la ruta del archivo en el bucket privado; las imágenes solo se abren desde el CRM."],
+    ["", "La ubicación capturada no puede modificarse una vez guardada."]];
+  return XLSX.utils.aoa_to_sheet(filas);
+}
+
+/* ---- Exportación principal, según el rol ------------------------------- */
+async function exportarExcel(btn){
+  if (!window.XLSX) return toast("La librería de Excel aún no cargó, intenta de nuevo");
+  const admin = S.user.rol !== "Ejecutivo";
+  if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
+
+  if (admin && !S.demo){
+    try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_BASE, filasBase()), "Base");
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_CANCEL, filasCancel()), "Cancelaciones");
+
+  if (admin){
+    XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
+    XLSX.utils.book_append_sheet(wb, hojaSeguimientoPOS(), "Seguimiento POS");
+    XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Efectividad de contacto");
+    XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
+    XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
+    XLSX.utils.book_append_sheet(wb, hojaBitacora(),      "Bitácora");
+  }
+  XLSX.utils.book_append_sheet(wb, hojaReporte(admin), "Reporte");
+
+  const hoy = hoyISO().replace(/-/g,"");
+  const quien = admin ? "Completo" : S.user.nombre.replace(/\s+/g,"_");
+  XLSX.writeFile(wb, `CRM_BBVA_${quien}_${hoy}.xlsx`);
+
+  if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
+  toast(admin ? `Excel completo generado · ${wb.SheetNames.length} hojas`
+              : "Excel de tu cartera generado · 4 hojas");
+}
+
+function exportarCSV(que){
+  const mapa = { base:[COLS_BASE, filasBase(), "Base"],
+                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
+                 cancelaciones:[COLS_CANCEL, filasCancel(), "Cancelaciones"] };
+  const [cols, filas, nombre] = mapa[que];
+  const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  const csv = "\ufeff" + [cols.map(q).join(";")].concat(filas.map(f => f.map(q).join(";"))).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type:"text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `${nombre}_StratisCRM.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  toast(`${nombre} exportado`);
+}
+
+/* =========================================================================
+   Ajustes
+   ========================================================================= */
+function viewAyuda(){
+  const admin = S.user.rol !== "Ejecutivo";
+  return `
+  <div class="card">
+    <h3>Sesión</h3>
+    <div style="display:flex;gap:11px;align-items:center">
+      <span class="av" style="width:42px;height:42px;font-size:14px;background:${userColor(S.user.nombre)}">${iniciales(S.user.nombre)}</span>
+      <div style="flex:1"><b>${esc(S.user.nombreCompleto || S.user.nombre)}</b>
+        <div style="font-size:12.5px;color:var(--muted)">${esc(S.user.correo)} · ${esc(S.user.rol)}</div></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn ghost sm" id="recargar" style="flex:1">Actualizar datos</button>
+      <button class="btn ghost sm" id="salir" style="flex:1">Cerrar sesión</button>
+    </div>
+    ${S.demo ? `<div class="note warn" style="margin-top:11px"><b>Modo demostración.</b> Nada se guarda: al recargar la página se pierde todo.</div>` : ""}
+  </div>
+
+  ${S.demo ? "" : `<div class="card">
+    <h3>Cambiar tu contraseña</h3>
+    <div class="note" style="margin-bottom:12px">
+      Cámbiala cuando quieras. Solo afecta a tu cuenta y no necesita correo.
+    </div>
+    <div class="field">
+      <label for="nc1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
+      <input type="password" id="nc1" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="nc2">Repítela</label>
+      <input type="password" id="nc2" autocomplete="new-password">
+    </div>
+    <button class="btn ghost block" id="guardarNuevaClave">Guardar contraseña</button>
+  </div>`}
+
+  ${admin ? `<div class="card">
+    <h3>Descargar la base</h3>
+    <div class="note" style="margin-bottom:12px">
+      Como <b>${esc(S.user.rol)}</b> descargas la campaña completa con los datos actualizados
+      al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Cancelaciones</b>,
+      <b>Avance por ejecutivo</b>, <b>Seguimiento POS</b>, <b>Efectividad de contacto</b>,
+      <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
+    </div>
+    <button class="btn block" id="expXlsx">Descargar Excel completo (10 hojas)</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+      <button class="btn ghost sm" data-exp="base">Base en CSV</button>
+      <button class="btn ghost sm" data-exp="visitas">Visitas en CSV</button>
+      <button class="btn ghost sm" data-exp="cancelaciones">Cancelaciones en CSV</button>
+    </div>
+  </div>` : ""}
+
+  <div class="card">
+    <h3>Reglas activas</h3>
+    <div class="note" style="margin-bottom:11px">Estas reglas viven en la base de datos, no en esta pantalla. Aunque alguien manipulara el navegador, Postgres las vuelve a aplicar al guardar.</div>
+    <div class="kv"><dt>Dominio permitido</dt><dd>@${esc(CONFIG.dominio)}</dd></div>
+    <div class="kv"><dt>Alta de comercios</dt><dd>La hace el ejecutivo en campo; el customer_id es único en toda la campaña</dd></div>
+    <div class="kv"><dt>Contactos por comercio</dt><dd>Máximo 4, cada uno con celular o correo</dd></div>
+    <div class="kv"><dt>Cumple_Visita</dt><dd>SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar</dd></div>
+    <div class="kv"><dt>Intentos</dt><dd>Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio</dd></div>
+    <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
+    <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
+    <div class="kv"><dt>Cancelara_POS</dt><dd>SI automático al registrar una cancelación</dd></div>
+    <div class="kv"><dt>Plazo POS</dt><dd>${CONFIG.horasUtilesPOS} horas útiles = ${Math.round(CONFIG.horasUtilesPOS/CONFIG.horasUtilesPorDia)} días hábiles, sin sábados, domingos ni feriados</dd></div>
+    
+    <div class="kv"><dt>Feriados cargados</dt><dd>${CONFIG.feriados.length} fechas del Perú</dd></div>
+    <div class="kv"><dt>Zona horaria</dt><dd>America/Lima — fechas, horas y plazos se calculan en hora de Lima</dd></div>
+    ${admin ? `<div class="note" style="margin-top:11px">Para cambiar cualquiera de estas reglas, edita la tabla <b>config</b> en Supabase. No hay que tocar la aplicación.</div>` : ""}
+  </div>
+
+  <div class="card">
+    <h3>Tu aislamiento</h3>
+    <div class="note ok">
+      ${S.user.rol === "Ejecutivo"
+        ? `Ves <b>${cartera().length} comercios</b>: exactamente los que tú registraste. La base rechaza cualquier consulta fuera de tu cartera, así que ningún otro ejecutivo puede ver tus registros ni tú los suyos.`
+        : `Tu perfil <b>${esc(S.user.rol)}</b> ve la campaña completa: ${cartera().length} comercios y ${DB.todos().length} interacciones de todo el equipo.`}
+    </div>
+  </div>
+
+  ${admin ? `<div class="card">
+    <h3>Bitácora de cambios</h3>
+    <div class="note" style="margin-bottom:11px">
+      Cada edición y cada eliminación queda registrada con quién, cuándo y qué cambió. Los ejecutivos
+      no la ven. El medio de contacto, el resultado, la fecha y la ubicación no se pueden editar:
+      para corregirlos hay que eliminar el registro y volver a crearlo, y esa eliminación aparece aquí.
+    </div>
+    ${AUDITORIA.length ? `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Comercio</th><th>Cambio</th></tr></thead>
+      <tbody>${AUDITORIA.slice(0,40).map(a => `<tr>
+        <td style="white-space:nowrap">${fmtFecha(String(a.creado_en).slice(0,10))}<div style="font-size:11px;color:var(--muted)">${String(a.creado_en).slice(11,16)}</div></td>
+        <td>${esc(a.ejecutivo||"—")}</td>
+        <td><span class="chip ${a.accion==="eliminar"?"crit":"warn"}">${a.accion==="eliminar"?"Eliminó":"Editó"}</span>
+            <div style="font-size:11px;color:var(--muted)">${a.tabla==="clientes"?"Comercio":"Registro"}</div></td>
+        <td>${esc(a.comercio||a.customer_id||"—")}</td>
+        <td style="font-size:12px">${esc(resumenAuditoria(a))}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    ${AUDITORIA.length > 40 ? `<div class="note" style="margin-top:9px">Se muestran los 40 cambios más recientes de ${AUDITORIA.length}. El Excel trae la bitácora completa.</div>` : ""}`
+      : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas.</div>`}
+  </div>` : ""}
+
+  ${admin ? cardEquipo() : ""}`;
+}
+
+/* =========================================================================
+   Gestión del equipo — solo Analista y Manager
+   Las altas y las contraseñas pasan por un servicio en Supabase que guarda
+   la llave de administración; el navegador nunca la ve.
+   ========================================================================= */
+const ROLES = ["Ejecutivo", "Analista", "Manager"];
+
+async function equipoAPI(cuerpo){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) throw new Error("Tu sesión venció. Vuelve a entrar.");
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/equipo`, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", apikey: SUPABASE_ANON_KEY,
+              Authorization: "Bearer " + session.access_token },
+    body: JSON.stringify(cuerpo)
+  });
+  let j = {};
+  try { j = await r.json(); } catch { throw new Error("El servidor no respondió correctamente."); }
+  if (!r.ok || j.error) throw new Error(j.error || ("Error " + r.status));
+  return j;
+}
+
+function cardEquipo(){
+  return `
+  <div class="card">
+    <h3>Equipo · ${USUARIOS.length} persona${USUARIOS.length===1?"":"s"}</h3>
+    <div class="note" style="margin-bottom:12px">
+      Desde aquí das de alta a alguien nuevo, cambias su rol o lo das de baja. La contraseña se
+      genera al momento y se muestra una sola vez: cópiala y envíasela por mensaje directo.
+      En su primer ingreso el CRM le pedirá cambiarla.
+    </div>
+
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Comercios</th>
+        <th style="text-align:right">Registros</th><th></th></tr></thead>
+      <tbody>${USUARIOS.map(u => `<tr${u.activo === false ? ' style="opacity:.55"' : ""}>
+        <td><b>${esc(u.nombreCompleto || u.nombre)}</b>
+          <div style="font-size:11.5px;color:var(--muted)">${esc(u.correo)}</div>
+          ${u.activo === false ? `<span class="chip crit" style="font-size:10px">De baja</span>` : ""}</td>
+        <td><span class="chip ${u.rol==="Ejecutivo"?"no":"info"}">${esc(u.rol)}</span></td>
+        <td style="text-align:right" class="mono">${CLIENTES.filter(c=>c.asignado_correo===u.correo).length || "—"}</td>
+        <td style="text-align:right" class="mono">${DB.todos().filter(r=>r.Correo_Stratis===u.correo).length}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn ghost sm" data-eqedit="${esc(u.correo)}">Editar</button>
+          <button class="btn ghost sm" data-eqclave="${esc(u.correo)}">Contraseña</button>
+        </td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+
+    <button class="btn block" id="eqNuevo" style="margin-top:13px">＋ Agregar persona al equipo</button>
+    <div class="note" style="margin-top:11px">
+      Dar de baja a alguien le cierra el acceso de inmediato, pero <b>no borra su historial</b>:
+      sus comercios y registros siguen contando en la campaña y en el Excel.
+    </div>
+  </div>`;
+}
+
+function bindEquipo(){
+  if ($("#eqNuevo")) $("#eqNuevo").onclick = () => modalNuevoUsuario();
+  document.querySelectorAll("[data-eqedit]").forEach(b =>
+    b.onclick = () => modalEditarUsuario(b.dataset.eqedit));
+  document.querySelectorAll("[data-eqclave]").forEach(b =>
+    b.onclick = () => modalClaveUsuario(b.dataset.eqclave));
+}
+
+/* ---- Alta ---------------------------------------------------------------- */
+function modalNuevoUsuario(){
+  modal(`
+    <h3>Agregar persona al equipo</h3>
+    <div class="field"><label>Nombre completo <span class="req">*</span></label>
+      <input type="text" id="eqNom" placeholder="Ej.: Ana María Torres Díaz"></div>
+    <div class="field"><label>Nombre corto <span class="hint">— el que aparece en la app</span></label>
+      <input type="text" id="eqCorto" placeholder="Ej.: Ana Torres"></div>
+    <div class="field"><label>Correo corporativo <span class="req">*</span></label>
+      <input type="email" id="eqMail" inputmode="email" autocapitalize="off"
+             placeholder="nombre.apellido@${CONFIG.dominio}"></div>
+    <div class="field"><label>Rol <span class="req">*</span></label>
+      <select id="eqRol">
+        <option value="Ejecutivo">Ejecutivo — registra su propia cartera</option>
+        <option value="Analista">Analista — ve todo y descarga el Excel</option>
+        <option value="Manager">Manager — ve todo y descarga el Excel</option>
+      </select></div>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="eqOk" style="flex:1">Crear cuenta</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  $("#eqNom").oninput = () => {
+    const p = $("#eqNom").value.trim().split(/\s+/);
+    if (!$("#eqCorto").dataset.tocado && p.length >= 3)
+      $("#eqCorto").value = p[0] + " " + p[2];
+  };
+  $("#eqCorto").oninput = () => $("#eqCorto").dataset.tocado = "1";
+
+  $("#eqOk").onclick = async () => {
+    const nombre = $("#eqNom").value.trim();
+    const corto  = $("#eqCorto").value.trim() || nombre;
+    const correo = $("#eqMail").value.trim().toLowerCase();
+    const rol    = $("#eqRol").value;
+    const msg = $("#eqMsg");
+    if (nombre.length < 3) return msg.innerHTML = `<div class="err">Escribe el nombre completo.</div>`;
+    if (!correo.endsWith("@" + CONFIG.dominio))
+      return msg.innerHTML = `<div class="err">El correo debe ser @${CONFIG.dominio}.</div>`;
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Creando…";
+    try {
+      const r = await equipoAPI({ accion:"crear", correo, nombre, nombre_corto:corto, rol });
+      await recargarEquipo();
+      modalClaveLista(nombre, correo, r.clave, "Cuenta creada");
+    } catch (e) {
+      b.disabled = false; b.textContent = "Crear cuenta";
+      msg.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- Edición ------------------------------------------------------------- */
+function modalEditarUsuario(correo){
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return;
+  const yo = correo === S.user.correo;
+  modal(`
+    <h3>Editar a ${esc(u.nombre)}</h3>
+    <div class="note" style="margin-bottom:12px">${esc(correo)}${yo ? " — eres tú" : ""}</div>
+    <div class="field"><label>Nombre completo</label>
+      <input type="text" id="eqNom" value="${esc(u.nombreCompleto || u.nombre)}"></div>
+    <div class="field"><label>Nombre corto</label>
+      <input type="text" id="eqCorto" value="${esc(u.nombre)}"></div>
+    <div class="field"><label>Rol</label>
+      <select id="eqRol" ${yo ? "disabled" : ""}>
+        ${ROLES.map(r => `<option ${u.rol===r?"selected":""}>${r}</option>`).join("")}
+      </select>
+      ${yo ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">No puedes cambiar tu propio rol.</div>` : ""}
+    </div>
+    <div class="field"><label>Acceso</label>
+      <div class="opts">
+        <div class="opt ${u.activo !== false ? "on" : ""}" data-act="1"><span class="rd"></span>
+          <span><b>Activo</b><span>Puede entrar al CRM</span></span></div>
+        <div class="opt ${u.activo === false ? "on" : ""}" data-act="0"><span class="rd"></span>
+          <span><b>De baja</b><span>Pierde el acceso, su historial se conserva</span></span></div>
+      </div>
+    </div>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="eqOk" style="flex:1">Guardar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  let activo = u.activo !== false;
+  document.querySelectorAll("[data-act]").forEach(el => el.onclick = () => {
+    if (yo && el.dataset.act === "0") return;
+    activo = el.dataset.act === "1";
+    document.querySelectorAll("[data-act]").forEach(x =>
+      x.classList.toggle("on", (x.dataset.act === "1") === activo));
+  });
+
+  $("#eqOk").onclick = async () => {
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Guardando…";
+    try {
+      await equipoAPI({ accion:"guardar", correo,
+        nombre: $("#eqNom").value.trim(),
+        nombre_corto: $("#eqCorto").value.trim(),
+        rol: $("#eqRol").value, activo });
+      await recargarEquipo();
+      cerrarModal(); toast("Equipo actualizado"); render();
+    } catch (e) {
+      b.disabled = false; b.textContent = "Guardar";
+      $("#eqMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- Reasignar contraseña ------------------------------------------------ */
+function modalClaveUsuario(correo){
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return;
+  modal(`
+    <h3>Nueva contraseña</h3>
+    <p>Se generará una contraseña nueva para <b>${esc(u.nombre)}</b> (${esc(correo)}).
+    La anterior deja de funcionar de inmediato y en su próximo ingreso el CRM le pedirá
+    cambiarla por una suya.</p>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn" id="eqOk" style="flex:1">Generar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+  $("#eqOk").onclick = async () => {
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Generando…";
+    try {
+      const r = await equipoAPI({ accion:"clave", correo });
+      modalClaveLista(u.nombre, correo, r.clave, "Contraseña reasignada");
+    } catch (e) {
+      b.disabled = false; b.textContent = "Generar";
+      $("#eqMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- La contraseña se muestra una sola vez ------------------------------- */
+function modalClaveLista(nombre, correo, clave, titulo2){
+  modal(`
+    <h3>${esc(titulo2)}</h3>
+    <div class="note ok" style="margin-bottom:12px">
+      <b>${esc(nombre)}</b> ya puede entrar con <b>${esc(correo)}</b>.
+    </div>
+    <div class="field">
+      <label>Contraseña inicial <span class="hint">— se muestra solo esta vez</span></label>
+      <input type="text" id="eqClave" value="${esc(clave)}" readonly
+             style="font-family:ui-monospace,monospace;font-size:17px;text-align:center;letter-spacing:.5px">
+    </div>
+    <button class="btn ghost block" id="eqCopiar" style="margin-bottom:10px">Copiar contraseña</button>
+    <div class="note" style="margin-bottom:12px">
+      Envíasela por mensaje directo, nunca en un grupo. Si se pierde, generas otra desde
+      el botón <b>Contraseña</b> de la lista.
+    </div>
+    <button class="btn block" onclick="cerrarModal()">Listo</button>`);
+  $("#eqCopiar").onclick = async () => {
+    const i = $("#eqClave");
+    try { await navigator.clipboard.writeText(i.value); toast("Contraseña copiada"); }
+    catch { i.select(); document.execCommand("copy"); toast("Contraseña copiada"); }
+  };
+  const cerrar = $("#overlay").querySelector(".btn.block:last-of-type");
+  if (cerrar) cerrar.onclick = () => { cerrarModal(); render(); };
+}
+
+async function recargarEquipo(){
+  const { data, error } = await sb.from("usuarios").select("*").order("rol");
+  if (error) return;
+  USUARIOS = (data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
+    nombreCompleto: u.nombre, correo: u.correo, rol: u.rol, activo: u.activo }));
+  await cargarAuditoria();
+}
+
+/* =========================================================================
+   Enlaces de interfaz y arranque
+   ========================================================================= */
+let qTimer = null;
+
+function bindExtras(){
+  const q = $("#q");
+  if (q){
+    q.oninput = e => {
+      S.q = e.target.value; S.limite = 40;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#q");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  document.querySelectorAll(".pill[data-f]").forEach(b => b.onclick = () => {
+    const map = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
+                  ejecutivo:"fEjecutivo", distrito:"fDistrito" };
+    S[map[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
+  });
+  if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
+  if ($("#masReg")) $("#masReg").onclick = () => { S.limiteReg += 40; render(); };
+
+  const qr = $("#qReg");
+  if (qr){
+    qr.oninput = e => {
+      S.qReg = e.target.value; S.limiteReg = 40;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#qReg");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.fResultado = b.dataset.fr; S.limiteReg = 40; render(); });
+  document.querySelectorAll("[data-fm]").forEach(b => b.onclick = () => { S.fMedio = b.dataset.fm; S.limiteReg = 40; render(); });
+  document.querySelectorAll("[data-fe]").forEach(b => b.onclick = () => { S.fEjecReg = b.dataset.fe; S.limiteReg = 40; render(); });
+
+  document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
+  if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
+  if ($("#expXlsx2")) $("#expXlsx2").onclick = e => exportarExcel(e.currentTarget);
+
+  if (typeof bindEquipo === "function") bindEquipo();
+  if ($("#salir")) $("#salir").onclick = salir;
+  if ($("#guardarNuevaClave")) $("#guardarNuevaClave").onclick = async () => {
+    const a = ($("#nc1").value || ""), b = ($("#nc2").value || "");
+    if (a.length < 8) return toast("La contraseña debe tener al menos 8 caracteres");
+    if (a !== b)      return toast("Las dos contraseñas no coinciden");
+    const btn = $("#guardarNuevaClave"); btn.disabled = true; btn.textContent = "Guardando…";
+    const { error } = await sb.auth.updateUser({ password:a, data:{ debe_cambiar:false } });
+    btn.disabled = false; btn.textContent = "Guardar contraseña";
+    if (error) return toast("No se pudo cambiar: " + error.message);
+    $("#nc1").value = ""; $("#nc2").value = "";
+    toast("Contraseña actualizada");
+  };
+  if ($("#recargar")) $("#recargar").onclick = async () => {
+    if (S.demo) return toast("En modo demostración no hay nada que recargar");
+    const b = $("#recargar"); b.disabled = true; b.textContent = "Actualizando…";
+    try { await refrescar(); toast("Datos actualizados"); }
+    catch (e) { toast("No se pudo actualizar: " + e.message); }
+    render();
+  };
+}
+
+/* ---- Cabecera ---------------------------------------------------------- */
+document.getElementById("btnTheme").onclick = () => {
+  const d = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", d ? "light" : "dark");
+};
+document.getElementById("btnUser").onclick = () => {
+  if (!S.user) return;
+  modal(`
+    <h3>${esc(S.user.nombreCompleto || S.user.nombre)}</h3>
+    <p>${esc(S.user.correo)} · ${esc(S.user.rol)}<br>
+    Cartera visible: <b>${cartera().length}</b> clientes · Registros propios:
+    <b>${DB.todos().filter(r => r.Correo_Stratis === S.user.correo).length}</b></p>
+    <div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn ghost" style="flex:1" id="mAjustes">Ajustes</button>
+      <button class="btn ghost" style="flex:1" id="mSalir">Cerrar sesión</button>
+    </div>`);
+  $("#mAjustes").onclick = () => { cerrarModal(); go("ayuda"); };
+  $("#mSalir").onclick   = () => { cerrarModal(); salir(); };
+};
+
+/* ---- Arranque ---------------------------------------------------------- */
+(async () => {
+  try {
+    if (!window.supabase && configurado())
+      throw new Error("No se pudo cargar la librería de Supabase desde internet. Revisa la conexión o si la red de la empresa bloquea jsdelivr.net.");
+    const listo = await iniciarSupabase();
+    if (!listo) return renderLogin();
+    sb.auth.onAuthStateChange((evento, session) => {
+      if (evento === "SIGNED_IN" && !S.user && session) entrar(session).catch(mostrarFallo);
+      if (evento === "SIGNED_OUT" && S.user) salir();
+    });
+    await comprobarSesion();
+  } catch (e) { mostrarFallo(e); }
+})();
+
+function mostrarFallo(e){
+  $("#login").classList.remove("hidden");
+  $("#app").classList.add("hidden");
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div></div>
+    <div class="err"><b>No se pudo conectar con la base de datos.</b><br>${esc(e.message || e)}</div>
+    <div class="note">Revisa que la URL y la llave <code>anon</code> del proyecto sean correctas y que hayas ejecutado
+    <b>01_esquema.sql</b> y <b>02_datos.sql</b> en el SQL Editor de Supabase.</div>
+    <button class="btn block" style="margin-top:12px" onclick="location.reload()">Reintentar</button>
+  </div>`;
+}
+
+</script>
+</body>
+</html>
