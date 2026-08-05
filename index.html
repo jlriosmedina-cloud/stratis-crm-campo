@@ -252,13 +252,13 @@ table.tbl tr:last-child td{border-bottom:0}
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
 
-   v2 — la cartera la construye cada ejecutivo en campo. Ya no hay base
-   precargada: el ejecutivo da de alta al comercio digitando su customer_id.
+   v3 — cartera en campo y sin datos sensibles. El único dato que viene de
+   BBVA es el customer_id; el nombre del comercio lo escribe el ejecutivo.
    ========================================================================= */
 "use strict";
 
-const SUPABASE_URL      = "https://ljypfsvmoymbhybpkrim.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_spNoHfQLCAcUR0nX7CefVw_e22si7tX";  // publishable — pública por diseño
+const SUPABASE_URL      = "https://xwvpnagvdrjffayzsnke.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";  // publishable — pública por diseño
 
 const CONFIG = {
   dominio: "mystratis.com",
