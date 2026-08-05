@@ -2874,8 +2874,8 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:12px">
       El archivo trae <b>dos hojas</b>. <b>Resumen BBVA</b> con los comercios de la cartera, que
       pegas por Customer ID. Y <b>Clientes nuevos</b> con las ventas que trae Stratis: como el banco
-      todavía no las tiene afiliadas, van identificadas por <b>RUC</b> y con razón social y contacto
-      para que puedan darlas de alta.
+      todavía no las tiene afiliadas, van identificadas por <b>RUC</b> y razón social. En esa hoja
+      Gestión sale siempre SI: la derivación ya cuenta como venta.
     </div>
     <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
@@ -2894,8 +2894,10 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:11px">Estas reglas viven en la base de datos, no en esta pantalla. Aunque alguien manipulara el navegador, Postgres las vuelve a aplicar al guardar.</div>
     <div class="kv"><dt>Dominio permitido</dt><dd>@${esc(CONFIG.dominio)}</dd></div>
     <div class="kv"><dt>Alta de comercios</dt><dd>La hace el ejecutivo en campo; el customer_id es único en toda la campaña</dd></div>
-    <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan razón social, RUC, teléfonos ni personas de contacto</dd></div>
+    <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para poder identificar la venta</dd></div>
     <div class="kv"><dt>Cumple_Visita</dt><dd>SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar</dd></div>
+    <div class="kv"><dt>Gestión = SI</dt><dd>Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó</dd></div>
+    <div class="kv"><dt>Cliente nuevo</dt><dd>La derivación es la venta: no se pide resultado y la base la marca sola</dd></div>
     <div class="kv"><dt>Intentos</dt><dd>Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio</dd></div>
     <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
     <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
