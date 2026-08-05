@@ -1374,11 +1374,7 @@ function renderFormCliente(){
       Márcalo cuando cierres con el comercio. Es lo que BBVA lee como
       <b>objetivo cumplido</b> en su archivo; mientras esté pendiente va como NO.
     </div>
-    <div class="field" style="margin-bottom:0">
-      <select data-c="resultado_gestion">
-        ${RESULTADOS_GESTION.map(g => `<option value="${g.id}" ${f.resultado_gestion===g.id?"selected":""}>${esc(g.label)} — ${esc(g.desc)}</option>`).join("")}
-      </select>
-    </div>
+    <div id="boxGestion"></div>
   </div>
 
   <div class="card">
@@ -1408,6 +1404,7 @@ function renderFormCliente(){
   $("#view").querySelectorAll("[data-estado]").forEach(el => el.onclick = () => {
     f.estado = el.dataset.estado;
     $("#view").querySelectorAll("[data-estado]").forEach(x => x.classList.toggle("on", x.dataset.estado === f.estado));
+    pintarGestion();   // el estado decide si el cierre puede ser retención o venta
   });
   $("#view").querySelectorAll("[data-tipo-reg]").forEach(el => el.onclick = () => {
     if (editando) return;                       // el origen no cambia después del alta
@@ -1418,6 +1415,54 @@ function renderFormCliente(){
   });
   $("#guardarCli").onclick = guardarCliente;
   pintarRubroOtro(); pintarIdentificacion();
+}
+
+/* ---------------------------------------------------------------------------
+   Qué cierres puede elegir el ejecutivo
+
+   Dos reglas, las mismas que vigila la base:
+   · Retenido y Venta solo existen si ya hubo un contacto logrado. Sin eso,
+     BBVA recibiría un objetivo cumplido con cero visitas y cero llamadas.
+   · Retenido es para un comercio activo; si al gestionarlo figuraba dado de
+     baja y se recuperó, eso es una venta y se deriva al ejecutivo de BBVA.
+   --------------------------------------------------------------------------- */
+function hayContactoLogrado(cid){
+  return !!cid && DB.delCliente(cid).some(r => esEfectivo(r.Resultado));
+}
+
+function gestionesPosibles(){
+  const f = S.formCli;
+  const logrado = hayContactoLogrado(S.editCli);
+  return RESULTADOS_GESTION.filter(g => {
+    if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
+    if (!logrado) return false;
+    if (g.id === "RETENIDO") return f.estado === "ACTIVO";
+    if (g.id === "VENTA")    return f.estado === "DE BAJA";
+    return true;
+  });
+}
+
+function pintarGestion(){
+  const f = S.formCli, box = $("#boxGestion");
+  if (!box) return;
+  const posibles = gestionesPosibles();
+  if (!posibles.some(g => g.id === f.resultado_gestion)) f.resultado_gestion = "PENDIENTE";
+  const logrado = hayContactoLogrado(S.editCli);
+  const aviso = !logrado
+    ? `Todavía no hay ningún contacto logrado con este comercio, así que el cierre no se puede marcar.
+       Registra la gestión en la que hablaste con el titular y después vuelve acá.`
+    : f.estado === "ACTIVO"
+      ? `El comercio figura <b>activo</b>: si se queda con BBVA es una <b>retención</b>.`
+      : `El comercio figura <b>dado de baja</b>: si lo recuperaste es una <b>venta</b>, y se deriva al
+         ejecutivo de BBVA. Si no lo recuperaste, no hay retención que contar.`;
+  box.innerHTML = `
+    <div class="field" style="margin-bottom:0">
+      <select data-c="resultado_gestion">
+        ${posibles.map(g => `<option value="${g.id}" ${f.resultado_gestion===g.id?"selected":""}>${esc(g.label)} — ${esc(g.desc)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="note ${logrado ? "" : "warn"}" style="margin:11px 0 0">${aviso}</div>`;
+  box.querySelectorAll("[data-c]").forEach(el => el.onchange = () => f[el.dataset.c] = el.value);
 }
 
 /* La identificación cambia según el origen: Customer ID, o RUC y razón social
@@ -1471,6 +1516,7 @@ function camposSegunOrigen(){
   // siguiente corte. Para el ejecutivo la derivación ya cuenta, así que va
   // como venta y no se pregunta.
   if (nuevo) S.formCli.resultado_gestion = "VENTA";
+  else pintarGestion();
 }
 
 /* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
