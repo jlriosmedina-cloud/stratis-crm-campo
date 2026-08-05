@@ -243,7 +243,11 @@ table.tbl tr:last-child td{border-bottom:0}
 .nota-ficha{padding:11px 12px}
 
 /* ---------- VIÁTICOS ---------- */
-.money{display:flex;align-items:center;gap:0}
+/* Un campo de contraseña de 1300 px no ayuda a nadie */
+.campo-corto input, .campo-corto select{max-width:360px}
+.card .btn.block.limitado{max-width:360px}
+
+.money{display:flex;align-items:center;gap:0;max-width:280px}
 .money span{padding:11px 11px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;
   background:var(--surface-2);color:var(--muted);font-weight:650;font-size:13.5px}
 .money input{border-radius:0 10px 10px 0!important;font-variant-numeric:tabular-nums}
@@ -285,13 +289,15 @@ table.tbl tr:last-child td{border-bottom:0}
   .cl-grid{grid-template-columns:repeat(2,1fr);gap:11px}
   .cl{padding:14px 15px}
 
-  /* Los formularios dejan de ser una columna larga: fluyen en dos, sin huecos.
-     Las tarjetas nunca se parten a la mitad. */
-  .view-form{column-count:2;column-gap:16px}
-  .view-form > *{break-inside:avoid}
+  /* Los formularios y los ajustes dejan de ser una columna larga: fluyen en
+     dos, sin huecos. Las tarjetas nunca se parten a la mitad. */
+  .view-form, .view-cols{column-count:2;column-gap:16px}
+  .view-form > *, .view-cols > *{break-inside:avoid}
   .view-form > .back,
   .view-form > .sticky-actions{column-span:all}
   .view-form > .card:first-of-type{column-span:all}
+  /* Las tarjetas con tabla necesitan el ancho completo */
+  .view-cols > .card:has(.tbl-wrap){column-span:all}
   .view-form .sticky-actions{position:static;justify-content:flex-end;
     background:none;border-top:1px solid var(--grid);padding-top:14px}
   .view-form .sticky-actions .btn{flex:none;min-width:210px}
@@ -952,7 +958,7 @@ function render(){
   $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
   renderNav();
   const v = $("#view");
-  v.className = /^form_/.test(S.tab) ? "view-form" : "";
+  v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-cols" : "");
   if (S.tab === "form_cliente")           return renderFormCliente();
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
   else if (S.tab === "form_visita")       return renderFormulario();
@@ -2550,15 +2556,15 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:12px">
       Cámbiala cuando quieras. Solo afecta a tu cuenta y no necesita correo.
     </div>
-    <div class="field">
+    <div class="field campo-corto">
       <label for="nc1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
       <input type="password" id="nc1" autocomplete="new-password">
     </div>
-    <div class="field">
+    <div class="field campo-corto">
       <label for="nc2">Repítela</label>
       <input type="password" id="nc2" autocomplete="new-password">
     </div>
-    <button class="btn ghost block" id="guardarNuevaClave">Guardar contraseña</button>
+    <button class="btn ghost block limitado" id="guardarNuevaClave">Guardar contraseña</button>
   </div>`}
 
   ${admin ? `<div class="card">
