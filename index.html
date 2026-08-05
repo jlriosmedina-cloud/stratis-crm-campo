@@ -390,6 +390,16 @@ const CALIFICACIONES = [
 
 const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
 
+/* Cierre de la gestión. Es lo que alimenta la columna "Gestión" del archivo
+   de BBVA: SI cuando se retuvo o se vendió, NO en cualquier otro caso. */
+const RESULTADOS_GESTION = [
+  { id:"PENDIENTE", label:"Pendiente",  desc:"Todavía se está trabajando",              bbva:"NO" },
+  { id:"RETENIDO",  label:"Retenido",   desc:"El comercio se queda con el POS BBVA",    bbva:"SI" },
+  { id:"VENTA",     label:"Venta",      desc:"Se concretó una venta o ampliación",      bbva:"SI" },
+  { id:"PERDIDO",   label:"Perdido",    desc:"Se fue a la competencia o cerró",         bbva:"NO" }
+];
+const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
+
 /* Sugerencias de distrito — el campo acepta cualquier texto */
 const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO","CARABAYLLO",
  "CERCADO DE LIMA","CHACLACAYO","CHORRILLOS","CIENEGUILLA","COMAS","EL AGUSTINO","INDEPENDENCIA",
@@ -1098,6 +1108,7 @@ function cardCliente(c){
         <span class="chip info">${esc(rubroLabel(c))}</span>
         <span class="chip ${st.chip}">${st.label}</span>
         ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
+        ${gestionCumplida(c) ? `<span class="chip ok">${c.resultado_gestion === "VENTA" ? "Venta" : "Retenido"}</span>` : ""}
         ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
       </div>
     </div>
@@ -1148,6 +1159,8 @@ function viewFicha(c){
       <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
       <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
       <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>
+      <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
       <div style="margin-top:11px">
@@ -1228,7 +1241,8 @@ function itemTimeline(r){
 function nuevoFormCliente(){
   return {
     customer_id:"", nombre_comercio:"", rubro:"", rubro_otro:"",
-    distrito:"", direccion:"", estado:"ACTIVO", observacion:""
+    distrito:"", direccion:"", estado:"ACTIVO",
+    resultado_gestion:"PENDIENTE", observacion:""
   };
 }
 
@@ -1239,6 +1253,7 @@ function formDeCliente(c){
     rubro: c.rubro, rubro_otro: c.rubro_otro || "",
     distrito: c.distrito || "", direccion: c.direccion || "",
     estado: c.estado || "ACTIVO",
+    resultado_gestion: c.resultado_gestion || "PENDIENTE",
     observacion: c.observacion || ""
   };
 }
@@ -1318,6 +1333,19 @@ function renderFormCliente(){
     <div class="field" style="margin-bottom:0">
       <label>Dirección <span class="req">*</span></label>
       <input type="text" data-c="direccion" value="${esc(f.direccion)}" placeholder="Ej.: Av. La Marina 1520, int. 3">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Resultado de la gestión</h3>
+    <div class="note" style="margin-bottom:11px">
+      Márcalo cuando cierres con el comercio. Es lo que BBVA lee como
+      <b>objetivo cumplido</b> en su archivo; mientras esté pendiente va como NO.
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <select data-c="resultado_gestion">
+        ${RESULTADOS_GESTION.map(g => `<option value="${g.id}" ${f.resultado_gestion===g.id?"selected":""}>${esc(g.label)} — ${esc(g.desc)}</option>`).join("")}
+      </select>
     </div>
   </div>
 
@@ -1402,6 +1430,7 @@ async function guardarCliente(){
     distrito: String(f.distrito).trim().toUpperCase(),
     direccion: String(f.direccion).trim(),
     estado: f.estado,
+    resultado_gestion: f.resultado_gestion || "PENDIENTE",
     observacion: String(f.observacion).trim() || null
   };
 
@@ -2225,7 +2254,7 @@ function viewPanel(){
    Exportación a Excel — estructura v3 (cartera en campo, sin datos sensibles)
    ========================================================================= */
 const COLS_BASE = ["customer_id","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
-  "Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Estado_Gestion","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Intentos","Contactos_Efectivos","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
   "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
@@ -2246,7 +2275,8 @@ function filasBase(){
   return cartera().map(c => {
     const b = RULES.recomputarBase(c.customer_id);
     return [c.customer_id, c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
-      c.estado, c.asignado, c.asignado_correo,
+      c.estado, (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
+      c.asignado, c.asignado_correo,
       String(c.creado_en || "").slice(0,10)]
       .concat([b._intentos, b._efectivos,
         DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
@@ -2347,7 +2377,8 @@ const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_c
   calificacion:"Calificación", evidencia_path:"Evidencia", nombre_comercio:"Nombre del comercio",
   gasto_total:"Monto de viáticos", gastos_paths:"Comprobantes de gasto",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
-  estado:"Estado del cliente", observacion:"Observación" };
+  estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
+  observacion:"Observación" };
 const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
@@ -2377,20 +2408,18 @@ function hojaUsuarios(){
 }
 
 /* =========================================================================
-   Resumen para BBVA — una fila por comercio, columnas planas.
-   Los nombres replican la plantilla del banco para poder pegar el bloque.
-
-   Cumple_Visita = SI cuando la gestión fue presencial O virtual y además se
-   logró hablar. Basta con una de las dos: por eso van las dos columnas.
+   Resumen para BBVA — una fila por comercio, en el formato exacto del banco.
+   Los nombres, el orden y la cantidad de columnas son los de su archivo, para
+   que el bloque se pegue tal cual sin reordenar nada.
    ========================================================================= */
 const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
-  "Fecha de llamada o visita","Direccion_Actual","Distrito_Actual",
-  "Contactado (Si/No)","Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
+  "Fecha de llamada o visita","Direccion_Actual","Contactado (Si/No)",
+  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita","Volumen_Comercio"];
 
-/* Columnas propias de Stratis, para el análisis interno */
-const COLS_BBVA_EXTRA = ["Intentos","Contactos_Efectivos","Reuniones_Virtuales","Medio_Efectivo",
-  "Medio_Cumple_Visita","Ultimo_Resultado","Comentario_Ejecutivo","Calificacion",
-  "Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
+/* Columnas propias de Stratis, para el análisis interno. No van al banco. */
+const COLS_BBVA_EXTRA = ["Resultado_Gestion","Distrito","Intentos","Contactos_Efectivos",
+  "Reuniones_Virtuales","Medio_Efectivo","Medio_Cumple_Visita","Ultimo_Resultado",
+  "Comentario_Ejecutivo","Calificacion","Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
 const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
@@ -2399,28 +2428,29 @@ function filasBBVA(extra){
   return cartera().map(c => {
     const regs = DB.delCliente(c.customer_id);              // del más reciente al más antiguo
     const efectivos = regs.filter(r => esEfectivo(r.Resultado));
-    const ref = efectivos[0] || regs[0] || null;            // el efectivo manda; si no, el último intento
     const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
-    // El comentario más reciente que exista, aunque venga de un intento anterior:
-    // a BBVA le sirve saber qué se dijo, sin importar en cuál gestión fue.
+    // El comentario más reciente que exista, aunque venga de una gestión anterior
     const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
     const base = [
       c.customer_id,
-      ref ? nomTipo(ref.Tipo_Contacto).toUpperCase() : "",
+      gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
       ultimo("Comentario_Cliente"),
       regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
       regs.filter(r => r.Tipo_Contacto === "llamada").length,
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
       c.direccion || "",
-      titulo(c.distrito || ""),
-      efectivos.length ? "Si" : "No",
-      regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "No",
-      regs.some(r => ES_VIRTUAL(r.Tipo_Contacto))    ? "SI" : "No",
-      cumplidas.length ? "SI" : "No",
-      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : ""
+      efectivos.length ? "SI" : "NO",
+      regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "NO",
+      regs.some(r => ES_VIRTUAL(r.Tipo_Contacto))    ? "SI" : "NO",
+      cumplidas.length ? "SI" : "NO",
+      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : "",
+      ""                                                    // Volumen_Comercio: lo completa BBVA
     ];
     if (!extra) return base;
+    const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
     return base.concat([
+      g ? g.label : "",
+      titulo(c.distrito || ""),
       regs.length,
       efectivos.length,
       regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length,
@@ -2584,23 +2614,25 @@ function viewAyuda(){
   <div class="card">
     <h3>Resumen para BBVA</h3>
     <div class="note" style="margin-bottom:12px">
-      Una fila por comercio, en columnas planas y con los mismos nombres que el archivo del banco:
-      <b>Gestión</b>, <b>Visitas</b>, <b>Llamadas</b>, <b>Fecha de llamada o visita</b>,
-      <b>Contactado (Si/No)</b>, <b>Visita_Presencial</b>, <b>Visita_Virtual</b>,
-      <b>Cumple_Visita</b> y <b>Fecha_Visita</b>. Se busca por <b>customer_id</b> y se pega.
+      Las <b>13 columnas del archivo del banco</b>, en su orden exacto y con sus nombres:
+      customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita,
+      Direccion_Actual, Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita,
+      Fecha_Visita y Volumen_Comercio. Se busca por <b>customer_id</b> y se pega.
     </div>
     <div class="note" style="margin-bottom:12px">
-      <b>Cumple_Visita = SI</b> cuando la gestión fue presencial <b>o</b> virtual y además se logró
-      hablar con el contacto. Basta con una de las dos, por eso van ambas columnas.
+      <b>Gestión = SI</b> cuando el comercio quedó como <b>Retenido</b> o <b>Venta</b>. Mientras siga
+      pendiente o se haya perdido va NO. Lo marca el ejecutivo en la ficha del comercio.<br>
+      <b>Cumple_Visita = SI</b> si la gestión fue presencial <b>o</b> virtual y además se logró hablar.<br>
+      <b>Volumen_Comercio</b> sale vacía: la completa BBVA.
     </div>
     <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
       <button class="btn ghost sm" data-exp="bbva">Solo las columnas de BBVA, en CSV</button>
     </div>
     <div class="note" style="margin-top:11px">
-      El Excel trae además, a la derecha, las columnas propias de Stratis —intentos, contactos
-      efectivos, medio efectivo, comentario del ejecutivo, calificación y ejecutivo asignado—
-      para tu análisis. Esas no se pegan en el archivo del banco.
+      El Excel trae además, a la derecha de la columna 13, las columnas propias de Stratis
+      —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo, comentarios,
+      calificación y ejecutivo asignado— para tu análisis. Esas no se pegan en el archivo del banco.
     </div>
   </div>` : ""}
 
