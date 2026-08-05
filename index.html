@@ -2370,6 +2370,82 @@ function hojaUsuarios(){
       DB.todos().filter(r => r.Correo_Stratis === u.correo).length]));
 }
 
+/* =========================================================================
+   Resumen para BBVA — una fila por comercio, columnas planas.
+   Los nombres y el orden replican la plantilla del banco para que el bloque
+   se pueda pegar directo. Las tres columnas de datos del titular van vacías
+   a propósito: esta base no los guarda, y así el pegado no se desalinea.
+   ========================================================================= */
+const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
+  "Fecha de llamada o visita","Direccion_Actual","Distrito_Actual",
+  "RRLL_Actual","Celular_Actual","Correo_Actual",
+  "Contactado (Si/No)","Visita_Presencial","Cumple_Visita","Fecha_Visita"];
+
+/* Columnas propias de Stratis, para el análisis interno */
+const COLS_BBVA_EXTRA = ["Intentos","Contactos_Efectivos","Medio_Efectivo","Ultimo_Resultado",
+  "Comentario_Ejecutivo","Calificacion","Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
+
+const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
+
+function filasBBVA(extra){
+  return cartera().map(c => {
+    const regs = DB.delCliente(c.customer_id);              // del más reciente al más antiguo
+    const efectivos = regs.filter(r => esEfectivo(r.Resultado));
+    const ref = efectivos[0] || regs[0] || null;            // el efectivo manda; si no, el último intento
+    const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
+    // El comentario más reciente que exista, aunque venga de un intento anterior:
+    // a BBVA le sirve saber qué se dijo, sin importar en cuál gestión fue.
+    const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+    const base = [
+      c.customer_id,
+      ref ? nomTipo(ref.Tipo_Contacto).toUpperCase() : "",
+      ultimo("Comentario_Cliente"),
+      regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
+      regs.filter(r => r.Tipo_Contacto === "llamada").length,
+      regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
+      c.direccion || "",
+      titulo(c.distrito || ""),
+      "", "", "",                                           // RRLL, celular y correo: no se guardan
+      efectivos.length ? "Si" : "No",
+      regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "No",
+      cumplidas.length ? "SI" : "No",
+      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : ""
+    ];
+    if (!extra) return base;
+    return base.concat([
+      regs.length,
+      efectivos.length,
+      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "",
+      regs[0] ? nomResultado(regs[0].Resultado) : "",
+      ultimo("Comentario_Ejecutivo"),
+      ultimo("Calificacion"),
+      c.asignado || "",
+      c.estado || "",
+      rubroLabel(c),
+      String(c.creado_en || "").slice(0,10)
+    ]);
+  });
+}
+
+function hojaBBVA(){
+  const cols = COLS_BBVA.concat(COLS_BBVA_EXTRA);
+  const ws = hoja(cols, filasBBVA(true));
+  // marca visualmente dónde termina el bloque que se pega en el archivo del banco
+  ws["!cols"] = cols.map((c,i) => ({ wch: i === 2 || i === 19 ? 46 : Math.min(30, Math.max(12, c.length + 3)) }));
+  return ws;
+}
+
+async function exportarBBVA(btn){
+  if (!window.XLSX) return toast("La librería de Excel aún no cargó, intenta de nuevo");
+  if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
+  try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hojaBBVA(), "Resumen BBVA");
+  XLSX.writeFile(wb, `Resumen_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
+  if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
+  toast(`Resumen generado · ${cartera().length} comercios`);
+}
+
 function hojaReporte(admin){
   const base = cartera();
   base.forEach(c => RULES.recomputarBase(c.customer_id));
@@ -2415,6 +2491,7 @@ async function exportarExcel(btn){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Efectividad de contacto");
     XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
+    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Resumen BBVA");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
     XLSX.utils.book_append_sheet(wb, hojaBitacora(),      "Bitácora");
@@ -2432,7 +2509,8 @@ async function exportarExcel(btn){
 
 function exportarCSV(que){
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
-                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"] };
+                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
+                 bbva:[COLS_BBVA, filasBBVA(false), "Resumen_BBVA"] };
   const [cols, filas, nombre] = mapa[que];
   const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
   const csv = "\ufeff" + [cols.map(q).join(";")].concat(filas.map(f => f.map(q).join(";"))).join("\r\n");
@@ -2484,12 +2562,35 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:12px">
       Como <b>${esc(S.user.rol)}</b> descargas la campaña completa con los datos actualizados
       al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Avance por ejecutivo</b>,
-      <b>Efectividad de contacto</b>, <b>Viáticos</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
+      <b>Efectividad de contacto</b>, <b>Viáticos</b>, <b>Resumen BBVA</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
     </div>
-    <button class="btn block" id="expXlsx">Descargar Excel completo (9 hojas)</button>
+    <button class="btn block" id="expXlsx">Descargar Excel completo (10 hojas)</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
       <button class="btn ghost sm" data-exp="base">Base en CSV</button>
       <button class="btn ghost sm" data-exp="visitas">Visitas en CSV</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Resumen para BBVA</h3>
+    <div class="note" style="margin-bottom:12px">
+      Una fila por comercio, en columnas planas y con los mismos nombres que el archivo del banco:
+      <b>Gestión</b>, <b>Visitas</b>, <b>Llamadas</b>, <b>Fecha de llamada o visita</b>,
+      <b>Contactado (Si/No)</b>, <b>Visita_Presencial</b>, <b>Cumple_Visita</b> y <b>Fecha_Visita</b>.
+      Se busca por <b>customer_id</b> y se pega.
+    </div>
+    <div class="note warn" style="margin-bottom:12px">
+      Las columnas <b>RRLL_Actual</b>, <b>Celular_Actual</b> y <b>Correo_Actual</b> salen vacías:
+      esta base no guarda esos datos. Van igual para que el bloque no se desalinee al pegarlo.
+    </div>
+    <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
+      <button class="btn ghost sm" data-exp="bbva">Solo las columnas de BBVA, en CSV</button>
+    </div>
+    <div class="note" style="margin-top:11px">
+      El Excel trae además, a la derecha, las columnas propias de Stratis —intentos, contactos
+      efectivos, medio efectivo, comentario del ejecutivo, calificación y ejecutivo asignado—
+      para tu análisis. Esas no se pegan en el archivo del banco.
     </div>
   </div>` : ""}
 
@@ -2829,6 +2930,7 @@ function bindExtras(){
   document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
   if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
   if ($("#expXlsx2")) $("#expXlsx2").onclick = e => exportarExcel(e.currentTarget);
+  if ($("#expBBVA"))  $("#expBBVA").onclick  = e => exportarBBVA(e.currentTarget);
 
   if (typeof bindEquipo === "function") bindEquipo();
   if ($("#salir")) $("#salir").onclick = salir;
