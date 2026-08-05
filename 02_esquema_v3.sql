@@ -174,6 +174,25 @@ declare
   v_virtual    boolean;
   v_dias       int;
 begin
+  -- Lo que quedó registrado no se toca. Al editar solo se pueden corregir
+  -- comentarios, calificación y la entrega del POS; todo lo demás se restaura
+  -- desde la fila original, venga de donde venga la petición.
+  if tg_op = 'UPDATE' then
+    new.tipo               := old.tipo;
+    new.customer_id        := old.customer_id;
+    new.correo_stratis     := old.correo_stratis;
+    new.ejecutivo          := old.ejecutivo;
+    new.fecha_contacto     := old.fecha_contacto;
+    new.hora_contacto      := old.hora_contacto;
+    new.tipo_contacto      := old.tipo_contacto;
+    new.resultado          := old.resultado;
+    new.ubicacion          := old.ubicacion;
+    new.ubicacion_verificada := old.ubicacion_verificada;
+    new.evidencia_path     := old.evidencia_path;
+    new.motivo_cancelacion := old.motivo_cancelacion;
+    new.creado_en          := old.creado_en;
+  end if;
+
   v_presencial := new.tipo_contacto in ('visita_presencial','reunion_presencial');
   v_virtual    := new.tipo_contacto in ('reunion_virtual','videollamada');
 
@@ -205,17 +224,8 @@ begin
     new.hora_entrega_pos  := null;
   end if;
 
-  if auth.role() = 'authenticated' then
+  if tg_op = 'INSERT' and auth.role() = 'authenticated' then
     new.correo_stratis := public.correo_actual();
-  end if;
-
-  -- La ubicación se captura una sola vez y no se puede alterar después.
-  if tg_op = 'UPDATE' then
-    new.ubicacion      := old.ubicacion;
-    new.ubicacion_verificada := old.ubicacion_verificada;
-    new.customer_id    := old.customer_id;
-    new.correo_stratis := old.correo_stratis;
-    new.creado_en      := old.creado_en;
   end if;
 
   new.modificado_en := now();
