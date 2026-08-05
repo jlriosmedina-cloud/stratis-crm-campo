@@ -2372,20 +2372,22 @@ function hojaUsuarios(){
 
 /* =========================================================================
    Resumen para BBVA — una fila por comercio, columnas planas.
-   Los nombres y el orden replican la plantilla del banco para que el bloque
-   se pueda pegar directo. Las tres columnas de datos del titular van vacías
-   a propósito: esta base no los guarda, y así el pegado no se desalinea.
+   Los nombres replican la plantilla del banco para poder pegar el bloque.
+
+   Cumple_Visita = SI cuando la gestión fue presencial O virtual y además se
+   logró hablar. Basta con una de las dos: por eso van las dos columnas.
    ========================================================================= */
 const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
   "Fecha de llamada o visita","Direccion_Actual","Distrito_Actual",
-  "RRLL_Actual","Celular_Actual","Correo_Actual",
-  "Contactado (Si/No)","Visita_Presencial","Cumple_Visita","Fecha_Visita"];
+  "Contactado (Si/No)","Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
 
 /* Columnas propias de Stratis, para el análisis interno */
-const COLS_BBVA_EXTRA = ["Intentos","Contactos_Efectivos","Medio_Efectivo","Ultimo_Resultado",
-  "Comentario_Ejecutivo","Calificacion","Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
+const COLS_BBVA_EXTRA = ["Intentos","Contactos_Efectivos","Reuniones_Virtuales","Medio_Efectivo",
+  "Medio_Cumple_Visita","Ultimo_Resultado","Comentario_Ejecutivo","Calificacion",
+  "Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
+const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
 
 function filasBBVA(extra){
   return cartera().map(c => {
@@ -2405,9 +2407,9 @@ function filasBBVA(extra){
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
       c.direccion || "",
       titulo(c.distrito || ""),
-      "", "", "",                                           // RRLL, celular y correo: no se guardan
       efectivos.length ? "Si" : "No",
       regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "No",
+      regs.some(r => ES_VIRTUAL(r.Tipo_Contacto))    ? "SI" : "No",
       cumplidas.length ? "SI" : "No",
       cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : ""
     ];
@@ -2415,7 +2417,9 @@ function filasBBVA(extra){
     return base.concat([
       regs.length,
       efectivos.length,
+      regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length,
       efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "",
+      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "",
       regs[0] ? nomResultado(regs[0].Resultado) : "",
       ultimo("Comentario_Ejecutivo"),
       ultimo("Calificacion"),
@@ -2431,7 +2435,7 @@ function hojaBBVA(){
   const cols = COLS_BBVA.concat(COLS_BBVA_EXTRA);
   const ws = hoja(cols, filasBBVA(true));
   // marca visualmente dónde termina el bloque que se pega en el archivo del banco
-  ws["!cols"] = cols.map((c,i) => ({ wch: i === 2 || i === 19 ? 46 : Math.min(30, Math.max(12, c.length + 3)) }));
+  ws["!cols"] = cols.map((c,i) => ({ wch: /Comentario/.test(c) ? 46 : Math.min(30, Math.max(12, c.length + 3)) }));
   return ws;
 }
 
@@ -2576,12 +2580,12 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:12px">
       Una fila por comercio, en columnas planas y con los mismos nombres que el archivo del banco:
       <b>Gestión</b>, <b>Visitas</b>, <b>Llamadas</b>, <b>Fecha de llamada o visita</b>,
-      <b>Contactado (Si/No)</b>, <b>Visita_Presencial</b>, <b>Cumple_Visita</b> y <b>Fecha_Visita</b>.
-      Se busca por <b>customer_id</b> y se pega.
+      <b>Contactado (Si/No)</b>, <b>Visita_Presencial</b>, <b>Visita_Virtual</b>,
+      <b>Cumple_Visita</b> y <b>Fecha_Visita</b>. Se busca por <b>customer_id</b> y se pega.
     </div>
-    <div class="note warn" style="margin-bottom:12px">
-      Las columnas <b>RRLL_Actual</b>, <b>Celular_Actual</b> y <b>Correo_Actual</b> salen vacías:
-      esta base no guarda esos datos. Van igual para que el bloque no se desalinee al pegarlo.
+    <div class="note" style="margin-bottom:12px">
+      <b>Cumple_Visita = SI</b> cuando la gestión fue presencial <b>o</b> virtual y además se logró
+      hablar con el contacto. Basta con una de las dos, por eso van ambas columnas.
     </div>
     <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
