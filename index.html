@@ -215,6 +215,45 @@ table.tbl tr:last-child td{border-bottom:0}
 .mono{font-variant-numeric:tabular-nums}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
+/* ---------- CABECERA DE PANTALLA ---------- */
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:2px 0 14px}
+.page-head h2{margin:0;font-size:20px;font-weight:730;letter-spacing:-.4px;line-height:1.2}
+.page-head .sub{font-size:12.5px;color:var(--muted);margin-top:3px}
+.page-head .btn{flex:none;width:100%}
+
+/* ---------- BLOQUE DE FILTROS ---------- */
+.filtros{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);
+  box-shadow:var(--sh);padding:12px;margin-bottom:14px;display:grid;gap:10px}
+.filtros .search{flex:none}
+.seg{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
+  padding:3px;gap:2px;overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.seg button{border:0;background:none;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:640;
+  color:var(--muted);cursor:pointer;white-space:nowrap;flex:none}
+.seg button.on{background:var(--card);color:var(--brand-2);box-shadow:var(--sh)}
+.seg button:hover:not(.on){color:var(--ink-2)}
+.sel-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.fsel{display:block;min-width:0}
+.fsel span{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.45px;
+  color:var(--muted);margin-bottom:4px}
+.fsel select{padding:9px 10px;font-size:13.5px}
+.filtros-pie{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  border-top:1px solid var(--grid);padding-top:10px;font-size:12.5px;color:var(--muted)}
+.nota-ficha .note{margin:0}
+.nota-ficha{padding:11px 12px}
+
+/* ---------- VIÁTICOS ---------- */
+.money{display:flex;align-items:center;gap:0}
+.money span{padding:11px 11px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;
+  background:var(--surface-2);color:var(--muted);font-weight:650;font-size:13.5px}
+.money input{border-radius:0 10px 10px 0!important;font-variant-numeric:tabular-nums}
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.cmp{border:1px solid var(--ring);border-radius:10px;padding:7px;background:var(--surface-1);text-align:center}
+.cmp img{width:100%;height:78px;object-fit:cover;border-radius:7px;display:block;margin-bottom:6px}
+.cmp-ph{height:78px;display:grid;place-items:center;font-size:26px;background:var(--surface-2);border-radius:7px;margin-bottom:6px}
+.cmp-n{font-size:11.5px;color:var(--muted);margin-bottom:6px}
+.cmp .btn{width:100%}
+
 /* La lista de comercios se acomoda al ancho disponible */
 .cl-grid{display:grid;gap:9px}
 .cl-grid .cl{margin-bottom:0}
@@ -227,6 +266,9 @@ table.tbl tr:last-child td{border-bottom:0}
   nav.bottom button.on{background:var(--info-bg)}
   nav.bottom button .dot{position:static;margin-left:1px}
   .stat-row{grid-template-columns:repeat(4,1fr)}
+  .page-head .btn{width:auto;min-width:230px}
+  .sel-row{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .filtros{padding:14px 15px}
   .sticky-actions{bottom:0}
   .tbl-wrap{margin:0;padding:0}
   .modal-bg{align-items:center;padding:22px}
@@ -390,6 +432,8 @@ function deDB(f){
     Ubicacion: f.ubicacion || "",
     Ubicacion_Verificada: f.ubicacion_verificada === true,
     Evidencia_Path: f.evidencia_path || "", Evidencia: "",
+    Gasto_Total: f.gasto_total === null || f.gasto_total === undefined ? "" : Number(f.gasto_total),
+    Gastos_Paths: Array.isArray(f.gastos_paths) ? f.gastos_paths : [],
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
   };
@@ -405,6 +449,8 @@ function aDB(f, c){
     ubicacion: f.Ubicacion || null,
     ubicacion_verificada: !!f.Ubicacion_Verificada,
     evidencia_path: f.Evidencia_Path || null,
+    gasto_total: String(f.Gasto_Total).trim() === "" ? null : Number(f.Gasto_Total),
+    gastos_paths: f.Gastos_Paths || [],
     calificacion: f.Calificacion || null,
     comentario_ejecutivo: f.Comentario_Ejecutivo,
     comentario_cliente: f.Comentario_Cliente || null
@@ -499,6 +545,10 @@ const esc = s => String(s == null ? "" : s)
 const iniciales = n => String(n||"").trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase();
 /* \b de JavaScript no entiende acentos y partía palabras como "doña" en
    "DoÑA". Capitalizamos solo después de un separador real. */
+/* Montos de viáticos, siempre en soles */
+const soles = n => (n === null || n === undefined || n === "" || isNaN(n)) ? ""
+  : "S/ " + Number(n).toLocaleString("es-PE", { minimumFractionDigits:2, maximumFractionDigits:2 });
+
 const titulo = s => String(s||"").toLowerCase()
   .replace(/(^|[\s\-—–/(.,;:"'¿¡])([a-záéíóúüñ])/g, (m, sep, l) => sep + l.toUpperCase());
 const userColor = n => { const i = USUARIOS.findIndex(u => u.nombre === n); return COLORES[i < 0 ? 0 : i % COLORES.length]; };
@@ -967,49 +1017,64 @@ function viewCartera(){
   const total = base.length;
   const conEf = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id))._efectivos > 0).length;
   const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
+  const cumplen = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cumple_Visita === "SI").length;
   const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
   const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
   const mostrar = lista.slice(0, S.limite);
+  const filtrando = q || [S.fContacto,S.fEstadoCli,S.fRubro,S.fDistrito,S.fEjecutivo].some(x => x !== "todos");
+
+  const opciones = (valor, todos, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
 
   return `
+  <div class="page-head">
+    <div>
+      <h2>${S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña"}</h2>
+      <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
+    </div>
+    <button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>
+  </div>
+
   <div class="stat-row">
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados por ${S.user.rol === "Ejecutivo" ? "ti" : "el equipo"}</div></div>
-    <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% con comunicación lograda</div></div>
+    <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
+    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
   </div>
 
-  <button class="btn block" data-go="form_cliente" style="margin-bottom:14px">＋ Registrar nuevo comercio</button>
-
-  <div class="toolbar">
+  <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
-      <input type="search" id="q" placeholder="Customer ID, comercio, distrito…" value="${esc(S.q)}"></div>
+      <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
+
+    <div class="seg" role="group" aria-label="Situación del comercio">
+      ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"]]
+        .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
+    </div>
+
+    <div class="sel-row">
+      <label class="fsel"><span>Estado</span>
+        <select data-f="estadocli">${opciones(S.fEstadoCli, "Todo estado", ESTADOS_CLIENTE.map(e => [e, e === "ACTIVO" ? "Activos" : "Dados de baja"]))}</select></label>
+      <label class="fsel"><span>Rubro</span>
+        <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`, rubrosUsados.map(r => [r.codigo, r.nombre]))}</select></label>
+      <label class="fsel"><span>Distrito</span>
+        <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`, distritos.map(d => [d, titulo(d)]))}</select></label>
+      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo</span>
+        <select data-f="ejecutivo">${opciones(S.fEjecutivo, "Todo el equipo", USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, u.nombre]))}</select></label>` : ""}
+    </div>
+
+    ${filtrando ? `<div class="filtros-pie">
+      <span>${lista.length} de ${total} comercios</span>
+      <button class="btn ghost sm" id="limpiarFiltros">Quitar filtros</button>
+    </div>` : ""}
   </div>
-  <div class="pills">
-    ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"]]
-      .map(([k,l]) => `<button class="pill ${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
-  </div>
-  <div class="pills">
-    <button class="pill ${S.fEstadoCli==="todos"?"on":""}" data-f="estadocli" data-v="todos">Todo estado</button>
-    ${ESTADOS_CLIENTE.map(e => `<button class="pill ${S.fEstadoCli===e?"on":""}" data-f="estadocli" data-v="${e}">${e === "ACTIVO" ? "Activos" : "Dados de baja"}</button>`).join("")}
-  </div>
-  ${rubrosUsados.length ? `<div class="pills">
-    <button class="pill ${S.fRubro==="todos"?"on":""}" data-f="rubro" data-v="todos">Todos los rubros</button>
-    ${rubrosUsados.map(r => `<button class="pill ${S.fRubro===r.codigo?"on":""}" data-f="rubro" data-v="${r.codigo}">${esc(r.nombre)}</button>`).join("")}
-  </div>` : ""}
-  ${S.user.rol !== "Ejecutivo" ? `<div class="pills">
-    <button class="pill ${S.fEjecutivo==="todos"?"on":""}" data-f="ejecutivo" data-v="todos">Todos los ejecutivos</button>
-    ${USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => `<button class="pill ${S.fEjecutivo===u.nombre?"on":""}" data-f="ejecutivo" data-v="${esc(u.nombre)}">${esc(u.nombre)}</button>`).join("")}
-  </div>` : ""}
-  ${distritos.length > 1 ? `<div class="pills">
-    <button class="pill ${S.fDistrito==="todos"?"on":""}" data-f="distrito" data-v="todos">Todos los distritos</button>
-    ${distritos.map(d => `<button class="pill ${S.fDistrito===d?"on":""}" data-f="distrito" data-v="${esc(d)}">${esc(titulo(d))}</button>`).join("")}
-  </div>` : ""}
 
   <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
   ${mostrar.length ? `<div class="cl-grid">${mostrar.map(cardCliente).join("")}</div>`
     : total === 0
       ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
-      : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.</div>`}
+      : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.<br><br>
+         <button class="btn ghost" id="limpiarFiltros2">Quitar filtros</button></div>`}
   ${lista.length > mostrar.length ? `<button class="btn ghost block" id="mas">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}`;
 }
 
@@ -1084,15 +1149,13 @@ function viewFicha(c){
       </div>
     </div>
 
-    <div class="card">
-      <h3>Qué guarda esta ficha</h3>
-      <div class="note">Esta base <b>no almacena razón social, RUC, teléfonos ni personas de contacto</b>.
-      El único dato que viene de BBVA es el Customer ID. Si necesitas los datos del titular,
-      están en la base de BBVA y se cruzan por ese código.</div>
-    </div>
    </div>
 
    <div>
+    <div class="card nota-ficha">
+      <div class="note">Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>.
+      El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.</div>
+    </div>
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -1135,6 +1198,7 @@ function itemTimeline(r){
         : sinUbicacionVerificada(r)
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
+      ${Number(r.Gasto_Total) > 0 ? `<div style="margin-top:7px"><span class="chip warn">🧾 Viáticos ${soles(r.Gasto_Total)} · ${(r.Gastos_Paths||[]).length} comprobante${(r.Gastos_Paths||[]).length===1?"":"s"}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
       ${r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`
@@ -1395,6 +1459,7 @@ function nuevoForm(){
     Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
+    Gasto_Total: "", Gastos_Paths: [], Gastos_Nuevos: [],
     Comentario_Ejecutivo: "", Comentario_Cliente: ""
   };
 }
@@ -1468,6 +1533,8 @@ function renderFormulario(){
     <div id="evBox"></div>
   </div>
 
+  <div id="boxGasto"></div>
+
   <div class="card">
     <h3>Comentarios</h3>
     <div class="field"><label>Calificación del cliente</label>
@@ -1501,7 +1568,7 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.tipo;
     $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps();
+    pintarDerivado(); pintarGps(); pintarGasto();
   });
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
@@ -1509,7 +1576,7 @@ function bindForm(c){
     pintarDerivado();
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarEvidencia();
+  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto();
 }
 
 function pintarDerivado(){
@@ -1624,6 +1691,84 @@ function notaSinUbicacion(){
     </div>`;
 }
 
+function pintarGasto(){
+  const f = S.form, box = $("#boxGasto");
+  if (!box) return;
+  // Los viáticos solo existen cuando el ejecutivo se movió: visitas y reuniones presenciales.
+  if (!RULES.requiereUbicacion(f.Tipo_Contacto)){
+    box.innerHTML = ""; f.Gasto_Total = ""; f.Gastos_Nuevos = [];
+    return;
+  }
+  const guardados = (f.Gastos_Paths || []).length;
+  const nuevos = (f.Gastos_Nuevos || []).length;
+  box.innerHTML = `
+  <div class="card">
+    <h3>Gastos de la visita <span style="text-transform:none;font-weight:500;color:var(--muted)">— viáticos, opcional</span></h3>
+    <div class="note" style="margin-bottom:12px">
+      Si gastaste en movilidad, peaje, estacionamiento o cualquier otra cosa para llegar a este
+      comercio, adjunta las boletas y anota el total. Sin comprobante no se puede declarar un monto.
+    </div>
+    <div class="field">
+      <label for="gastoMonto">Monto total de la visita <span class="hint">— en soles</span></label>
+      <div class="money"><span>S/</span>
+        <input type="number" id="gastoMonto" inputmode="decimal" step="0.10" min="0" max="2000"
+               value="${esc(f.Gasto_Total)}" placeholder="0.00"></div>
+    </div>
+    <div id="cmpBox"></div>
+    <div id="gastoMsg"></div>
+  </div>`;
+  $("#gastoMonto").oninput = e => { f.Gasto_Total = e.target.value; pintarAvisoGasto(); };
+  pintarComprobantes(); pintarAvisoGasto();
+}
+
+function pintarAvisoGasto(){
+  const f = S.form, msg = $("#gastoMsg");
+  if (!msg) return;
+  const monto = Number(f.Gasto_Total || 0);
+  const n = (f.Gastos_Paths||[]).length + (f.Gastos_Nuevos||[]).length;
+  if (monto > 0 && n === 0)
+    msg.innerHTML = `<div class="note warn">Declaraste <b>${soles(monto)}</b> pero todavía no adjuntas ningún comprobante.</div>`;
+  else if (n > 0 && monto <= 0)
+    msg.innerHTML = `<div class="note warn">Adjuntaste ${n} comprobante${n===1?"":"s"}: falta anotar el monto total.</div>`;
+  else if (monto > 0)
+    msg.innerHTML = `<div class="note ok"><b>${soles(monto)}</b> con ${n} comprobante${n===1?"":"s"} adjunto${n===1?"":"s"}.</div>`;
+  else msg.innerHTML = "";
+}
+
+function pintarComprobantes(){
+  const f = S.form, box = $("#cmpBox");
+  if (!box) return;
+  const guardados = (f.Gastos_Paths || []);
+  const nuevos = (f.Gastos_Nuevos || []);
+  box.innerHTML = `
+    <label style="display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px">
+      Comprobantes <span class="hint" style="font-weight:400;color:var(--muted)">— boletas, tickets, recibos</span></label>
+    ${(guardados.length || nuevos.length) ? `<div class="cmp-grid">
+      ${guardados.map((p,i) => `<div class="cmp"><div class="cmp-ph">📄</div>
+        <div class="cmp-n">Comprobante ${i+1}</div>
+        <button class="btn ghost sm" data-cmpdelg="${i}">Quitar</button></div>`).join("")}
+      ${nuevos.map((d,i) => `<div class="cmp"><img src="${d}" alt="Comprobante">
+        <button class="btn ghost sm" data-cmpdel="${i}">Quitar</button></div>`).join("")}
+    </div>` : ""}
+    <button class="btn ghost block" id="cmpAdd" style="margin-top:9px">📎 Adjuntar comprobante</button>
+    <input type="file" id="cmpFile" accept="image/*" capture="environment" multiple class="hidden">`;
+  const file = $("#cmpFile");
+  $("#cmpAdd").onclick = () => file.click();
+  file.onchange = e => {
+    const fl = [...e.target.files];
+    let quedan = fl.length;
+    fl.forEach(x => comprimir(x, d => {
+      f.Gastos_Nuevos.push(d);
+      if (--quedan === 0){ pintarComprobantes(); pintarAvisoGasto(); }
+    }));
+    e.target.value = "";
+  };
+  box.querySelectorAll("[data-cmpdel]").forEach(b => b.onclick = () => {
+    f.Gastos_Nuevos.splice(Number(b.dataset.cmpdel), 1); pintarComprobantes(); pintarAvisoGasto(); });
+  box.querySelectorAll("[data-cmpdelg]").forEach(b => b.onclick = () => {
+    f.Gastos_Paths.splice(Number(b.dataset.cmpdelg), 1); pintarComprobantes(); pintarAvisoGasto(); });
+}
+
 function pintarEvidencia(){
   const f = S.form, box = $("#evBox");
   if (!box) return;
@@ -1676,6 +1821,12 @@ async function guardar(c){
     errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
   if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
+  const gasto = Number(f.Gasto_Total || 0);
+  const nCmp = (f.Gastos_Paths||[]).length + (f.Gastos_Nuevos||[]).length;
+  if (gasto > 0 && nCmp === 0) errores.push("Adjunta el comprobante del gasto que declaraste.");
+  if (nCmp > 0 && gasto <= 0)  errores.push("Anota el monto total de los comprobantes que adjuntaste.");
+  if (gasto < 0)     errores.push("El monto del gasto no puede ser negativo.");
+  if (gasto > 2000)  errores.push("El monto supera el máximo permitido por visita (S/ 2,000).");
   if (errores.length){
     $("#errBox").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
     $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
@@ -1689,6 +1840,14 @@ async function guardar(c){
       if (f.Evidencia && !f.Evidencia_Path){
         const ruta = await subirEvidencia(f.Evidencia);
         if (ruta) f.Evidencia_Path = ruta;
+      }
+      // Cada comprobante nuevo va al bucket privado, igual que la evidencia.
+      if ((f.Gastos_Nuevos || []).length){
+        for (const d of f.Gastos_Nuevos){
+          const ruta = await subirEvidencia(d);
+          if (ruta) f.Gastos_Paths.push(ruta);
+        }
+        f.Gastos_Nuevos = [];
       }
       const fila = aDB(f, c);
       const { error } = S.editId
@@ -1797,33 +1956,52 @@ function viewRegistros(){
   const medios = TIPOS_CONTACTO.filter(t => todos.some(r => r.Tipo_Contacto === t.id));
   const mostrar = lista.slice(0, S.limiteReg);
 
+  const filtrando = q || S.fResultado !== "todos" || S.fMedio !== "todos" || S.fEjecReg !== "todos";
+  const opciones = (valor, todos, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
   return `
+  <div class="page-head">
+    <div>
+      <h2>${S.user.rol === "Ejecutivo" ? "Mis registros" : "Registros del equipo"}</h2>
+      <div class="sub">Cada contacto y cada intento, en orden del más reciente al más antiguo</div>
+    </div>
+  </div>
+
   <div class="stat-row">
     <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
     <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de efectividad</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${todos.filter(r=>r.Cumple_Visita==="SI").length}</div><div class="sub">presenciales o virtuales logradas</div></div>
+    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacionVerificada).length}</div><div class="sub">presenciales sin respaldo de GPS</div></div>
   </div>
 
-  <div class="toolbar">
+  <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
-      <input type="search" id="qReg" placeholder="Comercio, Customer ID, distrito, comentario…" value="${esc(S.qReg)}"></div>
+      <input type="search" id="qReg" placeholder="Buscar por comercio, Customer ID, distrito o comentario…" value="${esc(S.qReg)}"></div>
+
+    <div class="seg" role="group" aria-label="Resultado">
+      ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"]]
+        .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
+      ${todos.some(sinUbicacionVerificada)
+        ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
+    </div>
+
+    <div class="sel-row">
+      <label class="fsel"><span>Resultado</span>
+        <select data-fr-sel>${opciones(RESULTADOS.some(x=>x.id===S.fResultado)?S.fResultado:"todos", "Cualquier resultado",
+          RESULTADOS.filter(x => todos.some(r => r.Resultado === x.id)).map(x => [x.id, x.label]))}</select></label>
+      <label class="fsel"><span>Medio</span>
+        <select data-fm-sel>${opciones(S.fMedio, "Todos los medios", medios.map(t => [t.id, t.label]))}</select></label>
+      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo</span>
+        <select data-fe-sel>${opciones(S.fEjecReg, "Todo el equipo", USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, u.nombre]))}</select></label>` : ""}
+    </div>
+
+    ${filtrando ? `<div class="filtros-pie">
+      <span>${lista.length} de ${todos.length} registros</span>
+      <button class="btn ghost sm" id="limpiarReg">Quitar filtros</button>
+    </div>` : ""}
   </div>
-  <div class="pills">
-    ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"]]
-      .map(([k,l]) => `<button class="pill ${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
-    ${RESULTADOS.filter(x => !x.ok && todos.some(r => r.Resultado === x.id))
-      .map(x => `<button class="pill ${S.fResultado===x.id?"on":""}" data-fr="${x.id}">${esc(x.label)}</button>`).join("")}
-    ${todos.some(sinUbicacionVerificada)
-      ? `<button class="pill ${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">📍 Sin ubicación verificada</button>` : ""}
-  </div>
-  ${medios.length > 1 ? `<div class="pills">
-    <button class="pill ${S.fMedio==="todos"?"on":""}" data-fm="todos">Todos los medios</button>
-    ${medios.map(t => `<button class="pill ${S.fMedio===t.id?"on":""}" data-fm="${t.id}">${esc(t.label)}</button>`).join("")}
-  </div>` : ""}
-  ${S.user.rol !== "Ejecutivo" ? `<div class="pills">
-    <button class="pill ${S.fEjecReg==="todos"?"on":""}" data-fe="todos">Todo el equipo</button>
-    ${USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => `<button class="pill ${S.fEjecReg===u.nombre?"on":""}" data-fe="${esc(u.nombre)}">${esc(u.nombre)}</button>`).join("")}
-  </div>` : ""}
 
   <div class="sec-title">${lista.length} registro${lista.length===1?"":"s"}${S.user.rol==="Ejecutivo"?" — míos":" — todo el equipo"}</div>
   ${mostrar.length ? `<div class="tl tl-lectura">${mostrar.map(r => {
@@ -1909,6 +2087,15 @@ function viewPanel(){
   const presenciales = regs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto));
   const sinUbi = presenciales.filter(r => r.Ubicacion_Verificada !== true);
   const pctUbi = presenciales.length ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
+  // Viáticos: lo que la campaña lleva gastado en campo
+  const conGasto = regs.filter(r => Number(r.Gasto_Total) > 0);
+  const totalGasto = conGasto.reduce((n,r) => n + Number(r.Gasto_Total), 0);
+  const gastoEjec = [...new Set(conGasto.map(r => r.Ejecutivo))]
+    .map(n => ({ nombre:n, total: conGasto.filter(r => r.Ejecutivo === n).reduce((a,r) => a + Number(r.Gasto_Total), 0),
+                 visitas: conGasto.filter(r => r.Ejecutivo === n).length }))
+    .sort((a,b) => b.total - a.total);
+  const maxGasto = Math.max(1, ...gastoEjec.map(x => x.total));
+
   const sinUbiEjec = [...new Set(sinUbi.map(r => r.Ejecutivo))]
     .map(n => ({ nombre:n, n: sinUbi.filter(r => r.Ejecutivo === n).length }))
     .sort((a,b) => b.n - a.n);
@@ -1980,6 +2167,25 @@ function viewPanel(){
     </div>
 
     <div class="card">
+      <h3>Viáticos · gasto declarado en campo</h3>
+      ${conGasto.length ? `
+        <div class="stat-row" style="margin-bottom:11px">
+          <div class="stat"><div class="lbl">Total</div><div class="val" style="font-size:21px">${soles(totalGasto)}</div><div class="sub">${conGasto.length} visita${conGasto.length===1?"":"s"} con gasto</div></div>
+          <div class="stat"><div class="lbl">Promedio</div><div class="val" style="font-size:21px">${soles(totalGasto/conGasto.length)}</div><div class="sub">por visita con gasto</div></div>
+        </div>
+        ${gastoEjec.map(e => `
+          <div class="bar-row">
+            <span class="nm">${esc(e.nombre)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${(e.total/maxGasto*100).toFixed(1)}%;background:var(--warn)"></span></span>
+            <span class="bar-val" style="width:auto;white-space:nowrap">${soles(e.total)}</span>
+          </div>
+          <div class="bar-sub">${e.visitas} visita${e.visitas===1?"":"s"} con comprobante</div>`).join("")}
+        <div class="note" style="margin-top:9px">Todo monto declarado tiene comprobante adjunto: la base
+        rechaza un gasto sin boleta. El detalle está en la hoja <b>Viáticos</b> del Excel.</div>`
+      : `<div class="note">Todavía no se ha declarado ningún gasto de campo.</div>`}
+    </div>
+
+    <div class="card">
       <h3>Respaldo de ubicación · visitas presenciales</h3>
       ${presenciales.length ? `
         <div class="bar-row">
@@ -2021,7 +2227,7 @@ const COLS_BASE = ["customer_id","Nombre_Comercio","Rubro","Distrito","Direccion
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Contacto_Logrado",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
-  "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+  "Ubicacion_Verificada","Evidencia","Gasto_Viaticos","Comprobantes","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
 const marcaUbicacion = r => !RULES.requiereUbicacion(r.Tipo_Contacto) ? ""
@@ -2051,7 +2257,8 @@ function filasVisitas(){
     r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
     esEfectivo(r.Resultado) ? "SI" : "NO",
     r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
-    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "", r.Calificacion,
+    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "",
+    Number(r.Gasto_Total) > 0 ? Number(r.Gasto_Total) : "", (r.Gastos_Paths||[]).join(" | "), r.Calificacion,
     r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
 }
 
@@ -2066,7 +2273,7 @@ const hoja = (cols, filas) => {
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
   const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Contactos efectivos",
-                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada"];
+                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
     const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
     cs.forEach(c => RULES.recomputarBase(c.customer_id));
@@ -2077,10 +2284,29 @@ function hojaAvance(){
       cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
       rs.filter(r => r.Cumple_Visita === "SI").length,
       rs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto)).length,
-      rs.filter(sinUbicacionVerificada).length];
+      rs.filter(sinUbicacionVerificada).length,
+      Math.round(rs.reduce((n,r) => n + (Number(r.Gasto_Total)||0), 0) * 100) / 100,
+      rs.filter(r => Number(r.Gasto_Total) > 0).length];
   });
   const ws = hoja(cols, filas);
   filas.forEach((_,i) => { const c = ws["F"+(i+2)]; if (c) c.z = "0%"; });
+  return ws;
+}
+
+function hojaViaticos(){
+  const cols = ["Fecha","Ejecutivo","Customer_id","Comercio","Distrito","Medio",
+                "Monto (S/)","Comprobantes","Ubicacion_Verificada","ID_Registro"];
+  const filas = DB.todos().filter(r => Number(r.Gasto_Total) > 0)
+    .sort((a,b) => ts(a) - ts(b)).map(r => {
+      const c = byId[String(r.Customer_id)] || {};
+      return [r.Fecha_Contacto, r.Ejecutivo, r.Customer_id, titulo(nombreCliente(c)), c.distrito || "",
+        nomTipo(r.Tipo_Contacto), Number(r.Gasto_Total), (r.Gastos_Paths||[]).length,
+        marcaUbicacion(r), r._id];
+    });
+  const total = filas.reduce((n,f) => n + f[6], 0);
+  if (filas.length) filas.push([], ["", "TOTAL", "", "", "", "", Math.round(total*100)/100, "", "", ""]);
+  const ws = hoja(cols, filas);
+  filas.forEach((_,i) => { const c = ws["G"+(i+2)]; if (c && typeof c.v === "number") c.z = '"S/ "#,##0.00'; });
   return ws;
 }
 
@@ -2113,6 +2339,7 @@ function hojaRubros(){
 
 const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
   calificacion:"Calificación", evidencia_path:"Evidencia", nombre_comercio:"Nombre del comercio",
+  gasto_total:"Monto de viáticos", gastos_paths:"Comprobantes de gasto",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", observacion:"Observación" };
 const nomCampo = k => CAMPO_ES[k] || k;
@@ -2161,7 +2388,8 @@ function hojaReporte(admin){
     ["Contactos efectivos", ef],
     ["% Efectividad", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
-    ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length], [],
+    ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length],
+    ["Viáticos declarados", "S/ " + (Math.round(regs.reduce((n,r)=>n+(Number(r.Gasto_Total)||0),0)*100)/100).toFixed(2)], [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
     ["", "La columna Evidencia guarda la ruta del archivo en el bucket privado; las imágenes solo se abren desde el CRM."],
@@ -2186,6 +2414,7 @@ async function exportarExcel(btn){
   if (admin){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Efectividad de contacto");
+    XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
     XLSX.utils.book_append_sheet(wb, hojaBitacora(),      "Bitácora");
@@ -2255,9 +2484,9 @@ function viewAyuda(){
     <div class="note" style="margin-bottom:12px">
       Como <b>${esc(S.user.rol)}</b> descargas la campaña completa con los datos actualizados
       al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Avance por ejecutivo</b>,
-      <b>Efectividad de contacto</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
+      <b>Efectividad de contacto</b>, <b>Viáticos</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
     </div>
-    <button class="btn block" id="expXlsx">Descargar Excel completo (8 hojas)</button>
+    <button class="btn block" id="expXlsx">Descargar Excel completo (9 hojas)</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
       <button class="btn ghost sm" data-exp="base">Base en CSV</button>
       <button class="btn ghost sm" data-exp="visitas">Visitas en CSV</button>
@@ -2564,11 +2793,17 @@ function bindExtras(){
       }, 210);
     };
   }
-  document.querySelectorAll(".pill[data-f]").forEach(b => b.onclick = () => {
-    const map = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
-                  ejecutivo:"fEjecutivo", distrito:"fDistrito" };
-    S[map[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
+  const MAPA_F = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
+                   ejecutivo:"fEjecutivo", distrito:"fDistrito" };
+  document.querySelectorAll(".seg button[data-f], .pill[data-f]").forEach(b => b.onclick = () => {
+    S[MAPA_F[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
   });
+  document.querySelectorAll("select[data-f]").forEach(el => el.onchange = () => {
+    S[MAPA_F[el.dataset.f]] = el.value; S.limite = 40; render();
+  });
+  const limpiar = () => { S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fEjecutivo = S.fDistrito = "todos";
+    S.limite = 40; render(); };
+  ["limpiarFiltros","limpiarFiltros2"].forEach(id => { if ($("#"+id)) $("#"+id).onclick = limpiar; });
   if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
   if ($("#masReg")) $("#masReg").onclick = () => { S.limiteReg += 40; render(); };
 
@@ -2585,8 +2820,11 @@ function bindExtras(){
     };
   }
   document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.fResultado = b.dataset.fr; S.limiteReg = 40; render(); });
-  document.querySelectorAll("[data-fm]").forEach(b => b.onclick = () => { S.fMedio = b.dataset.fm; S.limiteReg = 40; render(); });
-  document.querySelectorAll("[data-fe]").forEach(b => b.onclick = () => { S.fEjecReg = b.dataset.fe; S.limiteReg = 40; render(); });
+  if ($("[data-fr-sel]")) $("[data-fr-sel]").onchange = e => { S.fResultado = e.target.value; S.limiteReg = 40; render(); };
+  if ($("[data-fm-sel]")) $("[data-fm-sel]").onchange = e => { S.fMedio = e.target.value; S.limiteReg = 40; render(); };
+  if ($("[data-fe-sel]")) $("[data-fe-sel]").onchange = e => { S.fEjecReg = e.target.value; S.limiteReg = 40; render(); };
+  if ($("#limpiarReg")) $("#limpiarReg").onclick = () => {
+    S.qReg = ""; S.fResultado = S.fMedio = S.fEjecReg = "todos"; S.limiteReg = 40; render(); };
 
   document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
   if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
