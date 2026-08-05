@@ -65,22 +65,34 @@ Deno.serve(async (req) => {
       if (nombre.length < 3) return json({ error: "Escribe el nombre completo." }, 400);
       if (!["Ejecutivo", "Analista", "Manager"].includes(rol)) return json({ error: "Rol no válido." }, 400);
 
-      const yaAuth = await buscarAuth();
+      // El orden importa: hay un disparador en auth.users que solo admite
+      // correos que YA están en la lista del equipo. Primero la fila en
+      // usuarios, después la cuenta de acceso, y si esta falla se revierte.
       const cl = clave();
+      const { error: eIns } = await admin.from("usuarios")
+        .insert({ correo, nombre, nombre_corto: corto, rol, activo: true });
+      if (eIns) return json({ error: "No se pudo guardar en el equipo: " + eIns.message }, 400);
+
+      const yaAuth = await buscarAuth();
       if (yaAuth) {
-        await admin.auth.admin.updateUserById(yaAuth.id, {
-          password: cl, email_confirm: true, user_metadata: { debe_cambiar: true },
+        const { error } = await admin.auth.admin.updateUserById(yaAuth.id, {
+          password: cl, email_confirm: true, ban_duration: "none",
+          user_metadata: { debe_cambiar: true },
         });
+        if (error) {
+          await admin.from("usuarios").delete().eq("correo", correo);
+          return json({ error: "No se pudo reactivar la cuenta: " + error.message }, 400);
+        }
       } else {
         const { error } = await admin.auth.admin.createUser({
           email: correo, password: cl, email_confirm: true,
           user_metadata: { debe_cambiar: true },
         });
-        if (error) return json({ error: "No se pudo crear la cuenta: " + error.message }, 400);
+        if (error) {
+          await admin.from("usuarios").delete().eq("correo", correo);
+          return json({ error: "No se pudo crear la cuenta: " + error.message }, 400);
+        }
       }
-      const { error: eIns } = await admin.from("usuarios")
-        .insert({ correo, nombre, nombre_corto: corto, rol, activo: true });
-      if (eIns) return json({ error: "No se pudo guardar en el equipo: " + eIns.message }, 400);
 
       await admin.from("auditoria").insert({
         tabla: "usuarios", accion: "editar", registro_id: correo, correo: quien,
