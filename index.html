@@ -2755,7 +2755,7 @@ function filasBBVA(extra){
   });
 }
 
-const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta",
+const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta","Medio del cierre",
   "Visitas","Llamadas","Contactado (Si/No)","Cumple_Visita",
   "Comentario de Cliente","Comentario del Ejecutivo","Ejecutivo_Stratis"];
 
@@ -2777,6 +2777,10 @@ function filasNuevos(){
       cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto)
         : (regs[0] ? fmtFecha(regs[0].Fecha_Contacto)
                    : fmtFecha(String(c.creado_en || "").slice(0,10))),
+      // Con qué se cerró: explica por qué una venta puede tener 0 visitas
+      // presenciales y aun así cumplir — fue por reunión virtual.
+      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto)
+                       : (regs[0] ? nomTipo(regs[0].Tipo_Contacto) : ""),
       regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
       regs.filter(r => r.Tipo_Contacto === "llamada").length,
       efectivos.length ? "SI" : "NO",
