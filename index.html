@@ -1178,7 +1178,8 @@ function viewFicha(c){
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Cuenta como venta · Para BBVA · Gestión = SI</div>
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div></dd></div>`
         : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
-             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>`}
+             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>
+             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}</dd></div>`}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
       ${c.direccion ? `<div style="margin-top:11px">
@@ -1194,6 +1195,15 @@ function viewFicha(c){
         ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro, y la derivación ya cuenta como venta. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
         : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
     </div>
+    ${(!esClienteNuevo(c) && b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio) ? `
+    <div class="card">
+      <div class="note warn" style="margin:0">
+        <b>Esta gestión sigue abierta.</b> Ya hablaste con el titular, así que puedes cerrarla como
+        ${c.estado === "ACTIVO" ? "retención" : "venta"} o como perdida. Mientras siga pendiente, a
+        BBVA le llega <b>Gestión = NO</b>.
+        <button class="btn ghost sm block" data-editcli="${c.customer_id}" style="margin-top:9px">Marcar el cierre</button>
+      </div>
+    </div>` : ""}
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -1783,7 +1793,8 @@ function nuevoForm(){
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
     Gasto_Total: "", Gastos_Paths: [], Gastos_Nuevos: [],
-    Comentario_Ejecutivo: "", Comentario_Cliente: ""
+    Comentario_Ejecutivo: "", Comentario_Cliente: "",
+    Cierre: null            // resultado_gestion del comercio, se define acá mismo
   };
 }
 
@@ -1872,6 +1883,8 @@ function renderFormulario(){
       <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea></div>
   </div>
 
+  <div id="boxCierre"></div>
+
   <div id="errBox"></div>
   <div class="sticky-actions">
     <button class="btn" id="guardar">${S.editId ? "Guardar cambios" : "Registrar"}</button>
@@ -1891,15 +1904,80 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.tipo;
     $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps(); pintarGasto();
+    pintarDerivado(); pintarGps(); pintarGasto(); pintarCierre(c);
   });
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
     $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
-    pintarDerivado();
+    pintarDerivado(); pintarCierre(c);
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto();
+  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto(); pintarCierre(c);
+}
+
+/* -------------------------------------------------------------------------
+   Cerrar la gestión desde acá
+
+   El momento en que el ejecutivo habla con el titular es el momento en que
+   sabe si lo retuvo. Obligarlo a entrar después a "Editar comercio" era
+   pedirle que se acuerde: las carteras se quedaban en Pendiente y a BBVA le
+   llegaba Gestión = NO.
+
+   Se ofrece lo mismo que permite la base: retención solo para un comercio
+   activo, venta solo para uno que estaba dado de baja, y ninguna de las dos
+   sin haber logrado la comunicación.
+   ------------------------------------------------------------------------- */
+function pintarCierre(c){
+  const f = S.form, box = $("#boxCierre");
+  if (!box) return;
+  if (!c || esClienteNuevo(c)){ box.innerHTML = ""; return; }   // la venta nueva ya es venta
+
+  const actual = c.resultado_gestion || "PENDIENTE";
+  if (f.Cierre === null || f.Cierre === undefined) f.Cierre = actual;
+
+  const logrado = esEfectivo(f.Resultado) ||
+    DB.delCliente(c.customer_id).some(r => esEfectivo(r.Resultado) && r._id !== S.editId);
+
+  const posibles = RESULTADOS_GESTION.filter(g => {
+    if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
+    if (!logrado) return false;
+    if (g.id === "RETENIDO") return c.estado === "ACTIVO";
+    if (g.id === "VENTA")    return c.estado === "DE BAJA";
+    return true;
+  });
+  if (!posibles.some(g => g.id === f.Cierre)) f.Cierre = "PENDIENTE";
+
+  const cambia = f.Cierre !== actual;
+  box.innerHTML = `
+  <div class="card">
+    <h3>¿Con esto se cierra la gestión?</h3>
+    <div class="note" style="margin-bottom:11px">
+      Es lo que BBVA lee como <b>objetivo cumplido</b>. Márcalo ahora, mientras tienes fresco lo que
+      pasó: mientras siga pendiente, al banco le llega <b>Gestión = NO</b>.
+    </div>
+    <div class="opts">
+      ${posibles.map(g => `
+        <div class="opt ${f.Cierre === g.id ? "on" : ""}" data-cierre="${g.id}">
+          <span class="rd"></span><span><b>${g.id === "PENDIENTE" ? "Sigue abierta" : g.label}</b>
+          <span>${g.id === "PENDIENTE" ? "Todavía hay que seguir trabajándola" : esc(g.desc)}</span></span>
+        </div>`).join("")}
+    </div>
+    ${!logrado ? `<div class="note warn" style="margin-top:11px">
+      Con este resultado no se logró hablar con el titular, así que no se puede marcar como
+      retención ni como venta. Registra el intento y vuelve cuando consigas la conversación.</div>` : ""}
+    <div class="note ${cambia ? (gestionCumplida({resultado_gestion:f.Cierre}) ? "ok" : "") : ""}" style="margin-top:11px">
+      ${cambia
+        ? `Al guardar, el comercio pasa de <b>${esc((RESULTADOS_GESTION.find(g=>g.id===actual)||{}).label)}</b>
+           a <b>${esc((RESULTADOS_GESTION.find(g=>g.id===f.Cierre)||{}).label)}</b> ·
+           Para BBVA · Gestión = <b>${gestionCumplida({resultado_gestion:f.Cierre}) ? "SI" : "NO"}</b>`
+        : `El comercio queda como está: <b>${esc((RESULTADOS_GESTION.find(g=>g.id===actual)||{}).label)}</b> ·
+           Para BBVA · Gestión = <b>${gestionCumplida(c) ? "SI" : "NO"}</b>`}
+    </div>
+  </div>`;
+  box.querySelectorAll("[data-cierre]").forEach(el => el.onclick = () => {
+    f.Cierre = el.dataset.cierre;
+    pintarCierre(c);
+  });
 }
 
 function pintarDerivado(){
@@ -2177,7 +2255,15 @@ async function guardar(c){
         ? await sb.from("interacciones").update(fila).eq("id", S.editId)
         : await sb.from("interacciones").insert(fila);
       if (error) throw new Error(error.message);
-      await refrescar(); await cargarAuditoria();
+
+      // El cierre va después de la gestión, nunca antes: la base exige que ya
+      // exista el contacto logrado que lo respalda.
+      if (f.Cierre && !esClienteNuevo(c) && f.Cierre !== (c.resultado_gestion || "PENDIENTE")){
+        const { error: eCierre } = await sb.from("clientes")
+          .update({ resultado_gestion: f.Cierre }).eq("customer_id", String(c.customer_id));
+        if (eCierre) throw new Error("La gestión quedó registrada, pero el cierre no: " + eCierre.message);
+      }
+      await recargarCartera(); await refrescar(); await cargarAuditoria();
     }
   } catch (err) {
     btn.disabled = false; btn.textContent = S.editId ? "Guardar cambios" : "Registrar";
@@ -2186,7 +2272,10 @@ async function guardar(c){
     return;
   }
 
-  toast(S.editId ? "Registro actualizado" : "Contacto registrado en el histórico");
+  const cerro = f.Cierre && !esClienteNuevo(c) && f.Cierre !== "PENDIENTE" && f.Cierre !== (c.resultado_gestion || "PENDIENTE");
+  toast(cerro
+    ? `Gestión cerrada como ${(RESULTADOS_GESTION.find(g=>g.id===f.Cierre)||{}).label}`
+    : (S.editId ? "Registro actualizado" : "Contacto registrado en el histórico"));
   S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id);
   window.scrollTo(0,0);
   render();
