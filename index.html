@@ -300,8 +300,12 @@ table.tbl tr:last-child td{border-bottom:0}
   .view-form > .back,
   .view-form > .sticky-actions{column-span:all}
   .view-form > .card:first-of-type{column-span:all}
-  /* Las tarjetas con tabla necesitan el ancho completo */
-  .view-cols > .card:has(.tbl-wrap){column-span:all}
+  /* Las tarjetas con tabla, y las marcadas como anchas, ocupan todo el ancho:
+     así las columnas se reparten parejo en vez de dejar un hueco largo. */
+  .view-cols > .card:has(.tbl-wrap),
+  .view-cols > .card.ancho{column-span:all}
+  .kv-cols{column-count:2;column-gap:26px}
+  .kv-cols .kv{break-inside:avoid}
   .view-form .sticky-actions{position:static;justify-content:flex-end;
     background:none;border-top:1px solid var(--grid);padding-top:14px}
   .view-form .sticky-actions .btn{flex:none;min-width:210px}
@@ -328,6 +332,7 @@ table.tbl tr:last-child td{border-bottom:0}
   .stat .val{font-size:28px}
   .view-form, .view-cols{column-count:3;column-gap:18px}
   .tl-lectura{column-count:3}
+  .kv-cols{column-count:3}
   .grid2{gap:14px}
 }
 
@@ -612,6 +617,13 @@ function esMiCliente(c){
   return !!(S.user && c && c.asignado_correo === S.user.correo);
 }
 
+/* Quién trabaja la calle. El Analista y el Manager supervisan la campaña:
+   ven todo, exportan todo y gestionan el equipo, pero no dan de alta
+   comercios ni registran gestiones. La base también lo impide. */
+function esDeCampo(){
+  return !!(S.user && S.user.rol === "Ejecutivo");
+}
+
 /* =========================================================================
    Acceso con enlace mágico y carga de datos desde Supabase
    ========================================================================= */
@@ -852,6 +864,16 @@ async function cargarDatos(){
   const fallo = [cli, inter, usr].find(r => r.error);
   if (fallo) throw new Error(fallo.error.message);
 
+  /* La lista de rubros la ve cualquier sesión válida, siempre. Si vuelve
+     vacía es que la sesión caducó: la base no rechaza con error, simplemente
+     no devuelve nada. Sin esta comprobación el CRM se abría en cero —sin
+     comercios, sin equipo, sin rubros— y parecía que se hubiera borrado todo. */
+  if (!(rub.data || []).length){
+    await sb.auth.signOut();
+    S.user = null;
+    throw new Error("Tu sesión caducó. Vuelve a entrar con tu correo y contraseña.");
+  }
+
   RUBROS = rub.data || [];
   CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
   byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
@@ -1079,7 +1101,7 @@ function viewCartera(){
       <h2>${S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña"}</h2>
       <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
     </div>
-    <button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>
+    ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
   </div>
 
   <div class="stat-row">
@@ -1118,7 +1140,9 @@ function viewCartera(){
   <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
   ${mostrar.length ? `<div class="cl-grid">${mostrar.map(cardCliente).join("")}</div>`
     : total === 0
-      ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
+      ? (esDeCampo()
+          ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
+          : `<div class="empty"><div class="big">◱</div>El equipo todavía no ha registrado comercios.<br>Acá vas a ver la cartera completa de la campaña en cuanto empiecen.</div>`)
       : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.<br><br>
          <button class="btn ghost" id="limpiarFiltros2">Quitar filtros</button></div>`}
   ${lista.length > mostrar.length ? `<button class="btn ghost block" id="mas">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}`;
@@ -1218,7 +1242,7 @@ function viewFicha(c){
         ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro, y la derivación ya cuenta como venta. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
         : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
     </div>
-    ${(!esClienteNuevo(c) && b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio) ? `
+    ${(!esClienteNuevo(c) && b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio && esDeCampo()) ? `
     <div class="card">
       <div class="note warn" style="margin:0">
         <b>Esta gestión sigue abierta.</b> Ya hablaste con el titular, así que puedes cerrarla como
@@ -1243,7 +1267,7 @@ function viewFicha(c){
   </div>
 
   ${mio ? `<div class="sticky-actions">
-    <button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>
+    ${esDeCampo() ? `<button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>` : ""}
   </div>` : ""}`;
 }
 
@@ -1325,6 +1349,10 @@ function editarCliente(cid){
 }
 
 function renderFormCliente(){
+  if (!esDeCampo() && !S.editCli){
+    S.tab = "cartera";
+    return toast("El alta de comercios la hacen los ejecutivos en campo");
+  }
   if (!S.formCli) S.formCli = nuevoFormCliente();
   const f = S.formCli, editando = !!S.editCli;
 
@@ -1824,6 +1852,10 @@ function nuevoForm(){
 function renderFormulario(){
   const c = byId[S.cid];
   if (!c) return go("cartera");
+  if (!esDeCampo() && !S.editId){
+    S.tab = "cartera";
+    return toast("Las gestiones las registran los ejecutivos en campo");
+  }
   if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId)) : nuevoForm();
   const f = S.form;
 
@@ -3091,9 +3123,10 @@ function viewAyuda(){
     </div>
   </div>` : ""}
 
-  <div class="card">
+  <div class="card ancho">
     <h3>Reglas activas</h3>
     <div class="note" style="margin-bottom:11px">Estas reglas viven en la base de datos, no en esta pantalla. Aunque alguien manipulara el navegador, Postgres las vuelve a aplicar al guardar.</div>
+    <div class="kv-cols">
     <div class="kv"><dt>Dominio permitido</dt><dd>@${esc(CONFIG.dominio)}</dd></div>
     <div class="kv"><dt>Alta de comercios</dt><dd>La hace el ejecutivo en campo; el customer_id es único en toda la campaña</dd></div>
     <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para poder identificar la venta</dd></div>
@@ -3104,7 +3137,9 @@ function viewAyuda(){
     <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
     <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
     
+    <div class="kv"><dt>Registrar</dt><dd>Solo los ejecutivos dan de alta comercios y registran gestiones; el Analista y el Manager supervisan</dd></div>
     <div class="kv"><dt>Zona horaria</dt><dd>America/Lima — fechas, horas y plazos se calculan en hora de Lima</dd></div>
+    </div>
     ${admin ? `<div class="note" style="margin-top:11px">Para cambiar cualquiera de estas reglas, edita la tabla <b>config</b> en Supabase. No hay que tocar la aplicación.</div>` : ""}
   </div>
 
@@ -3177,7 +3212,9 @@ function cardEquipo(){
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Comercios</th>
         <th style="text-align:right">Registros</th><th></th></tr></thead>
-      <tbody>${USUARIOS.map(u => `<tr${u.activo === false ? ' style="opacity:.55"' : ""}>
+      <tbody>${!USUARIOS.length ? `<tr><td colspan="5" style="padding:22px 10px;text-align:center;color:var(--muted)">
+        No se pudo leer la lista del equipo. Cierra sesión y vuelve a entrar.</td></tr>` : ""}
+      ${USUARIOS.map(u => `<tr${u.activo === false ? ' style="opacity:.55"' : ""}>
         <td><b>${esc(u.nombreCompleto || u.nombre)}</b>
           <div style="font-size:11.5px;color:var(--muted)">${esc(u.correo)}</div>
           ${u.activo === false ? `<span class="chip crit" style="font-size:10px">De baja</span>` : ""}</td>
@@ -3489,6 +3526,12 @@ document.getElementById("btnUser").onclick = () => {
 })();
 
 function mostrarFallo(e){
+  // Una sesión caducada no es una caída: se vuelve a la pantalla de ingreso.
+  if (/sesión caducó/i.test(String(e && e.message || e))){
+    S.user = null;
+    $("#app").classList.add("hidden");
+    return renderLogin({ error: String(e.message || e) });
+  }
   $("#login").classList.remove("hidden");
   $("#app").classList.add("hidden");
   $("#login").innerHTML = `<div class="lg-card">
