@@ -1179,8 +1179,6 @@ function viewFicha(c){
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div></dd></div>`
         : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div></dd></div>`}
-      ${c.comentario_cliente   ? `<div class="kv"><dt>Comentario del cliente</dt><dd>${esc(c.comentario_cliente)}</dd></div>` : ""}
-      ${c.comentario_ejecutivo ? `<div class="kv"><dt>Comentario del ejecutivo</dt><dd>${esc(c.comentario_ejecutivo)}</dd></div>` : ""}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
       ${c.direccion ? `<div style="margin-top:11px">
@@ -1264,8 +1262,7 @@ function nuevoFormCliente(){
     tipo_registro:"CARTERA", customer_id:"", ruc:"", razon_social:"",
     nombre_comercio:"", rubro:"", rubro_otro:"",
     distrito:"", direccion:"", estado:"ACTIVO",
-    resultado_gestion:"PENDIENTE", observacion:"",
-    comentario_cliente:"", comentario_ejecutivo:""
+    resultado_gestion:"PENDIENTE", observacion:""
   };
 }
 
@@ -1279,9 +1276,7 @@ function formDeCliente(c){
     distrito: c.distrito || "", direccion: c.direccion || "",
     estado: c.estado || "ACTIVO",
     resultado_gestion: c.resultado_gestion || "PENDIENTE",
-    observacion: c.observacion || "",
-    comentario_cliente: c.comentario_cliente || "",
-    comentario_ejecutivo: c.comentario_ejecutivo || ""
+    observacion: c.observacion || ""
   };
 }
 
@@ -1377,6 +1372,25 @@ function renderFormCliente(){
     <div id="boxGestion"></div>
   </div>
 
+  <div class="card" id="cardCierre">
+    <h3>¿Cómo se cerró la venta? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Una afiliación nueva se cierra en el local o en una reunión. Esta gestión se guarda
+      junto con el comercio: no puede quedar una venta sin la visita que la produjo.
+    </div>
+    <div class="opts" id="optsCierre"></div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+
+  <div id="boxGps"></div>
+
+  <div class="card" id="cardEvidencia">
+    <h3>Evidencia de la gestión <span class="req">*</span></h3>
+    <div id="evBox"></div>
+  </div>
+
+  <div id="boxGasto"></div>
+
   <div class="card">
     <h3 id="tituloNotas">Observación</h3>
     <div id="boxNotas"></div>
@@ -1392,7 +1406,7 @@ function renderFormCliente(){
 
   $("#view").querySelectorAll("[data-backcli]").forEach(b => b.onclick = () => {
     const volver = S.editCli;
-    S.formCli = null; S.editCli = null; S.tab = "cartera"; S.cid = volver || null;
+    S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = volver || null;
     render();
   });
   $("#view").querySelectorAll("[data-c]").forEach(el => {
@@ -1508,15 +1522,44 @@ function pintarIdentificacion(){
 /* Una venta nueva se registra con lo mínimo: RUC, razón social y rubro. La
    dirección, el distrito y el estado son de la cartera de BBVA — un comercio
    que recién se afilia todavía no tiene estado que reportar. */
+/* Medios con los que se puede cerrar una afiliación nueva. Por teléfono,
+   correo o WhatsApp no se cierra una venta: hay que estar ahí o verse la cara. */
+const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual","videollamada"];
+
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
+  const ocultarSiCartera = ["#cardCierre", "#cardEvidencia"];
   [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo], ["#cardGestion", nuevo]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
-  // Una venta nueva es una derivación: el resultado lo confirma BBVA en el
-  // siguiente corte. Para el ejecutivo la derivación ya cuenta, así que va
-  // como venta y no se pregunta.
-  if (nuevo) S.formCli.resultado_gestion = "VENTA";
-  else pintarGestion();
+  ocultarSiCartera.forEach(sel => { const el = $(sel); if (el) el.style.display = nuevo ? "" : "none"; });
+
+  if (nuevo){
+    // Una venta nueva es una derivación: el resultado lo confirma BBVA en el
+    // siguiente corte. Para el ejecutivo la derivación ya cuenta.
+    S.formCli.resultado_gestion = "VENTA";
+    // La gestión que cierra la venta se arma en el mismo formulario.
+    if (!S.form) S.form = nuevoForm();
+    S.form.Resultado = "efectivo";
+    pintarMediosVenta();
+  } else {
+    ["#derivado","#boxGps","#boxGasto"].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ""; });
+    pintarGestion();
+  }
+}
+
+function pintarMediosVenta(){
+  const f = S.form, box = $("#optsCierre");
+  if (!box) return;
+  box.innerHTML = TIPOS_CONTACTO.filter(t => MEDIOS_VENTA.includes(t.id)).map(t => `
+    <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-medio="${t.id}">
+      <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+    </div>`).join("");
+  box.querySelectorAll("[data-medio]").forEach(el => el.onclick = () => {
+    f.Tipo_Contacto = el.dataset.medio;
+    box.querySelectorAll("[data-medio]").forEach(x => x.classList.toggle("on", x.dataset.medio === f.Tipo_Contacto));
+    pintarDerivado(); pintarGps(); pintarGasto();
+  });
+  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto();
 }
 
 /* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
@@ -1525,16 +1568,26 @@ function pintarNotas(){
   const f = S.formCli, box = $("#boxNotas"), tit = $("#tituloNotas");
   if (!box) return;
   if (f.tipo_registro === "NUEVO"){
-    if (tit) tit.textContent = "Comentarios";
+    const g = S.form || (S.form = nuevoForm());
+    if (tit) tit.textContent = "Comentarios de la gestión";
     box.innerHTML = `
       <div class="field">
-        <label>Comentario del cliente <span class="hint">— lo que él dijo</span></label>
-        <textarea data-c="comentario_cliente" placeholder="Ej.: Le interesa el POS pero quiere comparar comisiones.">${esc(f.comentario_cliente)}</textarea>
+        <label>Calificación del cliente</label>
+        <select data-f="Calificacion">
+          <option value="">Seleccionar…</option>
+          ${CALIFICACIONES.map(k => `<option value="${k.id}" ${g.Calificacion===k.id?"selected":""}>${k.label}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— tu lectura</span></label>
+        <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Comercio sin afiliar, aceptó la propuesta. Se envían los datos para el onboarding.">${esc(g.Comentario_Ejecutivo)}</textarea>
       </div>
       <div class="field" style="margin-bottom:0">
-        <label>Comentario del ejecutivo <span class="hint">— tu lectura</span></label>
-        <textarea data-c="comentario_ejecutivo" placeholder="Ej.: Cierre probable esta semana; se derivó a BBVA para la afiliación.">${esc(f.comentario_ejecutivo)}</textarea>
+        <label>Comentario del cliente <span class="hint">— en sus palabras</span></label>
+        <textarea data-f="Comentario_Cliente" placeholder="Ej.: Mis clientes me piden pagar con tarjeta y pierdo ventas.">${esc(g.Comentario_Cliente)}</textarea>
       </div>`;
+    box.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => g[el.dataset.f] = el.value);
+    return;
   } else {
     if (tit) tit.textContent = "Observación";
     box.innerHTML = `
@@ -1587,6 +1640,20 @@ async function guardarCliente(){
   }
   if (nuevo){
     if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
+    if (!editando){
+      const g = S.form || {};
+      if (!g.Tipo_Contacto) errores.push("Indica cómo se cerró la venta: visita al local o reunión.");
+      if (RULES.requiereUbicacion(g.Tipo_Contacto) && !g.Ubicacion_Verificada && !g._sinUbicacion)
+        errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
+      if (!g.Evidencia) errores.push("Adjunta la evidencia de la gestión.");
+      if (!String(g.Comentario_Ejecutivo || "").trim()) errores.push("Escribe el comentario del ejecutivo.");
+      const gasto = Number(g.Gasto_Total || 0);
+      const nCmp = (g.Gastos_Paths||[]).length + (g.Gastos_Nuevos||[]).length;
+      if (gasto > 0 && nCmp === 0) errores.push("Adjunta el comprobante del gasto que declaraste.");
+      if (nCmp > 0 && gasto <= 0)  errores.push("Anota el monto total de los comprobantes que adjuntaste.");
+      if (gasto < 0)    errores.push("El monto del gasto no puede ser negativo.");
+      if (gasto > 2000) errores.push("El monto supera el máximo permitido por visita (S/ 2,000).");
+    }
   } else {
     if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
     if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
@@ -1612,30 +1679,52 @@ async function guardarCliente(){
   };
   if (nuevo){
     // Ficha mínima: el resto del onboarding lo hace BBVA por su canal.
-    fila.ruc                  = ruc;
-    fila.razon_social         = String(f.razon_social).trim();
-    fila.nombre_comercio      = String(f.razon_social).trim();
-    fila.distrito             = null;
-    fila.direccion            = null;
-    fila.estado               = null;
-    fila.observacion          = null;
-    fila.comentario_cliente   = String(f.comentario_cliente).trim() || null;
-    fila.comentario_ejecutivo = String(f.comentario_ejecutivo).trim() || null;
-    if (!editando) fila.customer_id = "NUEVO-" + ruc;
+    fila.ruc             = ruc;
+    fila.razon_social    = String(f.razon_social).trim();
+    fila.nombre_comercio = String(f.razon_social).trim();
+    fila.distrito = null; fila.direccion = null; fila.estado = null; fila.observacion = null;
   } else {
-    fila.nombre_comercio      = String(f.nombre_comercio).trim();
-    fila.distrito             = String(f.distrito).trim().toUpperCase();
-    fila.direccion            = String(f.direccion).trim();
-    fila.estado               = f.estado;
-    fila.observacion          = String(f.observacion).trim() || null;
-    fila.comentario_cliente   = null;
-    fila.comentario_ejecutivo = null;
+    fila.nombre_comercio = String(f.nombre_comercio).trim();
+    fila.distrito        = String(f.distrito).trim().toUpperCase();
+    fila.direccion       = String(f.direccion).trim();
+    fila.estado          = f.estado;
+    fila.observacion     = String(f.observacion).trim() || null;
     if (!editando) fila.customer_id = cid;
   }
 
   try {
     if (editando){
       const { error } = await sb.from("clientes").update(fila).eq("customer_id", S.editCli);
+      if (error) throw error;
+    } else if (nuevo){
+      // El comercio y la gestión que lo cerró entran juntos o no entra ninguno.
+      const g = S.form;
+      if (g.Evidencia && !g.Evidencia_Path){
+        const ruta = await subirEvidencia(g.Evidencia);
+        if (ruta) g.Evidencia_Path = ruta;
+      }
+      for (const d of (g.Gastos_Nuevos || [])){
+        const ruta = await subirEvidencia(d);
+        if (ruta) g.Gastos_Paths.push(ruta);
+      }
+      g.Gastos_Nuevos = [];
+      const { error } = await sb.rpc("crear_venta_nueva", {
+        p_ruc: ruc,
+        p_razon_social: fila.razon_social,
+        p_rubro: fila.rubro,
+        p_rubro_otro: fila.rubro_otro,
+        p_tipo_contacto: g.Tipo_Contacto,
+        p_fecha: g.Fecha_Contacto,
+        p_hora: g.Hora_Contacto,
+        p_evidencia_path: g.Evidencia_Path || "",
+        p_comentario_ejecutivo: String(g.Comentario_Ejecutivo || "").trim(),
+        p_comentario_cliente: String(g.Comentario_Cliente || "").trim() || null,
+        p_calificacion: g.Calificacion || null,
+        p_ubicacion: g.Ubicacion || null,
+        p_ubicacion_verificada: !!g.Ubicacion_Verificada,
+        p_gasto_total: String(g.Gasto_Total).trim() === "" ? null : Number(g.Gasto_Total),
+        p_gastos_paths: g.Gastos_Paths || []
+      });
       if (error) throw error;
     } else {
       fila.asignado = S.user.nombre;
@@ -1644,9 +1733,9 @@ async function guardarCliente(){
       if (error) throw error;
     }
     const destino = editando ? S.editCli : (nuevo ? "NUEVO-" + ruc : cid);
-    await recargarCartera(); await cargarAuditoria();
-    toast(editando ? "Comercio actualizado" : "Comercio registrado");
-    S.formCli = null; S.editCli = null; S.tab = "cartera"; S.cid = destino;
+    await recargarCartera(); await refrescar(); await cargarAuditoria();
+    toast(editando ? "Comercio actualizado" : (nuevo ? "Venta nueva registrada con su gestión" : "Comercio registrado"));
+    S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = destino;
     window.scrollTo(0,0);
     render();
   } catch (err){
@@ -2483,9 +2572,7 @@ function filasBase(){
         b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
-        b.Comentario_Ejecutivo || c.comentario_ejecutivo || "",
-        b.Comentario_Cliente   || c.comentario_cliente   || "",
-        c.observacion || ""]);
+        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""]);
   });
 }
 
@@ -2616,7 +2703,7 @@ function hojaUsuarios(){
    ========================================================================= */
 const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
   "Fecha de llamada o visita","Direccion_Actual","Contactado (Si/No)",
-  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita","Volumen_Comercio"];
+  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
 
 /* Columnas propias de Stratis, para el análisis interno. No van al banco. */
 const COLS_BBVA_EXTRA = ["Resultado_Gestion","Distrito","Intentos","Contactos_Efectivos",
@@ -2645,8 +2732,7 @@ function filasBBVA(extra){
       regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "NO",
       regs.some(r => ES_VIRTUAL(r.Tipo_Contacto))    ? "SI" : "NO",
       cumplidas.length ? "SI" : "NO",
-      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : "",
-      ""                                                    // Volumen_Comercio: lo completa BBVA
+      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : ""
     ];
     if (!extra) return base;
     const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
@@ -2671,7 +2757,7 @@ function filasBBVA(extra){
 
 const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta",
   "Visitas","Llamadas","Contactado (Si/No)","Cumple_Visita",
-  "Comentario de Cliente","Comentario del Ejecutivo","Ejecutivo_Stratis","Volumen_Comercio"];
+  "Comentario de Cliente","Comentario del Ejecutivo","Ejecutivo_Stratis"];
 
 /* Los clientes nuevos no tienen Customer ID, así que no se pueden pegar en el
    archivo de la cartera: BBVA primero tiene que afiliarlos. Van en su propia
@@ -2682,10 +2768,9 @@ function filasNuevos(){
     const efectivos = regs.filter(r => esEfectivo(r.Resultado));
     const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
     const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
-    // El comentario de la ficha es el del alta; si después hubo gestiones,
-    // manda el más reciente de ellas.
-    const comCliente = ultimo("Comentario_Cliente")   || c.comentario_cliente   || "";
-    const comEjec    = ultimo("Comentario_Ejecutivo") || c.comentario_ejecutivo || "";
+    // Los comentarios salen de la gestión que cerró la venta.
+    const comCliente = ultimo("Comentario_Cliente");
+    const comEjec    = ultimo("Comentario_Ejecutivo");
     return [
       c.ruc || "", c.razon_social || "", rubroLabel(c),
       "SI",                                     // la derivación ya cuenta como venta
@@ -2697,7 +2782,7 @@ function filasNuevos(){
       efectivos.length ? "SI" : "NO",
       cumplidas.length ? "SI" : "NO",
       comCliente, comEjec,
-      c.asignado || "", ""
+      c.asignado || ""
     ];
   });
 }
@@ -2860,22 +2945,23 @@ function viewAyuda(){
   <div class="card">
     <h3>Resumen para BBVA</h3>
     <div class="note" style="margin-bottom:12px">
-      Las <b>13 columnas del archivo del banco</b>, en su orden exacto y con sus nombres:
+      Las <b>12 columnas del archivo del banco</b>, en su orden exacto y con sus nombres:
       customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita,
-      Direccion_Actual, Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita,
-      Fecha_Visita y Volumen_Comercio. Se busca por <b>customer_id</b> y se pega.
+      Direccion_Actual, Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita y
+      Fecha_Visita. Se busca por <b>customer_id</b> y se pega.
     </div>
     <div class="note" style="margin-bottom:12px">
       <b>Gestión = SI</b> cuando el comercio quedó como <b>Retenido</b> o <b>Venta</b>. Mientras siga
       pendiente o se haya perdido va NO. Lo marca el ejecutivo en la ficha del comercio.<br>
       <b>Cumple_Visita = SI</b> si la gestión fue presencial <b>o</b> virtual y además se logró hablar.<br>
-      <b>Volumen_Comercio</b> sale vacía: la completa BBVA.
+      <b>Volumen_Comercio</b> no sale: esa columna la maneja el banco y el pegado no la toca.
     </div>
     <div class="note" style="margin-bottom:12px">
       El archivo trae <b>dos hojas</b>. <b>Resumen BBVA</b> con los comercios de la cartera, que
       pegas por Customer ID. Y <b>Clientes nuevos</b> con las ventas que trae Stratis: como el banco
       todavía no las tiene afiliadas, van identificadas por <b>RUC</b> y razón social. En esa hoja
-      Gestión sale siempre SI: la derivación ya cuenta como venta.
+      Gestión sale siempre SI: la derivación ya cuenta como venta, y siempre trae la gestión que la
+      cerró, porque el CRM no deja registrar una sin la otra.
     </div>
     <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
@@ -2883,7 +2969,7 @@ function viewAyuda(){
       <button class="btn ghost sm" data-exp="nuevos">Clientes nuevos en CSV</button>
     </div>
     <div class="note" style="margin-top:11px">
-      El Excel trae además, a la derecha de la columna 13, las columnas propias de Stratis
+      El Excel trae además, a la derecha de la columna 12, las columnas propias de Stratis
       —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo, comentarios,
       calificación y ejecutivo asignado— para tu análisis. Esas no se pegan en el archivo del banco.
     </div>
@@ -2897,7 +2983,7 @@ function viewAyuda(){
     <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para poder identificar la venta</dd></div>
     <div class="kv"><dt>Cumple_Visita</dt><dd>SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar</dd></div>
     <div class="kv"><dt>Gestión = SI</dt><dd>Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó</dd></div>
-    <div class="kv"><dt>Cliente nuevo</dt><dd>La derivación es la venta: no se pide resultado y la base la marca sola</dd></div>
+    <div class="kv"><dt>Venta nueva</dt><dd>Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual</dd></div>
     <div class="kv"><dt>Intentos</dt><dd>Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio</dd></div>
     <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
     <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
