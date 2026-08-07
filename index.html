@@ -121,6 +121,83 @@ nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-widt
 .card{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);box-shadow:var(--sh);padding:14px;margin-bottom:11px}
 .card h3{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--ink-2)}
 .sec-title{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:16px 2px 8px}
+
+/* ================= AJUSTES =================
+   La pantalla se lee como secciones, no como una pila de tarjetas iguales.
+   Cada sección abre con su título y una línea que dice para qué sirve; la
+   letra chica vive plegada, para que lo accionable quede a la vista. */
+.aj-sec{margin:0 0 22px}
+.aj-sec > .aj-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 2px 9px;
+  padding-bottom:7px;border-bottom:1px solid var(--line)}
+.aj-sec > .aj-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.2px;color:var(--ink)}
+.aj-sec > .aj-h span{font-size:12.5px;color:var(--muted)}
+.aj-grid{display:grid;grid-template-columns:1fr;gap:11px;align-items:start}
+.aj-grid > .card{margin-bottom:0}
+
+/* Identidad */
+.aj-yo{display:flex;gap:13px;align-items:center;flex-wrap:wrap}
+.aj-yo .av{width:46px;height:46px;font-size:15px;flex:none}
+.aj-yo .quien{flex:1;min-width:180px}
+.aj-yo .quien b{font-size:15.5px;letter-spacing:-.2px}
+.aj-yo .quien div{font-size:12.5px;color:var(--muted);margin-top:2px}
+.aj-acc{display:flex;gap:8px;flex-wrap:wrap}
+.aj-acc .btn{flex:1;min-width:132px}
+
+/* Una fila de descarga: qué es, el botón que lo baja, y los CSV sueltos.
+   En celular se apilan en ese orden —lo principal primero—; en pantalla ancha
+   el botón se va a la derecha y los CSV quedan debajo del texto. */
+.aj-dl{display:grid;grid-template-columns:1fr;gap:10px;
+  padding:14px 0;border-bottom:1px solid var(--grid)}
+.aj-dl:first-of-type{padding-top:2px}
+.aj-dl:last-of-type{border-bottom:0;padding-bottom:2px}
+.aj-dl .txt b{font-size:14.5px;letter-spacing:-.1px}
+.aj-dl .txt div{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+.aj-dl .btn{align-self:start}
+.aj-csv{display:flex;gap:7px;flex-wrap:wrap}
+/* Acá el ancho ya lo pone el contenedor; el tope de 820px dejaba el borde
+   derecho de cada aviso desalineado con el de su tarjeta. */
+.view-ajustes .note{max-width:none}
+
+/* Lo que antes eran tres bloques azules seguidos */
+details.aj-mas{border-top:1px solid var(--grid);margin-top:11px;padding-top:9px}
+details.aj-mas > summary{cursor:pointer;list-style:none;font-size:12.5px;font-weight:650;
+  color:var(--brand-2);display:inline-flex;align-items:center;gap:6px;padding:3px 0;user-select:none}
+details.aj-mas > summary::-webkit-details-marker{display:none}
+details.aj-mas > summary:before{content:"›";display:inline-block;transition:transform .16s;font-size:15px;line-height:1}
+details.aj-mas[open] > summary:before{transform:rotate(90deg)}
+details.aj-mas > summary:hover{text-decoration:underline}
+details.aj-mas .cuerpo{font-size:12.8px;color:var(--ink-2);line-height:1.58;padding:9px 0 2px;max-width:840px}
+details.aj-mas .cuerpo p{margin:0 0 9px}
+details.aj-mas .cuerpo p:last-child{margin-bottom:0}
+
+/* Reglas: rejilla real, no columnas que dejan huérfanas */
+.aj-reglas{display:grid;grid-template-columns:1fr;gap:0}
+.aj-reglas .kv{padding:9px 0}
+.aj-pie{font-size:12px;color:var(--muted);text-align:center;padding:14px 4px 4px;line-height:1.6}
+.aj-pie b{color:var(--ink-2);font-weight:650}
+
+/* Equipo */
+.eq-top{display:flex;align-items:center;justify-content:space-between;gap:11px;flex-wrap:wrap;
+  margin:0 0 12px;padding-bottom:11px;border-bottom:1px solid var(--line)}
+.eq-conteo{font-size:13.5px}
+.eq-conteo b{font-size:17px;letter-spacing:-.3px;margin-right:2px}
+table.tbl-equipo td:first-child{min-width:190px}
+table.tbl-equipo tr.eq-baja td{opacity:.55}
+/* En celular la tabla no cabe: los dos números se bajan al nombre en vez de
+   dejar la fila cortada por el borde derecho. */
+.eq-mini{display:none;font-size:11.5px;color:var(--muted);margin-top:5px;
+  align-items:center;gap:6px;flex-wrap:wrap}
+@media(max-width:759px){
+  .eq-mini{display:flex}
+  table.tbl-equipo thead{display:none}   /* una sola columna no necesita cabecera */
+  table.tbl-equipo th:nth-child(2), table.tbl-equipo td:nth-child(2),
+  table.tbl-equipo th:nth-child(3), table.tbl-equipo td:nth-child(3),
+  table.tbl-equipo th:nth-child(4), table.tbl-equipo td:nth-child(4){display:none}
+  table.tbl-equipo td:first-child{min-width:0}
+  table.tbl-equipo td:last-child{white-space:normal;width:104px}
+  table.tbl-equipo td:last-child .btn{display:block;width:100%}
+  table.tbl-equipo td:last-child .btn + .btn{margin-top:5px}
+}
 .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:650;line-height:1.6;white-space:nowrap}
 .chip.p1{background:#fbe6e6;color:#a32626} .chip.p2{background:#fdeade;color:#9c4a25}
 .chip.p3{background:#fef3d9;color:#8a6100} .chip.p4{background:#eceae4;color:#52514e}
@@ -216,6 +293,8 @@ table.tbl tr:last-child td{border-bottom:0}
 .caja-scroll::-webkit-scrollbar{width:10px;height:10px}
 .caja-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:3px solid var(--card)}
 .caja-scroll::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+#tblBitacora td:nth-child(4){min-width:120px}
+#tblBitacora td:nth-child(5){min-width:260px}
 @media(min-width:1180px){ .caja-scroll{max-height:min(52vh,520px)} }
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:0}
 .modal{background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88dvh;overflow:auto;padding:20px 17px calc(20px + env(safe-area-inset-bottom))}
@@ -346,6 +425,13 @@ table.tbl tr:last-child td{border-bottom:0}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px;align-items:start}
   .bar-row{grid-template-columns:158px 1fr 46px}
   .bar-sub{margin-left:167px}
+  .aj-dl{grid-template-columns:1fr auto;gap:10px 18px}
+  .aj-dl .txt{grid-column:1;grid-row:1}
+  .aj-dl > .btn{grid-column:2;grid-row:1;min-width:200px}
+  .aj-dl .aj-csv{grid-column:1;grid-row:2}
+  .aj-grid{grid-template-columns:repeat(2,1fr);gap:12px;align-items:stretch}
+  .aj-grid.una{grid-template-columns:1fr}
+  .aj-reglas{grid-template-columns:repeat(2,1fr);column-gap:28px}
 }
 
 /* ---------- LAPTOP: se aprovecha el ancho de la ventana ----------
@@ -372,6 +458,20 @@ table.tbl tr:last-child td{border-bottom:0}
   .view-cols > .card.ancho{column-span:all}
   .kv-cols{column-count:2;column-gap:26px}
   .kv-cols .kv{break-inside:avoid}
+
+  /* Ajustes: rejilla explícita. Dos tarjetas por fila, misma altura de fila,
+     sin los huecos que dejaba el masonry. La pantalla no se estira de borde a
+     borde —un panel de configuración a 1600px de ancho no se lee mejor, se lee
+     peor: los botones quedan del largo de la mesa y el ojo pierde la columna. */
+  .view-ajustes{max-width:1020px;margin:0 auto}
+  .aj-grid{grid-template-columns:repeat(2,1fr);gap:13px;align-items:stretch}
+  .aj-grid.una{grid-template-columns:1fr}
+  .aj-sec{margin-bottom:26px}
+  .aj-sec > .aj-h h2{font-size:16.5px}
+  .aj-reglas{grid-template-columns:repeat(2,1fr);column-gap:32px}
+  .aj-yo .quien b{font-size:16.5px}
+  .aj-acc{justify-content:flex-start}
+  .aj-acc .btn{flex:0 0 auto;min-width:150px}
   .view-form .sticky-actions{position:static;justify-content:flex-end;
     background:none;border-top:1px solid var(--grid);padding-top:14px}
   .view-form .sticky-actions .btn{flex:none;min-width:210px}
@@ -399,6 +499,7 @@ table.tbl tr:last-child td{border-bottom:0}
   .view-form, .view-cols{column-count:3;column-gap:18px}
   .tl-lectura{column-count:3}
   .kv-cols{column-count:3}
+  .view-ajustes{max-width:1140px}
   .grid2{gap:14px}
 }
 
@@ -1090,7 +1191,9 @@ function render(){
   $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
   renderNav();
   const v = $("#view");
-  v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-cols" : "");
+  /* Ajustes ya no fluye en columnas automáticas: cada bloque decide su ancho.
+     El masonry dejaba huecos largos y hacía zigzaguear la lectura. */
+  v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-ajustes" : "");
   if (S.tab === "form_cliente")           return renderFormCliente();
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
   else if (S.tab === "form_visita")       return renderFormulario();
@@ -3028,16 +3131,25 @@ function resumenAuditoria(a){
   if (a.accion === "eliminar"){
     const b = d._borrado;
     if (!b) return a.tabla === "clientes" ? "Eliminó el comercio completo" : "Eliminó una gestión";
+    /* Se arma con las partes que existan: un registro viejo puede no tener
+       todas, y no queremos líneas con paréntesis vacíos ni puntos sueltos. */
+    const partes = xs => xs.filter(x => x !== null && x !== undefined && String(x).trim() !== "").join(" · ");
     if (a.tabla === "clientes"){
       const g = Number(b.gestiones) || 0;
-      return `Eliminó el comercio (${b.llave || ""}) · ${b.cierre ? (RESULTADOS_GESTION.find(x=>x.id===b.cierre)||{}).label || b.cierre : ""}`
-        + `${b.distrito ? " · " + titulo(b.distrito) : ""}`
-        + ` · se llevó ${g} ${g === 1 ? "gestión" : "gestiones"}`;
+      return partes([
+        "Eliminó el comercio" + (b.llave ? ` (${b.llave})` : ""),
+        b.cierre ? ((RESULTADOS_GESTION.find(x=>x.id===b.cierre)||{}).label || b.cierre) : "",
+        b.distrito ? titulo(b.distrito) : "",
+        `se llevó ${g} ${g === 1 ? "gestión" : "gestiones"}`
+      ]);
     }
-    return `Eliminó la gestión del ${b.fecha || "—"}${b.hora ? " " + b.hora : ""} · ${nomTipo(b.medio)}`
-      + ` · ${nomResultado(b.resultado)}`
-      + `${b.cumple === "SI" ? " · cumplía visita" : ""}`
-      + `${Number(b.gasto) > 0 ? " · " + soles(b.gasto) + " en viáticos" : ""}`;
+    return partes([
+      "Eliminó la gestión" + (b.fecha ? ` del ${b.fecha}${b.hora ? " " + b.hora : ""}` : ""),
+      b.medio ? nomTipo(b.medio) : "",
+      b.resultado ? nomResultado(b.resultado) : "",
+      b.cumple === "SI" ? "cumplía visita" : "",
+      Number(b.gasto) > 0 ? soles(b.gasto) + " en viáticos" : ""
+    ]);
   }
   return Object.keys(d).map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`).join(" · ");
 }
@@ -3273,123 +3385,118 @@ function exportarCSV(que){
 
 /* =========================================================================
    Ajustes
+
+   La pantalla se organiza en secciones con un propósito cada una —tu cuenta,
+   descargas, equipo, bitácora, cómo funciona— en vez de una pila de tarjetas
+   del mismo peso. Lo accionable (los botones) queda arriba y a la vista; la
+   letra chica, que antes eran párrafos azules apilados, vive plegada.
    ========================================================================= */
+
+function ajSeccion(titulo, bajada, cuerpo, clase){
+  return `<section class="aj-sec">
+    <div class="aj-h"><h2>${titulo}</h2>${bajada ? `<span>${bajada}</span>` : ""}</div>
+    ${cuerpo}
+  </section>`;
+}
+
+function ajFilaDescarga(titulo, desc, idBoton, textoBoton, csv){
+  return `<div class="aj-dl">
+    <div class="txt"><b>${titulo}</b><div>${desc}</div></div>
+    <button class="btn" id="${idBoton}">${textoBoton}</button>
+    ${csv ? `<div class="aj-csv">${csv.map(c =>
+        `<button class="btn ghost sm" data-exp="${c[0]}">${c[1]}</button>`).join("")}</div>` : ""}
+  </div>`;
+}
+
 function viewAyuda(){
   const admin = S.user.rol !== "Ejecutivo";
-  return `
+  const yo = S.user;
+
+  /* ---- Tu cuenta -------------------------------------------------------- */
+  const alcance = yo.rol === "Ejecutivo"
+    ? `Ves <b>${cartera().length}</b> comercios: los tuyos. La base rechaza cualquier consulta fuera de tu cartera.`
+    : `Ves la campaña completa: <b>${cartera().length}</b> comercios y <b>${DB.todos().length}</b> gestiones de todo el equipo.`;
+
+  const cuenta = `
+  <div class="aj-grid${S.demo ? " una" : ""}">
+    <div class="card">
+      <div class="aj-yo">
+        <span class="av" style="background:${userColor(yo.nombre)}">${iniciales(yo.nombre)}</span>
+        <div class="quien">
+          <b>${esc(yo.nombreCompleto || yo.nombre)}</b>
+          <div>${esc(yo.correo)}</div>
+        </div>
+        <span class="chip ${yo.rol === "Ejecutivo" ? "no" : "info"}">${esc(yo.rol)}</span>
+      </div>
+      <div class="note ok" style="margin:13px 0">${alcance}</div>
+      <div class="aj-acc">
+        <button class="btn ghost sm" id="recargar">Actualizar datos</button>
+        <button class="btn ghost sm" id="salir">Cerrar sesión</button>
+      </div>
+      ${S.demo ? `<div class="note warn" style="margin-top:11px"><b>Modo demostración.</b> Nada se guarda: al recargar la página se pierde todo.</div>` : ""}
+    </div>
+
+    ${S.demo ? "" : `<div class="card">
+      <h3>Tu contraseña</h3>
+      <div style="font-size:12.8px;color:var(--muted);margin:-3px 0 12px;line-height:1.5">
+        Cámbiala cuando quieras. Solo afecta a tu cuenta y no hace falta correo de confirmación.
+      </div>
+      <div class="field campo-corto">
+        <label for="nc1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
+        <input type="password" id="nc1" autocomplete="new-password">
+      </div>
+      <div class="field campo-corto">
+        <label for="nc2">Repítela</label>
+        <input type="password" id="nc2" autocomplete="new-password">
+      </div>
+      <button class="btn ghost limitado" id="guardarNuevaClave">Guardar contraseña</button>
+    </div>`}
+  </div>`;
+
+  /* ---- Descargas -------------------------------------------------------- */
+  const descargas = !admin ? "" : `
   <div class="card">
-    <h3>Sesión</h3>
-    <div style="display:flex;gap:11px;align-items:center">
-      <span class="av" style="width:42px;height:42px;font-size:14px;background:${userColor(S.user.nombre)}">${iniciales(S.user.nombre)}</span>
-      <div style="flex:1"><b>${esc(S.user.nombreCompleto || S.user.nombre)}</b>
-        <div style="font-size:12.5px;color:var(--muted)">${esc(S.user.correo)} · ${esc(S.user.rol)}</div></div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn ghost sm" id="recargar" style="flex:1">Actualizar datos</button>
-      <button class="btn ghost sm" id="salir" style="flex:1">Cerrar sesión</button>
-    </div>
-    ${S.demo ? `<div class="note warn" style="margin-top:11px"><b>Modo demostración.</b> Nada se guarda: al recargar la página se pierde todo.</div>` : ""}
-  </div>
+    ${ajFilaDescarga(
+      "Resumen para BBVA",
+      "Las 12 columnas del archivo del banco, en su orden. Es el archivo que se entrega.",
+      "expBBVA", "Descargar para BBVA",
+      [["bbva","Cartera BBVA en CSV"],["nuevos","Clientes nuevos en CSV"]])}
 
-  ${S.demo ? "" : `<div class="card">
-    <h3>Cambiar tu contraseña</h3>
-    <div class="note" style="margin-bottom:12px">
-      Cámbiala cuando quieras. Solo afecta a tu cuenta y no necesita correo.
-    </div>
-    <div class="field campo-corto">
-      <label for="nc1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
-      <input type="password" id="nc1" autocomplete="new-password">
-    </div>
-    <div class="field campo-corto">
-      <label for="nc2">Repítela</label>
-      <input type="password" id="nc2" autocomplete="new-password">
-    </div>
-    <button class="btn ghost block limitado" id="guardarNuevaClave">Guardar contraseña</button>
-  </div>`}
+    ${ajFilaDescarga(
+      "La campaña completa",
+      "11 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
+      "expXlsx", "Descargar Excel completo",
+      [["base","Base en CSV"],["visitas","Visitas en CSV"]])}
 
-  ${admin ? `<div class="card">
-    <h3>Descargar la base</h3>
-    <div class="note" style="margin-bottom:12px">
-      Como <b>${esc(S.user.rol)}</b> descargas la campaña completa con los datos actualizados
-      al momento de generarlo: <b>Base</b>, <b>Visitas</b>, <b>Avance por ejecutivo</b>,
-      <b>Efectividad de contacto</b>, <b>Viáticos</b>, <b>Resumen BBVA</b>, <b>Clientes nuevos</b>, <b>Rubros</b>, <b>Usuarios</b>, <b>Bitácora</b> y <b>Reporte</b>.
-    </div>
-    <button class="btn block" id="expXlsx">Descargar Excel completo (11 hojas)</button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
-      <button class="btn ghost sm" data-exp="base">Base en CSV</button>
-      <button class="btn ghost sm" data-exp="visitas">Visitas en CSV</button>
-    </div>
-  </div>
+    <details class="aj-mas">
+      <summary>Qué trae cada archivo y cómo se pega</summary>
+      <div class="cuerpo">
+        <p><b>Resumen para BBVA</b> trae dos hojas. <b>Resumen BBVA</b> son los comercios de la
+        cartera, con las 12 columnas del banco en su orden exacto: customer_id, Gestión,
+        Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita, Direccion_Actual,
+        Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita y Fecha_Visita.
+        Se busca por customer_id y se pega.</p>
+        <p><b>Clientes nuevos</b> son las ventas que trae Stratis. Como el banco todavía no las
+        tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
+        la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
+        CRM no deja registrar una sin la otra.</p>
+        <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
+        pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
+        o virtual y además se logró hablar. <b>Volumen_Comercio</b> no sale: esa columna la
+        maneja el banco y el pegado no la toca.</p>
+        <p>A la derecha de la columna 12 el Excel agrega las columnas propias de Stratis
+        —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo,
+        comentarios, calificación y ejecutivo asignado—. Esas son para ti; no se pegan en el
+        archivo del banco.</p>
+        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Efectividad de
+        contacto, Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
+      </div>
+    </details>
+  </div>`;
 
+  /* ---- Bitácora --------------------------------------------------------- */
+  const bitacora = !admin ? "" : `
   <div class="card">
-    <h3>Resumen para BBVA</h3>
-    <div class="note" style="margin-bottom:12px">
-      Las <b>12 columnas del archivo del banco</b>, en su orden exacto y con sus nombres:
-      customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita,
-      Direccion_Actual, Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita y
-      Fecha_Visita. Se busca por <b>customer_id</b> y se pega.
-    </div>
-    <div class="note" style="margin-bottom:12px">
-      <b>Gestión = SI</b> cuando el comercio quedó como <b>Retenido</b> o <b>Venta</b>. Mientras siga
-      pendiente o se haya perdido va NO. Lo marca el ejecutivo en la ficha del comercio.<br>
-      <b>Cumple_Visita = SI</b> si la gestión fue presencial <b>o</b> virtual y además se logró hablar.<br>
-      <b>Volumen_Comercio</b> no sale: esa columna la maneja el banco y el pegado no la toca.
-    </div>
-    <div class="note" style="margin-bottom:12px">
-      El archivo trae <b>dos hojas</b>. <b>Resumen BBVA</b> con los comercios de la cartera, que
-      pegas por Customer ID. Y <b>Clientes nuevos</b> con las ventas que trae Stratis: como el banco
-      todavía no las tiene afiliadas, van identificadas por <b>RUC</b> y razón social. En esa hoja
-      Gestión sale siempre SI: la derivación ya cuenta como venta, y siempre trae la gestión que la
-      cerró, porque el CRM no deja registrar una sin la otra.
-    </div>
-    <button class="btn block" id="expBBVA">Descargar resumen para BBVA</button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">
-      <button class="btn ghost sm" data-exp="bbva">Cartera BBVA en CSV</button>
-      <button class="btn ghost sm" data-exp="nuevos">Clientes nuevos en CSV</button>
-    </div>
-    <div class="note" style="margin-top:11px">
-      El Excel trae además, a la derecha de la columna 12, las columnas propias de Stratis
-      —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo, comentarios,
-      calificación y ejecutivo asignado— para tu análisis. Esas no se pegan en el archivo del banco.
-    </div>
-  </div>` : ""}
-
-  <div class="card ancho">
-    <h3>Reglas activas</h3>
-    <div class="note" style="margin-bottom:11px">Estas reglas viven en la base de datos, no en esta pantalla. Aunque alguien manipulara el navegador, Postgres las vuelve a aplicar al guardar.</div>
-    <div class="kv-cols">
-    <div class="kv"><dt>Dominio permitido</dt><dd>@${esc(CONFIG.dominio)}</dd></div>
-    <div class="kv"><dt>Alta de comercios</dt><dd>La hace el ejecutivo en campo; el customer_id es único en toda la campaña</dd></div>
-    <div class="kv"><dt>Datos sensibles</dt><dd>No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para poder identificar la venta</dd></div>
-    <div class="kv"><dt>Cumple_Visita</dt><dd>SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar</dd></div>
-    <div class="kv"><dt>Gestión = SI</dt><dd>Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó</dd></div>
-    <div class="kv"><dt>Venta nueva</dt><dd>Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual</dd></div>
-    <div class="kv"><dt>Intentos</dt><dd>Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio</dd></div>
-    <div class="kv"><dt>Ubicación</dt><dd>Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada</dd></div>
-    <div class="kv"><dt>Evidencia</dt><dd>Obligatoria en todo registro, en bucket privado</dd></div>
-    
-    <div class="kv"><dt>Registrar</dt><dd>Solo los ejecutivos dan de alta comercios y registran gestiones; el Analista y el Manager supervisan</dd></div>
-    <div class="kv"><dt>Zona horaria</dt><dd>America/Lima — fechas, horas y plazos se calculan en hora de Lima</dd></div>
-    </div>
-    ${admin ? `<div class="note" style="margin-top:11px">Para cambiar cualquiera de estas reglas, edita la tabla <b>config</b> en Supabase. No hay que tocar la aplicación.</div>` : ""}
-  </div>
-
-  <div class="card">
-    <h3>Tu aislamiento</h3>
-    <div class="note ok">
-      ${S.user.rol === "Ejecutivo"
-        ? `Ves <b>${cartera().length} comercios</b>: exactamente los que tú registraste. La base rechaza cualquier consulta fuera de tu cartera, así que ningún otro ejecutivo puede ver tus registros ni tú los suyos.`
-        : `Tu perfil <b>${esc(S.user.rol)}</b> ve la campaña completa: ${cartera().length} comercios y ${DB.todos().length} interacciones de todo el equipo.`}
-    </div>
-  </div>
-
-  ${admin ? `<div class="card">
-    <h3>Bitácora de cambios</h3>
-    <div class="note" style="margin-bottom:11px">
-      Cada edición y cada eliminación queda registrada con quién, cuándo y qué cambió. Los ejecutivos
-      no la ven. El medio de contacto, el resultado, la fecha y la ubicación no se pueden editar:
-      para corregirlos hay que eliminar el registro y volver a crearlo, y esa eliminación aparece aquí.
-    </div>
     ${AUDITORIA.length ? (() => {
       const q = (S.qBit || "").trim().toLowerCase();
       let lista = AUDITORIA;
@@ -3437,12 +3544,60 @@ function viewAyuda(){
         ${lista.length > mostrar.length ? `<button class="btn ghost sm" id="masBit">Ver ${Math.min(25, lista.length - mostrar.length)} más</button>` : ""}
         ${filtrando ? `<button class="btn ghost sm" id="limpiarBit">Quitar filtros</button>` : ""}
         <span style="font-size:12px;color:var(--muted);margin-left:auto">La lista se desliza dentro del recuadro · el Excel trae la bitácora completa</span>
-      </div>`;
+      </div>
+      <details class="aj-mas">
+        <summary>Qué queda registrado</summary>
+        <div class="cuerpo"><p>Cada edición y cada eliminación, con quién, cuándo y qué cambió.
+        Los ejecutivos no la ven. El medio de contacto, el resultado, la fecha y la ubicación no
+        se pueden editar: para corregirlos hay que eliminar el registro y volver a crearlo, y esa
+        eliminación aparece acá con el detalle de lo que se borró.</p></div>
+      </details>`;
     })()
-      : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas.</div>`}
-  </div>` : ""}
+      : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas. Cuando alguien
+         edite o elimine algo, aparecerá acá con el detalle de lo que cambió.</div>`}
+  </div>`;
 
-  ${admin ? cardEquipo() : ""}`;
+  /* ---- Cómo funciona ---------------------------------------------------- */
+  const reglas = [
+    ["Registrar", "Solo los ejecutivos dan de alta comercios y registran gestiones; el Analista y el Manager supervisan"],
+    ["Alta de comercios", "La hace el ejecutivo en campo; el customer_id es único en toda la campaña"],
+    ["Venta nueva", "Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual"],
+    ["Gestión = SI", "Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó"],
+    ["Cumple_Visita", "SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar"],
+    ["Intentos", "Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio"],
+    ["Ubicación", "Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada"],
+    ["Evidencia", "Obligatoria en todo registro, en bucket privado"],
+    ["Datos sensibles", "No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para identificar la venta"],
+    ["Dominio permitido", "@" + CONFIG.dominio],
+    ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"]
+  ];
+
+  const comoFunciona = `
+  <div class="card">
+    <div class="aj-reglas">
+      ${reglas.map(([k,v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join("")}
+    </div>
+    <details class="aj-mas">
+      <summary>Por qué estas reglas no se pueden saltar</summary>
+      <div class="cuerpo">
+        <p>No viven en esta pantalla sino dentro de la base de datos, como restricciones y
+        disparadores de Postgres. Aunque alguien manipulara el navegador o llamara a la API por
+        fuera del CRM, la base las vuelve a aplicar al guardar y rechaza lo que no cumpla.</p>
+        ${admin ? `<p>Para cambiar cualquiera de ellas se edita la tabla <b>config</b> en Supabase.
+        No hay que tocar la aplicación.</p>` : ""}
+      </div>
+    </details>
+  </div>`;
+
+  /* ---- La página -------------------------------------------------------- */
+  return `
+  ${ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta)}
+  ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
+  ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
+  ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
+  ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
+  <div class="aj-pie"><b>Stratis CRM</b> · campaña BBVA Adquirencia<br>
+    Los datos viven en Supabase con las reglas de acceso por rol activas.</div>`;
 }
 
 /* =========================================================================
@@ -3468,39 +3623,52 @@ async function equipoAPI(cuerpo){
 }
 
 function cardEquipo(){
+  const activos = USUARIOS.filter(u => u.activo !== false).length;
+  const baja    = USUARIOS.length - activos;
   return `
   <div class="card">
-    <h3>Equipo · ${USUARIOS.length} persona${USUARIOS.length===1?"":"s"}</h3>
-    <div class="note" style="margin-bottom:12px">
-      Desde aquí das de alta a alguien nuevo, cambias su rol o lo das de baja. La contraseña se
-      genera al momento y se muestra una sola vez: cópiala y envíasela por mensaje directo.
-      En su primer ingreso el CRM le pedirá cambiarla.
+    <div class="eq-top">
+      <div class="eq-conteo">
+        <b>${activos}</b> con acceso${baja ? ` · <span style="color:var(--muted)">${baja} de baja</span>` : ""}
+      </div>
+      <button class="btn sm" id="eqNuevo">＋ Agregar persona</button>
     </div>
 
-    <div class="tbl-wrap"><table class="tbl">
+    <div class="tbl-wrap"><table class="tbl tbl-equipo">
       <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Comercios</th>
-        <th style="text-align:right">Registros</th><th></th></tr></thead>
+        <th style="text-align:right">Gestiones</th><th></th></tr></thead>
       <tbody>${!USUARIOS.length ? `<tr><td colspan="5" style="padding:22px 10px;text-align:center;color:var(--muted)">
         No se pudo leer la lista del equipo. Cierra sesión y vuelve a entrar.</td></tr>` : ""}
-      ${USUARIOS.map(u => `<tr${u.activo === false ? ' style="opacity:.55"' : ""}>
+      ${USUARIOS.map(u => {
+        const nCom = CLIENTES.filter(c=>c.asignado_correo===u.correo).length;
+        const nGes = DB.todos().filter(r=>r.Correo_Stratis===u.correo).length;
+        return `<tr${u.activo === false ? ' class="eq-baja"' : ""}>
         <td><b>${esc(u.nombreCompleto || u.nombre)}</b>
+          ${u.activo === false ? ` <span class="chip crit" style="font-size:10px">De baja</span>` : ""}
           <div style="font-size:11.5px;color:var(--muted)">${esc(u.correo)}</div>
-          ${u.activo === false ? `<span class="chip crit" style="font-size:10px">De baja</span>` : ""}</td>
+          <div class="eq-mini">
+            <span class="chip ${u.rol==="Ejecutivo"?"no":"info"}">${esc(u.rol)}</span>
+            ${nCom || "sin"} comercio${nCom===1?"":"s"} · ${nGes || "sin"} gesti${nGes===1?"ón":"ones"}</div></td>
         <td><span class="chip ${u.rol==="Ejecutivo"?"no":"info"}">${esc(u.rol)}</span></td>
-        <td style="text-align:right" class="mono">${CLIENTES.filter(c=>c.asignado_correo===u.correo).length || "—"}</td>
-        <td style="text-align:right" class="mono">${DB.todos().filter(r=>r.Correo_Stratis===u.correo).length}</td>
+        <td style="text-align:right" class="mono">${nCom || "—"}</td>
+        <td style="text-align:right" class="mono">${nGes || "—"}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="btn ghost sm" data-eqedit="${esc(u.correo)}">Editar</button>
           <button class="btn ghost sm" data-eqclave="${esc(u.correo)}">Contraseña</button>
         </td>
-      </tr>`).join("")}</tbody>
+      </tr>`; }).join("")}</tbody>
     </table></div>
 
-    <button class="btn block" id="eqNuevo" style="margin-top:13px">＋ Agregar persona al equipo</button>
-    <div class="note" style="margin-top:11px">
-      Dar de baja a alguien le cierra el acceso de inmediato, pero <b>no borra su historial</b>:
-      sus comercios y registros siguen contando en la campaña y en el Excel.
-    </div>
+    <details class="aj-mas">
+      <summary>Cómo funcionan las altas, las bajas y las contraseñas</summary>
+      <div class="cuerpo">
+        <p>Al crear una cuenta la contraseña se genera al momento y <b>se muestra una sola vez</b>:
+        cópiala y envíasela por mensaje directo, nunca en un grupo. En su primer ingreso el CRM le
+        pedirá cambiarla por una suya. Si se pierde, el botón <b>Contraseña</b> genera otra.</p>
+        <p>Dar de baja a alguien le cierra el acceso de inmediato, pero <b>no borra su historial</b>:
+        sus comercios y gestiones siguen contando en la campaña y en el Excel.</p>
+      </div>
+    </details>
   </div>`;
 }
 
