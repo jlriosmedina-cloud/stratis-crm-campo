@@ -263,6 +263,15 @@ table.tbl tr:last-child td{border-bottom:0}
 .cl-grid .cl{margin-bottom:0}
 
 
+/* Barra apilada del cierre de gestión */
+.g-barra{display:flex;height:16px;border-radius:9px;overflow:hidden;background:var(--surface-2);
+  border:1px solid var(--line)}
+.g-barra span{display:block;height:100%}
+.g-leyenda{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-size:12.5px;color:var(--muted)}
+.g-leyenda span{display:flex;align-items:center;gap:6px}
+.g-leyenda i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.g-leyenda b{color:var(--ink)}
+
 /* ---------- Guía de uso: la infografía dentro del CRM ---------- */
 .g-pasos{display:grid;gap:12px}
 .g-paso{display:flex;gap:13px;align-items:flex-start;padding:13px;border:1px solid var(--line);
@@ -314,7 +323,7 @@ table.tbl tr:last-child td{border-bottom:0}
   nav.bottom button{flex:none;flex-direction:row;gap:7px;padding:9px 15px;border-radius:9px;font-size:13.5px}
   nav.bottom button.on{background:var(--info-bg)}
   nav.bottom button .dot{position:static;margin-left:1px}
-  .stat-row{grid-template-columns:repeat(4,1fr)}
+  .stat-row{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
   .page-head .btn{width:auto;min-width:230px}
   .sel-row{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
   .filtros{padding:14px 15px}
@@ -1133,6 +1142,7 @@ function viewCartera(){
   const conEf = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id))._efectivos > 0).length;
   const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
   const cumplen = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cumple_Visita === "SI").length;
+  const cerrados = base.filter(gestionCumplida).length;
   const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
   const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
   const mostrar = lista.slice(0, S.limite);
@@ -1156,6 +1166,7 @@ function viewCartera(){
     <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
+    <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div><div class="sub">${total?Math.round(cerrados/total*100):0}% · retenidos y ventas</div></div>
   </div>
 
   <div class="filtros">
@@ -1302,7 +1313,7 @@ function viewFicha(c){
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
         <div class="stat"><div class="lbl">Intentos</div><div class="val">${b._intentos}</div><div class="sub">registros de contacto</div></div>
-        <div class="stat"><div class="lbl">Efectivos</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de efectividad</div></div>
+        <div class="stat"><div class="lbl">Efectivos</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de los intentos llegó a conversación</div></div>
       </div>
     </div>
     <div class="card">
@@ -2485,7 +2496,7 @@ function viewRegistros(){
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
-    <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de efectividad</div></div>
+    <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos llegó a conversación</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${todos.filter(r=>r.Cumple_Visita==="SI").length}</div><div class="sub">presenciales o virtuales logradas</div></div>
     <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacionVerificada).length}</div><div class="sub">presenciales sin respaldo de GPS</div></div>
   </div>
@@ -2577,6 +2588,28 @@ function viewPanel(){
       pct: rs.length ? ef / rs.length * 100 : 0 };
   }).filter(e => e.clientes || e.intentos).sort((a,b) => b.pct - a.pct);
 
+  /* ---- Cierre de la gestión --------------------------------------------
+     Dos números distintos y los dos hacen falta:
+     · Avance: cuánto de la cartera ya tiene el objetivo cumplido. Al inicio
+       de campaña es bajo por definición, porque casi todo está pendiente.
+     · Efectividad de cierre: de lo ya decidido, cuánto se ganó. Dice qué tan
+       bien cierran, sin castigarlos por lo que todavía están trabajando.
+     Por separado engañan: 100% de efectividad de cierre con 3 comercios
+     decididos de 200 no es una buena campaña. */
+  const nCierre = id => base.filter(c => (c.resultado_gestion || "PENDIENTE") === id).length;
+  const retenidos = nCierre("RETENIDO"), ventas = nCierre("VENTA");
+  const perdidos  = nCierre("PERDIDO"),  pendientes = nCierre("PENDIENTE");
+  const cumplido  = retenidos + ventas;
+  const decididos = cumplido + perdidos;
+  const pctAvance = total ? Math.round(cumplido / total * 100) : 0;
+  const pctCierre = decididos ? Math.round(cumplido / decididos * 100) : 0;
+  const repartoCierre = [
+    { label:"Retenidos",  n:retenidos,  color:"var(--good)" },
+    { label:"Ventas",     n:ventas,     color:"var(--brand-2)" },
+    { label:"Perdidos",   n:perdidos,   color:"var(--crit)" },
+    { label:"Pendientes", n:pendientes, color:"var(--line)" }
+  ].filter(x => x.n > 0);
+
   const porResultado = RESULTADOS.map(x => ({ label:x.label, ok:x.ok,
     n: regs.filter(r => r.Resultado === x.id).length })).filter(x => x.n > 0);
   const maxRes = Math.max(1, ...porResultado.map(x => x.n));
@@ -2619,8 +2652,39 @@ function viewPanel(){
   <div class="stat-row">
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Efectividad</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} lograron contacto</div></div>
+    <div class="stat"><div class="lbl">Efectividad de contacto</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} intentos llegaron a conversación</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumple}</div><div class="sub">${total?Math.round(cumple/total*100):0}% de la cartera</div></div>
+    <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cumplido}</div><div class="sub">${pctAvance}% de la cartera · Gestión = SI</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Cierre de la gestión · lo que BBVA lee como objetivo cumplido</h3>
+    ${total ? `
+    <div class="stat-row" style="margin-bottom:13px">
+      <div class="stat"><div class="lbl">Avance de la campaña</div><div class="val">${pctAvance}%</div>
+        <div class="sub">${cumplido} de ${total} comercios ya cerraron con objetivo cumplido</div></div>
+      <div class="stat"><div class="lbl">Efectividad de cierre</div><div class="val">${decididos ? pctCierre + "%" : "—"}</div>
+        <div class="sub">${decididos ? cumplido + " de " + decididos + " comercios ya decididos" : "Todavía no hay ningún comercio decidido"}</div></div>
+      <div class="stat"><div class="lbl">Todavía abiertos</div><div class="val">${pendientes}</div>
+        <div class="sub">${total?Math.round(pendientes/total*100):0}% de la cartera en trabajo</div></div>
+    </div>
+    <div class="g-barra">
+      ${repartoCierre.map(x => `<span style="width:${(x.n/total*100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${x.n}"></span>`).join("")}
+    </div>
+    <div class="g-leyenda">
+      ${repartoCierre.map(x => `<span><i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></span>`).join("")}
+    </div>
+    <div class="note" style="margin-top:12px">
+      <b>Los dos números dicen cosas distintas.</b> El <b>avance</b> es cuánto de la cartera ya está
+      cerrado con objetivo cumplido; al empezar la campaña va a ser bajo, y está bien.
+      La <b>efectividad de cierre</b> mira solo lo ya decidido: de cada comercio que dejó de estar
+      pendiente, cuántos se ganaron. Un 100% de efectividad con 3 comercios decididos de 200 no es
+      una buena campaña — por eso van juntos.
+    </div>
+    <div class="note" style="margin-top:9px">
+      Nada de esto es lo mismo que la <b>efectividad de contacto</b> de arriba, que solo mide cuántos
+      intentos llegaron a conversación. Se puede tener 100% de contacto y 0% de retención.
+    </div>` : `<div class="note">Todavía no hay comercios registrados en la campaña.</div>`}
   </div>
 
   <div class="grid2">
@@ -2789,23 +2853,33 @@ const hoja = (cols, filas) => {
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
   const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Contactos efectivos",
-                "% Efectividad","Intentos por comercio","Visitas válidas","Presenciales","Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
+                "% Efectividad de contacto","Intentos por comercio","Visitas válidas","Presenciales",
+                "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
+                "Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
     const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
     cs.forEach(c => RULES.recomputarBase(c.customer_id));
     const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
     const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
+    const n = id => cs.filter(c => (c.resultado_gestion || "PENDIENTE") === id).length;
+    const ret = n("RETENIDO"), ven = n("VENTA"), per = n("PERDIDO"), pen = n("PENDIENTE");
+    const cumplido = ret + ven, decididos = cumplido + per;
     return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length, ef,
       rs.length ? Math.round(ef/rs.length*100)/100 : 0,
       cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
       rs.filter(r => r.Cumple_Visita === "SI").length,
       rs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto)).length,
+      ret, ven, per, pen, cumplido,
+      cs.length ? Math.round(cumplido/cs.length*100)/100 : 0,
+      decididos ? Math.round(cumplido/decididos*100)/100 : "",
       rs.filter(sinUbicacionVerificada).length,
-      Math.round(rs.reduce((n,r) => n + (Number(r.Gasto_Total)||0), 0) * 100) / 100,
+      Math.round(rs.reduce((n2,r) => n2 + (Number(r.Gasto_Total)||0), 0) * 100) / 100,
       rs.filter(r => Number(r.Gasto_Total) > 0).length];
   });
   const ws = hoja(cols, filas);
-  filas.forEach((_,i) => { const c = ws["F"+(i+2)]; if (c) c.z = "0%"; });
+  ["F","O","P"].forEach(col => filas.forEach((_,i) => {
+    const c = ws[col+(i+2)]; if (c && typeof c.v === "number") c.z = "0%";
+  }));
   return ws;
 }
 
@@ -3026,7 +3100,19 @@ function hojaReporte(admin){
     ["% Contactado", base.length ? Math.round(cont/base.length*100) + "%" : "0%"],
     ["Intentos de comunicación", regs.length],
     ["Contactos efectivos", ef],
-    ["% Efectividad", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"],
+    ["% Efectividad de contacto", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"], [],
+    ["CIERRE DE LA GESTIÓN"],
+    ["Retenidos", base.filter(c => c.resultado_gestion === "RETENIDO").length],
+    ["Ventas", base.filter(c => c.resultado_gestion === "VENTA").length],
+    ["Perdidos", base.filter(c => c.resultado_gestion === "PERDIDO").length],
+    ["Pendientes", base.filter(c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE").length],
+    ["Objetivo cumplido (Gestión = SI)", base.filter(gestionCumplida).length],
+    ["% Avance sobre la cartera", base.length ? Math.round(base.filter(gestionCumplida).length/base.length*100) + "%" : "0%"],
+    ["% Efectividad de cierre", (() => {
+      const cum = base.filter(gestionCumplida).length;
+      const dec = cum + base.filter(c => c.resultado_gestion === "PERDIDO").length;
+      return dec ? Math.round(cum/dec*100) + "%" : "—";
+    })()],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
     ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length],
     ["Viáticos declarados", "S/ " + (Math.round(regs.reduce((n,r)=>n+(Number(r.Gasto_Total)||0),0)*100)/100).toFixed(2)], [],
@@ -3678,6 +3764,35 @@ function viewGuia(){
       </div>
     </div>
    </div>
+  </div>
+
+  <div class="card">
+    <h3>Tus números, y qué mide cada uno</h3>
+    <div class="note" style="margin-bottom:12px">
+      Los tres suben por motivos distintos. Ninguno es «el bueno»: se leen juntos.
+    </div>
+    <div class="g-esc">
+      <div class="g-caso">
+        <div class="g-caso-t">Intentos</div>
+        <div class="g-caso-n" style="border:0;padding:0;margin:0">Cuántas gestiones registraste, contestaran o no.
+        Mide cuánto saliste a buscar. Un día de cinco locales cerrados sube este número, y está bien.</div>
+      </div>
+      <div class="g-caso">
+        <div class="g-caso-t">Efectividad de contacto</div>
+        <div class="g-caso-n" style="border:0;padding:0;margin:0">De esos intentos, cuántos llegaron a conversación.
+        <b>No es retención:</b> puedes tener 100% de contacto y ningún comercio cerrado todavía.</div>
+      </div>
+      <div class="g-caso">
+        <div class="g-caso-t">Visitas válidas</div>
+        <div class="g-caso-n" style="border:0;padding:0;margin:0">Comercios donde hubo visita o reunión <b>y</b> se
+        habló con el titular. Es el cumplimiento que mide BBVA.</div>
+      </div>
+      <div class="g-caso">
+        <div class="g-caso-t">Objetivo cumplido</div>
+        <div class="g-caso-n" style="border:0;padding:0;margin:0">Comercios que cerraste como retención o venta.
+        Este sí es el resultado final: es lo que el banco lee como <b>Gestión = SI</b>.</div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
