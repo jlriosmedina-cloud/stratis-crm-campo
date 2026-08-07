@@ -2167,22 +2167,43 @@ function pintarGps(){
     <button class="btn ${cap ? "ghost" : ""} block" id="gps">📍 ${cap ? "Volver a capturar" : "Capturar mi ubicación actual"}</button>
     <div id="gpsVal" style="margin-top:11px">${cap ? tarjetaUbicacion(f.Ubicacion) : ""}</div>
     <div id="gpsMsg"></div>
+    ${(!cap && !f._sinUbicacion) ? `
+      <button class="btn ghost sm block" id="gpsOmitirYa" style="margin-top:9px">
+        No puedo capturar la ubicación</button>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:6px;text-align:center">
+        Sin señal, sin permiso de GPS, o una visita anterior que estás registrando después.
+      </div>` : ""}
     ${f._sinUbicacion ? notaSinUbicacion() : ""}
   </div>`;
+
+  /* La salida tiene que estar visible desde el principio. Antes solo aparecía
+     después de que el GPS fallara, y si el navegador nunca respondía —permiso
+     descartado, equipo sin ubicación— el ejecutivo quedaba atrapado: el aviso
+     le pedía usar un botón que no estaba en pantalla. */
+  if ($("#gpsOmitirYa")) $("#gpsOmitirYa").onclick = () => {
+    f.Ubicacion = ""; f.Ubicacion_Verificada = false; f._sinUbicacion = true;
+    pintarGps();
+  };
 
   $("#gps").onclick = () => {
     const msg = $("#gpsMsg");
     if (!navigator.geolocation){ return fallaGps("Este dispositivo no permite obtener la ubicación."); }
     msg.innerHTML = `<div class="note" style="margin-top:9px">Obteniendo ubicación…</div>`;
+    // Algunos navegadores no llaman de vuelta si el usuario descarta el aviso
+    // de permiso: sin esto, el mensaje se queda girando para siempre.
+    let respondio = false;
+    setTimeout(() => { if (!respondio && $("#gpsMsg") && /Obteniendo/.test($("#gpsMsg").innerText))
+      fallaGps("El equipo no respondió. Puede que no se haya dado permiso de ubicación."); }, 14000);
     navigator.geolocation.getCurrentPosition(
       p => {
+        respondio = true;
         f.Ubicacion = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)} m)`;
         f.Ubicacion_Verificada = true;
         f._sinUbicacion = false;
         pintarGps();
         $("#gpsMsg").innerHTML = `<div class="note ok" style="margin-top:9px"><b>Ubicación capturada.</b> Precisión ±${Math.round(p.coords.accuracy)} m.</div>`;
       },
-      e => fallaGps(e.message),
+      e => { respondio = true; fallaGps(e.message); },
       { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
   };
 
@@ -2217,9 +2238,12 @@ function tarjetaUbicacion(v){
 function notaSinUbicacion(){
   return `
     <div class="note crit" style="margin-top:11px">
-      <b>Se guardará como “Sin ubicación verificada”.</b> El registro es válido y cuenta como intento,
-      pero queda marcado en la ficha, en el panel y en el Excel para que se vea que no tiene respaldo
-      de GPS. Si recuperas señal, vuelve a capturar antes de guardar.
+      <b>Se guardará como “Sin ubicación verificada”.</b> El registro es válido y cuenta igual: la
+      gestión, la visita cumplida y el cierre no cambian. Lo único es que queda marcado en la ficha,
+      en el panel y en el Excel, para que se vea que esa vez no hubo respaldo de GPS.
+      <div style="margin-top:6px">Es lo correcto cuando no hay señal, cuando el equipo no da permiso
+      de ubicación, o cuando estás registrando una visita de días anteriores. Si recuperas señal antes
+      de guardar, vuelve a capturar.</div>
     </div>`;
 }
 
@@ -2350,7 +2374,7 @@ async function guardar(c){
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
   if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
   if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
-    errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
+    errores.push("Captura la ubicación con el botón, o marca “No puedo capturar la ubicación” si el GPS no responde o estás registrando una visita anterior.");
   if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
   const gasto = Number(f.Gasto_Total || 0);
@@ -3662,8 +3686,10 @@ const ERRORES_GUIA = [
     a:"Todavía no hay ninguna gestión donde hayas hablado con el titular. Registra esa conversación y la opción aparece." },
   { q:"El comercio está de baja y no me aparece «Retenido»",
     a:"Correcto: un comercio dado de baja no se retiene. Si lograste que vuelva es «Venta»; si no, no hay retención que contar." },
-  { q:"El GPS no responde",
-    a:"Toca «Registrar sin ubicación verificada» y guarda igual. El registro es válido, solo queda marcado como sin respaldo." },
+  { q:"El GPS no responde o no me da permiso",
+    a:"Toca «No puedo capturar la ubicación» y guarda igual. El registro es válido y cuenta lo mismo: solo queda marcado como sin respaldo de GPS." },
+  { q:"Estoy registrando una visita de días anteriores",
+    a:"Cambia la fecha al día real de la visita y usa «No puedo capturar la ubicación»: el GPS de hoy no probaría dónde estuviste ese día. Explica en el comentario del ejecutivo que es un registro posterior." },
   { q:"Me equivoqué de medio o de resultado",
     a:"No se puede corregir: elimina el registro y créalo de nuevo. La eliminación queda en la bitácora." },
   { q:"Puse un monto de viáticos y no me deja guardar",
