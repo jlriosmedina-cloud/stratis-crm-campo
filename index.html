@@ -262,6 +262,51 @@ table.tbl tr:last-child td{border-bottom:0}
 .cl-grid{display:grid;gap:9px}
 .cl-grid .cl{margin-bottom:0}
 
+
+/* ---------- Guía de uso: la infografía dentro del CRM ---------- */
+.g-pasos{display:grid;gap:12px}
+.g-paso{display:flex;gap:13px;align-items:flex-start;padding:13px;border:1px solid var(--line);
+  border-radius:13px;background:var(--surface-2)}
+.g-num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--brand-2);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14.5px}
+.g-t{font-weight:700;font-size:15px;letter-spacing:-.2px}
+.g-d{font-size:13px;color:var(--muted);margin-top:2px}
+.g-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+
+.g-formula{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px}
+.g-caja{padding:9px 12px;border-radius:11px;font-size:13px;font-weight:650;border:1px solid var(--line);
+  background:var(--surface-2)}
+.g-caja.res{background:var(--good-bg);border-color:var(--good);color:var(--good-ink)}
+.g-mas{font-weight:800;color:var(--muted);font-size:16px}
+
+.g-medios{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:7px}
+.g-medio{display:flex;align-items:center;gap:8px;padding:8px 11px;border-radius:10px;font-size:13px;
+  border:1px solid var(--line)}
+.g-medio span{font-weight:800;width:16px;text-align:center}
+.g-medio.si{background:var(--good-bg);border-color:var(--good);color:var(--good-ink)}
+.g-medio.no{background:var(--surface-2);color:var(--muted)}
+
+.g-arbol{display:grid;gap:9px}
+.g-rama{padding:11px 13px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2)}
+.g-cond{font-size:13.5px;font-weight:650;margin-bottom:5px}
+.g-si,.g-no{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+
+.g-esc{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:11px}
+.g-caso{padding:13px;border:1px solid var(--line);border-radius:13px;background:var(--surface-2)}
+.g-caso-t{font-weight:700;font-size:14px;letter-spacing:-.2px;margin-bottom:8px}
+.g-caso-k{display:grid;gap:4px;font-size:12.5px;color:var(--ink-2)}
+.g-caso-k b{color:var(--muted);font-weight:600;display:inline-block;min-width:104px}
+.g-caso-n{font-size:12.5px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--grid)}
+
+.g-fijos{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:7px}
+.g-fijo{padding:8px 11px;border-radius:10px;font-size:13px;background:var(--surface-2);
+  border:1px solid var(--line);color:var(--ink-2)}
+
+.g-faq{display:grid;gap:11px}
+.g-faq-i{padding-left:12px;border-left:3px solid var(--ring)}
+.g-faq-q{font-weight:650;font-size:13.5px}
+.g-faq-a{font-size:13px;color:var(--muted);margin-top:3px}
+
 @media(min-width:760px){
   body{font-size:15.5px}
   main{max-width:1080px;margin:0 auto;width:100%;padding:20px 20px 40px}
@@ -980,6 +1025,7 @@ const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
+  { id:"guia",     ic:"?", label:"Guía" },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
 
@@ -1025,6 +1071,7 @@ function render(){
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
+  else if (S.tab === "guia")              v.innerHTML = viewGuia();
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
 }
@@ -3410,6 +3457,236 @@ async function recargarEquipo(){
   USUARIOS = (data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
     nombreCompleto: u.nombre, correo: u.correo, rol: u.rol, activo: u.activo }));
   await cargarAuditoria();
+}
+
+/* =========================================================================
+   Guía de uso — la infografía dentro del CRM
+
+   No es un manual: es lo que el ejecutivo mira cuando está parado frente al
+   local y no sabe qué marcar. Por eso va por escenarios y no por pantallas,
+   y por eso las reglas se enuncian como decisiones, no como funcionalidades.
+
+   Vive dentro de la aplicación a propósito: si mañana cambia una regla,
+   cambia acá también y nadie queda leyendo un PDF viejo.
+   ========================================================================= */
+
+const PASOS_GUIA = [
+  { n:"1", t:"Registra el comercio",
+    d:"Solo la primera vez que lo tocas. Después ya está en tu cartera.",
+    chips:["Customer ID","Nombre","Rubro","Distrito y dirección","Estado"] },
+  { n:"2", t:"Registra cada gestión",
+    d:"Cada intento cuenta, aunque no te contesten. Es lo que mide tu esfuerzo.",
+    chips:["Medio","Resultado","Ubicación","Evidencia","Viáticos","Comentarios"] },
+  { n:"3", t:"Cierra cuando cierres",
+    d:"En la misma pantalla, al final. Es lo que BBVA lee como objetivo cumplido.",
+    chips:["Retenido","Venta","Perdido","Sigue abierta"] }
+];
+
+const ESCENARIOS = [
+  { s:"Fui al local y estaba cerrado",
+    medio:"Visita presencial", res:"Local cerrado",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Cuenta como intento. La visita queda registrada aunque no hayas hablado." },
+  { s:"Fui, hablé con el titular y se queda con BBVA",
+    medio:"Visita presencial", res:"Habló con el contacto",
+    cumple:"SI", cierre:"Retenido",
+    nota:"El caso completo. Cumple visita y cierra como retención." },
+  { s:"Atendió el hijo, no el titular",
+    medio:"Visita presencial", res:"Titular ausente",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Hubo visita pero no conversación con quien decide. Vuelve otro día." },
+  { s:"Lo llamé y no contestó",
+    medio:"Llamada telefónica", res:"No contestó",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Suma intento. Una llamada nunca cumple visita, ni contestando." },
+  { s:"Reunión por Teams con el titular, sin ir al local",
+    medio:"Reunión virtual", res:"Habló con el contacto",
+    cumple:"SI", cierre:"Retenido",
+    nota:"La reunión virtual cumple visita igual que ir al local." },
+  { s:"El comercio estaba de baja y logré que vuelva",
+    medio:"Visita o reunión", res:"Habló con el contacto",
+    cumple:"SI", cierre:"Venta",
+    nota:"Deja el estado en «Dado de baja»: es como estaba cuando lo gestionaste." },
+  { s:"Me dijo que se va a la competencia",
+    medio:"Cualquiera", res:"Habló con el contacto",
+    cumple:"según el medio", cierre:"Perdido",
+    nota:"Hubo contacto, no hubo objetivo. Escribe en el comentario del cliente por qué se va." },
+  { s:"Un comercio sin POS quiere afiliarse",
+    medio:"Visita o reunión", res:"Se registra solo",
+    cumple:"SI", cierre:"Venta automática",
+    nota:"Es una venta nueva: se da de alta con RUC y razón social, junto con la visita." },
+  { s:"El teléfono que tengo no es del comercio",
+    medio:"Llamada telefónica", res:"Datos errados",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Déjalo escrito en el comentario del ejecutivo para que se pueda corregir." },
+  { s:"No me quiso atender",
+    medio:"Cualquiera", res:"No quiso atender",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"No es lo mismo que perderlo: todavía no dijo que se va." }
+];
+
+const ERRORES_GUIA = [
+  { q:"No me deja marcar «Retenido»",
+    a:"Todavía no hay ninguna gestión donde hayas hablado con el titular. Registra esa conversación y la opción aparece." },
+  { q:"El comercio está de baja y no me aparece «Retenido»",
+    a:"Correcto: un comercio dado de baja no se retiene. Si lograste que vuelva es «Venta»; si no, no hay retención que contar." },
+  { q:"El GPS no responde",
+    a:"Toca «Registrar sin ubicación verificada» y guarda igual. El registro es válido, solo queda marcado como sin respaldo." },
+  { q:"Me equivoqué de medio o de resultado",
+    a:"No se puede corregir: elimina el registro y créalo de nuevo. La eliminación queda en la bitácora." },
+  { q:"Puse un monto de viáticos y no me deja guardar",
+    a:"Falta el comprobante. Sin boleta adjunta no se puede declarar un gasto." },
+  { q:"Se abrió el CRM vacío, sin mis comercios",
+    a:"Tu sesión caducó. Cierra sesión, vuelve a entrar y todo reaparece: no se borró nada." }
+];
+
+function viewGuia(){
+  const paso = p => `
+    <div class="g-paso">
+      <span class="g-num">${p.n}</span>
+      <div>
+        <div class="g-t">${p.t}</div>
+        <div class="g-d">${esc(p.d)}</div>
+        <div class="g-chips">${p.chips.map(c => `<span class="chip info">${esc(c)}</span>`).join("")}</div>
+      </div>
+    </div>`;
+
+  const esc2 = t => esc(t);
+
+  return `
+  <div class="page-head">
+    <div>
+      <h2>Cómo se registra</h2>
+      <div class="sub">Los escenarios de la calle, y qué marcar en cada uno</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>El recorrido, de principio a fin</h3>
+    <div class="g-pasos">${PASOS_GUIA.map(paso).join("")}</div>
+  </div>
+
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Qué cuenta como visita cumplida</h3>
+      <div class="note" style="margin-bottom:12px">
+        Es la métrica que mira BBVA. Se calcula sola: nadie la marca a mano.
+      </div>
+      <div class="g-formula">
+        <span class="g-caja ok">Presencial <b>o</b> virtual</span>
+        <span class="g-mas">+</span>
+        <span class="g-caja ok">Hablaste con el titular</span>
+        <span class="g-mas">=</span>
+        <span class="g-caja res">Cumple visita</span>
+      </div>
+      <div class="g-medios">
+        ${[["Visita presencial","si"],["Reunión presencial","si"],["Reunión virtual","si"],
+           ["Videollamada","si"],["Llamada telefónica","no"],["Mensaje WhatsApp","no"],
+           ["Correo electrónico","no"]]
+          .map(([m,v]) => `<div class="g-medio ${v}"><span>${v === "si" ? "✓" : "✕"}</span>${esc(m)}</div>`).join("")}
+      </div>
+      <div class="note warn" style="margin-top:12px">
+        Una llamada telefónica <b>nunca</b> cumple visita, aunque el cliente conteste y la
+        conversación sea perfecta. Cuenta como intento y como contacto logrado, no como visita.
+      </div>
+    </div>
+   </div>
+
+   <div>
+    <div class="card">
+      <h3>Cómo cierra cada comercio</h3>
+      <div class="note" style="margin-bottom:12px">
+        El estado del comercio decide si el cierre es retención o venta. El CRM solo te ofrece
+        el que corresponde.
+      </div>
+      <div class="g-arbol">
+        <div class="g-rama">
+          <div class="g-cond">¿Hablaste con el titular?</div>
+          <div class="g-no">NO → solo puedes dejarla abierta o darla por perdida</div>
+        </div>
+        <div class="g-rama">
+          <div class="g-cond">SÍ, y el comercio está <b>activo</b></div>
+          <div class="g-si"><span class="chip ok">Retenido</span> → BBVA lee Gestión = SI</div>
+        </div>
+        <div class="g-rama">
+          <div class="g-cond">SÍ, y el comercio está <b>dado de baja</b></div>
+          <div class="g-si"><span class="chip ok">Venta</span> → se deriva al ejecutivo BBVA</div>
+        </div>
+        <div class="g-rama">
+          <div class="g-cond">Se va a la competencia o cerró</div>
+          <div class="g-no"><span class="chip crit">Perdido</span> → BBVA lee Gestión = NO</div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:12px">
+        Mientras la dejes abierta, a BBVA le llega <b>Gestión = NO</b>. No pasa nada: significa
+        que sigues trabajándola.
+      </div>
+    </div>
+   </div>
+  </div>
+
+  <div class="card">
+    <h3>Situación por situación</h3>
+    <div class="note" style="margin-bottom:12px">
+      Si dudas frente al local, busca acá tu caso.
+    </div>
+    <div class="g-esc">
+      ${ESCENARIOS.map(e => `
+        <div class="g-caso">
+          <div class="g-caso-t">${esc(e.s)}</div>
+          <div class="g-caso-k">
+            <span><b>Medio</b> ${esc(e.medio)}</span>
+            <span><b>Resultado</b> ${esc(e.res)}</span>
+            <span><b>Cumple visita</b> <span class="chip ${e.cumple==="SI"?"ok":"no"}">${esc(e.cumple)}</span></span>
+            <span><b>Cierre</b> <span class="chip ${/Retenido|Venta/.test(e.cierre)?"ok":(e.cierre==="Perdido"?"crit":"no")}">${esc(e.cierre)}</span></span>
+          </div>
+          <div class="g-caso-n">${esc(e.nota)}</div>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Lo que no se puede cambiar después</h3>
+      <div class="note" style="margin-bottom:12px">
+        Al editar una gestión solo se corrigen los comentarios, la calificación y los viáticos.
+        Lo demás queda fijo porque alimenta los conteos.
+      </div>
+      <div class="g-fijos">
+        ${["Fecha y hora","Medio de contacto","Resultado","Ubicación y su sello de GPS",
+           "Evidencia","Comercio y ejecutivo"]
+          .map(x => `<div class="g-fijo">🔒 ${esc(x)}</div>`).join("")}
+      </div>
+      <div class="note warn" style="margin-top:12px">
+        Si te equivocaste en alguno, <b>elimina el registro y créalo de nuevo</b>. Editar nunca
+        suma un intento, y cada eliminación queda en la bitácora.
+      </div>
+    </div>
+   </div>
+
+   <div>
+    <div class="card">
+      <h3>Si algo no te deja avanzar</h3>
+      <div class="g-faq">
+        ${ERRORES_GUIA.map(e => `
+          <div class="g-faq-i">
+            <div class="g-faq-q">${esc(e.q)}</div>
+            <div class="g-faq-a">${esc(e.a)}</div>
+          </div>`).join("")}
+      </div>
+    </div>
+   </div>
+  </div>
+
+  <div class="card">
+    <div class="note">
+      <b>Una regla que resume todas.</b> Registra lo que pasó, no lo que te gustaría que hubiera
+      pasado. El CRM está hecho para que un día malo —cinco locales cerrados— se vea como lo que
+      es: trabajo hecho. Inflar el cumplimiento no ayuda a nadie y la base lo rechaza sola.
+    </div>
+  </div>`;
 }
 
 /* =========================================================================
