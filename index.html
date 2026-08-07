@@ -1145,6 +1145,19 @@ function viewCartera(){
   const cerrados = base.filter(gestionCumplida).length;
   const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
   const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
+
+  /* Cuántos Customer ID lleva registrado cada quien. Los clientes nuevos van
+     aparte a propósito: no tienen Customer ID, así que sumarlos al mismo
+     número escondería justo lo que se quiere vigilar. */
+  const deCartera = base.filter(c => !esClienteNuevo(c));
+  const nuevos    = base.filter(esClienteNuevo);
+  const idsDe     = nom => deCartera.filter(c => c.asignado === nom).length;
+  const nuevosDe  = nom => nuevos.filter(c => c.asignado === nom).length;
+  const etiquetaEjec = nom => {
+    const n = nuevosDe(nom);
+    return `${nom} · ${idsDe(nom)} ID${n ? " + " + n + " nuevo" + (n === 1 ? "" : "s") : ""}`;
+  };
+  const cuenta = (arr, pred) => arr.filter(pred).length;
   const mostrar = lista.slice(0, S.limite);
   const filtrando = q || [S.fContacto,S.fEstadoCli,S.fRubro,S.fDistrito,S.fEjecutivo].some(x => x !== "todos");
 
@@ -1162,7 +1175,7 @@ function viewCartera(){
   </div>
 
   <div class="stat-row">
-    <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados por ${S.user.rol === "Ejecutivo" ? "ti" : "el equipo"}</div></div>
+    <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
     <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
@@ -1180,13 +1193,18 @@ function viewCartera(){
 
     <div class="sel-row">
       <label class="fsel"><span>Estado</span>
-        <select data-f="estadocli">${opciones(S.fEstadoCli, "Todo estado", ESTADOS_CLIENTE.map(e => [e, e === "ACTIVO" ? "Activos" : "Dados de baja"]).concat([["NUEVO","Clientes nuevos"]]))}</select></label>
+        <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
+          ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
+            .concat([["NUEVO", `Clientes nuevos · ${nuevos.length}`]]))}</select></label>
       <label class="fsel"><span>Rubro</span>
-        <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`, rubrosUsados.map(r => [r.codigo, r.nombre]))}</select></label>
+        <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`,
+          rubrosUsados.map(r => [r.codigo, `${r.nombre} · ${cuenta(base, c => c.rubro === r.codigo)}`]))}</select></label>
       <label class="fsel"><span>Distrito</span>
-        <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`, distritos.map(d => [d, titulo(d)]))}</select></label>
-      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo</span>
-        <select data-f="ejecutivo">${opciones(S.fEjecutivo, "Todo el equipo", USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, u.nombre]))}</select></label>` : ""}
+        <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`,
+          distritos.map(d => [d, `${titulo(d)} · ${cuenta(base, c => c.distrito === d)}`]))}</select></label>
+      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo · Customer ID</span>
+        <select data-f="ejecutivo">${opciones(S.fEjecutivo, `Todo el equipo · ${deCartera.length} ID${nuevos.length ? " + " + nuevos.length + " nuevos" : ""}`,
+          USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, etiquetaEjec(u.nombre)]))}</select></label>` : ""}
     </div>
 
     ${filtrando ? `<div class="filtros-pie">
@@ -2515,11 +2533,13 @@ function viewRegistros(){
     <div class="sel-row">
       <label class="fsel"><span>Resultado</span>
         <select data-fr-sel>${opciones(RESULTADOS.some(x=>x.id===S.fResultado)?S.fResultado:"todos", "Cualquier resultado",
-          RESULTADOS.filter(x => todos.some(r => r.Resultado === x.id)).map(x => [x.id, x.label]))}</select></label>
+          RESULTADOS.filter(x => todos.some(r => r.Resultado === x.id)).map(x => [x.id, `${x.label} · ${todos.filter(r => r.Resultado === x.id).length}`]))}</select></label>
       <label class="fsel"><span>Medio</span>
-        <select data-fm-sel>${opciones(S.fMedio, "Todos los medios", medios.map(t => [t.id, t.label]))}</select></label>
+        <select data-fm-sel>${opciones(S.fMedio, "Todos los medios", medios.map(t => [t.id, `${t.label} · ${todos.filter(r => r.Tipo_Contacto === t.id).length}`]))}</select></label>
       ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo</span>
-        <select data-fe-sel>${opciones(S.fEjecReg, "Todo el equipo", USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, u.nombre]))}</select></label>` : ""}
+        <select data-fe-sel>${opciones(S.fEjecReg, `Todo el equipo · ${todos.length}`,
+          USUARIOS.filter(u=>u.rol==="Ejecutivo")
+            .map(u => [u.nombre, `${u.nombre} · ${todos.filter(r => r.Ejecutivo === u.nombre).length}`]))}</select></label>` : ""}
     </div>
 
     ${filtrando ? `<div class="filtros-pie">
@@ -2583,6 +2603,8 @@ function viewPanel(){
     const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
     const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
     return { nombre:u.nombre, clientes:cs.length, intentos:rs.length, efectivos:ef,
+      ids: cs.filter(c => !esClienteNuevo(c)).length,
+      nuevos: cs.filter(esClienteNuevo).length,
       cumple: rs.filter(r => r.Cumple_Visita === "SI").length,
       trabajados: new Set(rs.map(r => String(r.Customer_id))).size,
       pct: rs.length ? ef / rs.length * 100 : 0 };
@@ -2697,8 +2719,32 @@ function viewPanel(){
           <span class="bar-track"><span class="bar-fill" style="width:${e.pct.toFixed(1)}%"></span></span>
           <span class="bar-val">${Math.round(e.pct)}%</span>
         </div>
-        <div class="bar-sub">${e.clientes} comercios · ${e.intentos} intentos · ${e.efectivos} efectivos · ${e.cumple} visitas válidas</div>
+        <div class="bar-sub">${e.ids} Customer ID${e.nuevos ? " + " + e.nuevos + " nuevo" + (e.nuevos===1?"":"s") : ""} · ${e.intentos} intentos · ${e.efectivos} efectivos · ${e.cumple} visitas válidas</div>
       `).join("") : `<div class="note">Todavía no hay actividad registrada en la campaña.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Customer ID registrados · por ejecutivo</h3>
+      <div class="note" style="margin-bottom:11px">
+        Cuántos comercios de la cartera de BBVA lleva cargado cada uno. Las ventas nuevas van
+        aparte: no tienen Customer ID.
+      </div>
+      ${(() => {
+        const reg = ejecutivos.slice().sort((a,b) => b.ids - a.ids);
+        const maxId = Math.max(1, ...reg.map(e => e.ids));
+        return reg.length ? reg.map(e => `
+          <div class="bar-row">
+            <span class="nm">${esc(e.nombre)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${(e.ids/maxId*100).toFixed(1)}%"></span></span>
+            <span class="bar-val">${e.ids}</span>
+          </div>
+          ${e.nuevos ? `<div class="bar-sub">+ ${e.nuevos} venta${e.nuevos===1?"":"s"} nueva${e.nuevos===1?"":"s"} por RUC</div>` : ""}
+        `).join("") : `<div class="note">Todavía no hay comercios registrados.</div>`;
+      })()}
+      <div class="bar-sub" style="margin-top:9px">
+        Total de la campaña: <b>${base.filter(c => !esClienteNuevo(c)).length}</b> Customer ID${
+          base.filter(esClienteNuevo).length ? ` · <b>${base.filter(esClienteNuevo).length}</b> ventas nuevas` : ""}
+      </div>
     </div>
 
     <div class="card">
