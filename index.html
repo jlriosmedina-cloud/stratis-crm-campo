@@ -205,6 +205,18 @@ table.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spac
 table.tbl td{padding:8px;border-bottom:1px solid var(--grid);vertical-align:top}
 table.tbl tr:last-child td{border-bottom:0}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -14px;padding:0 14px}
+/* La bitácora vive dentro de su propio recuadro: crece hasta cierto alto y de
+   ahí en adelante se desliza por dentro, para que la página no se alargue. */
+.caja-scroll{max-height:min(46vh,420px);overflow:auto;-webkit-overflow-scrolling:touch;
+  border:1px solid var(--line);border-radius:12px;background:var(--card);overscroll-behavior:contain}
+.caja-scroll table.tbl{font-size:12.5px}
+.caja-scroll table.tbl th{position:sticky;top:0;z-index:2;background:var(--card);
+  box-shadow:inset 0 -1px 0 var(--line);padding:9px 10px}
+.caja-scroll table.tbl td{padding:9px 10px}
+.caja-scroll::-webkit-scrollbar{width:10px;height:10px}
+.caja-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:3px solid var(--card)}
+.caja-scroll::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+@media(min-width:1180px){ .caja-scroll{max-height:min(52vh,520px)} }
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:0}
 .modal{background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88dvh;overflow:auto;padding:20px 17px calc(20px + env(safe-area-inset-bottom))}
 .modal h3{margin:0 0 6px;font-size:17px;text-transform:none;letter-spacing:-.2px}
@@ -633,10 +645,15 @@ const RULES = {
 /* =========================================================================
    Estado
    ========================================================================= */
+/* Cuántas líneas de bitácora se pintan de golpe. El recuadro se desliza por
+   dentro; esto es para que el navegador no arme miles de filas de una vez. */
+const LOTE_BIT = 30;
+
 const S = {
   user:null, tab:"cartera", cid:null, editId:null, form:null, formCli:null, editCli:null,
   q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
   qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
+  qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   limite:40, cargando:false
 };
 
@@ -3007,10 +3024,21 @@ const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
 function resumenAuditoria(a){
-  if (a.accion === "eliminar")
-    return a.tabla === "clientes" ? "Eliminó el comercio completo"
-         : `Eliminó un registro del ${fmtFecha(a.detalle && a.detalle.fecha)} (${nomResultado((a.detalle||{}).resultado)})`;
   const d = a.detalle || {};
+  if (a.accion === "eliminar"){
+    const b = d._borrado;
+    if (!b) return a.tabla === "clientes" ? "Eliminó el comercio completo" : "Eliminó una gestión";
+    if (a.tabla === "clientes"){
+      const g = Number(b.gestiones) || 0;
+      return `Eliminó el comercio (${b.llave || ""}) · ${b.cierre ? (RESULTADOS_GESTION.find(x=>x.id===b.cierre)||{}).label || b.cierre : ""}`
+        + `${b.distrito ? " · " + titulo(b.distrito) : ""}`
+        + ` · se llevó ${g} ${g === 1 ? "gestión" : "gestiones"}`;
+    }
+    return `Eliminó la gestión del ${b.fecha || "—"}${b.hora ? " " + b.hora : ""} · ${nomTipo(b.medio)}`
+      + ` · ${nomResultado(b.resultado)}`
+      + `${b.cumple === "SI" ? " · cumplía visita" : ""}`
+      + `${Number(b.gasto) > 0 ? " · " + soles(b.gasto) + " en viáticos" : ""}`;
+  }
   return Object.keys(d).map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`).join(" · ");
 }
 
@@ -3362,18 +3390,55 @@ function viewAyuda(){
       no la ven. El medio de contacto, el resultado, la fecha y la ubicación no se pueden editar:
       para corregirlos hay que eliminar el registro y volver a crearlo, y esa eliminación aparece aquí.
     </div>
-    ${AUDITORIA.length ? `<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Comercio</th><th>Cambio</th></tr></thead>
-      <tbody>${AUDITORIA.slice(0,40).map(a => `<tr>
-        <td style="white-space:nowrap">${fmtFecha(String(a.creado_en).slice(0,10))}<div style="font-size:11px;color:var(--muted)">${String(a.creado_en).slice(11,16)}</div></td>
-        <td>${esc(a.ejecutivo||"—")}</td>
-        <td><span class="chip ${a.accion==="eliminar"?"crit":"warn"}">${a.accion==="eliminar"?"Eliminó":"Editó"}</span>
-            <div style="font-size:11px;color:var(--muted)">${a.tabla==="clientes"?"Comercio":"Registro"}</div></td>
-        <td>${esc(a.comercio||a.customer_id||"—")}</td>
-        <td style="font-size:12px">${esc(resumenAuditoria(a))}</td>
-      </tr>`).join("")}</tbody>
-    </table></div>
-    ${AUDITORIA.length > 40 ? `<div class="note" style="margin-top:9px">Se muestran los 40 cambios más recientes de ${AUDITORIA.length}. El Excel trae la bitácora completa.</div>` : ""}`
+    ${AUDITORIA.length ? (() => {
+      const q = (S.qBit || "").trim().toLowerCase();
+      let lista = AUDITORIA;
+      if (S.fBitAccion !== "todos") lista = lista.filter(a => a.accion === S.fBitAccion);
+      if (S.fBitQuien !== "todos")  lista = lista.filter(a => a.ejecutivo === S.fBitQuien);
+      if (q) lista = lista.filter(a =>
+        String(a.comercio||"").toLowerCase().includes(q) ||
+        String(a.customer_id||"").toLowerCase().includes(q) ||
+        String(a.ejecutivo||"").toLowerCase().includes(q) ||
+        resumenAuditoria(a).toLowerCase().includes(q));
+      const quienes = [...new Set(AUDITORIA.map(a => a.ejecutivo).filter(Boolean))].sort();
+      const mostrar = lista.slice(0, S.limiteBit);
+      const filtrando = q || S.fBitAccion !== "todos" || S.fBitQuien !== "todos";
+      const op = (valor, todos, items) =>
+        `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+        items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+      return `
+      <div class="filtros" style="margin-bottom:12px">
+        <div class="search"><span class="mag">⌕</span>
+          <input type="search" id="qBit" placeholder="Buscar por comercio, persona o cambio…" value="${esc(S.qBit||"")}"></div>
+        <div class="sel-row">
+          <label class="fsel"><span>Acción</span>
+            <select data-fbit="accion">${op(S.fBitAccion, `Todo · ${AUDITORIA.length}`, [
+              ["editar", `Ediciones · ${AUDITORIA.filter(a=>a.accion==="editar").length}`],
+              ["eliminar", `Eliminaciones · ${AUDITORIA.filter(a=>a.accion==="eliminar").length}`]])}</select></label>
+          <label class="fsel"><span>Quién</span>
+            <select data-fbit="quien">${op(S.fBitQuien, "Todo el equipo",
+              quienes.map(n => [n, `${n} · ${AUDITORIA.filter(a=>a.ejecutivo===n).length}`]))}</select></label>
+        </div>
+      </div>
+      ${mostrar.length ? `<div class="caja-scroll" id="cajaBit"><table class="tbl" id="tblBitacora">
+        <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Comercio</th><th>Cambio</th></tr></thead>
+        <tbody>${mostrar.map(a => `<tr>
+          <td style="white-space:nowrap">${fmtFecha(String(a.creado_en).slice(0,10))}<div style="font-size:11px;color:var(--muted)">${String(a.creado_en).slice(11,16)}</div></td>
+          <td>${esc(a.ejecutivo||"—")}</td>
+          <td><span class="chip ${a.accion==="eliminar"?"crit":"warn"}">${a.accion==="eliminar"?"Eliminó":"Editó"}</span>
+              <div style="font-size:11px;color:var(--muted)">${a.tabla==="clientes"?"Comercio":"Registro"}</div></td>
+          <td>${esc(a.comercio||a.customer_id||"—")}</td>
+          <td style="font-size:12px">${esc(resumenAuditoria(a))}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="note">Ningún cambio coincide con lo que buscas.</div>`}
+      <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <span style="font-size:12.5px;color:var(--muted)">
+          ${mostrar.length} de ${lista.length}${filtrando ? ` (${AUDITORIA.length} en total)` : ""}</span>
+        ${lista.length > mostrar.length ? `<button class="btn ghost sm" id="masBit">Ver ${Math.min(25, lista.length - mostrar.length)} más</button>` : ""}
+        ${filtrando ? `<button class="btn ghost sm" id="limpiarBit">Quitar filtros</button>` : ""}
+        <span style="font-size:12px;color:var(--muted);margin-left:auto">La lista se desliza dentro del recuadro · el Excel trae la bitácora completa</span>
+      </div>`;
+    })()
       : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas.</div>`}
   </div>` : ""}
 
@@ -3907,6 +3972,31 @@ function bindExtras(){
   ["limpiarFiltros","limpiarFiltros2"].forEach(id => { if ($("#"+id)) $("#"+id).onclick = limpiar; });
   if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
   if ($("#masReg")) $("#masReg").onclick = () => { S.limiteReg += 40; render(); };
+
+  /* Bitácora: buscador, filtros y por tandas dentro de su propio recuadro.
+     Se guarda todo, pero no se pinta todo: con la campaña corriendo son miles
+     de líneas, y la página no puede crecer sin fin. */
+  if ($("#masBit")) $("#masBit").onclick = () => {
+    const y = $("#cajaBit") ? $("#cajaBit").scrollTop : 0;   // no devolver al usuario al inicio
+    S.limiteBit += 25; render();
+    const c = $("#cajaBit"); if (c) c.scrollTop = y;
+  };
+  if ($("#limpiarBit")) $("#limpiarBit").onclick = () => {
+    S.qBit = ""; S.fBitAccion = S.fBitQuien = "todos"; S.limiteBit = LOTE_BIT; render(); };
+  if ($("#qBit")){
+    const cajaBit = $("#qBit");
+    cajaBit.oninput = e => {
+      S.qBit = e.target.value; S.limiteBit = LOTE_BIT;
+      clearTimeout(cajaBit._t);
+      cajaBit._t = setTimeout(() => { render(); const n = $("#qBit"); if (n){ n.focus();
+        n.setSelectionRange(n.value.length, n.value.length); } }, 260);
+    };
+  }
+  document.querySelectorAll("[data-fbit]").forEach(sel => sel.onchange = e => {
+    if (sel.dataset.fbit === "accion") S.fBitAccion = e.target.value;
+    else S.fBitQuien = e.target.value;
+    S.limiteBit = LOTE_BIT; render();
+  });
 
   const qr = $("#qReg");
   if (qr){
