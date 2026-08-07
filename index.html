@@ -1214,6 +1214,7 @@ function bindComunes(){
   document.querySelectorAll("[data-edit]").forEach(el => el.onclick = e => { e.stopPropagation(); editarRegistro(el.dataset.edit); });
   document.querySelectorAll("[data-editcli]").forEach(el => el.onclick = e => { e.stopPropagation(); editarCliente(el.dataset.editcli); });
   document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
+  document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
   document.querySelectorAll("[data-img]").forEach(el => el.onclick = e => {
     e.stopPropagation();
     modal(`<h3>Evidencia del contacto</h3><img src="${el.dataset.img}" style="width:100%;border-radius:11px;border:1px solid var(--ring)"><div style="margin-top:14px"><button class="btn ghost block" onclick="cerrarModal()">Cerrar</button></div>`);
@@ -1395,9 +1396,10 @@ function viewFicha(c){
         </div>
       </div>
     </div>
-    ${mio ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
-      <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>
+    ${(mio || (!esDeCampo() && !esClienteNuevo(c))) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${mio ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
+      <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+      ${(!esDeCampo() && !esClienteNuevo(c)) ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir Customer ID</button>` : ""}
     </div>` : ""}
   </div>
 
@@ -2028,6 +2030,73 @@ function confirmarEliminarCliente(cid){
     await recargarCartera(); await cargarAuditoria();
     cerrarModal(); toast("Comercio eliminado");
     S.cid = null; S.tab = "cartera"; render();
+  };
+}
+
+/* -------------------------------------------------------------------------
+   Corregir un Customer ID mal tipeado
+
+   La llave con la que se cruza contra la cartera del banco. Si se registró
+   con un dedazo, el comercio no le pega a nada en el archivo de BBVA, y hasta
+   ahora la única salida era borrarlo —perdiendo sus gestiones y su evidencia—
+   y volver a empezar. La corrección la hacen el Analista y el Manager: el
+   error lo comete quien registra, así que no debería revisarse a sí mismo.
+   ------------------------------------------------------------------------- */
+function modalCorregirId(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  if (esDeCampo()) return toast("La corrección del Customer ID la hacen el Analista o el Manager");
+  if (esClienteNuevo(c)) return toast("Una venta nueva se identifica por RUC, no por Customer ID");
+  const n = DB.delCliente(cid).length;
+
+  modal(`
+    <h3>Corregir el Customer ID</h3>
+    <p><b>${esc(titulo(nombreCliente(c)))}</b> — registrado por ${esc(c.asignado)}.</p>
+    <div class="kv" style="border:0;padding:0 0 12px"><dt>Customer ID actual</dt>
+      <dd class="mono">${esc(c.customer_id)}</dd></div>
+    <div class="field">
+      <label for="fixNuevo">Customer ID correcto <span class="req">*</span></label>
+      <input type="text" id="fixNuevo" inputmode="numeric" autocomplete="off"
+             placeholder="${esc(c.customer_id)}" value="">
+    </div>
+    <div class="note" style="margin-bottom:12px">
+      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} y la evidencia se mueven con él; no se pierde nada. `
+          : "El comercio todavía no tiene gestiones. "}
+      La corrección queda en la bitácora con tu nombre.
+    </div>
+    <div id="fixMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="fixOk" style="flex:1">Corregir</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  const caja = $("#fixNuevo");
+  caja.focus();
+  caja.oninput = () => $("#fixMsg").innerHTML = "";
+
+  $("#fixOk").onclick = async () => {
+    const nuevo = caja.value.trim();
+    const msg = $("#fixMsg");
+    if (!nuevo) return msg.innerHTML = `<div class="err">Escribe el Customer ID correcto.</div>`;
+    if (nuevo === String(c.customer_id))
+      return msg.innerHTML = `<div class="err">Ese es el mismo que ya tiene.</div>`;
+    if (!/^[A-Za-z0-9._-]{3,30}$/.test(nuevo))
+      return msg.innerHTML = `<div class="err">Entre 3 y 30 caracteres, sin espacios ni símbolos raros.</div>`;
+    if (byId[nuevo])
+      return msg.innerHTML = `<div class="err">El ${esc(nuevo)} ya lo tiene <b>${esc(titulo(nombreCliente(byId[nuevo])))}</b>.</div>`;
+
+    const b = $("#fixOk"); b.disabled = true; b.textContent = "Corrigiendo…";
+    try {
+      const { error } = await sb.rpc("corregir_customer_id",
+        { p_actual: String(c.customer_id), p_nuevo: nuevo });
+      if (error) throw new Error(error.message);
+      await recargarCartera(); await cargarAuditoria();
+      cerrarModal(); toast("Customer ID corregido");
+      S.cid = nuevo; render();
+    } catch (e) {
+      b.disabled = false; b.textContent = "Corregir";
+      msg.innerHTML = `<div class="err">${esc(String(e.message).replace(/^.*?:\s*/, ""))}</div>`;
+    }
   };
 }
 
@@ -3122,7 +3191,8 @@ const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_c
   gasto_total:"Monto de viáticos", gastos_paths:"Comprobantes de gasto",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
-  observacion:"Observación", ruc:"RUC", razon_social:"Razón social" };
+  observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
+  customer_id:"Customer ID" };
 const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
@@ -3151,7 +3221,14 @@ function resumenAuditoria(a){
       Number(b.gasto) > 0 ? soles(b.gasto) + " en viáticos" : ""
     ]);
   }
-  return Object.keys(d).map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`).join(" · ");
+  /* Las claves con guion bajo son contexto, no campos editados: no se listan
+     como "antes → después" sino que se cuentan aparte. */
+  const cambios = Object.keys(d).filter(k => k[0] !== "_")
+    .map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`);
+  const n = Number(d._arrastro);
+  if (n > 0) cambios.push(`se movieron ${n} ${n === 1 ? "gestión" : "gestiones"} con él`);
+  if (d._nota) cambios.push(String(d._nota));
+  return cambios.join(" · ");
 }
 
 function hojaBitacora(){
