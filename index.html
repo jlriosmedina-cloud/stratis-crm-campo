@@ -558,10 +558,14 @@ const TIPOS_CONTACTO = [
 ];
 const tipoById = id => TIPOS_CONTACTO.find(t => t.id === id) || null;
 
-/* ---- Resultado del intento — es lo que separa intentar de lograr ------- */
+/* ---- Resultado del intento — es lo que separa intentar de lograr -------
+   Ojo con la palabra: acá "logrado" es que el cliente respondió, no que se
+   haya retenido. Si el objetivo se cumplió o no, eso lo dice el cierre de la
+   gestión (Retenido / Venta / Perdido), que es otra cosa y va en otra columna.
+   Enviar un correo o un WhatsApp no es una respuesta: es un intento. */
 const RESULTADOS = [
-  { id:"efectivo",        label:"Habló con el contacto", desc:"Se logró la comunicación",           ok:true  },
-  { id:"no_contesta",     label:"No contestó",           desc:"Llamó o escribió y no hubo respuesta", ok:false },
+  { id:"efectivo",        label:"El cliente respondió",  desc:"Contestó la llamada, respondió el mensaje o te atendió en el local", ok:true  },
+  { id:"no_contesta",     label:"No respondió",          desc:"Llamaste o escribiste y no hubo respuesta", ok:false },
   { id:"local_cerrado",   label:"Local cerrado",         desc:"Fue al local y estaba cerrado",      ok:false },
   { id:"titular_ausente", label:"Titular ausente",       desc:"Atendió otra persona, no el contacto", ok:false },
   { id:"datos_errados",   label:"Datos errados",         desc:"Teléfono o dirección equivocada",    ok:false },
@@ -569,6 +573,13 @@ const RESULTADOS = [
 ];
 const resultadoById = id => RESULTADOS.find(r => r.id === id) || null;
 const esEfectivo = id => id === "efectivo";
+
+/* Medios donde el mensaje sale sin que nadie lo conteste todavía. Ahí decir
+   que el cliente respondió obliga a transcribir su respuesta: si respondió,
+   hay algo que citar. La base aplica la misma regla. */
+const MEDIOS_ASINCRONICOS = ["correo", "whatsapp"];
+const pruebaDeRespuesta = f =>
+  esEfectivo(f.Resultado) && MEDIOS_ASINCRONICOS.includes(f.Tipo_Contacto);
 
 /* Un registro presencial solo tiene respaldo si el GPS del equipo entregó las
    coordenadas. Si el ejecutivo tuvo que guardar sin señal, queda marcado. */
@@ -704,8 +715,9 @@ const RULES = {
   requiereUbicacion(id){ const t = tipoById(id); return !!(t && t.gps); },
 
 
-  /* Resumen por cliente. Cada interacción cuenta como intento; solo el
-     resultado "efectivo" cuenta como comunicación lograda. */
+  /* Resumen por cliente. Cada interacción cuenta como intento; solo cuentan
+     como respuesta aquellas en las que el cliente contestó. Nada de esto dice
+     si se retuvo: eso es el cierre de la gestión. */
   recomputarBase(cid){
     const c = byId[String(cid)];
     if (!c) return null;
@@ -1228,7 +1240,7 @@ function bindComunes(){
 function estadoCliente(c){
   const b = c._base || RULES.recomputarBase(c.customer_id);
   if (b.Cumple_Visita === "SI") return { chip:"ok", label:"Visita cumplida" };
-  if (b._efectivos > 0) return { chip:"warn", label:"Contactado" };
+  if (b._efectivos > 0) return { chip:"warn", label:"Respondió" };
   if (b._intentos > 0)  return { chip:"serious", label:"Solo intentos" };
   return { chip:"no", label:"Sin contactar" };
 }
@@ -1297,7 +1309,7 @@ function viewCartera(){
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
-    <div class="stat"><div class="lbl">Contactados</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
+    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera respondió</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
     <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div><div class="sub">${total?Math.round(cerrados/total*100):0}% · retenidos y ventas</div></div>
@@ -1308,7 +1320,7 @@ function viewCartera(){
       <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
 
     <div class="seg" role="group" aria-label="Situación del comercio">
-      ${[["todos","Todos"],["sin","Sin contactar"],["intento","Solo intentos"],["con","Contactados"],["cumple","Cumple visita"]]
+      ${[["todos","Todos"],["sin","Sin intentar"],["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
     </div>
 
@@ -1366,7 +1378,7 @@ function cardCliente(c){
     </div>
     <div class="rt">
       <div class="amt">${b._intentos}<small>INTENTOS</small></div>
-      <div class="amt" style="font-size:11.5px;color:var(--muted)">${b._efectivos} efectivo${b._efectivos===1?"":"s"}</div>
+      <div class="amt" style="font-size:11.5px;color:var(--muted)">${b._efectivos} con respuesta</div>
     </div>
   </div>`;
 }
@@ -1453,7 +1465,7 @@ function viewFicha(c){
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
         <div class="stat"><div class="lbl">Intentos</div><div class="val">${b._intentos}</div><div class="sub">registros de contacto</div></div>
-        <div class="stat"><div class="lbl">Efectivos</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de los intentos llegó a conversación</div></div>
+        <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de los intentos obtuvo respuesta</div></div>
       </div>
     </div>
     <div class="card">
@@ -2147,7 +2159,7 @@ function renderFormulario(){
     <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
     <div class="note warn" style="margin-bottom:11px">
       El medio de contacto, el resultado y la fecha <b>no se pueden cambiar</b>: son los que alimentan
-      el conteo de intentos y la efectividad. Si te equivocaste al elegirlos, elimina este registro y
+      el conteo de intentos y la tasa de respuesta. Si te equivocaste al elegirlos, elimina este registro y
       créalo de nuevo — la eliminación queda en la bitácora.
     </div>
     <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
@@ -2201,8 +2213,12 @@ function renderFormulario(){
     </div>
     <div class="field"><label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— cómo calificas al cliente</span></label>
       <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
-    <div class="field" style="margin-bottom:0"><label>Comentario del cliente <span class="hint">— el sentir del cliente, en sus palabras</span></label>
-      <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea></div>
+    <div class="field" style="margin-bottom:0"><label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''} <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
+      <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
+      ${pruebaDeRespuesta(f) ? `<div class="note warn" style="margin-top:8px">
+        Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
+        es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
+        es <b>No respondió</b>.</div>` : ""}</div>
   </div>
 
   <div id="errBox"></div>
@@ -2317,7 +2333,7 @@ function pintarDerivado(){
       <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
         <span class="chip ${RULES.visitaPresencial(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_Presencial: ${RULES.visitaPresencial(f.Tipo_Contacto)}</span>
         <span class="chip ${RULES.visitaVirtual(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_virtual: ${RULES.visitaVirtual(f.Tipo_Contacto)}</span>
-        <span class="chip ${efectivo?"ok":"serious"}">${efectivo ? "Contacto logrado" : "Solo intento"}</span>
+        <span class="chip ${efectivo?"ok":"serious"}">${efectivo ? "El cliente respondió" : "Sin respuesta"}</span>
         <span class="chip ${cumple==="SI"?"ok":"no"}">Cumple_Visita: ${cumple}</span>
       </div>
     </div>`;
@@ -2566,6 +2582,10 @@ async function guardar(c){
     errores.push("Captura la ubicación con el botón, o marca “No puedo capturar la ubicación” si el GPS no responde o estás registrando una visita anterior.");
   if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
+  /* Enviar un correo o un WhatsApp no es que te hayan respondido. Si se marca
+     que el cliente respondió, tiene que haber algo que citar. */
+  if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
+    errores.push(`Escribe qué respondió el cliente por ${nomTipo(f.Tipo_Contacto).toLowerCase()}. Si todavía no contesta, cambia el resultado a “No respondió”.`);
   const gasto = Number(f.Gasto_Total || 0);
   const nCmp = (f.Gastos_Paths||[]).length + (f.Gastos_Nuevos||[]).length;
   if (gasto > 0 && nCmp === 0) errores.push("Adjunta el comprobante del gasto que declaraste.");
@@ -2643,7 +2663,7 @@ function confirmarEliminar(id){
   modal(`
     <h3>Eliminar registro</h3>
     <p>Se eliminará el contacto del <b>${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}</b> con
-    <b>${esc(titulo(c ? nombreCliente(c) : ""))}</b>. El conteo de intentos y la efectividad se recalculan. Esta acción no se puede deshacer.</p>
+    <b>${esc(titulo(c ? nombreCliente(c) : ""))}</b>. El conteo de intentos y la tasa de respuesta se recalculan. Esta acción no se puede deshacer.</p>
     <div style="display:flex;gap:9px">
       <button class="btn danger" id="okDel" style="flex:1">Eliminar</button>
       <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Conservar</button>
@@ -2727,7 +2747,7 @@ function viewRegistros(){
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
-    <div class="stat"><div class="lbl">Efectivos</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos llegó a conversación</div></div>
+    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${todos.filter(r=>r.Cumple_Visita==="SI").length}</div><div class="sub">presenciales o virtuales logradas</div></div>
     <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacionVerificada).length}</div><div class="sub">presenciales sin respaldo de GPS</div></div>
   </div>
@@ -2737,7 +2757,7 @@ function viewRegistros(){
       <input type="search" id="qReg" placeholder="Buscar por comercio, Customer ID, distrito o comentario…" value="${esc(S.qReg)}"></div>
 
     <div class="seg" role="group" aria-label="Resultado">
-      ${[["todos","Todos"],["efectivos","Contacto logrado"],["fallidos","Sin contacto"]]
+      ${[["todos","Todos"],["efectivos","El cliente respondió"],["fallidos","Sin respuesta"]]
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacionVerificada)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
@@ -2887,7 +2907,7 @@ function viewPanel(){
   <div class="stat-row">
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Efectividad de contacto</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} intentos llegaron a conversación</div></div>
+    <div class="stat"><div class="lbl">Tasa de respuesta</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} intentos obtuvieron respuesta</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumple}</div><div class="sub">${total?Math.round(cumple/total*100):0}% de la cartera</div></div>
     <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cumplido}</div><div class="sub">${pctAvance}% de la cartera · Gestión = SI</div></div>
   </div>
@@ -2925,14 +2945,14 @@ function viewPanel(){
   <div class="grid2">
    <div>
     <div class="card">
-      <h3>Efectividad por ejecutivo · % de intentos que lograron contacto</h3>
+      <h3>Tasa de respuesta por ejecutivo · % de intentos que obtuvieron respuesta</h3>
       ${ejecutivos.length ? ejecutivos.map(e => `
         <div class="bar-row">
           <span class="nm">${esc(e.nombre)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${e.pct.toFixed(1)}%"></span></span>
           <span class="bar-val">${Math.round(e.pct)}%</span>
         </div>
-        <div class="bar-sub">${e.ids} Customer ID${e.nuevos ? " + " + e.nuevos + " nuevo" + (e.nuevos===1?"":"s") : ""} · ${e.intentos} intentos · ${e.efectivos} efectivos · ${e.cumple} visitas válidas</div>
+        <div class="bar-sub">${e.ids} Customer ID${e.nuevos ? " + " + e.nuevos + " nuevo" + (e.nuevos===1?"":"s") : ""} · ${e.intentos} intentos · ${e.efectivos} con respuesta · ${e.cumple} visitas válidas</div>
       `).join("") : `<div class="note">Todavía no hay actividad registrada en la campaña.</div>`}
     </div>
 
@@ -3057,12 +3077,12 @@ function viewPanel(){
    ========================================================================= */
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
   "Estado_Gestion","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
-  "Intentos","Contactos_Efectivos","Visitas_Validas","Contactado (Si/No)",
+  "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
   "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
 
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
-  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","Contacto_Logrado",
+  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
   "Ubicacion_Verificada","Evidencia","Gasto_Viaticos","Comprobantes","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
@@ -3111,8 +3131,8 @@ const hoja = (cols, filas) => {
 
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
-  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Contactos efectivos",
-                "% Efectividad de contacto","Intentos por comercio","Visitas válidas","Presenciales",
+  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Gestiones con respuesta",
+                "% Tasa de respuesta","Intentos por comercio","Visitas válidas","Presenciales",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
                 "Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
@@ -3163,12 +3183,12 @@ function hojaEfectividad(){
   const regs = DB.todos();
   const filas = RESULTADOS.map(x => {
     const n = regs.filter(r => r.Resultado === x.id).length;
-    return [x.label, x.ok ? "Contacto logrado" : "Intento sin contacto", n,
+    return [x.label, x.ok ? "El cliente respondió" : "Intento sin respuesta", n,
       regs.length ? Math.round(n/regs.length*100) + "%" : "—"];
   });
   filas.push([]);
   filas.push(["TOTAL DE INTENTOS", "", regs.length, "100%"]);
-  filas.push(["CONTACTOS LOGRADOS", "", regs.filter(r => esEfectivo(r.Resultado)).length,
+  filas.push(["CON RESPUESTA DEL CLIENTE", "", regs.filter(r => esEfectivo(r.Resultado)).length,
     regs.length ? Math.round(regs.filter(r => esEfectivo(r.Resultado)).length/regs.length*100) + "%" : "—"]);
   return hoja(["Resultado","Clasificación","Registros","% del total"], filas);
 }
@@ -3183,7 +3203,7 @@ function hojaRubros(){
       cs.reduce((a,c) => a + c._base._intentos, 0),
       cs.filter(c => c.estado === "DE BAJA").length];
   }).filter(Boolean).sort((a,b) => b[1] - a[1]);
-  return hoja(["Rubro","Comercios","Contactados","% Contactado","Intentos","Dados de baja"], filas);
+  return hoja(["Rubro","Comercios","Con respuesta","% Con respuesta","Intentos","Dados de baja"], filas);
 }
 
 const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
@@ -3258,8 +3278,8 @@ const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","L
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
 
 /* Columnas propias de Stratis, para el análisis interno. No van al banco. */
-const COLS_BBVA_EXTRA = ["Resultado_Gestion","Distrito","Intentos","Contactos_Efectivos",
-  "Reuniones_Virtuales","Medio_Efectivo","Medio_Cumple_Visita","Ultimo_Resultado",
+const COLS_BBVA_EXTRA = ["Resultado_Gestion","Distrito","Intentos","Respuestas_del_Cliente",
+  "Reuniones_Virtuales","Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
   "Comentario_Ejecutivo","Calificacion","Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
@@ -3384,10 +3404,10 @@ function hojaReporte(admin){
     ["Alcance del archivo", admin ? "Campaña completa — todos los ejecutivos" : "Cartera propia únicamente"], [],
     ["Comercios registrados", base.length],
     ["Comercios contactados", cont],
-    ["% Contactado", base.length ? Math.round(cont/base.length*100) + "%" : "0%"],
+    ["% de la cartera que respondió", base.length ? Math.round(cont/base.length*100) + "%" : "0%"],
     ["Intentos de comunicación", regs.length],
     ["Contactos efectivos", ef],
-    ["% Efectividad de contacto", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"], [],
+    ["% Tasa de respuesta", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"], [],
     ["CIERRE DE LA GESTIÓN"],
     ["Retenidos", base.filter(c => c.resultado_gestion === "RETENIDO").length],
     ["Ventas", base.filter(c => c.resultado_gestion === "VENTA").length],
@@ -3426,7 +3446,7 @@ async function exportarExcel(btn){
 
   if (admin){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
-    XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Efectividad de contacto");
+    XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
     XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
     XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Resumen BBVA");
     XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
@@ -3565,8 +3585,8 @@ function viewAyuda(){
         —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo,
         comentarios, calificación y ejecutivo asignado—. Esas son para ti; no se pegan en el
         archivo del banco.</p>
-        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Efectividad de
-        contacto, Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
+        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Tasa de respuesta,
+        Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
       </div>
     </details>
   </div>`;
@@ -3954,7 +3974,7 @@ const ESCENARIOS = [
     cumple:"No", cierre:"Sigue abierta",
     nota:"Cuenta como intento. La visita queda registrada aunque no hayas hablado." },
   { s:"Fui, hablé con el titular y se queda con BBVA",
-    medio:"Visita presencial", res:"Habló con el contacto",
+    medio:"Visita presencial", res:"El cliente respondió",
     cumple:"SI", cierre:"Retenido",
     nota:"El caso completo. Cumple visita y cierra como retención." },
   { s:"Atendió el hijo, no el titular",
@@ -3962,25 +3982,33 @@ const ESCENARIOS = [
     cumple:"No", cierre:"Sigue abierta",
     nota:"Hubo visita pero no conversación con quien decide. Vuelve otro día." },
   { s:"Lo llamé y no contestó",
-    medio:"Llamada telefónica", res:"No contestó",
+    medio:"Llamada telefónica", res:"No respondió",
     cumple:"No", cierre:"Sigue abierta",
     nota:"Suma intento. Una llamada nunca cumple visita, ni contestando." },
   { s:"Reunión por Teams con el titular, sin ir al local",
-    medio:"Reunión virtual", res:"Habló con el contacto",
+    medio:"Reunión virtual", res:"El cliente respondió",
     cumple:"SI", cierre:"Retenido",
     nota:"La reunión virtual cumple visita igual que ir al local." },
   { s:"El comercio estaba de baja y logré que vuelva",
-    medio:"Visita o reunión", res:"Habló con el contacto",
+    medio:"Visita o reunión", res:"El cliente respondió",
     cumple:"SI", cierre:"Venta",
     nota:"Deja el estado en «Dado de baja»: es como estaba cuando lo gestionaste." },
   { s:"Me dijo que se va a la competencia",
-    medio:"Cualquiera", res:"Habló con el contacto",
+    medio:"Cualquiera", res:"El cliente respondió",
     cumple:"según el medio", cierre:"Perdido",
     nota:"Hubo contacto, no hubo objetivo. Escribe en el comentario del cliente por qué se va." },
   { s:"Un comercio sin POS quiere afiliarse",
     medio:"Visita o reunión", res:"Se registra solo",
     cumple:"SI", cierre:"Venta automática",
     nota:"Es una venta nueva: se da de alta con RUC y razón social, junto con la visita." },
+  { s:"Le mandé un correo o un WhatsApp y todavía no me responde",
+    medio:"Correo o WhatsApp", res:"No respondió",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Mandar el mensaje es un intento, no una respuesta. Solo marca «El cliente respondió» cuando conteste, y ahí el CRM te pedirá escribir qué te dijo." },
+  { s:"Le escribí por WhatsApp y me contestó para coordinar la visita",
+    medio:"Mensaje WhatsApp", res:"El cliente respondió",
+    cumple:"No", cierre:"Sigue abierta",
+    nota:"Sí hubo respuesta, así que cuenta. Pero un chat nunca cumple visita: eso llega recién cuando lo visites." },
   { s:"El teléfono que tengo no es del comercio",
     medio:"Llamada telefónica", res:"Datos errados",
     cumple:"No", cierre:"Sigue abierta",
@@ -4056,7 +4084,7 @@ function viewGuia(){
       </div>
       <div class="note warn" style="margin-top:12px">
         Una llamada telefónica <b>nunca</b> cumple visita, aunque el cliente conteste y la
-        conversación sea perfecta. Cuenta como intento y como contacto logrado, no como visita.
+        conversación sea perfecta. Cuenta como intento y como respuesta del cliente, no como visita.
       </div>
     </div>
    </div>
@@ -4160,9 +4188,10 @@ function viewGuia(){
         Mide cuánto saliste a buscar. Un día de cinco locales cerrados sube este número, y está bien.</div>
       </div>
       <div class="g-caso">
-        <div class="g-caso-t">Efectividad de contacto</div>
-        <div class="g-caso-n" style="border:0;padding:0;margin:0">De esos intentos, cuántos llegaron a conversación.
-        <b>No es retención:</b> puedes tener 100% de contacto y ningún comercio cerrado todavía.</div>
+        <div class="g-caso-t">Tasa de respuesta</div>
+        <div class="g-caso-n" style="border:0;padding:0;margin:0">De esos intentos, en cuántos el cliente respondió.
+        <b>Respondió no es retenido:</b> puedes tener 100% de respuesta y ningún comercio cerrado todavía.
+        Y mandar un correo no cuenta hasta que conteste.</div>
       </div>
       <div class="g-caso">
         <div class="g-caso-t">Visitas válidas</div>
