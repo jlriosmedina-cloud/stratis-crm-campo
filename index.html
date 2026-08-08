@@ -3377,6 +3377,22 @@ function hojaAvance(){
       rs.filter(r => Number(r.Gasto_Total) > 0).length];
   });
   const ws = hoja(cols, filas);
+  columnaFormula(ws, cols, filas, "% Alcance del mes",
+    (L, f) => `IFERROR((${L("Retenidos del mes")}${f}+${L("Recuperados del mes")}${f})/${L("Cartera asignada")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Tasa de respuesta",
+    (L, f) => `IFERROR(${L("Gestiones con respuesta")}${f}/${L("Intentos")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Avance",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/${L("Comercios registrados")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Efectividad de cierre",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/(${L("Objetivo cumplido")}${f}+${L("Perdidos")}${f}),0)`);
+  columnaFormula(ws, cols, filas, "Intentos por comercio",
+    (L, f) => `IFERROR(${L("Intentos")}${f}/${L("Comercios registrados")}${f},0)`);
+  columnaFormula(ws, cols, filas, "Suma por medio",
+    (L, f) => `${L("Presenciales")}${f}+${L("Reuniones virtuales")}${f}+${L("Llamadas")}${f}+${L("WhatsApp")}${f}+${L("Correos")}${f}`);
+  columnaFormula(ws, cols, filas, "Sin respuesta",
+    (L, f) => `${L("Intentos")}${f}-${L("Gestiones con respuesta")}${f}`);
+  columnaFormula(ws, cols, filas, "Comercios sin intentar",
+    (L, f) => `${L("Comercios registrados")}${f}-${L("Comercios trabajados")}${f}`);
   formatoPorcentaje(ws, cols, filas, ["% Alcance del mes","% Tasa de respuesta","% Avance","% Efectividad de cierre"]);
   return ws;
 }
@@ -3400,6 +3416,10 @@ function hojaMetas(){
     });
   });
   const ws = hoja(cols, filas);
+  columnaFormula(ws, cols, filas, "Objetivo cumplido",
+    (L, f) => `${L("Retenidos")}${f}+${L("Recuperados")}${f}`);
+  columnaFormula(ws, cols, filas, "% Alcance",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/${L("Cartera asignada")}${f},0)`);
   formatoPorcentaje(ws, cols, filas, ["% Alcance"]);
   return ws;
 }
@@ -3520,9 +3540,9 @@ function hojaUsuarios(){
    de datos que ya estaban en el archivo— entra el motivo de la no retención, y
    "Fecha de llamada o visita" pasa a llamarse por lo que es. */
 const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
-  "Fecha_Ultimo_Contacto","Direccion_Actual","Contactado (Si/No)","Cumple_Visita","Fecha_Visita",
-  "Intentos_Totales","Tipo_Cierre","Estado_Comercio","Fecha_Cierre","Motivo_No_Retencion",
-  "Ejecutivo_Asignado"];
+  "Fecha_Ultima_Gestion","Fecha_Ultima_Respuesta","Direccion_Actual","Contactado (Si/No)",
+  "Cumple_Visita","Fecha_Visita","Intentos_Totales","Tipo_Cierre","Estado_Comercio",
+  "Fecha_Cierre","Motivo_No_Retencion","Ejecutivo_Asignado"];
 
 /* El resto de la gestión, completo. No se entrega al banco: es lo que sostiene
    el análisis y las tablas dinámicas del lado de Stratis. Van en la misma hoja
@@ -3533,7 +3553,7 @@ const COLS_DETALLE = [
   "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
   "Visitas_Validas","Visita_Presencial","Visita_Virtual",
   "Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
-  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta"];
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta","Alertas"];
 
 const COLS_BASE_BBVA = COLS_ENTREGA.concat(COLS_DETALLE);
 
@@ -3572,6 +3592,7 @@ function filasBBVA(soloEntrega){
       nPresencial,
       nLlamada,
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
+      efectivos.length ? fmtFecha(efectivos[0].Fecha_Contacto) : "",
       c.direccion || "",
       efectivos.length ? "SI" : "NO",
       cumplidas.length ? "SI" : "NO",
@@ -3608,9 +3629,26 @@ function filasBBVA(soloEntrega){
       g ? g.label : "",
       ultimo("Calificacion") || "Sin calificar",
       ultimo("Comentario_Ejecutivo"),
-      String(c.creado_en || "").slice(0,10)
+      String(c.creado_en || "").slice(0,10),
+      alertasDe(c, regs, efectivos, suma)
     ]);
   });
+}
+
+/* Lo que hay que revisar en esta fila, en una sola celda. Filtrando esta columna
+   se ve de un vistazo qué le falta a la base, sin tener que cruzar nada a mano.
+   Vacía quiere decir que la fila está completa. */
+function alertasDe(c, regs, efectivos, suma){
+  const a = [];
+  const hoy = hoyISO();
+  if (regs.some(r => r.Fecha_Contacto > hoy))            a.push("Fecha futura");
+  if (c.cerrado_en && String(c.cerrado_en).slice(0,10) > hoy) a.push("Cierre con fecha futura");
+  if (c.resultado_gestion === "PERDIDO" && !c.motivo_no_retencion) a.push("Perdido sin motivo");
+  if (!regs.length)                                      a.push("Sin gestiones");
+  if (suma !== regs.length)                              a.push("Los medios no cuadran");
+  if (efectivos.length && !regs.some(r => String(r.Calificacion || "").trim())) a.push("Respondió sin calificar");
+  if (/^\d+$/.test(String(c.nombre_comercio || "").trim())) a.push("El nombre parece un RUC");
+  return a.join(" · ");
 }
 
 const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta","Medio del cierre",
@@ -3655,6 +3693,23 @@ function hojaNuevos(){
   return ws;
 }
 
+/* Convierte una columna en fórmula viva. Un porcentaje escrito como número se
+   queda congelado: si mañana se filtra, se reordena o se pega en otra hoja,
+   sigue diciendo lo mismo aunque sus dos factores hayan cambiado. Como fórmula,
+   se recalcula solo y además se ve de dónde sale. */
+function columnaFormula(ws, cols, filas, nombre, arma){
+  const i = cols.indexOf(nombre);
+  if (i < 0) return;
+  const L = n => XLSX.utils.encode_col(cols.indexOf(n));
+  filas.forEach((_, f) => {
+    const ref = XLSX.utils.encode_col(i) + (f + 2);
+    const celda = ws[ref];
+    if (!celda) return;
+    const fx = arma(L, f + 2);
+    if (fx) { celda.f = fx; celda.t = "n"; }
+  });
+}
+
 /* Aplica formato de porcentaje a las columnas que lo son, buscándolas por
    nombre. Antes iban por letra fija y bastaba agregar una columna al medio
    para que el formato terminara en la de al lado. */
@@ -3678,6 +3733,12 @@ function hojaBBVA(){
   /* Las doce del banco quedan fijas al desplazarse: el bloque de Stratis es
      largo y sin esto uno se pierde de qué comercio está mirando. */
   ws["!freeze"] = { xSplit: 1, ySplit: 1 };
+  columnaFormula(ws, cols, filas, "Tasa_Respuesta",
+    (L, f) => `IFERROR(${L("Respuestas_del_Cliente")}${f}/${L("Intentos_Totales")}${f},0)`);
+  columnaFormula(ws, cols, filas, "Suma_por_Medio",
+    (L, f) => `${L("Visitas")}${f}+${L("Llamadas")}${f}+${L("Reuniones_Virtuales")}${f}+${L("WhatsApp")}${f}+${L("Correos")}${f}`);
+  columnaFormula(ws, cols, filas, "Sin_Respuesta",
+    (L, f) => `${L("Intentos_Totales")}${f}-${L("Respuestas_del_Cliente")}${f}`);
   formatoPorcentaje(ws, cols, filas, ["Tasa_Respuesta"]);
   return ws;
 }
