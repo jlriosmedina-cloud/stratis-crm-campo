@@ -3515,33 +3515,27 @@ function hojaUsuarios(){
    Los nombres, el orden y la cantidad de columnas son los de su archivo, para
    que el bloque se pegue tal cual sin reordenar nada.
    ========================================================================= */
-const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
-  "Fecha de llamada o visita","Direccion_Actual","Contactado (Si/No)",
-  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
+/* Las columnas que se entregan al banco. Es la propuesta que reemplaza a las
+   12 originales: salen Visita_Presencial y Visita_Virtual —eran SI/NO derivados
+   de datos que ya estaban en el archivo— entra el motivo de la no retención, y
+   "Fecha de llamada o visita" pasa a llamarse por lo que es. */
+const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
+  "Fecha_Ultimo_Contacto","Direccion_Actual","Contactado (Si/No)","Cumple_Visita","Fecha_Visita",
+  "Intentos_Totales","Tipo_Cierre","Estado_Comercio","Fecha_Cierre","Motivo_No_Retencion",
+  "Ejecutivo_Asignado"];
 
-/* Columnas propias de Stratis, para el análisis interno. No van al banco.
-   Van agrupadas por lo que miden, y la primera tanda cierra la aritmética:
-
-     Visitas (col D) + Llamadas (col E) + Reuniones + WhatsApp + Correos
-       = Suma_por_Medio = Intentos
-
-   Visitas y Llamadas no se repiten acá a propósito: ya están en el bloque del
-   banco, y dos columnas con el mismo dato terminan discrepando el día que
-   alguien edite una. En su lugar va Suma_por_Medio, que las incluye, y
-   Cuadra, que avisa si alguna vez dejan de coincidir. */
-const COLS_BBVA_EXTRA = [
-  /* 1 · Actividad: de qué se compone cada intento */
-  "Intentos","Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
-  /* 2 · Comunicación: en cuántos respondió el cliente */
+/* El resto de la gestión, completo. No se entrega al banco: es lo que sostiene
+   el análisis y las tablas dinámicas del lado de Stratis. Van en la misma hoja
+   para que el pegado sea uno solo. */
+const COLS_DETALLE = [
+  "Nombre_Comercio","Rubro","Distrito",
   "Estado_Contacto","Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta",
-  "Medio_con_Respuesta","Ultimo_Resultado",
-  /* 3 · Visita: lo que BBVA mide como cumplimiento */
-  "Visitas_Validas","Medio_Cumple_Visita",
-  /* 4 · Cierre: qué pasó, cuándo y por qué */
-  "Resultado_Gestion","Tipo_Cierre","Fecha_Cierre","Motivo_No_Retencion",
-  /* 5 · Contexto */
-  "Calificacion","Comentario_Ejecutivo",
-  "Ejecutivo_Stratis","Distrito","Estado_Cliente","Rubro","Fecha_Alta"];
+  "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
+  "Visitas_Validas","Visita_Presencial","Visita_Virtual",
+  "Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta"];
+
+const COLS_BASE_BBVA = COLS_ENTREGA.concat(COLS_DETALLE);
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
 const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
@@ -3555,7 +3549,7 @@ const estadoContacto = (intentos, respuestas) =>
   : intentos > 0 ? "Intentado sin respuesta"
   : "Sin intentar";
 
-function filasBBVA(extra){
+function filasBBVA(soloEntrega){
   return cartera().filter(c => !esClienteNuevo(c)).map(c => {
     const regs = DB.delCliente(c.customer_id);              // del más reciente al más antiguo
     const efectivos = regs.filter(r => esEfectivo(r.Resultado));
@@ -3567,7 +3561,11 @@ function filasBBVA(extra){
     const nVirtual    = regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length;
     const nWhatsapp   = regs.filter(r => r.Tipo_Contacto === "whatsapp").length;
     const nCorreo     = regs.filter(r => r.Tipo_Contacto === "correo").length;
-    const base = [
+    const suma = nPresencial + nLlamada + nVirtual + nWhatsapp + nCorreo;
+    const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
+
+    /* Lo que se entrega al banco */
+    const entrega = [
       c.customer_id,
       gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
       ultimo("Comentario_Cliente"),
@@ -3576,44 +3574,40 @@ function filasBBVA(extra){
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
       c.direccion || "",
       efectivos.length ? "SI" : "NO",
-      regs.some(r => ES_PRESENCIAL(r.Tipo_Contacto)) ? "SI" : "NO",
-      regs.some(r => ES_VIRTUAL(r.Tipo_Contacto))    ? "SI" : "NO",
       cumplidas.length ? "SI" : "NO",
-      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : ""
+      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : "",
+      regs.length,                                          // Intentos_Totales
+      tipoCierre(c),
+      c.estado || "",
+      c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "Sin cerrar",
+      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : "",
+      c.asignado || ""
     ];
-    if (!extra) return base;
-    const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
-    const suma = nPresencial + nLlamada + nVirtual + nWhatsapp + nCorreo;
-    return base.concat([
-      /* 1 · Actividad */
-      regs.length,
+    if (soloEntrega) return entrega;
+
+    /* El resto de la gestión, para el análisis de Stratis */
+    return entrega.concat([
+      titulo(c.nombre_comercio || ""),
+      rubroLabel(c),
+      titulo(c.distrito || ""),
+      estadoContacto(regs.length, efectivos.length),
+      efectivos.length,
+      regs.length - efectivos.length,
+      regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
       nVirtual,
       nWhatsapp,
       nCorreo,
       suma,
       suma === regs.length ? "SI" : "REVISAR",
-      /* 2 · Comunicación */
-      estadoContacto(regs.length, efectivos.length),
-      efectivos.length,
-      regs.length - efectivos.length,
-      regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
-      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
-      regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
-      /* 3 · Visita */
       cumplidas.length,
+      nPresencial > 0 ? "SI" : "NO",
+      nVirtual    > 0 ? "SI" : "NO",
+      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
       cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
-      /* 4 · Cierre */
+      regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
       g ? g.label : "",
-      tipoCierre(c),
-      c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "Sin cerrar",
-      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : "",
-      /* 5 · Contexto */
-      ultimo("Calificacion"),
+      ultimo("Calificacion") || "Sin calificar",
       ultimo("Comentario_Ejecutivo"),
-      c.asignado || "",
-      titulo(c.distrito || ""),
-      c.estado || "",
-      rubroLabel(c),
       String(c.creado_en || "").slice(0,10)
     ]);
   });
@@ -3676,18 +3670,9 @@ function formatoPorcentaje(ws, cols, filas, nombres){
   });
 }
 
-/* El detalle que la hoja resumida no puede tener: una fila por gestión, con su
-   medio y si el cliente respondió. Mismas columnas que la hoja Visitas del Excel
-   completo, para que cualquier tabla dinámica sirva con los dos archivos. */
-function hojaGestiones(){
-  const ws = hoja(COLS_VISITAS, filasVisitas());
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-  return ws;
-}
-
 function hojaBBVA(){
-  const cols  = COLS_BBVA.concat(COLS_BBVA_EXTRA);
-  const filas = filasBBVA(true);
+  const cols  = COLS_BASE_BBVA;
+  const filas = filasBBVA(false);
   const ws = hoja(cols, filas);
   ws["!cols"] = cols.map(c => ({ wch: /Comentario/.test(c) ? 46 : Math.min(30, Math.max(11, c.length + 3)) }));
   /* Las doce del banco quedan fijas al desplazarse: el bloque de Stratis es
@@ -3702,18 +3687,15 @@ async function exportarBBVA(btn){
   if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
   try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, hojaBBVA(),     "Resumen BBVA");
-  XLSX.utils.book_append_sheet(wb, hojaNuevos(),   "Clientes nuevos");
-  /* Una fila por gestión. La hoja Resumen BBVA resume por comercio, así que no
-     puede decir por qué medio se logró cada respuesta ni cuántos intentos se
-     perdieron en el camino: para eso hace falta el detalle. Va en el mismo
-     archivo para no tener que bajar el Excel completo solo por esto. */
-  XLSX.utils.book_append_sheet(wb, hojaGestiones(), "Gestiones");
-  XLSX.writeFile(wb, `Resumen_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
+  /* Dos hojas, nada más. La hoja Base trae primero lo que se entrega al banco
+     y a continuación el resto de la gestión, para que sea un solo pegado. */
+  XLSX.utils.book_append_sheet(wb, hojaBBVA(),   "Base");
+  XLSX.utils.book_append_sheet(wb, hojaNuevos(), "Clientes nuevos");
+  XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   const nCartera = cartera().filter(c => !esClienteNuevo(c)).length;
   const nNuevos  = cartera().filter(esClienteNuevo).length;
-  toast(`Resumen generado · ${nCartera} de cartera, ${nNuevos} nuevo${nNuevos===1?"":"s"} y ${DB.todos().length} gestiones`);
+  toast(`Base generada · ${nCartera} de cartera y ${nNuevos} nuevo${nNuevos===1?"":"s"}`);
 }
 
 function hojaReporte(admin){
@@ -3774,7 +3756,7 @@ async function exportarExcel(btn){
     XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
     XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
-    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Resumen BBVA");
+    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base");
     XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
@@ -3794,7 +3776,7 @@ async function exportarExcel(btn){
 function exportarCSV(que){
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
                  visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
-                 bbva:[COLS_BBVA, filasBBVA(false), "Resumen_BBVA"],
+                 bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
                  nuevos:[COLS_NUEVOS, filasNuevos(), "Clientes_nuevos"] };
   const [cols, filas, nombre] = mapa[que];
   const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
@@ -3880,10 +3862,10 @@ function viewAyuda(){
   const descargas = !admin ? "" : `
   <div class="card">
     ${ajFilaDescarga(
-      "Resumen para BBVA",
-      "Las 12 columnas del banco en su orden, más el detalle de cada gestión para tu análisis.",
+      "Base para BBVA",
+      "Dos hojas: Base —lo que se entrega y el detalle de la gestión— y Clientes nuevos.",
       "expBBVA", "Descargar para BBVA",
-      [["bbva","Cartera BBVA en CSV"],["nuevos","Clientes nuevos en CSV"]])}
+      [["bbva","Base para BBVA en CSV"],["nuevos","Clientes nuevos en CSV"]])}
 
     ${ajFilaDescarga(
       "La campaña completa",
@@ -3894,34 +3876,30 @@ function viewAyuda(){
     <details class="aj-mas">
       <summary>Qué trae cada archivo y cómo se pega</summary>
       <div class="cuerpo">
-        <p><b>Resumen para BBVA</b> trae dos hojas. <b>Resumen BBVA</b> son los comercios de la
-        cartera, con las 12 columnas del banco en su orden exacto: customer_id, Gestión,
-        Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita, Direccion_Actual,
-        Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita y Fecha_Visita.
-        Se busca por customer_id y se pega.</p>
-        <p>El archivo trae además una tercera hoja, <b>Gestiones</b>: una fila por cada contacto,
-        con su medio y si el cliente respondió. La hoja Resumen BBVA resume por comercio y por eso
-        no puede decir qué canal funciona; para eso está el detalle. No se pega en el banco.</p>
+        <p><b>Base para BBVA</b> trae dos hojas. La hoja <b>Base</b> tiene una fila por comercio
+        de la cartera: primero las <b>16 columnas que se entregan al banco</b>, y a continuación
+        el resto de la gestión completa, para el análisis de Stratis. Es un solo pegado.</p>
+        <p>Las 16 de entrega son: customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas,
+        Fecha_Ultimo_Contacto, Direccion_Actual, Contactado (Si/No), Cumple_Visita, Fecha_Visita,
+        Intentos_Totales, Tipo_Cierre, Estado_Comercio, Fecha_Cierre, Motivo_No_Retencion y
+        Ejecutivo_Asignado. De la 17 en adelante es material interno y no se pega en el banco.</p>
+        <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
+        pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
+        o virtual y además el cliente respondió. <b>Volumen_Comercio</b> no sale: esa columna la
+        maneja el banco y el pegado no la toca.</p>
+        <p><b>Intentos_Totales</b> incluye WhatsApp y correo, que son la mayor parte del esfuerzo
+        y antes no viajaban. Sirve además para leer bien el NO de Contactado: en cero es cobertura
+        pendiente, sobre cero es que el cliente no responde. <b>Tipo_Cierre</b> separa el comercio
+        activo que se quedó (Retenido) del que estaba de baja y volvió (Recuperado), que para el
+        banco no valen lo mismo.</p>
         <p><b>Clientes nuevos</b> son las ventas que trae Stratis. Como el banco todavía no las
         tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
         la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
         CRM no deja registrar una sin la otra.</p>
-        <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
-        pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
-        o virtual y además se logró hablar. <b>Volumen_Comercio</b> no sale: esa columna la
-        maneja el banco y el pegado no la toca.</p>
-        <p>De la columna 13 en adelante van las columnas propias de Stratis, agrupadas por lo
-        que miden: primero la <b>actividad</b> (intentos y de qué medios se componen), después la
-        <b>comunicación</b> (en cuántos respondió el cliente), la <b>visita</b>, y al final el
-        <b>cierre y el contexto</b>. Son para tu análisis; no se pegan en el archivo del banco.</p>
-        <p><b>Los números cuadran solos.</b> Visitas + Llamadas —las dos del banco— más Reuniones
-        virtuales, WhatsApp y Correos dan <b>Suma_por_Medio</b>, que tiene que ser igual a
-        <b>Intentos</b>; la columna <b>Cuadra</b> lo verifica fila por fila y dice REVISAR si
-        alguna vez no coincide. Y <b>Respuestas_del_Cliente + Sin_Respuesta = Intentos</b>.
-        Visitas y Llamadas no se repiten en el bloque de Stratis a propósito: dos columnas con el
-        mismo dato terminan discrepando.</p>
         <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Cartera asignada,
-        Tasa de respuesta, Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
+        Tasa de respuesta, Viáticos, Base para BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora
+        y Reporte. La hoja <b>Visitas</b> es la que trae una fila por gestión: es la fuente para
+        cualquier tabla dinámica por medio, por fecha o por resultado.</p>
       </div>
     </details>
   </div>`;
