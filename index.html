@@ -3133,7 +3133,7 @@ const hoja = (cols, filas) => {
 
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
-  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos",
+  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Comercios sin intentar","Intentos",
                 "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
                 "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
@@ -3152,7 +3152,8 @@ function hojaAvance(){
     const nWsp  = rs.filter(r => r.Tipo_Contacto === "whatsapp").length;
     const nCorr = rs.filter(r => r.Tipo_Contacto === "correo").length;
     const suma  = nPres + nVirt + nLlam + nWsp + nCorr;
-    return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length,
+    const trabajados = new Set(rs.map(r => String(r.Customer_id))).size;
+    return [u.nombre, cs.length, trabajados, cs.length - trabajados, rs.length,
       nPres, nVirt, nLlam, nWsp, nCorr, suma, suma === rs.length ? "SI" : "REVISAR",
       ef, rs.length - ef,
       rs.length ? Math.round(ef/rs.length*10000)/10000 : 0,
@@ -3299,7 +3300,8 @@ const COLS_BBVA_EXTRA = [
   /* 1 · Actividad: de qué se compone cada intento */
   "Intentos","Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
   /* 2 · Comunicación: en cuántos respondió el cliente */
-  "Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta","Medio_con_Respuesta","Ultimo_Resultado",
+  "Estado_Contacto","Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta",
+  "Medio_con_Respuesta","Ultimo_Resultado",
   /* 3 · Visita: lo que BBVA mide como cumplimiento */
   "Visitas_Validas","Medio_Cumple_Visita",
   /* 4 · Cierre y contexto */
@@ -3308,6 +3310,15 @@ const COLS_BBVA_EXTRA = [
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
 const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
+
+/* Contactado (Si/No) es la columna del banco y solo tiene dos valores, así que
+   mete en la misma bolsa dos cosas distintas: el comercio que se intentó y no
+   respondió, y el que nadie tocó todavía. Uno mide resistencia del cliente; el
+   otro mide trabajo pendiente del ejecutivo. Esta columna los separa. */
+const estadoContacto = (intentos, respuestas) =>
+  respuestas > 0 ? "Respondió"
+  : intentos > 0 ? "Intentado sin respuesta"
+  : "Sin intentar";
 
 function filasBBVA(extra){
   return cartera().filter(c => !esClienteNuevo(c)).map(c => {
@@ -3347,14 +3358,15 @@ function filasBBVA(extra){
       suma,
       suma === regs.length ? "SI" : "REVISAR",
       /* 2 · Comunicación */
+      estadoContacto(regs.length, efectivos.length),
       efectivos.length,
       regs.length - efectivos.length,
       regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
-      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "",
-      regs[0] ? nomResultado(regs[0].Resultado) : "",
+      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
+      regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
       /* 3 · Visita */
       cumplidas.length,
-      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "",
+      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
       /* 4 · Cierre y contexto */
       g ? g.label : "",
       ultimo("Calificacion"),
