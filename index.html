@@ -181,6 +181,11 @@ details.aj-mas .cuerpo p:last-child{margin-bottom:0}
   margin:0 0 12px;padding-bottom:11px;border-bottom:1px solid var(--line)}
 .eq-conteo{font-size:13.5px}
 .eq-conteo b{font-size:17px;letter-spacing:-.3px;margin-right:2px}
+input.meta-in{width:96px;text-align:right;padding:7px 9px;font-size:14px;font-weight:650;
+  border:1px solid var(--ring);border-radius:9px;background:var(--card);color:var(--ink);
+  font-variant-numeric:tabular-nums}
+input.meta-in:focus{outline:none;border-color:var(--brand-2);box-shadow:0 0 0 3px var(--info-bg)}
+table.tbl-metas td{vertical-align:middle}
 table.tbl-equipo td:first-child{min-width:190px}
 table.tbl-equipo tr.eq-baja td{opacity:.55}
 /* En celular la tabla no cabe: los dos números se bajan al nombre en vez de
@@ -621,7 +626,46 @@ const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO",
  "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO"];
 
 /* ---- Datos en memoria --------------------------------------------------- */
-let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [];
+let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
+
+/* ---- Metas: la cartera que BBVA asignó a cada quien, mes a mes ----------
+   Es el denominador del alcance. Sin él, once comercios trabajados se ven
+   igual de bien con veinte asignados que con doscientos. */
+const mesISO = f => String(f || "").slice(0, 7);
+const mesHoy = () => mesISO(hoyISO());
+
+const MESES_ES = ["enero","febrero","marzo","abril","mayo","junio",
+                  "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+function nombreMes(p){
+  const [a, m] = String(p || "").split("-");
+  return m ? `${MESES_ES[Number(m) - 1]} ${a}` : "";
+}
+function mesAnterior(p){
+  let [a, m] = String(p).split("-").map(Number);
+  m -= 1; if (m === 0){ m = 12; a -= 1; }
+  return `${a}-${String(m).padStart(2, "0")}`;
+}
+const metaDe = (correo, periodo) => {
+  const m = METAS.find(x => x.correo === correo && x.periodo === periodo);
+  return m ? m.asignada : 0;
+};
+/* Meses con meta cargada, del más reciente al más antiguo, y siempre el actual */
+function mesesConMeta(){
+  const s = new Set(METAS.map(m => m.periodo));
+  s.add(mesHoy());
+  return [...s].sort().reverse();
+}
+
+/* Un cierre pertenece al mes en que se decidió, no al mes en que se registró
+   la primera gestión. La base sella esa fecha al cerrar. */
+const mesDelCierre = c => mesISO(c && c.cerrado_en);
+const cerroEn = (c, periodo) => !!c.cerrado_en && mesDelCierre(c) === periodo;
+
+/* Lo que suma a la meta: el comercio activo que se quedó, y el que estaba de
+   baja y volvió. Los dos salían de la cartera asignada. La venta nueva por RUC
+   no: esa nunca estuvo en la cartera de nadie. */
+const esRetencion  = c => !esClienteNuevo(c) && c.resultado_gestion === "RETENIDO";
+const esRecuperado = c => !esClienteNuevo(c) && c.resultado_gestion === "VENTA";
 const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
 
 const rubroLabel = c => {
@@ -767,6 +811,7 @@ const S = {
   q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
   qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
+  mesPanel:"",   /* mes que se está mirando; vacío = el actual */
   limite:40, cargando:false
 };
 
@@ -1072,6 +1117,20 @@ async function cargarDatos(){
   await firmarEvidencias();
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
+  await cargarMetas();
+}
+
+/* Cartera asignada por mes. La base filtra sola: el ejecutivo recibe solo la
+   suya, el Analista y el Manager las de todos. */
+async function cargarMetas(){
+  METAS = [];
+  if (!S.user || S.demo) return;
+  const { data, error } = await sb.from("metas").select("*").order("periodo", { ascending:false });
+  if (!error) METAS = (data || []).map(m => ({
+    correo: m.correo, periodo: String(m.periodo).slice(0,7),
+    asignada: Number(m.cartera_asignada) || 0,
+    porQuien: m.actualizado_por || "", cuando: m.actualizado_en
+  }));
 }
 
 /* Bitácora de cambios — la base solo la devuelve a Analista y Manager */
@@ -2816,6 +2875,86 @@ function viewRegistros(){
 }
 
 
+/* ---------- Alcance sobre la cartera asignada ----------------------------
+   Lo que sigue es el único bloque del panel que tiene denominador de verdad:
+   no mide sobre lo registrado, mide sobre lo que BBVA entregó ese mes. */
+function cardAlcance(){
+  const p     = periodoActivo();
+  const admin = S.user.rol !== "Ejecutivo";
+  const meses = mesesConMeta();
+  const quienes = admin
+    ? USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    : [{ nombre: S.user.nombre, correo: S.user.correo }];
+
+  const filas = quienes.map(u => Object.assign({ nombre:u.nombre }, alcanceDe(u.correo, p)));
+  const sum = k => filas.reduce((n,f) => n + f[k], 0);
+  const asign = sum("asignada"), logrado = sum("logrado"), trab = sum("trabajados");
+  const pct = asign ? Math.round(logrado / asign * 1000) / 10 : 0;
+  const pctT = asign ? Math.round(trab / asign * 1000) / 10 : 0;
+
+  const anterior = mesAnterior(p);
+  const prev = quienes.reduce((n,u) => n + alcanceDe(u.correo, anterior).logrado, 0);
+  const prevAs = quienes.reduce((n,u) => n + metaDe(u.correo, anterior), 0);
+
+  if (!asign) return `
+    <div class="card">
+      <h3>Alcance sobre la cartera asignada · ${esc(nombreMes(p))}</h3>
+      <div class="note warn" style="margin:0">
+        ${admin
+          ? `Todavía no cargaste cuántos casos tiene asignado cada ejecutivo en ${esc(nombreMes(p))}.
+             Se cargan en <b>Ajustes → Cartera asignada</b>. Sin ese número el avance solo se puede
+             medir sobre lo que ya está registrado, que siempre se ve mejor de lo que es.`
+          : `Tu supervisor todavía no cargó tu cartera asignada de ${esc(nombreMes(p))}.`}
+      </div>
+    </div>`;
+
+  return `
+  <div class="card">
+    <div class="eq-top">
+      <div class="eq-conteo"><b>${pct}%</b> de alcance en ${esc(nombreMes(p))}
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
+          ${logrado} de ${asign} casos asignados${prevAs ? ` · ${esc(nombreMes(anterior))}: ${prev}` : ""}</div>
+      </div>
+      ${meses.length > 1 ? `<label class="fsel" style="min-width:170px"><span>Mes</span>
+        <select id="mesPanel">${meses.map(m =>
+          `<option value="${m}"${m === p ? " selected" : ""}>${esc(nombreMes(m))}</option>`).join("")}
+        </select></label>` : ""}
+    </div>
+
+    <div class="g-barra" style="margin:4px 0 6px">
+      <span style="width:${Math.min(100, pct)}%;background:var(--good)"></span>
+      <span style="width:${Math.min(100 - Math.min(100,pct), Math.max(0, pctT - pct))}%;background:var(--warn)"></span>
+    </div>
+    <div class="g-leyenda">
+      <span><i style="background:var(--good)"></i>Objetivo cumplido ${logrado}</span>
+      <span><i style="background:var(--warn)"></i>Trabajados sin cerrar ${Math.max(0, trab - logrado)}</span>
+      <span><i style="background:var(--grid)"></i>Sin tocar ${Math.max(0, asign - trab)}</span>
+    </div>
+
+    <div class="tbl-wrap" style="margin-top:13px"><table class="tbl">
+      <thead><tr><th>${admin ? "Ejecutivo" : "Tu mes"}</th>
+        <th style="text-align:right">Asignados</th><th style="text-align:right">Trabajados</th>
+        <th style="text-align:right">Retenidos</th><th style="text-align:right">Recuperados</th>
+        <th style="text-align:right">% alcance</th></tr></thead>
+      <tbody>${filas.map(f => `<tr>
+        <td><b>${esc(f.nombre)}</b></td>
+        <td style="text-align:right" class="mono">${f.asignada || "—"}</td>
+        <td style="text-align:right" class="mono">${f.trabajados || "—"}</td>
+        <td style="text-align:right" class="mono">${f.retenidos || "—"}</td>
+        <td style="text-align:right" class="mono">${f.recuperados || "—"}</td>
+        <td style="text-align:right" class="mono"><b>${f.asignada ? Math.round(f.pct*1000)/10 + "%" : "—"}</b></td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+
+    <div class="note" style="margin-top:11px">
+      <b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban de
+      baja y volvieron: cierran como Venta, pero salían de la misma cartera asignada y por eso
+      suman al alcance. Las ventas nuevas por RUC no entran acá.
+      Un cierre cuenta en el mes en que se decidió.
+    </div>
+  </div>`;
+}
+
 /* ---------- Panel de avance y efectividad -------------------------------- */
 function viewPanel(){
   const base = cartera();
@@ -2904,6 +3043,7 @@ function viewPanel(){
 
 
   return `
+  ${cardAlcance()}
   <div class="stat-row">
     <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
@@ -3133,7 +3273,9 @@ const hoja = (cols, filas) => {
 
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
-  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Comercios sin intentar","Intentos",
+  const p = periodoActivo();
+  const cols = ["Ejecutivo","Cartera asignada","% Alcance del mes","Retenidos del mes","Recuperados del mes",
+                "Comercios registrados","Comercios trabajados","Comercios sin intentar","Intentos",
                 "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
                 "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
@@ -3153,7 +3295,10 @@ function hojaAvance(){
     const nCorr = rs.filter(r => r.Tipo_Contacto === "correo").length;
     const suma  = nPres + nVirt + nLlam + nWsp + nCorr;
     const trabajados = new Set(rs.map(r => String(r.Customer_id))).size;
-    return [u.nombre, cs.length, trabajados, cs.length - trabajados, rs.length,
+    const al = alcanceDe(u.correo, p);
+    return [u.nombre, al.asignada || "", al.asignada ? Math.round(al.pct*10000)/10000 : "",
+      al.retenidos, al.recuperados,
+      cs.length, trabajados, cs.length - trabajados, rs.length,
       nPres, nVirt, nLlam, nWsp, nCorr, suma, suma === rs.length ? "SI" : "REVISAR",
       ef, rs.length - ef,
       rs.length ? Math.round(ef/rs.length*10000)/10000 : 0,
@@ -3167,7 +3312,30 @@ function hojaAvance(){
       rs.filter(r => Number(r.Gasto_Total) > 0).length];
   });
   const ws = hoja(cols, filas);
-  formatoPorcentaje(ws, cols, filas, ["% Tasa de respuesta","% Avance","% Efectividad de cierre"]);
+  formatoPorcentaje(ws, cols, filas, ["% Alcance del mes","% Tasa de respuesta","% Avance","% Efectividad de cierre"]);
+  return ws;
+}
+
+/* El histórico completo: una fila por ejecutivo y mes, con lo asignado y lo
+   logrado. Es la hoja de la que sale cualquier evolutivo. */
+function hojaMetas(){
+  const cols = ["Mes","Ejecutivo","Cartera asignada","Comercios trabajados en el mes",
+                "Retenidos","Recuperados","Objetivo cumplido","% Alcance","Perdidos",
+                "Cargada por","Actualizada"];
+  const filas = [];
+  mesesConMeta().slice().reverse().forEach(m => {
+    USUARIOS.filter(u => u.rol === "Ejecutivo").forEach(u => {
+      const a = alcanceDe(u.correo, m);
+      const reg = METAS.find(x => x.correo === u.correo && x.periodo === m);
+      if (!a.asignada && !a.logrado && !a.trabajados) return;
+      filas.push([nombreMes(m), u.nombre, a.asignada || "", a.trabajados,
+        a.retenidos, a.recuperados, a.logrado,
+        a.asignada ? Math.round(a.pct*10000)/10000 : "", a.perdidos,
+        reg ? reg.porQuien : "", reg ? String(reg.cuando).slice(0,10) : ""]);
+    });
+  });
+  const ws = hoja(cols, filas);
+  formatoPorcentaje(ws, cols, filas, ["% Alcance"]);
   return ws;
 }
 
@@ -3518,6 +3686,7 @@ async function exportarExcel(btn){
 
   if (admin){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
+    XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
     XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
     XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Resumen BBVA");
@@ -3633,7 +3802,7 @@ function viewAyuda(){
 
     ${ajFilaDescarga(
       "La campaña completa",
-      "11 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
+      "12 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
       "expXlsx", "Descargar Excel completo",
       [["base","Base en CSV"],["visitas","Visitas en CSV"]])}
 
@@ -3663,8 +3832,8 @@ function viewAyuda(){
         alguna vez no coincide. Y <b>Respuestas_del_Cliente + Sin_Respuesta = Intentos</b>.
         Visitas y Llamadas no se repiten en el bloque de Stratis a propósito: dos columnas con el
         mismo dato terminan discrepando.</p>
-        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Tasa de respuesta,
-        Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
+        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Cartera asignada,
+        Tasa de respuesta, Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
       </div>
     </details>
   </div>`;
@@ -3768,6 +3937,7 @@ function viewAyuda(){
   return `
   ${ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta)}
   ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
+  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
   ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
   ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
@@ -4021,6 +4191,120 @@ async function recargarEquipo(){
   USUARIOS = (data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
     nombreCompleto: u.nombre, correo: u.correo, rol: u.rol, activo: u.activo }));
   await cargarAuditoria();
+}
+
+/* =========================================================================
+   Metas: la cartera asignada por mes
+
+   Es el denominador de todo el alcance. Lo cargan el Analista y el Manager;
+   cada ejecutivo ve el suyo. Se guarda por mes, nunca se pisa: así queda el
+   histórico y se puede mirar la evolución.
+   ========================================================================= */
+function periodoActivo(){
+  return S.mesPanel || mesHoy();
+}
+
+/* Lo que un ejecutivo logró en un mes, medido contra lo que le asignaron. */
+function alcanceDe(correo, periodo){
+  const suyos    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const asignada = metaDe(correo, periodo);
+  const retenidos   = suyos.filter(c => esRetencion(c)  && cerroEn(c, periodo)).length;
+  const recuperados = suyos.filter(c => esRecuperado(c) && cerroEn(c, periodo)).length;
+  const perdidos    = suyos.filter(c => c.resultado_gestion === "PERDIDO" && cerroEn(c, periodo)).length;
+  const logrado  = retenidos + recuperados;
+  const trabajados = suyos.filter(c => DB.delCliente(c.customer_id)
+      .some(r => mesISO(r.Fecha_Contacto) === periodo)).length;
+  return { asignada, retenidos, recuperados, perdidos, logrado, trabajados,
+           pct: asignada ? logrado / asignada : 0,
+           pctTrabajo: asignada ? trabajados / asignada : 0 };
+}
+
+function cardMetas(){
+  const p = periodoActivo();
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  const meses = mesesConMeta();
+  const total = ejec.reduce((n,u) => n + metaDe(u.correo, p), 0);
+
+  return `
+  <div class="card">
+    <div class="eq-top">
+      <div class="eq-conteo">
+        <b>${total}</b> casos asignados en ${esc(nombreMes(p))}
+      </div>
+      <label class="fsel" style="min-width:170px"><span>Mes</span>
+        <select id="mesMetas">${meses.map(m =>
+          `<option value="${m}"${m === p ? " selected" : ""}>${esc(nombreMes(m))}</option>`).join("")}
+        </select></label>
+    </div>
+
+    <div class="tbl-wrap"><table class="tbl tbl-metas">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Cartera asignada</th>
+        <th style="text-align:right">Trabajados</th><th style="text-align:right">Retenidos</th>
+        <th style="text-align:right">Recuperados</th><th style="text-align:right">% alcance</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const a = alcanceDe(u.correo, p);
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>
+            <div class="eq-mini">${a.asignada ? a.asignada + " asignados" : "sin meta cargada"}</div></td>
+          <td style="text-align:right">
+            <input type="number" class="meta-in" min="0" max="100000" step="1"
+                   data-meta="${esc(u.correo)}" value="${a.asignada || ""}" placeholder="0"></td>
+          <td style="text-align:right" class="mono">${a.trabajados || "—"}</td>
+          <td style="text-align:right" class="mono">${a.retenidos || "—"}</td>
+          <td style="text-align:right" class="mono">${a.recuperados || "—"}</td>
+          <td style="text-align:right" class="mono">${a.asignada ? Math.round(a.pct*1000)/10 + "%" : "—"}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+
+    <div id="msgMetas"></div>
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <button class="btn sm" id="guardarMetas">Guardar las metas de ${esc(nombreMes(p))}</button>
+      <span style="font-size:12px;color:var(--muted)">Cada mes se guarda por separado; el histórico no se pisa.</span>
+    </div>
+
+    <details class="aj-mas">
+      <summary>Qué cuenta para el % de alcance</summary>
+      <div class="cuerpo">
+        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron con BBVA.
+        <b>Recuperados</b> estaban <b>de baja</b> y volvieron: cierran como Venta, no como
+        Retención, pero salían de la misma cartera asignada, así que suman igual. Van separados
+        a propósito para que se vea de dónde viene cada punto.</p>
+        <p>Las <b>ventas nuevas por RUC no entran</b>: nunca estuvieron en la cartera de nadie,
+        así que inflarían el alcance de un mes sin que hubiera nada asignado detrás.</p>
+        <p>Un cierre cuenta en el mes en que se decidió, no en el mes en que se registró la
+        primera gestión. Si un comercio se reabre, deja de contar hasta que se vuelva a cerrar.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bindMetas(){
+  const sel = $("#mesMetas");
+  if (sel) sel.onchange = e => { S.mesPanel = e.target.value; render(); };
+
+  const btn = $("#guardarMetas");
+  if (!btn) return;
+  btn.onclick = async () => {
+    const p = periodoActivo();
+    const filas = [...document.querySelectorAll("[data-meta]")].map(i => ({
+      correo: i.dataset.meta,
+      periodo: p + "-01",
+      cartera_asignada: Math.max(0, Math.round(Number(i.value) || 0))
+    }));
+    const msg = $("#msgMetas");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    try {
+      const { error } = await sb.from("metas").upsert(filas, { onConflict: "correo,periodo" });
+      if (error) throw new Error(error.message);
+      await cargarMetas();
+      toast(`Metas de ${nombreMes(p)} guardadas`);
+      render();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "Guardar las metas de " + nombreMes(p);
+      msg.innerHTML = `<div class="err">${esc(String(e.message))}</div>`;
+    }
+  };
 }
 
 /* =========================================================================
@@ -4375,6 +4659,8 @@ function bindExtras(){
   if ($("#expBBVA"))  $("#expBBVA").onclick  = e => exportarBBVA(e.currentTarget);
 
   if (typeof bindEquipo === "function") bindEquipo();
+  if (typeof bindMetas === "function") bindMetas();
+  if ($("#mesPanel")) $("#mesPanel").onchange = e => { S.mesPanel = e.target.value; render(); };
   if ($("#salir")) $("#salir").onclick = salir;
   if ($("#guardarNuevaClave")) $("#guardarNuevaClave").onclick = async () => {
     const a = ($("#nc1").value || ""), b = ($("#nc2").value || "");
