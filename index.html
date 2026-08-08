@@ -3605,6 +3605,15 @@ function formatoPorcentaje(ws, cols, filas, nombres){
   });
 }
 
+/* El detalle que la hoja resumida no puede tener: una fila por gestión, con su
+   medio y si el cliente respondió. Mismas columnas que la hoja Visitas del Excel
+   completo, para que cualquier tabla dinámica sirva con los dos archivos. */
+function hojaGestiones(){
+  const ws = hoja(COLS_VISITAS, filasVisitas());
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  return ws;
+}
+
 function hojaBBVA(){
   const cols  = COLS_BBVA.concat(COLS_BBVA_EXTRA);
   const filas = filasBBVA(true);
@@ -3622,13 +3631,18 @@ async function exportarBBVA(btn){
   if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
   try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, hojaBBVA(),   "Resumen BBVA");
-  XLSX.utils.book_append_sheet(wb, hojaNuevos(), "Clientes nuevos");
+  XLSX.utils.book_append_sheet(wb, hojaBBVA(),     "Resumen BBVA");
+  XLSX.utils.book_append_sheet(wb, hojaNuevos(),   "Clientes nuevos");
+  /* Una fila por gestión. La hoja Resumen BBVA resume por comercio, así que no
+     puede decir por qué medio se logró cada respuesta ni cuántos intentos se
+     perdieron en el camino: para eso hace falta el detalle. Va en el mismo
+     archivo para no tener que bajar el Excel completo solo por esto. */
+  XLSX.utils.book_append_sheet(wb, hojaGestiones(), "Gestiones");
   XLSX.writeFile(wb, `Resumen_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   const nCartera = cartera().filter(c => !esClienteNuevo(c)).length;
   const nNuevos  = cartera().filter(esClienteNuevo).length;
-  toast(`Resumen generado · ${nCartera} de cartera y ${nNuevos} nuevo${nNuevos===1?"":"s"}`);
+  toast(`Resumen generado · ${nCartera} de cartera, ${nNuevos} nuevo${nNuevos===1?"":"s"} y ${DB.todos().length} gestiones`);
 }
 
 function hojaReporte(admin){
@@ -3796,7 +3810,7 @@ function viewAyuda(){
   <div class="card">
     ${ajFilaDescarga(
       "Resumen para BBVA",
-      "Las 12 columnas del archivo del banco, en su orden. Es el archivo que se entrega.",
+      "Las 12 columnas del banco en su orden, más el detalle de cada gestión para tu análisis.",
       "expBBVA", "Descargar para BBVA",
       [["bbva","Cartera BBVA en CSV"],["nuevos","Clientes nuevos en CSV"]])}
 
@@ -3814,6 +3828,9 @@ function viewAyuda(){
         Comentario de Cliente, Visitas, Llamadas, Fecha de llamada o visita, Direccion_Actual,
         Contactado (Si/No), Visita_Presencial, Visita_Virtual, Cumple_Visita y Fecha_Visita.
         Se busca por customer_id y se pega.</p>
+        <p>El archivo trae además una tercera hoja, <b>Gestiones</b>: una fila por cada contacto,
+        con su medio y si el cliente respondió. La hoja Resumen BBVA resume por comercio y por eso
+        no puede decir qué canal funciona; para eso está el detalle. No se pega en el banco.</p>
         <p><b>Clientes nuevos</b> son las ventas que trae Stratis. Como el banco todavía no las
         tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
         la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
