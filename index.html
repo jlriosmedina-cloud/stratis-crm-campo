@@ -3133,8 +3133,9 @@ const hoja = (cols, filas) => {
 
 /* Hojas exclusivas del Analista y del Manager -------------------------- */
 function hojaAvance(){
-  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos","Gestiones con respuesta",
-                "% Tasa de respuesta","Intentos por comercio","Visitas válidas","Presenciales",
+  const cols = ["Ejecutivo","Comercios registrados","Comercios trabajados","Intentos",
+                "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
+                "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
                 "Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
@@ -3145,22 +3146,27 @@ function hojaAvance(){
     const n = id => cs.filter(c => (c.resultado_gestion || "PENDIENTE") === id).length;
     const ret = n("RETENIDO"), ven = n("VENTA"), per = n("PERDIDO"), pen = n("PENDIENTE");
     const cumplido = ret + ven, decididos = cumplido + per;
-    return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length, ef,
-      rs.length ? Math.round(ef/rs.length*100)/100 : 0,
+    const nPres = rs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length;
+    const nVirt = rs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length;
+    const nLlam = rs.filter(r => r.Tipo_Contacto === "llamada").length;
+    const nWsp  = rs.filter(r => r.Tipo_Contacto === "whatsapp").length;
+    const nCorr = rs.filter(r => r.Tipo_Contacto === "correo").length;
+    const suma  = nPres + nVirt + nLlam + nWsp + nCorr;
+    return [u.nombre, cs.length, new Set(rs.map(r => String(r.Customer_id))).size, rs.length,
+      nPres, nVirt, nLlam, nWsp, nCorr, suma, suma === rs.length ? "SI" : "REVISAR",
+      ef, rs.length - ef,
+      rs.length ? Math.round(ef/rs.length*10000)/10000 : 0,
       cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
       rs.filter(r => r.Cumple_Visita === "SI").length,
-      rs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto)).length,
       ret, ven, per, pen, cumplido,
-      cs.length ? Math.round(cumplido/cs.length*100)/100 : 0,
-      decididos ? Math.round(cumplido/decididos*100)/100 : "",
+      cs.length ? Math.round(cumplido/cs.length*10000)/10000 : 0,
+      decididos ? Math.round(cumplido/decididos*10000)/10000 : "",
       rs.filter(sinUbicacionVerificada).length,
       Math.round(rs.reduce((n2,r) => n2 + (Number(r.Gasto_Total)||0), 0) * 100) / 100,
       rs.filter(r => Number(r.Gasto_Total) > 0).length];
   });
   const ws = hoja(cols, filas);
-  ["F","O","P"].forEach(col => filas.forEach((_,i) => {
-    const c = ws[col+(i+2)]; if (c && typeof c.v === "number") c.z = "0%";
-  }));
+  formatoPorcentaje(ws, cols, filas, ["% Tasa de respuesta","% Avance","% Efectividad de cierre"]);
   return ws;
 }
 
@@ -3279,10 +3285,26 @@ const COLS_BBVA = ["customer_id","Gestión","Comentario de Cliente","Visitas","L
   "Fecha de llamada o visita","Direccion_Actual","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita"];
 
-/* Columnas propias de Stratis, para el análisis interno. No van al banco. */
-const COLS_BBVA_EXTRA = ["Resultado_Gestion","Distrito","Intentos","Respuestas_del_Cliente",
-  "Reuniones_Virtuales","Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
-  "Comentario_Ejecutivo","Calificacion","Ejecutivo_Stratis","Estado_Cliente","Rubro","Fecha_Alta"];
+/* Columnas propias de Stratis, para el análisis interno. No van al banco.
+   Van agrupadas por lo que miden, y la primera tanda cierra la aritmética:
+
+     Visitas (col D) + Llamadas (col E) + Reuniones + WhatsApp + Correos
+       = Suma_por_Medio = Intentos
+
+   Visitas y Llamadas no se repiten acá a propósito: ya están en el bloque del
+   banco, y dos columnas con el mismo dato terminan discrepando el día que
+   alguien edite una. En su lugar va Suma_por_Medio, que las incluye, y
+   Cuadra, que avisa si alguna vez dejan de coincidir. */
+const COLS_BBVA_EXTRA = [
+  /* 1 · Actividad: de qué se compone cada intento */
+  "Intentos","Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
+  /* 2 · Comunicación: en cuántos respondió el cliente */
+  "Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta","Medio_con_Respuesta","Ultimo_Resultado",
+  /* 3 · Visita: lo que BBVA mide como cumplimiento */
+  "Visitas_Validas","Medio_Cumple_Visita",
+  /* 4 · Cierre y contexto */
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo",
+  "Ejecutivo_Stratis","Distrito","Estado_Cliente","Rubro","Fecha_Alta"];
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
 const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
@@ -3294,12 +3316,17 @@ function filasBBVA(extra){
     const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
     // El comentario más reciente que exista, aunque venga de una gestión anterior
     const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+    const nPresencial = regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length;
+    const nLlamada    = regs.filter(r => r.Tipo_Contacto === "llamada").length;
+    const nVirtual    = regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length;
+    const nWhatsapp   = regs.filter(r => r.Tipo_Contacto === "whatsapp").length;
+    const nCorreo     = regs.filter(r => r.Tipo_Contacto === "correo").length;
     const base = [
       c.customer_id,
       gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
       ultimo("Comentario_Cliente"),
-      regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
-      regs.filter(r => r.Tipo_Contacto === "llamada").length,
+      nPresencial,
+      nLlamada,
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
       c.direccion || "",
       efectivos.length ? "SI" : "NO",
@@ -3310,18 +3337,30 @@ function filasBBVA(extra){
     ];
     if (!extra) return base;
     const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
+    const suma = nPresencial + nLlamada + nVirtual + nWhatsapp + nCorreo;
     return base.concat([
-      g ? g.label : "",
-      titulo(c.distrito || ""),
+      /* 1 · Actividad */
       regs.length,
+      nVirtual,
+      nWhatsapp,
+      nCorreo,
+      suma,
+      suma === regs.length ? "SI" : "REVISAR",
+      /* 2 · Comunicación */
       efectivos.length,
-      regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length,
+      regs.length - efectivos.length,
+      regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
       efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "",
-      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "",
       regs[0] ? nomResultado(regs[0].Resultado) : "",
-      ultimo("Comentario_Ejecutivo"),
+      /* 3 · Visita */
+      cumplidas.length,
+      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "",
+      /* 4 · Cierre y contexto */
+      g ? g.label : "",
       ultimo("Calificacion"),
+      ultimo("Comentario_Ejecutivo"),
       c.asignado || "",
+      titulo(c.distrito || ""),
       c.estado || "",
       rubroLabel(c),
       String(c.creado_en || "").slice(0,10)
@@ -3371,11 +3410,30 @@ function hojaNuevos(){
   return ws;
 }
 
+/* Aplica formato de porcentaje a las columnas que lo son, buscándolas por
+   nombre. Antes iban por letra fija y bastaba agregar una columna al medio
+   para que el formato terminara en la de al lado. */
+function formatoPorcentaje(ws, cols, filas, nombres){
+  nombres.forEach(n => {
+    const i = cols.indexOf(n);
+    if (i < 0) return;
+    const letra = XLSX.utils.encode_col(i);
+    filas.forEach((_, f) => {
+      const celda = ws[letra + (f + 2)];
+      if (celda && typeof celda.v === "number") celda.z = "0.0%";
+    });
+  });
+}
+
 function hojaBBVA(){
-  const cols = COLS_BBVA.concat(COLS_BBVA_EXTRA);
-  const ws = hoja(cols, filasBBVA(true));
-  // marca visualmente dónde termina el bloque que se pega en el archivo del banco
-  ws["!cols"] = cols.map((c,i) => ({ wch: /Comentario/.test(c) ? 46 : Math.min(30, Math.max(12, c.length + 3)) }));
+  const cols  = COLS_BBVA.concat(COLS_BBVA_EXTRA);
+  const filas = filasBBVA(true);
+  const ws = hoja(cols, filas);
+  ws["!cols"] = cols.map(c => ({ wch: /Comentario/.test(c) ? 46 : Math.min(30, Math.max(11, c.length + 3)) }));
+  /* Las doce del banco quedan fijas al desplazarse: el bloque de Stratis es
+     largo y sin esto uno se pierde de qué comercio está mirando. */
+  ws["!freeze"] = { xSplit: 1, ySplit: 1 };
+  formatoPorcentaje(ws, cols, filas, ["Tasa_Respuesta"]);
   return ws;
 }
 
@@ -3583,10 +3641,16 @@ function viewAyuda(){
         pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
         o virtual y además se logró hablar. <b>Volumen_Comercio</b> no sale: esa columna la
         maneja el banco y el pegado no la toca.</p>
-        <p>A la derecha de la columna 12 el Excel agrega las columnas propias de Stratis
-        —resultado de la gestión, distrito, intentos, contactos efectivos, medio efectivo,
-        comentarios, calificación y ejecutivo asignado—. Esas son para ti; no se pegan en el
-        archivo del banco.</p>
+        <p>De la columna 13 en adelante van las columnas propias de Stratis, agrupadas por lo
+        que miden: primero la <b>actividad</b> (intentos y de qué medios se componen), después la
+        <b>comunicación</b> (en cuántos respondió el cliente), la <b>visita</b>, y al final el
+        <b>cierre y el contexto</b>. Son para tu análisis; no se pegan en el archivo del banco.</p>
+        <p><b>Los números cuadran solos.</b> Visitas + Llamadas —las dos del banco— más Reuniones
+        virtuales, WhatsApp y Correos dan <b>Suma_por_Medio</b>, que tiene que ser igual a
+        <b>Intentos</b>; la columna <b>Cuadra</b> lo verifica fila por fila y dice REVISAR si
+        alguna vez no coincide. Y <b>Respuestas_del_Cliente + Sin_Respuesta = Intentos</b>.
+        Visitas y Llamadas no se repiten en el bloque de Stratis a propósito: dos columnas con el
+        mismo dato terminan discrepando.</p>
         <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Tasa de respuesta,
         Viáticos, Resumen BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora y Reporte.</p>
       </div>
