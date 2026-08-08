@@ -2215,7 +2215,7 @@ function renderFormulario(){
       <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
     <div class="field" style="margin-bottom:0"><label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''} <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
       <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
-      ${pruebaDeRespuesta(f) ? `<div class="note warn" style="margin-top:8px">
+      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note warn" style="margin-top:8px">
         Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
         es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
         es <b>No respondió</b>.</div>` : ""}</div>
@@ -2937,8 +2937,10 @@ function viewPanel(){
       una buena campaña — por eso van juntos.
     </div>
     <div class="note" style="margin-top:9px">
-      Nada de esto es lo mismo que la <b>efectividad de contacto</b> de arriba, que solo mide cuántos
-      intentos llegaron a conversación. Se puede tener 100% de contacto y 0% de retención.
+      Nada de esto es lo mismo que la <b>tasa de respuesta</b> de arriba, que solo mide en cuántos
+      intentos el cliente contestó. Que respondan no es que se queden: se puede tener 100% de
+      respuesta y 0% de retención. Y mandar un correo o un WhatsApp no cuenta como respuesta
+      mientras nadie conteste.
     </div>` : `<div class="note">Todavía no hay comercios registrados en la campaña.</div>`}
   </div>
 
