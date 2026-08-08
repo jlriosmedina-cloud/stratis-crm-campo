@@ -611,6 +611,32 @@ const RESULTADOS_GESTION = [
 ];
 const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
 
+/* Por qué se perdió. Lista cerrada a propósito: un campo libre se llena de
+   textos que después no se pueden agrupar, y el motivo solo sirve si se puede
+   contar. Se pide en el momento del cierre, que es cuando está fresco. */
+const MOTIVOS_NO_RETENCION = [
+  { id:"TASA",           label:"Tasa o comisión",        desc:"Le ofrecieron mejor precio, o la comisión le parece alta" },
+  { id:"SERVICIO",       label:"Servicio o soporte",     desc:"Problemas con el POS, la atención o los tiempos de respuesta" },
+  { id:"COMPETENCIA",    label:"Se fue a la competencia",desc:"Ya migró o firmó con otro operador" },
+  { id:"CERRO",          label:"Cerró el negocio",       desc:"El comercio dejó de operar" },
+  { id:"NO_DECIDE",      label:"No decide el contacto",  desc:"Quien atiende no es quien decide, y no se llegó al titular" },
+  { id:"NO_CONTACTABLE", label:"No se pudo contactar",   desc:"Datos errados o nunca hubo respuesta" },
+  { id:"OTRO",           label:"Otro motivo",            desc:"Escríbelo en el comentario del ejecutivo" }
+];
+const nomMotivo = id => (MOTIVOS_NO_RETENCION.find(m => m.id === id) || {}).label || "";
+
+/* Retenido y recuperado no valen lo mismo para el banco: uno ya operaba y se
+   quedó, el otro estaba de baja y volvió. La columna Gestión los junta; esta
+   los separa. */
+function tipoCierre(c){
+  if (!c) return "";
+  const g = c.resultado_gestion || "PENDIENTE";
+  if (g === "RETENIDO") return "Retenido";
+  if (g === "VENTA")    return esClienteNuevo(c) ? "Venta nueva" : "Recuperado";
+  if (g === "PERDIDO")  return "Perdido";
+  return "Pendiente";
+}
+
 /* Dos orígenes posibles: la cartera que entrega BBVA, o una venta nueva que
    trae Stratis y que el banco todavía no tiene afiliada. */
 const esClienteNuevo = c => c && c.tipo_registro === "NUEVO";
@@ -1588,7 +1614,7 @@ function nuevoFormCliente(){
     tipo_registro:"CARTERA", customer_id:"", ruc:"", razon_social:"",
     nombre_comercio:"", rubro:"", rubro_otro:"",
     distrito:"", direccion:"", estado:"ACTIVO",
-    resultado_gestion:"PENDIENTE", observacion:""
+    resultado_gestion:"PENDIENTE", motivo_no_retencion:"", observacion:""
   };
 }
 
@@ -1602,6 +1628,7 @@ function formDeCliente(c){
     distrito: c.distrito || "", direccion: c.direccion || "",
     estado: c.estado || "ACTIVO",
     resultado_gestion: c.resultado_gestion || "PENDIENTE",
+    motivo_no_retencion: c.motivo_no_retencion || "",
     observacion: c.observacion || ""
   };
 }
@@ -1805,8 +1832,23 @@ function pintarGestion(){
         ${posibles.map(g => `<option value="${g.id}" ${f.resultado_gestion===g.id?"selected":""}>${esc(g.label)} — ${esc(g.desc)}</option>`).join("")}
       </select>
     </div>
+    ${f.resultado_gestion === "PERDIDO" ? `
+    <div class="field" style="margin:12px 0 0">
+      <label>¿Por qué no se retuvo? <span class="req">*</span>
+        <span class="hint">— es lo que le falta al reporte de BBVA para poder actuar</span></label>
+      <select data-c="motivo_no_retencion">
+        <option value="">Seleccionar…</option>
+        ${MOTIVOS_NO_RETENCION.map(m => `<option value="${m.id}" ${f.motivo_no_retencion===m.id?"selected":""}>${esc(m.label)} — ${esc(m.desc)}</option>`).join("")}
+      </select>
+    </div>` : ""}
     <div class="note ${logrado ? "" : "warn"}" style="margin:11px 0 0">${aviso}</div>`;
-  box.querySelectorAll("[data-c]").forEach(el => el.onchange = () => f[el.dataset.c] = el.value);
+  box.querySelectorAll("[data-c]").forEach(el => el.onchange = () => {
+    f[el.dataset.c] = el.value;
+    if (el.dataset.c === "resultado_gestion"){
+      if (el.value !== "PERDIDO") f.motivo_no_retencion = "";
+      pintarGestion();
+    }
+  });
 }
 
 /* La identificación cambia según el origen: Customer ID, o RUC y razón social
@@ -1968,6 +2010,8 @@ async function guardarCliente(){
       if (byId[cid]) errores.push(`El Customer ID ${cid} ya está registrado en tu cartera.`);
     }
   }
+  if (!nuevo && f.resultado_gestion === "PERDIDO" && !f.motivo_no_retencion)
+    errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
   if (nuevo){
     if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
     if (!editando){
@@ -2005,7 +2049,8 @@ async function guardarCliente(){
     tipo_registro: f.tipo_registro,
     rubro: f.rubro,
     rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
-    resultado_gestion: nuevo ? "VENTA" : (f.resultado_gestion || "PENDIENTE")
+    resultado_gestion: nuevo ? "VENTA" : (f.resultado_gestion || "PENDIENTE"),
+    motivo_no_retencion: (!nuevo && f.resultado_gestion === "PERDIDO") ? (f.motivo_no_retencion || null) : null
   };
   if (nuevo){
     // Ficha mínima: el resto del onboarding lo hace BBVA por su canal.
@@ -2180,7 +2225,7 @@ function nuevoForm(){
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
     Gasto_Total: "", Gastos_Paths: [], Gastos_Nuevos: [],
-    Comentario_Ejecutivo: "", Comentario_Cliente: "",
+    Comentario_Ejecutivo: "", Comentario_Cliente: "", Motivo: "",
     Cierre: null            // resultado_gestion del comercio, se define acá mismo
   };
 }
@@ -2357,6 +2402,15 @@ function pintarCierre(c){
           <span>${g.id === "PENDIENTE" ? "Todavía hay que seguir trabajándola" : esc(g.desc)}</span></span>
         </div>`).join("")}
     </div>
+    ${f.Cierre === "PERDIDO" ? `
+      <div class="field" style="margin:13px 0 0">
+        <label>¿Por qué no se retuvo? <span class="req">*</span>
+          <span class="hint">— es lo que le falta al reporte de BBVA para poder actuar</span></label>
+        <select data-f="Motivo">
+          <option value="">Seleccionar…</option>
+          ${MOTIVOS_NO_RETENCION.map(m => `<option value="${m.id}" ${f.Motivo === m.id ? "selected" : ""}>${esc(m.label)} — ${esc(m.desc)}</option>`).join("")}
+        </select>
+      </div>` : ""}
     ${!logrado ? `<div class="note warn" style="margin-top:11px">
       Con este resultado no se logró hablar con el titular, así que no se puede marcar como
       retención ni como venta. Registra el intento y vuelve cuando consigas la conversación.</div>` : ""}
@@ -2371,8 +2425,11 @@ function pintarCierre(c){
   </div>`;
   box.querySelectorAll("[data-cierre]").forEach(el => el.onclick = () => {
     f.Cierre = el.dataset.cierre;
+    if (f.Cierre !== "PERDIDO") f.Motivo = "";
     pintarCierre(c);
   });
+  const selMotivo = box.querySelector('[data-f="Motivo"]');
+  if (selMotivo) selMotivo.onchange = e => { f.Motivo = e.target.value; };
 }
 
 function pintarDerivado(){
@@ -2641,6 +2698,8 @@ async function guardar(c){
     errores.push("Captura la ubicación con el botón, o marca “No puedo capturar la ubicación” si el GPS no responde o estás registrando una visita anterior.");
   if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
+  if (f.Cierre === "PERDIDO" && !f.Motivo)
+    errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
   /* Enviar un correo o un WhatsApp no es que te hayan respondido. Si se marca
      que el cliente respondió, tiene que haber algo que citar. */
   if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
@@ -2683,7 +2742,9 @@ async function guardar(c){
       // exista el contacto logrado que lo respalda.
       if (f.Cierre && !esClienteNuevo(c) && f.Cierre !== (c.resultado_gestion || "PENDIENTE")){
         const { error: eCierre } = await sb.from("clientes")
-          .update({ resultado_gestion: f.Cierre }).eq("customer_id", String(c.customer_id));
+          .update({ resultado_gestion: f.Cierre,
+                    motivo_no_retencion: f.Cierre === "PERDIDO" ? (f.Motivo || null) : null })
+          .eq("customer_id", String(c.customer_id));
         if (eCierre) throw new Error("La gestión quedó registrada, pero el cierre no: " + eCierre.message);
       }
       await recargarCartera(); await refrescar(); await cargarAuditoria();
@@ -3219,6 +3280,7 @@ function viewPanel(){
    ========================================================================= */
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
   "Estado_Gestion","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
   "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
   "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
@@ -3242,7 +3304,10 @@ function filasBase(){
       c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
       c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
       c.asignado, c.asignado_correo,
-      String(c.creado_en || "").slice(0,10)]
+      String(c.creado_en || "").slice(0,10),
+      tipoCierre(c),
+      c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "",
+      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : ""]
       .concat([b._intentos, b._efectivos,
         DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
         b._efectivos > 0 ? "Si" : "No",
@@ -3472,8 +3537,10 @@ const COLS_BBVA_EXTRA = [
   "Medio_con_Respuesta","Ultimo_Resultado",
   /* 3 · Visita: lo que BBVA mide como cumplimiento */
   "Visitas_Validas","Medio_Cumple_Visita",
-  /* 4 · Cierre y contexto */
-  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo",
+  /* 4 · Cierre: qué pasó, cuándo y por qué */
+  "Resultado_Gestion","Tipo_Cierre","Fecha_Cierre","Motivo_No_Retencion",
+  /* 5 · Contexto */
+  "Calificacion","Comentario_Ejecutivo",
   "Ejecutivo_Stratis","Distrito","Estado_Cliente","Rubro","Fecha_Alta"];
 
 const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
@@ -3535,8 +3602,12 @@ function filasBBVA(extra){
       /* 3 · Visita */
       cumplidas.length,
       cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
-      /* 4 · Cierre y contexto */
+      /* 4 · Cierre */
       g ? g.label : "",
+      tipoCierre(c),
+      c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "Sin cerrar",
+      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : "",
+      /* 5 · Contexto */
       ultimo("Calificacion"),
       ultimo("Comentario_Ejecutivo"),
       c.asignado || "",
