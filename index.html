@@ -104,6 +104,16 @@ header.top h1{margin:0;font-size:15px;font-weight:700;letter-spacing:-.2px;flex:
 header.top h1 small{display:block;font-size:11px;font-weight:500;opacity:.72;letter-spacing:0}
 .icon-btn{background:rgba(255,255,255,.13);border:0;color:#fff;width:33px;height:33px;border-radius:9px;display:grid;place-items:center;cursor:pointer;flex:none;font-size:15px}
 .icon-btn:hover{background:rgba(255,255,255,.24)}
+/* El pulso: un punto que dice si el CRM está escuchando cambios en vivo */
+.pulso i{width:9px;height:9px;border-radius:50%;background:#9aa6b2;display:block;transition:background .3s}
+.pulso[data-estado="vivo"] i{background:#39d98a;box-shadow:0 0 0 0 rgba(57,217,138,.65);animation:latido 2.4s ease-out infinite}
+.pulso[data-estado="tibio"] i{background:#f5c451}
+.pulso[data-estado="mal"] i{background:#ef6b6b}
+.pulso[data-estado="carga"] i{background:#fff;animation:parpadeo .8s ease-in-out infinite}
+.pulso.con-novedad{background:rgba(57,217,138,.3)}
+@keyframes latido{0%{box-shadow:0 0 0 0 rgba(57,217,138,.6)}70%{box-shadow:0 0 0 7px rgba(57,217,138,0)}100%{box-shadow:0 0 0 0 rgba(57,217,138,0)}}
+@keyframes parpadeo{0%,100%{opacity:.35}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.pulso i{animation:none!important}}
 main{flex:1;padding:13px 13px calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px)}
 nav.bottom{
   position:fixed;left:0;right:0;bottom:0;z-index:45;background:var(--card);
@@ -522,6 +532,7 @@ table.tbl tr:last-child td{border-bottom:0}
   <header class="top">
     <div class="mark">S</div>
     <h1 id="topTitle">Stratis CRM<small id="topSub">BBVA Adquirencia</small></h1>
+    <button class="icon-btn pulso" id="btnSync" data-estado="tibio" title="Actualizar ahora"><i></i></button>
     <button class="icon-btn" id="btnTheme" title="Tema">◐</button>
     <button class="icon-btn" id="btnUser" title="Cuenta">▾</button>
   </header>
@@ -1093,6 +1104,7 @@ async function abrirApp(){
   $("#app").classList.remove("hidden");
   S.tab = "cartera"; S.cid = null;
   render();
+  arrancarSync();
 }
 
 function pantallaCarga(msg){
@@ -1108,6 +1120,7 @@ function pantallaCarga(msg){
 }
 
 async function salir(){
+  detenerSync();
   if (sb) await sb.auth.signOut();
   S.user = null; S.entrando = false;
   CLIENTES = []; byId = {}; DB.visitas = [];
@@ -1275,6 +1288,9 @@ function go(tab, cid){
   S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
   window.scrollTo(0,0);
   render();
+  /* Si mientras se llenaba un formulario llegaron registros de otro, se
+     aplican recién ahora: al salir del formulario no se pisa nada. */
+  if (typeof aplicarPendientes === "function") aplicarPendientes();
 }
 function toast(msg){
   const old = document.querySelector(".toast"); if (old) old.remove();
@@ -4726,6 +4742,157 @@ function viewGuia(){
 }
 
 /* =========================================================================
+   Sincronización — el CRM se actualiza solo
+
+   Tres disparadores, del más barato al más caro:
+
+     empuje    Postgres avisa por websocket apenas alguien graba algo.
+     reloj     cada 45 s, y solo si la pestaña está a la vista.
+     regreso   al volver a la pestaña, al recuperar el foco o la red.
+
+   Cualquiera de los tres llama a lo mismo, y lo primero que hace es preguntar
+   la firma del estado —pulso()—: dos conteos y una fecha. Si la firma no
+   cambió, no se baja nada. Solo cuando cambió se vuelven a traer cartera,
+   gestiones, metas y bitácora, y se vuelve a pintar la vista actual.
+
+   Regla que no se rompe: si hay un formulario abierto o un modal encima, no
+   se repinta nada. Se anota que hay novedades y se aplican cuando la persona
+   sale del formulario. Nadie pierde lo que estaba escribiendo.
+   ========================================================================= */
+
+const SYNC = {
+  canal:null, timer:null, vivo:false,
+  firma:null, cuando:null,
+  ocupado:false, pendiente:false, fallos:0
+};
+
+const RELOJ_SYNC = 45000;    // el latido cuando la pestaña está a la vista
+const ESPERA_EMPUJE = 1200;  // se agrupan las ráfagas de cambios
+
+/* No se toca la pantalla mientras se está escribiendo en ella */
+const escribiendo = () =>
+  /^form_/.test(S.tab) || ($("#overlay") && $("#overlay").innerHTML.trim() !== "");
+
+async function firmaRemota(){
+  const { data, error } = await sb.rpc("pulso");
+  if (error) return null;
+  const p = Array.isArray(data) ? data[0] : data;
+  if (!p) return null;
+  return `${p.comercios}|${p.gestiones}|${p.ultimo}`;
+}
+
+async function sincronizar(motivo){
+  if (!S.user || S.demo || SYNC.ocupado) return;
+  if (navigator.onLine === false) return;
+  SYNC.ocupado = true;
+  try {
+    const firma = await firmaRemota();
+    if (firma === null) { SYNC.fallos++; return; }
+    SYNC.fallos = 0;
+
+    if (firma === SYNC.firma && !SYNC.pendiente){ SYNC.cuando = Date.now(); return; }
+    if (escribiendo()){ SYNC.pendiente = true; return; }
+
+    /* Si los conteos remotos ya coinciden con lo que hay en pantalla, el
+       cambio lo hicimos nosotros al guardar: se recarga igual, pero sin
+       avisar como si fuera novedad de otro. */
+    const [nc, ng] = firma.split("|");
+    const eraNuestro = Number(nc) === CLIENTES.length && Number(ng) === DB.todos().length;
+
+    await recargarCartera();
+    await refrescar();
+    await cargarMetas();
+    await cargarAuditoria();
+
+    const primera = SYNC.firma === null;
+    SYNC.firma = firma; SYNC.cuando = Date.now(); SYNC.pendiente = false;
+    render();
+    if (motivo === "manual")                              toast("Actualizado");
+    else if (!primera && !eraNuestro)                     toast("Se actualizó con los últimos registros");
+  } catch (e){
+    SYNC.fallos++;
+  } finally {
+    SYNC.ocupado = false;
+    pintarPulso();
+  }
+}
+
+/* Las ráfagas se agrupan: diez inserciones seguidas son una sola recarga */
+let _debEmpuje;
+function empuje(){
+  clearTimeout(_debEmpuje);
+  _debEmpuje = setTimeout(() => sincronizar("empuje"), ESPERA_EMPUJE);
+}
+
+/* ---- El indicador del encabezado ---------------------------------------- */
+function haceCuanto(t){
+  if (!t) return "sin actualizar";
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 15)   return "al día";
+  if (s < 90)   return "hace un momento";
+  if (s < 3600) return `hace ${Math.round(s/60)} min`;
+  return `hace ${Math.round(s/3600)} h`;
+}
+
+function pintarPulso(){
+  const b = $("#btnSync");
+  if (!b) return;
+  const estado = SYNC.ocupado ? "carga" : SYNC.fallos > 1 ? "mal" : SYNC.vivo ? "vivo" : "tibio";
+  b.dataset.estado = estado;
+  b.title = (SYNC.vivo ? "En vivo · " : "Actualización periódica · ") +
+            haceCuanto(SYNC.cuando) +
+            (SYNC.pendiente ? " · hay novedades sin aplicar" : "") +
+            "\nToca para actualizar ahora";
+  b.classList.toggle("con-novedad", SYNC.pendiente);
+}
+
+/* ---- Arranque y parada --------------------------------------------------- */
+async function arrancarSync(){
+  detenerSync();
+  if (!S.user || S.demo) return;
+
+  SYNC.timer = setInterval(() => { if (!document.hidden) sincronizar("reloj"); }, RELOJ_SYNC);
+  SYNC._reloj = setInterval(pintarPulso, 20000);
+
+  SYNC._vis  = () => { if (!document.hidden) sincronizar("regreso"); };
+  SYNC._foco = () => sincronizar("regreso");
+  SYNC._red  = () => sincronizar("regreso");
+  document.addEventListener("visibilitychange", SYNC._vis);
+  window.addEventListener("focus", SYNC._foco);
+  window.addEventListener("online", SYNC._red);
+
+  /* El empuje es un extra: si el websocket no levanta, el reloj cubre igual */
+  try {
+    /* El websocket lleva su propio token: sin él, el RLS no deja pasar nada */
+    const { data } = await sb.auth.getSession();
+    const tok = data && data.session ? data.session.access_token : null;
+    if (tok && sb.realtime && sb.realtime.setAuth) sb.realtime.setAuth(tok);
+    SYNC.canal = sb.channel("crm-vivo")
+      .on("postgres_changes", { event:"*", schema:"public", table:"clientes" },      empuje)
+      .on("postgres_changes", { event:"*", schema:"public", table:"interacciones" }, empuje)
+      .subscribe(estado => { SYNC.vivo = estado === "SUBSCRIBED"; pintarPulso(); });
+  } catch (e){ SYNC.vivo = false; }
+
+  pintarPulso();
+}
+
+function detenerSync(){
+  clearInterval(SYNC.timer);  clearInterval(SYNC._reloj);
+  clearTimeout(_debEmpuje);
+  if (SYNC._vis)  document.removeEventListener("visibilitychange", SYNC._vis);
+  if (SYNC._foco) window.removeEventListener("focus", SYNC._foco);
+  if (SYNC._red)  window.removeEventListener("online", SYNC._red);
+  if (SYNC.canal){ try { sb.removeChannel(SYNC.canal); } catch(e){} }
+  Object.assign(SYNC, { canal:null, timer:null, vivo:false, firma:null,
+                        cuando:null, ocupado:false, pendiente:false, fallos:0 });
+}
+
+/* Al salir de un formulario se aplican las novedades que quedaron esperando */
+function aplicarPendientes(){
+  if (SYNC.pendiente && !escribiendo()) sincronizar("pendiente");
+}
+
+/* =========================================================================
    Enlaces de interfaz y arranque
    ========================================================================= */
 let qTimer = null;
@@ -4831,6 +4998,11 @@ function bindExtras(){
 }
 
 /* ---- Cabecera ---------------------------------------------------------- */
+document.getElementById("btnSync").onclick = () => {
+  if (!S.user) return;
+  if (S.demo) return toast("En modo demo no hay nada que sincronizar");
+  sincronizar("manual");
+};
 document.getElementById("btnTheme").onclick = () => {
   const d = document.documentElement.getAttribute("data-theme") === "dark";
   document.documentElement.setAttribute("data-theme", d ? "light" : "dark");
