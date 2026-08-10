@@ -586,6 +586,16 @@ const MEDIOS_ASINCRONICOS = ["correo", "whatsapp"];
 const pruebaDeRespuesta = f =>
   esEfectivo(f.Resultado) && MEDIOS_ASINCRONICOS.includes(f.Tipo_Contacto);
 
+/* Una gestión se registra el día que ocurrió o después —nunca antes—. Hacia
+   atrás no hay tope: sirve para poner al día lo que se quedó sin registrar. */
+const fechaFutura = fecha => !!fecha && String(fecha) > hoyISO();
+const diasDeAtraso = fecha => {
+  if (!fecha) return 0;
+  const d = (new Date(hoyISO()) - new Date(String(fecha))) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+};
+const textoDias = n => n === 1 ? "1 día" : n + " días";
+
 /* Un registro presencial solo tiene respaldo si el GPS del equipo entregó las
    coordenadas. Si el ejecutivo tuvo que guardar sin señal, queda marcado. */
 const sinUbicacionVerificada = r =>
@@ -2255,6 +2265,15 @@ function renderFormulario(){
       <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
       <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
     </div>
+    ${fechaFutura(f.Fecha_Contacto) ? `
+    <div class="note warn" style="margin-top:8px">
+      <b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
+      Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.
+    </div>` : diasDeAtraso(f.Fecha_Contacto) > 2 ? `
+    <div class="note" style="margin-top:8px">
+      Estás registrando una gestión de hace ${esc(textoDias(diasDeAtraso(f.Fecha_Contacto)))}. Se puede,
+      pero mientras más cerca del día en que ocurrió, más confiable el seguimiento.
+    </div>` : ""}
     <div class="note" style="margin-top:4px">Se registra automáticamente a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> (${esc(S.user.correo)}).</div>
   </div>`}
 
@@ -2692,6 +2711,8 @@ function comprimir(file, cb){
 async function guardar(c){
   const f = S.form, errores = [];
   if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
+  if (fechaFutura(f.Fecha_Contacto))
+    errores.push(`No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
   if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
   if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
