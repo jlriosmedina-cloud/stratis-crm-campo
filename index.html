@@ -265,6 +265,54 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .tl-h .who{font-weight:660;font-size:13.5px}
 .quote{border-left:3px solid var(--grid);padding:2px 0 2px 10px;margin:7px 0 0;font-size:13px;color:var(--ink-2)}
 .quote b{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;font-weight:700}
+.quote.cli{border-left-color:var(--brand-2)}
+
+/* ---- Bitácora de gestiones: control del equipo ---------------------------- */
+.seg-periodo{margin-bottom:13px}
+.ctrl{padding-bottom:6px}
+.ctrl-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.ctrl-h h3{margin:0}
+.ctrl-h .sub{font-size:12px;color:var(--muted)}
+.ctrl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
+.tbl-ctrl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
+.tbl-ctrl th{text-align:right;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+  font-weight:700;padding:0 9px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl-ctrl th:first-child{text-align:left}
+.tbl-ctrl td{padding:9px;border-bottom:1px solid var(--grid);vertical-align:middle}
+.tbl-ctrl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl-ctrl td.fuerte{font-weight:700}
+.tbl-ctrl td.nom{font-weight:640}
+.tbl-ctrl td.alerta{color:var(--crit-ink);font-weight:650}
+.tbl-ctrl .tenue{color:var(--muted);font-weight:500}
+.tbl-ctrl tbody tr{cursor:pointer}
+.tbl-ctrl tbody tr:hover{background:var(--surface-2)}
+.tbl-ctrl tbody tr.on{background:var(--info-bg)}
+.tbl-ctrl tbody tr.on td.nom{color:var(--brand-2)}
+.tbl-ctrl tbody tr.vacia td{color:var(--muted)}
+.ctrl-pie{display:flex;flex-wrap:wrap;gap:6px;padding:11px 0 6px;border-top:1px solid var(--grid);margin-top:4px}
+/* En celular la tabla se desliza, pero el nombre se queda fijo a la izquierda:
+   si no, se pierde de vista justo la columna que dice de quién es la fila. */
+.tbl-ctrl th:first-child,.tbl-ctrl td.nom{position:sticky;left:0;z-index:1;white-space:nowrap;
+  background:var(--card);box-shadow:1px 0 0 var(--grid)}
+.tbl-ctrl thead th:first-child{background:var(--card)}
+.tbl-ctrl tbody tr:hover td.nom{background:var(--surface-2)}
+.tbl-ctrl tbody tr.on td.nom{background:var(--info-bg)}
+@media (max-width:640px){ .tbl-ctrl th,.tbl-ctrl td{padding:8px 7px} }
+
+/* ---- Encabezado de día ---------------------------------------------------- */
+.dia-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  margin:20px 2px 9px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.dia-t{font-size:13px;font-weight:730;letter-spacing:-.2px;text-transform:capitalize}
+.dia-n{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---- Tarjeta de gestión --------------------------------------------------- */
+.ges-cuerpo{display:flex;gap:11px;align-items:flex-start;margin-top:2px}
+.ges-texto{flex:1;min-width:0}
+.ges-ev{flex:none;width:78px;height:78px;object-fit:cover;border-radius:10px;border:1px solid var(--ring);cursor:zoom-in}
+.ges-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.ges-chips:empty{display:none}
+.ges-acc{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+@media (max-width:520px){ .ges-ev{width:60px;height:60px} }
 .ev-thumb{width:100%;max-height:190px;object-fit:cover;border-radius:10px;border:1px solid var(--ring);margin-top:9px;display:block;cursor:pointer}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .opts{display:grid;gap:7px}
@@ -754,8 +802,20 @@ function deDB(f){
     Gastos_Paths: Array.isArray(f.gastos_paths) ? f.gastos_paths : [],
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
+    /* Cuándo se grabó, que no es lo mismo que cuándo se gestionó: la distancia
+       entre ambas fechas dice si el CRM se usa en campo o se llena después. */
+    Creado_En: f.creado_en || "",
   };
 }
+
+/* Días entre el día que se gestionó y el día que se registró */
+const demoraRegistro = r => {
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const c = String(r.Creado_En || "").slice(0,10);
+  if (!f || !c) return 0;
+  const d = (new Date(c) - new Date(f)) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+};
 
 function aDB(f, c){
   const base = {
@@ -789,6 +849,21 @@ const parseDT = (f,h) => new Date(`${f}T${(h||"00:00")}:00`);
 const ts = r => parseDT(r.Fecha_Contacto, r.Hora_Contacto).getTime();
 const fmtFecha = f => { if(!f) return "—"; const [y,m,d] = String(f).slice(0,10).split("-"); return `${d}/${m}/${y}`; };
 const fmtDT = (f,h) => `${fmtFecha(f)}${h ? " · " + h : ""}`;
+
+/* Encabezado de día para la bitácora de gestiones: «martes 4 de agosto» */
+const DIAS_ES = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+function fechaLarga(iso){
+  const s = String(iso || "").slice(0,10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "—";
+  const [y,m,d] = s.split("-").map(Number);
+  const f = new Date(y, m-1, d);
+  const hoy = hoyISO();
+  if (s === hoy) return "hoy";
+  const ayer = new Date(new Date(hoy).getTime() - 86400000).toISOString().slice(0,10);
+  if (s === ayer) return "ayer";
+  const base = `${DIAS_ES[f.getDay()]} ${d} de ${MESES_ES[m-1]}`;
+  return s.slice(0,4) === hoy.slice(0,4) ? base : `${base} de ${y}`;
+}
 const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 
 
@@ -857,6 +932,7 @@ const S = {
   user:null, tab:"cartera", cid:null, editId:null, form:null, formCli:null, editCli:null,
   q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
   qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
+  fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   mesPanel:"",   /* mes que se está mirando; vacío = el actual */
   limite:40, cargando:false
@@ -2860,13 +2936,158 @@ const EVIDENCIA_DEMO = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
 </svg>`);
 
 /* ---------- Registros: historial con buscador y filtros ------------------ */
-function viewRegistros(){
-  let todos = S.user.rol === "Ejecutivo"
-    ? DB.todos().filter(r => r.Correo_Stratis === S.user.correo)
-    : DB.todos();
-  todos.sort((a,b) => ts(b) - ts(a));
+/* =========================================================================
+   Bitácora de gestiones — la evidencia de lo que hizo el equipo
 
-  const efect   = todos.filter(r => esEfectivo(r.Resultado)).length;
+   El Analista y el Manager ven todo; el ejecutivo, lo suyo. La diferencia con
+   la lista de antes no es que muestre más filas, es que ordena:
+
+     · un tablero de control por ejecutivo, para leer la actividad de un golpe
+     · las gestiones agrupadas por día, que es como se conversa en una reunión
+     · cada tarjeta con su respaldo: evidencia, lo que dijo el cliente y el GPS
+
+   Todo se puede filtrar por período, ejecutivo, medio y resultado, y bajar a
+   Excel tal como se está viendo.
+   ========================================================================= */
+
+const PERIODOS_REG = [
+  ["todo", "Todo"],
+  ["7",    "Últimos 7 días"],
+  ["30",   "Últimos 30 días"],
+  ["mes",  "Este mes"]
+];
+
+/* Recorta por el período elegido. Se mide contra la fecha del contacto, no
+   contra cuándo se grabó: lo que importa es cuándo se trabajó el comercio. */
+function enPeriodo(r, periodo){
+  if (periodo === "todo") return true;
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  if (!f) return false;
+  if (periodo === "mes") return f.slice(0,7) === mesHoy();
+  const dias = Number(periodo);
+  const corte = new Date(new Date(hoyISO()).getTime() - (dias - 1) * 86400000)
+                  .toISOString().slice(0,10);
+  return f >= corte;
+}
+
+/* Una fila por ejecutivo: lo que hay que mirar cuando los resultados no salen */
+function controlEquipo(regs){
+  const porNombre = {};
+  USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+          .forEach(u => porNombre[u.nombre] = []);
+  regs.forEach(r => { (porNombre[r.Ejecutivo] = porNombre[r.Ejecutivo] || []).push(r); });
+
+  return Object.entries(porNombre).map(([nombre, lista]) => {
+    const dias = new Set(lista.map(r => String(r.Fecha_Contacto).slice(0,10)));
+    const ultima = lista.length ? lista.map(r => String(r.Fecha_Contacto).slice(0,10)).sort().pop() : "";
+    const respuestas = lista.filter(r => esEfectivo(r.Resultado)).length;
+    return {
+      nombre,
+      gestiones: lista.length,
+      comercios: new Set(lista.map(r => String(r.Customer_id))).size,
+      dias: dias.size,
+      porDia: dias.size ? Math.round(lista.length / dias.size * 10) / 10 : 0,
+      respuestas,
+      tasa: lista.length ? respuestas / lista.length : 0,
+      sinEvidencia: lista.filter(r => !r.Evidencia_Path && !r.Evidencia).length,
+      sinGps: lista.filter(sinUbicacionVerificada).length,
+      /* En el día: cuántas se registraron el mismo día en que se gestionaron */
+      alDia: lista.filter(r => demoraRegistro(r) === 0).length,
+      ultima,
+      silencio: ultima ? diasDeAtraso(ultima) : null
+    };
+  }).sort((a,b) => b.gestiones - a.gestiones);
+}
+
+function tablaControl(filas){
+  if (!filas.length) return "";
+  const celda = (v, clase) => `<td class="${clase||""}">${v}</td>`;
+  return `
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Actividad por ejecutivo</h3>
+      <span class="sub">Toca una fila para ver solo sus gestiones</span>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl">
+      <thead><tr>
+        <th>Ejecutivo</th><th>Gestiones</th><th>Comercios</th><th>Días con actividad</th>
+        <th>Por día</th><th>Respuestas</th><th>% respuesta</th>
+        <th title="Gestiones registradas el mismo día en que ocurrieron">En el día</th>
+        <th>Última gestión</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(f => {
+        const mudo = f.silencio === null || f.silencio > 6;
+        return `<tr data-fejec="${esc(f.nombre)}" class="${S.fEjecReg === f.nombre ? "on" : ""}${f.gestiones ? "" : " vacia"}">
+          <td class="nom">${esc(f.nombre)}</td>
+          ${celda(f.gestiones, "num fuerte")}
+          ${celda(f.comercios, "num")}
+          ${celda(f.dias, "num")}
+          ${celda(f.gestiones ? f.porDia.toFixed(1) : "—", "num")}
+          ${celda(f.respuestas, "num")}
+          ${celda(f.gestiones ? Math.round(f.tasa * 100) + "%" : "—", "num")}
+          ${celda(f.gestiones ? `${f.alDia} <span class="tenue">de ${f.gestiones}</span>` : "—", "num")}
+          <td class="num ${mudo ? "alerta" : ""}">${
+            f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}`
+                     : "sin gestiones"}</td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    </div>
+    ${filas.some(f => f.sinEvidencia || f.sinGps) ? `<div class="ctrl-pie">
+      ${filas.filter(f => f.sinEvidencia).map(f => `<span class="chip warn">${esc(f.nombre)}: ${f.sinEvidencia} sin evidencia</span>`).join("")}
+      ${filas.filter(f => f.sinGps).map(f => `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
+    </div>` : ""}
+  </div>`;
+}
+
+/* Una tarjeta de gestión, con todo lo que sirve para respaldarla */
+function tarjetaGestion(r){
+  const c   = byId[String(r.Customer_id)];
+  const res = resultadoById(r.Resultado);
+  const hora = r.Hora_Contacto ? String(r.Hora_Contacto).slice(0,5) : "";
+  return `<div class="tl-item">
+    <div class="card ges" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
+          <div class="dt">${hora ? hora + " · " : ""}${esc(nomTipo(r.Tipo_Contacto))} · ${esc(r.Ejecutivo)}${c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</div>
+        </div>
+        <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res?res.label:r.Resultado)}</span>
+      </div>
+
+      <div class="ges-cuerpo">
+        <div class="ges-texto">
+          ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
+          ${r.Comentario_Cliente?`<div class="quote cli"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>`:""}
+          <div class="ges-chips">
+            ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
+            ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
+            ${sinUbicacionVerificada(r)?`<span class="chip crit">Sin ubicación verificada</span>`
+              : (r.Ubicacion?`<span class="chip no">Ubicación verificada</span>`:"")}
+            ${!r.Evidencia && !r.Evidencia_Path?`<span class="chip warn">Sin evidencia</span>`:""}
+            ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
+          </div>
+        </div>
+        ${r.Evidencia?`<img class="ev-thumb ges-ev" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`:""}
+      </div>
+
+      ${puedeEditar(r)?`<div class="ges-acc">
+        <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
+        <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
+        <button class="btn ghost sm" data-cid="${r.Customer_id}">Ver ficha</button></div>`:""}
+    </div></div>`;
+}
+
+function viewRegistros(){
+  const mando = S.user.rol !== "Ejecutivo";
+  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === S.user.correo))
+                  .filter(r => enPeriodo(r, S.fPeriodoReg))
+                  .sort((a,b) => ts(b) - ts(a));
+
+  const efect = todos.filter(r => esEfectivo(r.Resultado)).length;
 
   let lista = todos;
   const q = S.qReg.trim().toLowerCase();
@@ -2879,35 +3100,62 @@ function viewRegistros(){
         || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
         || String(r.Comentario_Cliente||"").toLowerCase().includes(q);
   });
-  if (S.fResultado === "efectivos")      lista = lista.filter(r => esEfectivo(r.Resultado));
-  else if (S.fResultado === "fallidos")  lista = lista.filter(r => !esEfectivo(r.Resultado));
-  else if (S.fResultado === "sin_ubicacion") lista = lista.filter(sinUbicacionVerificada);
-  else if (S.fResultado !== "todos")     lista = lista.filter(r => r.Resultado === S.fResultado);
+  if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
+  else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
+  else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacionVerificada);
+  else if (S.fResultado === "sin_evidencia")  lista = lista.filter(r => !r.Evidencia_Path && !r.Evidencia);
+  else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
 
-  const medios = TIPOS_CONTACTO.filter(t => todos.some(r => r.Tipo_Contacto === t.id));
+  const medios  = TIPOS_CONTACTO.filter(t => todos.some(r => r.Tipo_Contacto === t.id));
   const mostrar = lista.slice(0, S.limiteReg);
+  const dias    = new Set(todos.map(r => String(r.Fecha_Contacto).slice(0,10))).size;
 
   const filtrando = q || S.fResultado !== "todos" || S.fMedio !== "todos" || S.fEjecReg !== "todos";
-  const opciones = (valor, todos, items) =>
-    `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+  const opciones = (valor, todosTxt, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todosTxt}</option>` +
     items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
+  /* Las tarjetas se agrupan por día: así se lee como una jornada, no como
+     una lista infinita. */
+  let bloques = "", diaActual = "";
+  mostrar.forEach(r => {
+    const d = String(r.Fecha_Contacto).slice(0,10);
+    if (d !== diaActual){
+      if (diaActual) bloques += `</div>`;
+      const delDia = lista.filter(x => String(x.Fecha_Contacto).slice(0,10) === d);
+      const resp   = delDia.filter(x => esEfectivo(x.Resultado)).length;
+      bloques += `<div class="dia-h"><span class="dia-t">${esc(fechaLarga(d))}</span>
+        <span class="dia-n">${delDia.length} ${delDia.length===1?"gestión":"gestiones"}${resp?` · ${resp} con respuesta`:""}</span></div>
+        <div class="tl tl-lectura">`;
+      diaActual = d;
+    }
+    bloques += tarjetaGestion(r);
+  });
+  if (diaActual) bloques += `</div>`;
 
   return `
   <div class="page-head">
     <div>
-      <h2>${S.user.rol === "Ejecutivo" ? "Mis registros" : "Registros del equipo"}</h2>
-      <div class="sub">Cada contacto y cada intento, en orden del más reciente al más antiguo</div>
+      <h2>${mando ? "Gestiones del equipo" : "Mis gestiones"}</h2>
+      <div class="sub">Cada contacto y cada intento, con su respaldo, del más reciente al más antiguo</div>
     </div>
+    ${lista.length ? `<button class="btn ghost sm" id="bajarReg">Descargar lo que estoy viendo</button>` : ""}
+  </div>
+
+  <div class="seg seg-periodo" role="group" aria-label="Período">
+    ${PERIODOS_REG.map(([k,l]) => `<button class="${S.fPeriodoReg===k?"on":""}" data-fper="${k}">${l}</button>`).join("")}
   </div>
 
   <div class="stat-row">
-    <div class="stat"><div class="lbl">Registros</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
+    <div class="stat"><div class="lbl">Gestiones</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
     <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
-    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${todos.filter(r=>r.Cumple_Visita==="SI").length}</div><div class="sub">presenciales o virtuales logradas</div></div>
+    <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div><div class="sub">${dias?`${(todos.length/dias).toFixed(1)} gestiones por día`:"sin movimiento"}</div></div>
     <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacionVerificada).length}</div><div class="sub">presenciales sin respaldo de GPS</div></div>
   </div>
+
+  ${mando ? tablaControl(controlEquipo(todos)) : ""}
 
   <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
@@ -2918,6 +3166,8 @@ function viewRegistros(){
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacionVerificada)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
+      ${todos.some(r => !r.Evidencia_Path && !r.Evidencia)
+        ? `<button class="${S.fResultado==="sin_evidencia"?"on":""}" data-fr="sin_evidencia">Sin evidencia</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -2926,51 +3176,61 @@ function viewRegistros(){
           RESULTADOS.filter(x => todos.some(r => r.Resultado === x.id)).map(x => [x.id, `${x.label} · ${todos.filter(r => r.Resultado === x.id).length}`]))}</select></label>
       <label class="fsel"><span>Medio</span>
         <select data-fm-sel>${opciones(S.fMedio, "Todos los medios", medios.map(t => [t.id, `${t.label} · ${todos.filter(r => r.Tipo_Contacto === t.id).length}`]))}</select></label>
-      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo</span>
+      ${mando ? `<label class="fsel"><span>Ejecutivo</span>
         <select data-fe-sel>${opciones(S.fEjecReg, `Todo el equipo · ${todos.length}`,
           USUARIOS.filter(u=>u.rol==="Ejecutivo")
             .map(u => [u.nombre, `${u.nombre} · ${todos.filter(r => r.Ejecutivo === u.nombre).length}`]))}</select></label>` : ""}
     </div>
 
     ${filtrando ? `<div class="filtros-pie">
-      <span>${lista.length} de ${todos.length} registros</span>
+      <span>${lista.length} de ${todos.length} gestiones</span>
       <button class="btn ghost sm" id="limpiarReg">Quitar filtros</button>
     </div>` : ""}
   </div>
 
-  <div class="sec-title">${lista.length} registro${lista.length===1?"":"s"}${S.user.rol==="Ejecutivo"?" — míos":" — todo el equipo"}</div>
-  ${mostrar.length ? `<div class="tl tl-lectura">${mostrar.map(r => {
-      const c = byId[String(r.Customer_id)];
-      const res = resultadoById(r.Resultado);
-      return `<div class="tl-item">
-        <div class="card" style="margin-bottom:0">
-          <div class="tl-h">
-            <div>
-              <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
-              <div class="dt">${fmtDT(r.Fecha_Contacto,r.Hora_Contacto)} · ${esc((tipoById(r.Tipo_Contacto)||{}).label||"")} · ${esc(r.Ejecutivo)}</div>
-            </div>
-            <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res?res.label:r.Resultado)}</span>
-          </div>
-          ${sinUbicacionVerificada(r)?`<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>`:""}
-          ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
-          ${puedeEditar(r)?`<div style="display:flex;gap:7px;margin-top:11px">
-            <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
-            <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
-            <button class="btn ghost sm" data-cid="${r.Customer_id}">Ver ficha</button></div>`:""}
-        </div></div>`;
-    }).join("")}</div>`
+  ${mostrar.length ? bloques
     : todos.length
-      ? `<div class="empty"><div class="big">⌕</div>No hay registros con estos filtros.</div>`
-      : `<div class="empty"><div class="big">≡</div>Todavía no has registrado contactos.<br><br>
-         <button class="btn" data-go="cartera">Ir a mi cartera</button></div>`}
+      ? `<div class="empty"><div class="big">⌕</div>No hay gestiones con estos filtros.</div>`
+      : `<div class="empty"><div class="big">≡</div>${
+          S.fPeriodoReg === "todo"
+            ? (mando ? "Todavía no hay gestiones registradas." : "Todavía no has registrado contactos.")
+            : "No hay gestiones en este período."}<br><br>
+         <button class="btn" data-go="cartera">Ir a la cartera</button></div>`}
   ${lista.length > mostrar.length ? `<button class="btn ghost block" id="masReg">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}
 
   <div class="card" style="margin-top:14px">
-    <div class="note"><b>Editar no suma un intento.</b> El contador solo sube cuando registras un contacto
-    nuevo desde la ficha del comercio. Al editar solo puedes corregir comentarios y calificación:
+    <div class="note"><b>Editar no suma un intento.</b> El contador solo sube cuando se registra un contacto
+    nuevo desde la ficha del comercio. Al editar solo se corrigen comentarios y calificación:
     el medio, el resultado, la fecha y la ubicación quedan fijos.</div>
   </div>`;
 }
+
+/* Lo que está en pantalla, a Excel: la misma selección, sin volver a filtrar */
+function gestionesFiltradas(){
+  const mando = S.user.rol !== "Ejecutivo";
+  let l = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === S.user.correo))
+            .filter(r => enPeriodo(r, S.fPeriodoReg))
+            .sort((a,b) => ts(b) - ts(a));
+  const q = S.qReg.trim().toLowerCase();
+  if (q) l = l.filter(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return String(r.Customer_id).toLowerCase().includes(q)
+        || String(c.nombre_comercio||"").toLowerCase().includes(q)
+        || String(c.distrito||"").toLowerCase().includes(q)
+        || String(r.Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q);
+  });
+  if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
+  else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
+  else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacionVerificada);
+  else if (S.fResultado === "sin_evidencia")  l = l.filter(r => !r.Evidencia_Path && !r.Evidencia);
+  else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
+  if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
+  if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
+  return l;
+}
+
 
 
 /* ---------- Alcance sobre la cartera asignada ----------------------------
@@ -3363,6 +3623,36 @@ function filasVisitas(){
     r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "",
     Number(r.Gasto_Total) > 0 ? Number(r.Gasto_Total) : "", (r.Gastos_Paths||[]).join(" | "), r.Calificacion,
     r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
+}
+
+/* Lo que se está viendo en «Gestiones del equipo», tal cual, a Excel. Sirve
+   para llevar la evidencia a una reunión sin bajar el archivo completo. */
+function descargarGestiones(){
+  const regs = typeof gestionesFiltradas === "function" ? gestionesFiltradas() : DB.todos();
+  if (!regs.length) return toast("No hay gestiones que descargar con estos filtros");
+  const cols = ["Fecha","Hora","Ejecutivo","Customer_id","Nombre_Comercio","Distrito",
+                "Medio","Resultado","El_Cliente_Respondio","Cumple_Visita",
+                "Ubicacion_Verificada","Tiene_Evidencia","Calificacion",
+                "Comentario_Ejecutivo","Lo_Que_Dijo_El_Cliente","Registrada_El","ID_Registro"];
+  const filas = regs.map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return [
+      r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Customer_id,
+      titulo(c.nombre_comercio || r.Nombre_Comercio || ""), titulo(c.distrito || r.Distrito || ""),
+      nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
+      esEfectivo(r.Resultado) ? "SI" : "NO",
+      r.Cumple_Visita === "SI" ? "SI" : "NO",
+      marcaUbicacion(r),
+      (r.Evidencia_Path || r.Evidencia) ? "SI" : "NO",
+      r.Calificacion || "",
+      r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
+      String(r.Creado_En || "").slice(0,10), r._id
+    ];
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hoja(cols, filas), "Gestiones");
+  XLSX.writeFile(wb, `Gestiones_${hoyISO().replace(/-/g,"")}.xlsx`);
+  toast(`${filas.length} gestiones descargadas`);
 }
 
 const hoja = (cols, filas) => {
@@ -4967,6 +5257,13 @@ function bindExtras(){
   if ($("[data-fe-sel]")) $("[data-fe-sel]").onchange = e => { S.fEjecReg = e.target.value; S.limiteReg = 40; render(); };
   if ($("#limpiarReg")) $("#limpiarReg").onclick = () => {
     S.qReg = ""; S.fResultado = S.fMedio = S.fEjecReg = "todos"; S.limiteReg = 40; render(); };
+  document.querySelectorAll("[data-fper]").forEach(b => b.onclick = () => {
+    S.fPeriodoReg = b.dataset.fper; S.limiteReg = 40; render(); });
+  /* La fila del tablero funciona como filtro: se toca y vuelve a soltar */
+  document.querySelectorAll("[data-fejec]").forEach(tr => tr.onclick = () => {
+    S.fEjecReg = S.fEjecReg === tr.dataset.fejec ? "todos" : tr.dataset.fejec;
+    S.limiteReg = 40; render(); });
+  if ($("#bajarReg")) $("#bajarReg").onclick = () => descargarGestiones();
 
   document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
   if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
