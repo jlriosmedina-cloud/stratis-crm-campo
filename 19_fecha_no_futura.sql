@@ -21,6 +21,13 @@ returns trigger language plpgsql as $fn$
 declare
   v_hoy date := (now() at time zone 'America/Lima')::date;
 begin
+  -- En un UPDATE solo se revisa si la fecha cambió. Las dos gestiones que ya
+  -- entraron con fecha futura antes de esta regla quedarían inmodificables si
+  -- no, y no se podría ni corregirles el comentario ni la calificación.
+  if tg_op = 'UPDATE' and new.fecha_contacto = old.fecha_contacto then
+    return new;
+  end if;
+
   if new.fecha_contacto > v_hoy then
     raise exception 'La fecha del contacto (%) es posterior a hoy (%). Una gestión se registra el día que ocurrió o después, nunca antes. Si estás poniendo al día algo de días pasados, elige esa fecha; si te equivocaste de mes, corrígela.',
       to_char(new.fecha_contacto, 'DD/MM/YYYY'),
@@ -52,6 +59,10 @@ returns trigger language plpgsql as $fn$
 declare
   v_hoy date := (now() at time zone 'America/Lima')::date;
 begin
+  if tg_op = 'UPDATE' and new.cerrado_en is not distinct from old.cerrado_en then
+    return new;
+  end if;
+
   if new.cerrado_en is not null
      and (new.cerrado_en at time zone 'America/Lima')::date > v_hoy then
     raise exception 'La fecha de cierre (%) es posterior a hoy (%). Un comercio no se puede cerrar en una fecha que aún no llega.',
