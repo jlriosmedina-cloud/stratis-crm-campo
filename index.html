@@ -2418,6 +2418,40 @@ const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo");
 /* La ubicación no se reescribe nunca. Lo único que se puede hacer con una
    equivocada es anularla, y solo mientras la ventana de corrección esté
    abierta —salvo supervisión, que no tiene ventana—. */
+/* Durante la ventana, el ejecutivo puede escribir la ubicación de sus propias
+   gestiones. Fuera de ella, nadie: vuelve a ser solo lectura. */
+function puedeCorregirUbicacion(f){
+  if (!f || !S.editId || !edicionLibre()) return false;
+  return mandoTotal() || !f.Correo_Stratis || f.Correo_Stratis === S.user.correo;
+}
+
+async function guardarUbicacion(id){
+  const txt = ($("#ubiTxt") && $("#ubiTxt").value || "").trim();
+  const msg = $("#ubiMsg");
+  if (!txt){ if (msg) msg.innerHTML = `<div class="err">Escribe las coordenadas o toca «Usar donde estoy ahora».</div>`; return; }
+  const { error } = await sb.rpc("fijar_ubicacion", { p_id: id, p_ubicacion: txt, p_motivo: null });
+  if (error){ if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  await refrescar();
+  S.form = Object.assign({}, DB.buscar(id));
+  render();
+  toast("Ubicación corregida");
+}
+
+function ubicacionDeAqui(){
+  const msg = $("#ubiMsg");
+  if (!navigator.geolocation){ if (msg) msg.innerHTML = `<div class="err">Este equipo no entrega ubicación.</div>`; return; }
+  if (msg) msg.innerHTML = `<div class="note">Buscando tu ubicación…</div>`;
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const v = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
+      if ($("#ubiTxt")) $("#ubiTxt").value = v;
+      S.form._ubiNueva = v;
+      if (msg) msg.innerHTML = `<div class="note">Tomada de donde estás <b>ahora</b>. Si la visita fue en otro sitio, esta no es la del local.</div>`;
+    },
+    err => { if (msg) msg.innerHTML = `<div class="err">No se pudo obtener la ubicación: ${esc(err.message)}</div>`; },
+    { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
+}
+
 function puedeAnularUbicacion(f){
   if (!f || !S.editId) return false;
   if (!f.Ubicacion && f.Ubicacion_Verificada !== true) return false;
@@ -2601,15 +2635,27 @@ function renderFormulario(){
         </div>`).join("")}
     </div>
     ${avisoCorreccion(f)}
-    ${puedeAnularUbicacion(f) ? `
-    <div class="note warn" style="margin-top:12px">
-      <b>¿La ubicación de este registro está equivocada?</b>
-      No se puede reescribir —se midió en el momento y en el sitio; ponerle otra hoy sería
-      grabar dónde estás ahora, no dónde estuviste—. Lo que sí puedes hacer es
-      <b>anularla</b>: la gestión queda como «sin ubicación verificada», que es la verdad.
-      Si de verdad hiciste la visita, elimina el registro y créalo de nuevo desde el local.
+    ${puedeCorregirUbicacion(f) ? `
+    <div class="note warn" style="margin-top:12px" id="cajaUbi">
+      <b>Ubicación del registro</b>
+      <div style="margin-top:4px">Actual: <span class="mono">${esc(f.Ubicacion || "sin ubicación")}</span>${
+        f.Ubicacion_Verificada === true
+          ? ` · <span class="chip ok">capturada por GPS</span>`
+          : (f.Ubicacion ? ` · <span class="chip no">escrita a mano</span>` : "")}</div>
       <div style="margin-top:9px">
-        <button class="btn ghost sm" id="anularUbi" style="color:var(--crit-ink)">Anular la ubicación</button>
+        <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:5px">Coordenadas correctas <span class="hint" style="font-weight:400">— latitud, longitud</span></label>
+        <input type="text" id="ubiTxt" class="mono" placeholder="-12.0464, -77.0428" value="${esc(f._ubiNueva || "")}">
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+        <button class="btn ghost sm" id="ubiAqui">📍 Usar donde estoy ahora</button>
+        <button class="btn sm" id="ubiGuardar">Guardar la ubicación</button>
+        <button class="btn ghost sm" id="anularUbi" style="color:var(--crit-ink)">Anular</button>
+      </div>
+      <div id="ubiMsg" style="margin-top:8px"></div>
+      <div style="margin-top:9px;font-size:12px">
+        Una coordenada escrita después <b>no cuenta como verificada por GPS</b>: esa marca significa
+        que el equipo la midió en el local y en el momento, y es la que respalda la visita ante BBVA.
+        La corrección sirve para ubicar bien el comercio en el mapa, y queda en la bitácora con tu nombre.
       </div>
     </div>` : ""}
     <div id="derivado" style="margin-top:11px"></div>
@@ -5452,6 +5498,9 @@ function bindExtras(){
     S.limiteReg = 40; render(); });
   if ($("#bajarReg")) $("#bajarReg").onclick = () => descargarGestiones();
   if ($("#anularUbi")) $("#anularUbi").onclick = () => anularUbicacion(S.editId);
+  if ($("#ubiAqui")) $("#ubiAqui").onclick = () => ubicacionDeAqui();
+  if ($("#ubiGuardar")) $("#ubiGuardar").onclick = () => guardarUbicacion(S.editId);
+  if ($("#ubiTxt")) $("#ubiTxt").oninput = e => { if (S.form) S.form._ubiNueva = e.target.value; };
   if ($("#verFaltanBBVA")) $("#verFaltanBBVA").onclick = () => {
     S.fContacto = "sin_bbva"; S.limite = 40; render(); };
 
