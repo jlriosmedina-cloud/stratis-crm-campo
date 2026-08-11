@@ -18,7 +18,7 @@
 -- ===========================================================================
 
 create or replace function public.corregir_customer_id(p_actual text, p_nuevo text)
-returns jsonb
+returns text          -- se conserva el tipo original: la aplicación no lo lee
 language plpgsql
 security definer
 set search_path = public
@@ -97,8 +97,7 @@ begin
             jsonb_build_object('antes', v_actual, 'despues', v_nuevo),
             '_arrastro', v_n));
 
-  return jsonb_build_object('ok', true, 'antes', v_actual, 'despues', v_nuevo,
-                            'gestiones', v_n, 'comercio', v_nombre);
+  return format('%s: %s -> %s, con %s gestion(es)', v_nombre, v_actual, v_nuevo, v_n);
 end $fn$;
 
 revoke all on function public.corregir_customer_id(text, text) from public, anon;
