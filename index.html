@@ -658,6 +658,16 @@ const diasDeAtraso = fecha => {
 };
 const textoDias = n => n === 1 ? "1 día" : n + " días";
 
+/* Ventana temporal de corrección. La fecha vive en la base (config), así que
+   se cierra sola: acá solo se lee para saber qué mostrar. */
+let EDICION_HASTA = null;
+const edicionLibre = () => !!EDICION_HASTA && new Date() < new Date(EDICION_HASTA);
+function textoVentana(){
+  if (!edicionLibre()) return "";
+  const d = new Date(EDICION_HASTA);
+  return `Hoy hasta las ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+
 /* Un registro presencial solo tiene respaldo si el GPS del equipo entregó las
    coordenadas. Si el ejecutivo tuvo que guardar sin señal, queda marcado. */
 const sinUbicacionVerificada = r =>
@@ -1248,6 +1258,7 @@ async function cargarDatos(){
   (cfg.data || []).forEach(({clave, valor}) => {
     if (clave === "cumple_visita_historico") CONFIG.cumpleVisitaHistorico = valor === "true";
     if (clave === "dominio_permitido")     CONFIG.dominio = valor;
+    if (clave === "edicion_libre_hasta")   EDICION_HASTA = valor;
   });
 
   DB.cargar(inter.data || []);
@@ -1360,7 +1371,6 @@ const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
-  { id:"guia",     ic:"?", label:"Guía" },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
 
@@ -1411,7 +1421,7 @@ function render(){
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
-  else if (S.tab === "guia")              v.innerHTML = viewGuia();
+  else if (S.tab === "guia")              v.innerHTML = viewGuia();   // sin pestaña: el equipo no la usaba
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
 }
@@ -1444,6 +1454,31 @@ function estadoCliente(c){
   return { chip:"no", label:"Sin contactar" };
 }
 
+/* Mientras la ventana esté abierta el equipo tiene que verlo apenas entra:
+   es un permiso con hora de cierre, no un cambio de reglas. */
+function avisoVentana(){
+  if (!edicionLibre()) return "";
+  return `<div class="card" style="border-left:3px solid var(--warn)">
+    <h3>Ventana de corrección abierta · ${esc(textoVentana().toLowerCase())}</h3>
+    <div class="note" style="margin-bottom:0">
+      Hoy puedes arreglar <b>tus</b> registros sin pedir permiso: el medio y el resultado de cualquier
+      gestión tuya, el Customer ID de los comercios que registraste, y anular una ubicación equivocada.
+      <b>A partir de mañana vuelve a estar cerrado.</b>
+      ${(() => {
+        const faltan = cartera().filter(c => !esClienteNuevo(c) && !c.contacto_bbva).length;
+        return faltan ? `<div style="margin-top:8px"><b>Te faltan ${faltan} comercio${faltan===1?"":"s"}</b>
+          por indicar cómo se contactó al ejecutivo de BBVA. Se completa entrando al comercio y
+          tocando <b>Editar comercio</b>.
+          <button class="btn ghost sm" id="verFaltanBBVA" style="margin-top:7px">Ver los que faltan</button>
+          </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con el contacto de BBVA.</div>`;
+      })()}
+      <div style="margin-top:6px">La ubicación no se puede reescribir —solo anular—: se mide en el sitio
+      y en el momento, y ponerle otra hoy sería grabar dónde estás ahora. Si la visita sí ocurrió,
+      elimina el registro y créalo de nuevo desde el local.</div>
+    </div>
+  </div>`;
+}
+
 function viewCartera(){
   let lista = cartera();
   const q = S.q.trim().toLowerCase();
@@ -1465,6 +1500,7 @@ function viewCartera(){
     if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
+    if (S.fContacto === "sin_bbva") return !esClienteNuevo(c) && !c.contacto_bbva;
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -1505,6 +1541,8 @@ function viewCartera(){
     </div>
     ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
   </div>
+
+  ${avisoVentana()}
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
@@ -1610,7 +1648,8 @@ function viewFicha(c){
     ${(mio || (!esDeCampo() && !esClienteNuevo(c))) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       ${mio ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
       <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
-      ${(!esDeCampo() && !esClienteNuevo(c)) ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir Customer ID</button>` : ""}
+      ${((!esDeCampo() || (edicionLibre() && esMiCliente(c))) && !esClienteNuevo(c))
+        ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir Customer ID</button>` : ""}
     </div>` : ""}
   </div>
 
@@ -2376,11 +2415,46 @@ const DIAS_CORRECCION = 1;
    arreglar un dedazo. Las coordenadas siguen fuera del alcance de todos. */
 const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo");
 
+/* La ubicación no se reescribe nunca. Lo único que se puede hacer con una
+   equivocada es anularla, y solo mientras la ventana de corrección esté
+   abierta —salvo supervisión, que no tiene ventana—. */
+function puedeAnularUbicacion(f){
+  if (!f || !S.editId) return false;
+  if (!f.Ubicacion && f.Ubicacion_Verificada !== true) return false;
+  if (mandoTotal()) return true;
+  return edicionLibre() && (!f.Correo_Stratis || f.Correo_Stratis === S.user.correo);
+}
+
+async function anularUbicacion(id){
+  const r = DB.buscar(id); if (!r) return;
+  const ok = await new Promise(res => {
+    modal(`
+      <h3>Anular la ubicación</h3>
+      <p style="margin-top:0">La gestión del <b>${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}</b> quedará
+      marcada como <b>sin ubicación verificada</b>. No se le pone otra ubicación: se borra la que tenía.</p>
+      <div class="note">Queda en la bitácora con tu nombre. Si la visita sí ocurrió, lo correcto es
+      eliminar el registro y volver a crearlo desde el local.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn danger" id="anOk" style="flex:1">Sí, anularla</button>
+        <button class="btn ghost" id="anNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#anOk").onclick = () => { cerrarModal(); res(true); };
+    $("#anNo").onclick = () => { cerrarModal(); res(false); };
+  });
+  if (!ok) return;
+  const { error } = await sb.rpc("anular_ubicacion", { p_id: id, p_motivo: null });
+  if (error) return toast("No se pudo anular: " + error.message);
+  await refrescar();
+  S.form = Object.assign({}, DB.buscar(id));
+  render();
+  toast("Ubicación anulada");
+}
+
 function corregible(f){
   if (!f || !S.user) return false;
   if (S.user.rol !== "Ejecutivo") return true;
   if (f.Correo_Stratis && f.Correo_Stratis !== S.user.correo) return false;
-  return diasDesdeRegistro(f) <= DIAS_CORRECCION;
+  return edicionLibre() || diasDesdeRegistro(f) <= DIAS_CORRECCION;
 }
 
 function diasDesdeRegistro(f){
@@ -2396,6 +2470,8 @@ function plazoCorreccion(f){
   const n = diasDesdeRegistro(f);
   if (S.user && S.user.rol !== "Ejecutivo")
     return `Se registró el ${fmtFecha(c)}; como supervisor no tienes plazo.`;
+  if (edicionLibre())
+    return `Ventana de corrección abierta: puedes arreglar cualquier gestión tuya ${textoVentana().toLowerCase()}.`;
   if (n === 0) return "Se registró hoy: tienes hasta la medianoche de mañana.";
   if (n === 1) return "Se registró ayer: tienes hasta esta medianoche.";
   return `Se registró el ${fmtFecha(c)}.`;
@@ -2408,12 +2484,16 @@ function plazoCorreccion(f){
    respaldo. El ejecutivo no puede hacerlo; el supervisor, que audita, sí. */
 function volverPresencialProhibido(f){
   if (!S.user || S.user.rol !== "Ejecutivo") return false;
+  if (edicionLibre()) return false;      // hoy sí puede, pero sin ganar un GPS
   if (!RULES.requiereUbicacion(f.Tipo_Contacto)) return false;
   return f.Ubicacion_Verificada !== true;
 }
 
 function avisoCorreccion(f){
   const avisos = [];
+  if (edicionLibre() && S.user && S.user.rol === "Ejecutivo"
+      && RULES.requiereUbicacion(f.Tipo_Contacto) && f.Ubicacion_Verificada !== true)
+    avisos.push(`Al pasarla a ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}, la gestión queda marcada como <b>sin ubicación verificada</b>: no se le puede poner un GPS que nunca tuvo. Si de verdad hiciste la visita, elimina el registro y créalo de nuevo desde el local.`);
   if (volverPresencialProhibido(f))
     avisos.push(`No puedes convertir esta gestión en ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}: una gestión presencial se respalda con la ubicación capturada en el momento, y la ubicación no se modifica nunca. Si de verdad fue presencial, elimina el registro y créalo de nuevo desde el local.`);
   if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
@@ -2521,6 +2601,17 @@ function renderFormulario(){
         </div>`).join("")}
     </div>
     ${avisoCorreccion(f)}
+    ${puedeAnularUbicacion(f) ? `
+    <div class="note warn" style="margin-top:12px">
+      <b>¿La ubicación de este registro está equivocada?</b>
+      No se puede reescribir —se midió en el momento y en el sitio; ponerle otra hoy sería
+      grabar dónde estás ahora, no dónde estuviste—. Lo que sí puedes hacer es
+      <b>anularla</b>: la gestión queda como «sin ubicación verificada», que es la verdad.
+      Si de verdad hiciste la visita, elimina el registro y créalo de nuevo desde el local.
+      <div style="margin-top:9px">
+        <button class="btn ghost sm" id="anularUbi" style="color:var(--crit-ink)">Anular la ubicación</button>
+      </div>
+    </div>` : ""}
     <div id="derivado" style="margin-top:11px"></div>
   </div>
   ` : `
@@ -5360,6 +5451,9 @@ function bindExtras(){
     S.fEjecReg = S.fEjecReg === tr.dataset.fejec ? "todos" : tr.dataset.fejec;
     S.limiteReg = 40; render(); });
   if ($("#bajarReg")) $("#bajarReg").onclick = () => descargarGestiones();
+  if ($("#anularUbi")) $("#anularUbi").onclick = () => anularUbicacion(S.editId);
+  if ($("#verFaltanBBVA")) $("#verFaltanBBVA").onclick = () => {
+    S.fContacto = "sin_bbva"; S.limite = 40; render(); };
 
   document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
   if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
