@@ -1490,9 +1490,8 @@ function avisoVentana(){
           <button class="btn ghost sm" id="verFaltanBBVA" style="margin-top:7px">Ver los que faltan</button>
           </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con el contacto de BBVA.</div>`;
       })()}
-      <div style="margin-top:6px">La ubicación que escribas hoy queda como <b>escrita a mano</b>: sirve para
-      ubicar el comercio en el mapa, pero no reemplaza al GPS capturado en el local, que es el que
-      respalda la visita. Para que cuente como visita con respaldo, hay que capturarla estando ahí.</div>
+      <div style="margin-top:6px">Para que una visita cuente con respaldo de GPS hay que capturar la
+      ubicación estando en el local, en el momento. Lo que se escriba hoy ubica el comercio en el mapa.</div>
     </div>
   </div>`;
 }
@@ -1762,7 +1761,7 @@ function itemTimeline(r){
       ${r.Ubicacion_Verificada
         ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
         : ubicacionDeclarada(r)
-          ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip warn" style="font-size:10px">escrita a mano</span></div>`
+          ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)}</div>`
         : sinUbicacion(r)
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
@@ -2660,9 +2659,7 @@ function renderFormulario(){
     <div class="note warn" style="margin-top:12px" id="cajaUbi">
       <b>Ubicación del registro</b>
       <div style="margin-top:4px">Actual: <span class="mono">${esc(f.Ubicacion || "sin ubicación")}</span>${
-        f.Ubicacion_Verificada === true
-          ? ` · <span class="chip ok">capturada por GPS</span>`
-          : (f.Ubicacion ? ` · <span class="chip no">escrita a mano</span>` : "")}</div>
+        f.Ubicacion_Verificada === true ? ` · <span class="chip ok">capturada por GPS</span>` : ""}</div>
       <div style="margin-top:9px">
         <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:5px">Coordenadas correctas <span class="hint" style="font-weight:400">— latitud, longitud</span></label>
         <input type="text" id="ubiTxt" class="mono" placeholder="-12.0464, -77.0428" value="${esc(f._ubiNueva || "")}">
@@ -2674,9 +2671,8 @@ function renderFormulario(){
       </div>
       <div id="ubiMsg" style="margin-top:8px"></div>
       <div style="margin-top:9px;font-size:12px">
-        Una coordenada escrita después <b>no cuenta como verificada por GPS</b>: esa marca significa
-        que el equipo la midió en el local y en el momento, y es la que respalda la visita ante BBVA.
-        La corrección sirve para ubicar bien el comercio en el mapa, y queda en la bitácora con tu nombre.
+        La corrección queda en la bitácora con tu nombre. El sello de <b>GPS verificado</b> solo lo da
+        la captura hecha en el local; escribirla acá ubica el comercio en el mapa.
       </div>
     </div>` : ""}
     <div id="derivado" style="margin-top:11px"></div>
@@ -3305,10 +3301,9 @@ function tablaControl(filas){
       </tbody>
     </table>
     </div>
-    ${filas.some(f => f.sinEvidencia || f.sinGps || f.declaradas) ? `<div class="ctrl-pie">
+    ${filas.some(f => f.sinEvidencia || f.sinGps) ? `<div class="ctrl-pie">
       ${filas.filter(f => f.sinEvidencia).map(f => `<span class="chip warn">${esc(f.nombre)}: ${f.sinEvidencia} sin evidencia</span>`).join("")}
       ${filas.filter(f => f.sinGps).map(f => `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
-      ${filas.filter(f => f.declaradas).map(f => `<span class="chip no">${esc(f.nombre)}: ${f.declaradas} con ubicación escrita a mano</span>`).join("")}
     </div>` : ""}
   </div>`;
 }
@@ -3336,8 +3331,7 @@ function tarjetaGestion(r){
             ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
             ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
-              : ubicacionDeclarada(r)?`<span class="chip warn">Ubicación escrita a mano</span>`
-              : (r.Ubicacion?`<span class="chip no">Ubicación verificada</span>`:"")}
+              : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
             ${!r.Evidencia && !r.Evidencia_Path?`<span class="chip warn">Sin evidencia</span>`:""}
             ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
           </div>
@@ -3423,10 +3417,7 @@ function viewRegistros(){
     <div class="stat"><div class="lbl">Gestiones</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
     <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
     <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div><div class="sub">${dias?`${(todos.length/dias).toFixed(1)} gestiones por día`:"sin movimiento"}</div></div>
-    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">${
-      (() => { const d = todos.filter(ubicacionDeclarada).length;
-               return d ? `presenciales sin ninguna coordenada · ${d} más con ubicación escrita a mano`
-                        : "presenciales sin ninguna coordenada"; })()}</div></div>
+    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">presenciales sin ninguna coordenada</div></div>
   </div>
 
   ${mando ? tablaControl(controlEquipo(todos)) : ""}
