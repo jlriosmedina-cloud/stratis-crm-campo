@@ -267,6 +267,19 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .quote b{display:block;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;font-weight:700}
 .quote.cli{border-left-color:var(--brand-2)}
 
+/* ---- El pop de confirmación de una corrección ----------------------------- */
+.corr-lista{display:flex;flex-direction:column;gap:7px;margin-top:11px}
+.corr-fila{display:grid;grid-template-columns:82px 1fr 16px 1fr;align-items:center;gap:7px;
+  padding:8px 10px;background:var(--surface-2);border:1px solid var(--grid);border-radius:9px;font-size:13px}
+.corr-campo{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+.corr-antes{color:var(--muted);text-decoration:line-through}
+.corr-flecha{color:var(--brand-2);text-align:center;font-weight:700}
+.corr-despues{font-weight:660}
+@media (max-width:460px){
+  .corr-fila{grid-template-columns:1fr 16px 1fr;row-gap:2px}
+  .corr-campo{grid-column:1/-1}
+}
+
 /* ---- Bitácora de gestiones: control del equipo ---------------------------- */
 .seg-periodo{margin-bottom:13px}
 .ctrl{padding-bottom:6px}
@@ -2306,6 +2319,91 @@ function nuevoForm(){
   };
 }
 
+/* ---- Corregir el medio y el resultado ----------------------------------
+   Un dedazo al elegir «llamada» en vez de WhatsApp se arregla acá mismo, sin
+   borrar el registro. La ventana es corta a propósito: hasta la medianoche del
+   día siguiente al que se registró. No son 48 horas corridas — es «hoy y
+   mañana», que es como lo piensa quien está en la calle.
+   El Analista y el Manager no tienen ventana: son los que auditan. */
+const DIAS_CORRECCION = 1;
+
+/* El Analista y el Manager corrigen cualquier gestión, sin plazo: son los que
+   responden por el dato frente al banco y no deberían depender de nadie para
+   arreglar un dedazo. Las coordenadas siguen fuera del alcance de todos. */
+const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo");
+
+function corregible(f){
+  if (!f || !S.user) return false;
+  if (S.user.rol !== "Ejecutivo") return true;
+  if (f.Correo_Stratis && f.Correo_Stratis !== S.user.correo) return false;
+  return diasDesdeRegistro(f) <= DIAS_CORRECCION;
+}
+
+function diasDesdeRegistro(f){
+  const c = String(f.Creado_En || "").slice(0,10);
+  if (!c) return 0;                       // sin dato, no se castiga al ejecutivo
+  const d = (new Date(hoyISO()) - new Date(c)) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+}
+
+function plazoCorreccion(f){
+  const c = String(f.Creado_En || "").slice(0,10);
+  if (!c) return "";
+  const n = diasDesdeRegistro(f);
+  if (S.user && S.user.rol !== "Ejecutivo")
+    return `Se registró el ${fmtFecha(c)}; como supervisor no tienes plazo.`;
+  if (n === 0) return "Se registró hoy: tienes hasta la medianoche de mañana.";
+  if (n === 1) return "Se registró ayer: tienes hasta esta medianoche.";
+  return `Se registró el ${fmtFecha(c)}.`;
+}
+
+/* Avisos que dependen de lo que acaba de elegir, sin bloquear todavía */
+/* Una gestión presencial se sostiene en la ubicación capturada en el momento.
+   Como la ubicación no se puede tocar —ni ahora ni nunca—, convertir una
+   llamada en una visita después del hecho sería fabricar una visita sin
+   respaldo. El ejecutivo no puede hacerlo; el supervisor, que audita, sí. */
+function volverPresencialProhibido(f){
+  if (!S.user || S.user.rol !== "Ejecutivo") return false;
+  if (!RULES.requiereUbicacion(f.Tipo_Contacto)) return false;
+  return f.Ubicacion_Verificada !== true;
+}
+
+function avisoCorreccion(f){
+  const avisos = [];
+  if (volverPresencialProhibido(f))
+    avisos.push(`No puedes convertir esta gestión en ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}: una gestión presencial se respalda con la ubicación capturada en el momento, y la ubicación no se modifica nunca. Si de verdad fue presencial, elimina el registro y créalo de nuevo desde el local.`);
+  if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
+    avisos.push(`Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe abajo qué respondió: sin eso no se puede guardar.`);
+  if (!avisos.length) return "";
+  return `<div class="note warn" style="margin-top:11px">${avisos.join("<div style=\"height:6px\"></div>")}</div>`;
+}
+
+/* El pop de confirmación: se ve exactamente qué va a cambiar antes de tocar
+   nada, porque el medio y el resultado mueven la tasa de respuesta. */
+function confirmarCorreccion(cambios){
+  return new Promise(resolve => {
+    modal(`
+      <h3>Confirmar la corrección</h3>
+      <p style="margin-top:0">Vas a cambiar lo siguiente en esta gestión:</p>
+      <div class="corr-lista">
+        ${cambios.map(c => `<div class="corr-fila">
+          <span class="corr-campo">${esc(c.campo)}</span>
+          <span class="corr-antes">${esc(c.antes)}</span>
+          <span class="corr-flecha">→</span>
+          <span class="corr-despues">${esc(c.despues)}</span>
+        </div>`).join("")}
+      </div>
+      <div class="note" style="margin-top:12px">Queda registrado en la bitácora de cambios con tu nombre,
+      y los intentos y la tasa de respuesta se recalculan.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="corrOk" style="flex:1">Sí, corregir</button>
+        <button class="btn ghost" id="corrNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#corrOk").onclick = () => { cerrarModal(); resolve(true); };
+    $("#corrNo").onclick = () => { cerrarModal(); resolve(false); };
+  });
+}
+
 function renderFormulario(){
   const c = byId[S.cid];
   if (!c) return go("cartera");
@@ -2343,20 +2441,58 @@ function renderFormulario(){
     <div class="note" style="margin-top:4px">Se registra automáticamente a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> (${esc(S.user.correo)}).</div>
   </div>`}
 
-  ${S.editId ? `
+  ${S.editId ? (corregible(f) ? `
   <div class="card">
-    <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
-    <div class="note warn" style="margin-bottom:11px">
-      El medio de contacto, el resultado y la fecha <b>no se pueden cambiar</b>: son los que alimentan
-      el conteo de intentos y la tasa de respuesta. Si te equivocaste al elegirlos, elimina este registro y
-      créalo de nuevo — la eliminación queda en la bitácora.
+    <h3>Lo que quedó registrado</h3>
+    <div class="note" style="margin-bottom:11px">
+      ${mandoTotal()
+        ? "Puedes corregir <b>la fecha, la hora, el medio y el resultado</b>. La ubicación capturada y la evidencia no se tocan: son la constancia de dónde estuvo el ejecutivo y de qué mostró."
+        : "Puedes corregir <b>el medio y el resultado</b> si te equivocaste al elegirlos. " + esc(plazoCorreccion(f)) +
+          " La fecha, la hora, la ubicación y la evidencia no cambian: son la constancia de lo que pasó."}
     </div>
-    <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
-    <div class="kv"><dt>Medio de contacto</dt><dd>${esc((tipoById(f.Tipo_Contacto)||{}).label || f.Tipo_Contacto)}</dd></div>
-    <div class="kv"><dt>Resultado</dt><dd><span class="chip ${esEfectivo(f.Resultado)?"ok":"serious"}">${esc((resultadoById(f.Resultado)||{}).label || f.Resultado)}</span></dd></div>
+    ${mandoTotal() ? `
+    <div class="row2">
+      <div class="field"><label>Fecha</label>
+        <input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
+      <div class="field" style="margin-bottom:0"><label>Hora</label>
+        <input type="time" data-f="Hora_Contacto" value="${esc(String(f.Hora_Contacto||"").slice(0,5))}"></div>
+    </div>
+    ${fechaFutura(f.Fecha_Contacto) ? `<div class="note warn" style="margin-top:8px">
+      Esa fecha todavía no llega. Hoy es ${esc(fmtFecha(hoyISO()))}.</div>` : ""}`
+    : `<div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>`}
+
+    <h3 style="margin-top:15px">¿Cómo se contactó al cliente?</h3>
+    <div class="opts">
+      ${TIPOS_CONTACTO.map(t => `
+        <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-tipo="${t.id}">
+          <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+        </div>`).join("")}
+    </div>
+
+    <h3 style="margin-top:15px">¿Cuál fue el resultado?</h3>
+    <div class="opts">
+      ${RESULTADOS.map(x => `
+        <div class="opt ${f.Resultado === x.id ? "on" : ""}" data-res="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    ${avisoCorreccion(f)}
     <div id="derivado" style="margin-top:11px"></div>
   </div>
   ` : `
+  <div class="card">
+    <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
+    <div class="note warn" style="margin-bottom:11px">
+      El plazo para corregir el medio y el resultado <b>ya venció</b>: se puede hasta la medianoche del
+      día siguiente al registro. ${esc(plazoCorreccion(f))}
+      Si hay algo mal, pídeselo a tu supervisor: él sí puede corregirlo y queda en la bitácora.
+    </div>
+    <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
+    <div class="kv"><dt>Medio de contacto</dt><dd>${esc(nomTipo(f.Tipo_Contacto))}</dd></div>
+    <div class="kv"><dt>Resultado</dt><dd><span class="chip ${esEfectivo(f.Resultado)?"ok":"serious"}">${esc(nomResultado(f.Resultado))}</span></dd></div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+  `) : `
   <div class="card">
     <h3>¿Cómo se contactó al cliente? <span class="req">*</span></h3>
     <div class="opts">
@@ -2542,6 +2678,9 @@ function pintarDerivado(){
 function pintarGps(){
   const f = S.form, box = $("#boxGps");
   if (!box) return;
+  /* Editando no se muestra: la ubicación quedó fijada al registrar y no se
+     puede volver a capturar. */
+  if (S.editId){ box.innerHTML = ""; return; }
   if (!RULES.requiereUbicacion(f.Tipo_Contacto)){ box.innerHTML = ""; return; }
 
   if (S.editId){
@@ -2702,6 +2841,8 @@ function comprimir(file, cb){
 async function guardar(c){
   const f = S.form, errores = [];
   if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
+  if (S.editId && volverPresencialProhibido(f))
+    errores.push(`No puedes cambiar el medio a ${nomTipo(f.Tipo_Contacto).toLowerCase()}: una gestión presencial necesita la ubicación capturada en el momento, y esa no se modifica. Elimina el registro y créalo de nuevo desde el local.`);
   if (fechaFutura(f.Fecha_Contacto))
     errores.push(`No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
@@ -2730,6 +2871,46 @@ async function guardar(c){
         const ruta = await subirEvidencia(f.Evidencia);
         if (ruta) f.Evidencia_Path = ruta;
       }
+      /* Editando, lo que cambia el medio, el resultado, la hora o la fecha va
+         por funciones aparte: la base congela esos campos en un UPDATE normal
+         y solo las deja pasar con la corrección autorizada, que además las
+         anota en la bitácora. El resto —comentarios y calificación— sí viaja
+         en el UPDATE de siempre. */
+      if (S.editId){
+        const o = DB.buscar(S.editId) || {};
+        const hhmm = v => String(v || "").slice(0,5);
+        const cambiaMedio = f.Tipo_Contacto !== o.Tipo_Contacto || f.Resultado !== o.Resultado;
+        const cambiaHora  = mandoTotal() && hhmm(f.Hora_Contacto) !== hhmm(o.Hora_Contacto);
+        const cambiaFecha = mandoTotal() && f.Fecha_Contacto !== o.Fecha_Contacto;
+
+        if (cambiaMedio || cambiaHora || cambiaFecha){
+          const cambios = [];
+          if (cambiaFecha) cambios.push({ campo:"Fecha", antes:fmtFecha(o.Fecha_Contacto), despues:fmtFecha(f.Fecha_Contacto) });
+          if (cambiaHora)  cambios.push({ campo:"Hora",  antes:hhmm(o.Hora_Contacto) || "—", despues:hhmm(f.Hora_Contacto) });
+          if (f.Tipo_Contacto !== o.Tipo_Contacto)
+            cambios.push({ campo:"Medio", antes:nomTipo(o.Tipo_Contacto), despues:nomTipo(f.Tipo_Contacto) });
+          if (f.Resultado !== o.Resultado)
+            cambios.push({ campo:"Resultado", antes:nomResultado(o.Resultado), despues:nomResultado(f.Resultado) });
+
+          if (!await confirmarCorreccion(cambios)){
+            btn.disabled = false; btn.textContent = S.editId ? "Guardar cambios" : "Registrar";
+            return;
+          }
+          if (cambiaFecha){
+            const { error: eF } = await sb.rpc("corregir_fecha_gestion", {
+              p_id: S.editId, p_fecha: f.Fecha_Contacto,
+              p_motivo: "Corrección desde el CRM" });
+            if (eF) throw new Error(eF.message);
+          }
+          if (cambiaMedio || cambiaHora){
+            const { error: eG } = await sb.rpc("corregir_gestion", {
+              p_id: S.editId, p_tipo: f.Tipo_Contacto, p_resultado: f.Resultado,
+              p_hora: cambiaHora ? hhmm(f.Hora_Contacto) + ":00" : null });
+            if (eG) throw new Error(eG.message);
+          }
+        }
+      }
+
       const fila = aDB(f, c);
       const { error } = S.editId
         ? await sb.from("interacciones").update(fila).eq("id", S.editId)
