@@ -401,16 +401,6 @@ table.tbl tr:last-child td{border-bottom:0}
 .campo-corto input, .campo-corto select{max-width:360px}
 .card .btn.block.limitado{max-width:360px}
 
-.money{display:flex;align-items:center;gap:0;max-width:280px}
-.money span{padding:11px 11px;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;
-  background:var(--surface-2);color:var(--muted);font-weight:650;font-size:13.5px}
-.money input{border-radius:0 10px 10px 0!important;font-variant-numeric:tabular-nums}
-.cmp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
-.cmp{border:1px solid var(--ring);border-radius:10px;padding:7px;background:var(--surface-1);text-align:center}
-.cmp img{width:100%;height:78px;object-fit:cover;border-radius:7px;display:block;margin-bottom:6px}
-.cmp-ph{height:78px;display:grid;place-items:center;font-size:26px;background:var(--surface-2);border-radius:7px;margin-bottom:6px}
-.cmp-n{font-size:11.5px;color:var(--muted);margin-bottom:6px}
-.cmp .btn{width:100%}
 
 /* La lista de comercios se acomoda al ancho disponible */
 .cl-grid{display:grid;gap:9px}
@@ -827,8 +817,6 @@ function aDB(f, c){
     ubicacion: f.Ubicacion || null,
     ubicacion_verificada: !!f.Ubicacion_Verificada,
     evidencia_path: f.Evidencia_Path || null,
-    gasto_total: String(f.Gasto_Total).trim() === "" ? null : Number(f.Gasto_Total),
-    gastos_paths: f.Gastos_Paths || [],
     calificacion: f.Calificacion || null,
     comentario_ejecutivo: f.Comentario_Ejecutivo,
     comentario_cliente: f.Comentario_Cliente || null
@@ -1690,7 +1678,6 @@ function itemTimeline(r){
         : sinUbicacionVerificada(r)
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
-      ${Number(r.Gasto_Total) > 0 ? `<div style="margin-top:7px"><span class="chip warn">🧾 Viáticos ${soles(r.Gasto_Total)} · ${(r.Gastos_Paths||[]).length} comprobante${(r.Gastos_Paths||[]).length===1?"":"s"}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
       ${r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`
@@ -1848,7 +1835,6 @@ function renderFormCliente(){
     <div id="evBox"></div>
   </div>
 
-  <div id="boxGasto"></div>
 
   <div class="card">
     <h3 id="tituloNotas">Observación</h3>
@@ -2016,7 +2002,7 @@ function camposSegunOrigen(){
     S.form.Resultado = "efectivo";
     pintarMediosVenta();
   } else {
-    ["#derivado","#boxGps","#boxGasto"].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ""; });
+    ["#derivado","#boxGps"].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ""; });
     pintarGestion();
   }
 }
@@ -2031,9 +2017,9 @@ function pintarMediosVenta(){
   box.querySelectorAll("[data-medio]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.medio;
     box.querySelectorAll("[data-medio]").forEach(x => x.classList.toggle("on", x.dataset.medio === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps(); pintarGasto();
+    pintarDerivado(); pintarGps();
   });
-  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto();
+  pintarDerivado(); pintarGps(); pintarEvidencia();
 }
 
 /* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
@@ -2123,12 +2109,6 @@ async function guardarCliente(){
         errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
       if (!g.Evidencia) errores.push("Adjunta la evidencia de la gestión.");
       if (!String(g.Comentario_Ejecutivo || "").trim()) errores.push("Escribe el comentario del ejecutivo.");
-      const gasto = Number(g.Gasto_Total || 0);
-      const nCmp = (g.Gastos_Paths||[]).length + (g.Gastos_Nuevos||[]).length;
-      if (gasto > 0 && nCmp === 0) errores.push("Adjunta el comprobante del gasto que declaraste.");
-      if (nCmp > 0 && gasto <= 0)  errores.push("Anota el monto total de los comprobantes que adjuntaste.");
-      if (gasto < 0)    errores.push("El monto del gasto no puede ser negativo.");
-      if (gasto > 2000) errores.push("El monto supera el máximo permitido por visita (S/ 2,000).");
     }
   } else {
     if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
@@ -2180,11 +2160,6 @@ async function guardarCliente(){
         const ruta = await subirEvidencia(g.Evidencia);
         if (ruta) g.Evidencia_Path = ruta;
       }
-      for (const d of (g.Gastos_Nuevos || [])){
-        const ruta = await subirEvidencia(d);
-        if (ruta) g.Gastos_Paths.push(ruta);
-      }
-      g.Gastos_Nuevos = [];
       const { error } = await sb.rpc("crear_venta_nueva", {
         p_ruc: ruc,
         p_razon_social: fila.razon_social,
@@ -2199,8 +2174,10 @@ async function guardarCliente(){
         p_calificacion: g.Calificacion || null,
         p_ubicacion: g.Ubicacion || null,
         p_ubicacion_verificada: !!g.Ubicacion_Verificada,
-        p_gasto_total: String(g.Gasto_Total).trim() === "" ? null : Number(g.Gasto_Total),
-        p_gastos_paths: g.Gastos_Paths || []
+        // Los viáticos se retiraron de la campaña; la función de la base
+        // conserva los parámetros, así que van vacíos.
+        p_gasto_total: null,
+        p_gastos_paths: []
       });
       if (error) throw error;
     } else {
@@ -2326,7 +2303,6 @@ function nuevoForm(){
     Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
-    Gasto_Total: "", Gastos_Paths: [], Gastos_Nuevos: [],
     Comentario_Ejecutivo: "", Comentario_Cliente: "", Motivo: "",
     Cierre: null            // resultado_gestion del comercio, se define acá mismo
   };
@@ -2414,7 +2390,6 @@ function renderFormulario(){
     <div id="evBox"></div>
   </div>
 
-  <div id="boxGasto"></div>
 
   <div id="boxCierre"></div>
 
@@ -2455,7 +2430,7 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.tipo;
     $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps(); pintarGasto(); pintarCierre(c);
+    pintarDerivado(); pintarGps(); pintarCierre(c);
   });
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
@@ -2463,7 +2438,7 @@ function bindForm(c){
     pintarDerivado(); pintarCierre(c);
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarGasto(); pintarCierre(c);
+  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarCierre(c);
 }
 
 /* -------------------------------------------------------------------------
@@ -2679,83 +2654,9 @@ function notaSinUbicacion(){
     </div>`;
 }
 
-function pintarGasto(){
-  const f = S.form, box = $("#boxGasto");
-  if (!box) return;
-  // Los viáticos solo existen cuando el ejecutivo se movió: visitas y reuniones presenciales.
-  if (!RULES.requiereUbicacion(f.Tipo_Contacto)){
-    box.innerHTML = ""; f.Gasto_Total = ""; f.Gastos_Nuevos = [];
-    return;
-  }
-  const guardados = (f.Gastos_Paths || []).length;
-  const nuevos = (f.Gastos_Nuevos || []).length;
-  box.innerHTML = `
-  <div class="card">
-    <h3>Gastos de la visita <span style="text-transform:none;font-weight:500;color:var(--muted)">— viáticos, opcional</span></h3>
-    <div class="note" style="margin-bottom:12px">
-      Si gastaste en movilidad, peaje, estacionamiento o cualquier otra cosa para llegar a este
-      comercio, adjunta las boletas y anota el total. Sin comprobante no se puede declarar un monto.
-    </div>
-    <div class="field">
-      <label for="gastoMonto">Monto total de la visita <span class="hint">— en soles</span></label>
-      <div class="money"><span>S/</span>
-        <input type="number" id="gastoMonto" inputmode="decimal" step="0.10" min="0" max="2000"
-               value="${esc(f.Gasto_Total)}" placeholder="0.00"></div>
-    </div>
-    <div id="cmpBox"></div>
-    <div id="gastoMsg"></div>
-  </div>`;
-  $("#gastoMonto").oninput = e => { f.Gasto_Total = e.target.value; pintarAvisoGasto(); };
-  pintarComprobantes(); pintarAvisoGasto();
-}
-
-function pintarAvisoGasto(){
-  const f = S.form, msg = $("#gastoMsg");
-  if (!msg) return;
-  const monto = Number(f.Gasto_Total || 0);
-  const n = (f.Gastos_Paths||[]).length + (f.Gastos_Nuevos||[]).length;
-  if (monto > 0 && n === 0)
-    msg.innerHTML = `<div class="note warn">Declaraste <b>${soles(monto)}</b> pero todavía no adjuntas ningún comprobante.</div>`;
-  else if (n > 0 && monto <= 0)
-    msg.innerHTML = `<div class="note warn">Adjuntaste ${n} comprobante${n===1?"":"s"}: falta anotar el monto total.</div>`;
-  else if (monto > 0)
-    msg.innerHTML = `<div class="note ok"><b>${soles(monto)}</b> con ${n} comprobante${n===1?"":"s"} adjunto${n===1?"":"s"}.</div>`;
-  else msg.innerHTML = "";
-}
-
-function pintarComprobantes(){
-  const f = S.form, box = $("#cmpBox");
-  if (!box) return;
-  const guardados = (f.Gastos_Paths || []);
-  const nuevos = (f.Gastos_Nuevos || []);
-  box.innerHTML = `
-    <label style="display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px">
-      Comprobantes <span class="hint" style="font-weight:400;color:var(--muted)">— boletas, tickets, recibos</span></label>
-    ${(guardados.length || nuevos.length) ? `<div class="cmp-grid">
-      ${guardados.map((p,i) => `<div class="cmp"><div class="cmp-ph">📄</div>
-        <div class="cmp-n">Comprobante ${i+1}</div>
-        <button class="btn ghost sm" data-cmpdelg="${i}">Quitar</button></div>`).join("")}
-      ${nuevos.map((d,i) => `<div class="cmp"><img src="${d}" alt="Comprobante">
-        <button class="btn ghost sm" data-cmpdel="${i}">Quitar</button></div>`).join("")}
-    </div>` : ""}
-    <button class="btn ghost block" id="cmpAdd" style="margin-top:9px">📎 Adjuntar comprobante</button>
-    <input type="file" id="cmpFile" accept="image/*" capture="environment" multiple class="hidden">`;
-  const file = $("#cmpFile");
-  $("#cmpAdd").onclick = () => file.click();
-  file.onchange = e => {
-    const fl = [...e.target.files];
-    let quedan = fl.length;
-    fl.forEach(x => comprimir(x, d => {
-      f.Gastos_Nuevos.push(d);
-      if (--quedan === 0){ pintarComprobantes(); pintarAvisoGasto(); }
-    }));
-    e.target.value = "";
-  };
-  box.querySelectorAll("[data-cmpdel]").forEach(b => b.onclick = () => {
-    f.Gastos_Nuevos.splice(Number(b.dataset.cmpdel), 1); pintarComprobantes(); pintarAvisoGasto(); });
-  box.querySelectorAll("[data-cmpdelg]").forEach(b => b.onclick = () => {
-    f.Gastos_Paths.splice(Number(b.dataset.cmpdelg), 1); pintarComprobantes(); pintarAvisoGasto(); });
-}
+/* Los viáticos se retiraron de la campaña: ya no se capturan gastos ni
+   comprobantes en el formulario. Lo que se declaró antes sigue guardado y se
+   puede consultar en el Excel; simplemente no se pide nada nuevo. */
 
 function pintarEvidencia(){
   const f = S.form, box = $("#evBox");
@@ -2817,12 +2718,6 @@ async function guardar(c){
      que el cliente respondió, tiene que haber algo que citar. */
   if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
     errores.push(`Escribe qué respondió el cliente por ${nomTipo(f.Tipo_Contacto).toLowerCase()}. Si todavía no contesta, cambia el resultado a “No respondió”.`);
-  const gasto = Number(f.Gasto_Total || 0);
-  const nCmp = (f.Gastos_Paths||[]).length + (f.Gastos_Nuevos||[]).length;
-  if (gasto > 0 && nCmp === 0) errores.push("Adjunta el comprobante del gasto que declaraste.");
-  if (nCmp > 0 && gasto <= 0)  errores.push("Anota el monto total de los comprobantes que adjuntaste.");
-  if (gasto < 0)     errores.push("El monto del gasto no puede ser negativo.");
-  if (gasto > 2000)  errores.push("El monto supera el máximo permitido por visita (S/ 2,000).");
   if (errores.length){
     $("#errBox").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
     $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
@@ -2836,14 +2731,6 @@ async function guardar(c){
       if (f.Evidencia && !f.Evidencia_Path){
         const ruta = await subirEvidencia(f.Evidencia);
         if (ruta) f.Evidencia_Path = ruta;
-      }
-      // Cada comprobante nuevo va al bucket privado, igual que la evidencia.
-      if ((f.Gastos_Nuevos || []).length){
-        for (const d of f.Gastos_Nuevos){
-          const ruta = await subirEvidencia(d);
-          if (ruta) f.Gastos_Paths.push(ruta);
-        }
-        f.Gastos_Nuevos = [];
       }
       const fila = aDB(f, c);
       const { error } = S.editId
@@ -3386,14 +3273,6 @@ function viewPanel(){
   const presenciales = regs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto));
   const sinUbi = presenciales.filter(r => r.Ubicacion_Verificada !== true);
   const pctUbi = presenciales.length ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
-  // Viáticos: lo que la campaña lleva gastado en campo
-  const conGasto = regs.filter(r => Number(r.Gasto_Total) > 0);
-  const totalGasto = conGasto.reduce((n,r) => n + Number(r.Gasto_Total), 0);
-  const gastoEjec = [...new Set(conGasto.map(r => r.Ejecutivo))]
-    .map(n => ({ nombre:n, total: conGasto.filter(r => r.Ejecutivo === n).reduce((a,r) => a + Number(r.Gasto_Total), 0),
-                 visitas: conGasto.filter(r => r.Ejecutivo === n).length }))
-    .sort((a,b) => b.total - a.total);
-  const maxGasto = Math.max(1, ...gastoEjec.map(x => x.total));
 
   const sinUbiEjec = [...new Set(sinUbi.map(r => r.Ejecutivo))]
     .map(n => ({ nombre:n, n: sinUbi.filter(r => r.Ejecutivo === n).length }))
@@ -3523,24 +3402,6 @@ function viewPanel(){
         </div>`).join("") : `<div class="note">Todavía no hay comercios registrados.</div>`}
     </div>
 
-    <div class="card">
-      <h3>Viáticos · gasto declarado en campo</h3>
-      ${conGasto.length ? `
-        <div class="stat-row" style="margin-bottom:11px">
-          <div class="stat"><div class="lbl">Total</div><div class="val" style="font-size:21px">${soles(totalGasto)}</div><div class="sub">${conGasto.length} visita${conGasto.length===1?"":"s"} con gasto</div></div>
-          <div class="stat"><div class="lbl">Promedio</div><div class="val" style="font-size:21px">${soles(totalGasto/conGasto.length)}</div><div class="sub">por visita con gasto</div></div>
-        </div>
-        ${gastoEjec.map(e => `
-          <div class="bar-row">
-            <span class="nm">${esc(e.nombre)}</span>
-            <span class="bar-track"><span class="bar-fill" style="width:${(e.total/maxGasto*100).toFixed(1)}%;background:var(--warn)"></span></span>
-            <span class="bar-val" style="width:auto;white-space:nowrap">${soles(e.total)}</span>
-          </div>
-          <div class="bar-sub">${e.visitas} visita${e.visitas===1?"":"s"} con comprobante</div>`).join("")}
-        <div class="note" style="margin-top:9px">Todo monto declarado tiene comprobante adjunto: la base
-        rechaza un gasto sin boleta. El detalle está en la hoja <b>Viáticos</b> del Excel.</div>`
-      : `<div class="note">Todavía no se ha declarado ningún gasto de campo.</div>`}
-    </div>
 
     <div class="card">
       <h3>Respaldo de ubicación · visitas presenciales</h3>
@@ -3671,7 +3532,7 @@ function hojaAvance(){
                 "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
                 "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
-                "Sin ubicación verificada","Viáticos (S/)","Visitas con gasto"];
+                "Sin ubicación verificada"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
     const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
     cs.forEach(c => RULES.recomputarBase(c.customer_id));
@@ -3699,9 +3560,7 @@ function hojaAvance(){
       ret, ven, per, pen, cumplido,
       cs.length ? Math.round(cumplido/cs.length*10000)/10000 : 0,
       decididos ? Math.round(cumplido/decididos*10000)/10000 : "",
-      rs.filter(sinUbicacionVerificada).length,
-      Math.round(rs.reduce((n2,r) => n2 + (Number(r.Gasto_Total)||0), 0) * 100) / 100,
-      rs.filter(r => Number(r.Gasto_Total) > 0).length];
+      rs.filter(sinUbicacionVerificada).length];
   });
   const ws = hoja(cols, filas);
   columnaFormula(ws, cols, filas, "% Alcance del mes",
@@ -3750,6 +3609,11 @@ function hojaMetas(){
   formatoPorcentaje(ws, cols, filas, ["% Alcance"]);
   return ws;
 }
+
+/* Los viáticos ya no se capturan. La hoja se mantiene solo mientras exista
+   lo que se declaró en su momento, para que ese historial no quede huérfano;
+   el día que no haya ninguno, deja de aparecer sola. */
+const hayViaticos = () => DB.todos().some(r => Number(r.Gasto_Total) > 0);
 
 function hojaViaticos(){
   const cols = ["Fecha","Ejecutivo","Customer_id","Comercio","Distrito","Medio",
@@ -3801,7 +3665,7 @@ const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_c
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
   observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
-  customer_id:"Customer ID" };
+  customer_id:"Customer ID", fecha_contacto:"Fecha de la gestión" };
 const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
@@ -4117,7 +3981,7 @@ function hojaReporte(admin){
     })()],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
     ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length],
-    ["Viáticos declarados", "S/ " + (Math.round(regs.reduce((n,r)=>n+(Number(r.Gasto_Total)||0),0)*100)/100).toFixed(2)], [],
+    [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
     ["", "La columna Evidencia guarda la ruta del archivo en el bucket privado; las imágenes solo se abren desde el CRM."],
@@ -4143,7 +4007,7 @@ async function exportarExcel(btn){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
-    XLSX.utils.book_append_sheet(wb, hojaViaticos(),       "Viáticos");
+    if (hayViaticos()) XLSX.utils.book_append_sheet(wb, hojaViaticos(), "Viáticos");
     XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base");
     XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
@@ -4285,7 +4149,7 @@ function viewAyuda(){
         la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
         CRM no deja registrar una sin la otra.</p>
         <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Cartera asignada,
-        Tasa de respuesta, Viáticos, Base para BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora
+        Tasa de respuesta, Base para BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora
         y Reporte. La hoja <b>Visitas</b> es la que trae una fila por gestión: es la fuente para
         cualquier tabla dinámica por medio, por fecha o por resultado.</p>
       </div>
@@ -4778,7 +4642,7 @@ const PASOS_GUIA = [
     chips:["Customer ID","Nombre","Rubro","Distrito y dirección","Estado"] },
   { n:"2", t:"Registra cada gestión",
     d:"Cada intento cuenta, aunque no te contesten. Es lo que mide tu esfuerzo.",
-    chips:["Medio","Resultado","Ubicación","Evidencia","Viáticos","Comentarios"] },
+    chips:["Medio","Resultado","Ubicación","Evidencia","Comentarios"] },
   { n:"3", t:"Cierra cuando cierres",
     d:"En la misma pantalla, al final. Es lo que BBVA lee como objetivo cumplido.",
     chips:["Retenido","Venta","Perdido","Sigue abierta"] }
@@ -4846,8 +4710,6 @@ const ERRORES_GUIA = [
     a:"Cambia la fecha al día real de la visita y usa «No puedo capturar la ubicación»: el GPS de hoy no probaría dónde estuviste ese día. Explica en el comentario del ejecutivo que es un registro posterior." },
   { q:"Me equivoqué de medio o de resultado",
     a:"No se puede corregir: elimina el registro y créalo de nuevo. La eliminación queda en la bitácora." },
-  { q:"Puse un monto de viáticos y no me deja guardar",
-    a:"Falta el comprobante. Sin boleta adjunta no se puede declarar un gasto." },
   { q:"Se abrió el CRM vacío, sin mis comercios",
     a:"Tu sesión caducó. Cierra sesión, vuelve a entrar y todo reaparece: no se borró nada." }
 ];
@@ -4963,7 +4825,7 @@ function viewGuia(){
     <div class="card">
       <h3>Lo que no se puede cambiar después</h3>
       <div class="note" style="margin-bottom:12px">
-        Al editar una gestión solo se corrigen los comentarios, la calificación y los viáticos.
+        Al editar una gestión solo se corrigen los comentarios y la calificación.
         Lo demás queda fijo porque alimenta los conteos.
       </div>
       <div class="g-fijos">
