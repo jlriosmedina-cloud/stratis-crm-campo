@@ -668,8 +668,26 @@ function textoVentana(){
   return `Hoy hasta las ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 }
 
-/* Un registro presencial solo tiene respaldo si el GPS del equipo entregó las
-   coordenadas. Si el ejecutivo tuvo que guardar sin señal, queda marcado. */
+/* La ubicación de un registro presencial tiene tres estados, no dos, y
+   confundirlos costaba caro: una gestión con la coordenada escrita a mano
+   aparecía igual que una sin ninguna ubicación.
+
+     gps        el equipo la midió en el local y en el momento — es la que
+                respalda la visita ante BBVA
+     declarada  alguien la escribió después: sirve para ubicar el comercio en
+                el mapa, pero no prueba que se estuvo ahí
+     falta      no hay ninguna coordenada
+
+   «Sin ubicación» a secas significa el tercero. El segundo se cuenta aparte. */
+function estadoUbicacion(r){
+  if (!RULES.requiereUbicacion(r.Tipo_Contacto)) return "";
+  if (r.Ubicacion_Verificada === true) return "gps";
+  return String(r.Ubicacion || "").trim() ? "declarada" : "falta";
+}
+const sinUbicacion         = r => estadoUbicacion(r) === "falta";
+const ubicacionDeclarada   = r => estadoUbicacion(r) === "declarada";
+/* Sigue existiendo para lo que de verdad mide respaldo de GPS: una declarada
+   no cuenta como verificada. */
 const sinUbicacionVerificada = r =>
   RULES.requiereUbicacion(r.Tipo_Contacto) && r.Ubicacion_Verificada !== true;
 
@@ -1462,7 +1480,7 @@ function avisoVentana(){
     <h3>Ventana de corrección abierta · ${esc(textoVentana().toLowerCase())}</h3>
     <div class="note" style="margin-bottom:0">
       Hoy puedes arreglar <b>tus</b> registros sin pedir permiso: el medio y el resultado de cualquier
-      gestión tuya, el Customer ID de los comercios que registraste, y anular una ubicación equivocada.
+      gestión tuya, el Customer ID de los comercios que registraste, y la ubicación de tus gestiones.
       <b>A partir de mañana vuelve a estar cerrado.</b>
       ${(() => {
         const faltan = cartera().filter(c => !esClienteNuevo(c) && !c.contacto_bbva).length;
@@ -1472,9 +1490,9 @@ function avisoVentana(){
           <button class="btn ghost sm" id="verFaltanBBVA" style="margin-top:7px">Ver los que faltan</button>
           </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con el contacto de BBVA.</div>`;
       })()}
-      <div style="margin-top:6px">La ubicación no se puede reescribir —solo anular—: se mide en el sitio
-      y en el momento, y ponerle otra hoy sería grabar dónde estás ahora. Si la visita sí ocurrió,
-      elimina el registro y créalo de nuevo desde el local.</div>
+      <div style="margin-top:6px">La ubicación que escribas hoy queda como <b>escrita a mano</b>: sirve para
+      ubicar el comercio en el mapa, pero no reemplaza al GPS capturado en el local, que es el que
+      respalda la visita. Para que cuente como visita con respaldo, hay que capturarla estando ahí.</div>
     </div>
   </div>`;
 }
@@ -1743,8 +1761,10 @@ function itemTimeline(r){
       </div>
       ${r.Ubicacion_Verificada
         ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
-        : sinUbicacionVerificada(r)
-          ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación verificada</span></div>` : ""}
+        : ubicacionDeclarada(r)
+          ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip warn" style="font-size:10px">escrita a mano</span></div>`
+        : sinUbicacion(r)
+          ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
@@ -2526,7 +2546,8 @@ function volverPresencialProhibido(f){
 function avisoCorreccion(f){
   const avisos = [];
   if (edicionLibre() && S.user && S.user.rol === "Ejecutivo"
-      && RULES.requiereUbicacion(f.Tipo_Contacto) && f.Ubicacion_Verificada !== true)
+      && RULES.requiereUbicacion(f.Tipo_Contacto) && f.Ubicacion_Verificada !== true
+      && !String(f.Ubicacion || "").trim())
     avisos.push(`Al pasarla a ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}, la gestión queda marcada como <b>sin ubicación verificada</b>: no se le puede poner un GPS que nunca tuvo. Si de verdad hiciste la visita, elimina el registro y créalo de nuevo desde el local.`);
   if (volverPresencialProhibido(f))
     avisos.push(`No puedes convertir esta gestión en ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}: una gestión presencial se respalda con la ubicación capturada en el momento, y la ubicación no se modifica nunca. Si de verdad fue presencial, elimina el registro y créalo de nuevo desde el local.`);
@@ -3237,7 +3258,8 @@ function controlEquipo(regs){
       respuestas,
       tasa: lista.length ? respuestas / lista.length : 0,
       sinEvidencia: lista.filter(r => !r.Evidencia_Path && !r.Evidencia).length,
-      sinGps: lista.filter(sinUbicacionVerificada).length,
+      sinGps: lista.filter(sinUbicacion).length,
+      declaradas: lista.filter(ubicacionDeclarada).length,
       /* En el día: cuántas se registraron el mismo día en que se gestionaron */
       alDia: lista.filter(r => demoraRegistro(r) === 0).length,
       ultima,
@@ -3283,9 +3305,10 @@ function tablaControl(filas){
       </tbody>
     </table>
     </div>
-    ${filas.some(f => f.sinEvidencia || f.sinGps) ? `<div class="ctrl-pie">
+    ${filas.some(f => f.sinEvidencia || f.sinGps || f.declaradas) ? `<div class="ctrl-pie">
       ${filas.filter(f => f.sinEvidencia).map(f => `<span class="chip warn">${esc(f.nombre)}: ${f.sinEvidencia} sin evidencia</span>`).join("")}
       ${filas.filter(f => f.sinGps).map(f => `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
+      ${filas.filter(f => f.declaradas).map(f => `<span class="chip no">${esc(f.nombre)}: ${f.declaradas} con ubicación escrita a mano</span>`).join("")}
     </div>` : ""}
   </div>`;
 }
@@ -3312,7 +3335,8 @@ function tarjetaGestion(r){
           <div class="ges-chips">
             ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
             ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
-            ${sinUbicacionVerificada(r)?`<span class="chip crit">Sin ubicación verificada</span>`
+            ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
+              : ubicacionDeclarada(r)?`<span class="chip warn">Ubicación escrita a mano</span>`
               : (r.Ubicacion?`<span class="chip no">Ubicación verificada</span>`:"")}
             ${!r.Evidencia && !r.Evidencia_Path?`<span class="chip warn">Sin evidencia</span>`:""}
             ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
@@ -3349,7 +3373,7 @@ function viewRegistros(){
   });
   if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
-  else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacionVerificada);
+  else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacion);
   else if (S.fResultado === "sin_evidencia")  lista = lista.filter(r => !r.Evidencia_Path && !r.Evidencia);
   else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
@@ -3399,7 +3423,10 @@ function viewRegistros(){
     <div class="stat"><div class="lbl">Gestiones</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
     <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
     <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div><div class="sub">${dias?`${(todos.length/dias).toFixed(1)} gestiones por día`:"sin movimiento"}</div></div>
-    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacionVerificada).length}</div><div class="sub">presenciales sin respaldo de GPS</div></div>
+    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">${
+      (() => { const d = todos.filter(ubicacionDeclarada).length;
+               return d ? `presenciales sin ninguna coordenada · ${d} más con ubicación escrita a mano`
+                        : "presenciales sin ninguna coordenada"; })()}</div></div>
   </div>
 
   ${mando ? tablaControl(controlEquipo(todos)) : ""}
@@ -3411,7 +3438,7 @@ function viewRegistros(){
     <div class="seg" role="group" aria-label="Resultado">
       ${[["todos","Todos"],["efectivos","El cliente respondió"],["fallidos","Sin respuesta"]]
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
-      ${todos.some(sinUbicacionVerificada)
+      ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
       ${todos.some(r => !r.Evidencia_Path && !r.Evidencia)
         ? `<button class="${S.fResultado==="sin_evidencia"?"on":""}" data-fr="sin_evidencia">Sin evidencia</button>` : ""}
@@ -3470,7 +3497,7 @@ function gestionesFiltradas(){
   });
   if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
-  else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacionVerificada);
+  else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
   else if (S.fResultado === "sin_evidencia")  l = l.filter(r => !r.Evidencia_Path && !r.Evidencia);
   else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
@@ -3840,8 +3867,13 @@ const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Strat
   "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
-const marcaUbicacion = r => !RULES.requiereUbicacion(r.Tipo_Contacto) ? ""
-  : (r.Ubicacion_Verificada === true ? "SI" : "NO — sin ubicación verificada");
+const marcaUbicacion = r => {
+  const e = estadoUbicacion(r);
+  if (e === "gps")       return "SI";
+  if (e === "declarada") return "Escrita a mano — sin respaldo de GPS";
+  if (e === "falta")     return "NO — sin ubicación";
+  return "";
+};
 
 const nomTipo = id => (tipoById(id) || {}).label || id || "";
 const nomResultado = id => (resultadoById(id) || {}).label || id || "";
@@ -3923,7 +3955,7 @@ function hojaAvance(){
                 "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
                 "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
-                "Sin ubicación verificada"];
+                "Sin ubicación","Con ubicación escrita a mano"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
     const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
     cs.forEach(c => RULES.recomputarBase(c.customer_id));
@@ -3951,7 +3983,8 @@ function hojaAvance(){
       ret, ven, per, pen, cumplido,
       cs.length ? Math.round(cumplido/cs.length*10000)/10000 : 0,
       decididos ? Math.round(cumplido/decididos*10000)/10000 : "",
-      rs.filter(sinUbicacionVerificada).length];
+      rs.filter(sinUbicacion).length,
+      rs.filter(ubicacionDeclarada).length];
   });
   const ws = hoja(cols, filas);
   columnaFormula(ws, cols, filas, "% Alcance del mes",
