@@ -788,8 +788,6 @@ function deDB(f){
     Ubicacion: f.ubicacion || "",
     Ubicacion_Verificada: f.ubicacion_verificada === true,
     Evidencia_Path: f.evidencia_path || "", Evidencia: "",
-    Gasto_Total: f.gasto_total === null || f.gasto_total === undefined ? "" : Number(f.gasto_total),
-    Gastos_Paths: Array.isArray(f.gastos_paths) ? f.gastos_paths : [],
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
     /* Cuándo se grabó, que no es lo mismo que cuándo se gestionó: la distancia
@@ -3446,7 +3444,7 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
-  "Ubicacion_Verificada","Evidencia","Gasto_Viaticos","Comprobantes","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+  "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
 const marcaUbicacion = r => !RULES.requiereUbicacion(r.Tipo_Contacto) ? ""
@@ -3481,8 +3479,7 @@ function filasVisitas(){
     r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
     esEfectivo(r.Resultado) ? "SI" : "NO",
     r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
-    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "",
-    Number(r.Gasto_Total) > 0 ? Number(r.Gasto_Total) : "", (r.Gastos_Paths||[]).join(" | "), r.Calificacion,
+    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "", r.Calificacion,
     r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
 }
 
@@ -3610,27 +3607,6 @@ function hojaMetas(){
   return ws;
 }
 
-/* Los viáticos ya no se capturan. La hoja se mantiene solo mientras exista
-   lo que se declaró en su momento, para que ese historial no quede huérfano;
-   el día que no haya ninguno, deja de aparecer sola. */
-const hayViaticos = () => DB.todos().some(r => Number(r.Gasto_Total) > 0);
-
-function hojaViaticos(){
-  const cols = ["Fecha","Ejecutivo","Customer_id","Comercio","Distrito","Medio",
-                "Monto (S/)","Comprobantes","Ubicacion_Verificada","ID_Registro"];
-  const filas = DB.todos().filter(r => Number(r.Gasto_Total) > 0)
-    .sort((a,b) => ts(a) - ts(b)).map(r => {
-      const c = byId[String(r.Customer_id)] || {};
-      return [r.Fecha_Contacto, r.Ejecutivo, r.Customer_id, titulo(nombreCliente(c)), c.distrito || "",
-        nomTipo(r.Tipo_Contacto), Number(r.Gasto_Total), (r.Gastos_Paths||[]).length,
-        marcaUbicacion(r), r._id];
-    });
-  const total = filas.reduce((n,f) => n + f[6], 0);
-  if (filas.length) filas.push([], ["", "TOTAL", "", "", "", "", Math.round(total*100)/100, "", "", ""]);
-  const ws = hoja(cols, filas);
-  filas.forEach((_,i) => { const c = ws["G"+(i+2)]; if (c && typeof c.v === "number") c.z = '"S/ "#,##0.00'; });
-  return ws;
-}
 
 function hojaEfectividad(){
   const regs = DB.todos();
@@ -3661,7 +3637,6 @@ function hojaRubros(){
 
 const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
   calificacion:"Calificación", evidencia_path:"Evidencia", nombre_comercio:"Nombre del comercio",
-  gasto_total:"Monto de viáticos", gastos_paths:"Comprobantes de gasto",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
   observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
@@ -3691,6 +3666,7 @@ function resumenAuditoria(a){
       b.medio ? nomTipo(b.medio) : "",
       b.resultado ? nomResultado(b.resultado) : "",
       b.cumple === "SI" ? "cumplía visita" : "",
+      /* Gestiones borradas antes de que se retiraran los viáticos */
       Number(b.gasto) > 0 ? soles(b.gasto) + " en viáticos" : ""
     ]);
   }
@@ -4007,7 +3983,6 @@ async function exportarExcel(btn){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
-    if (hayViaticos()) XLSX.utils.book_append_sheet(wb, hojaViaticos(), "Viáticos");
     XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base");
     XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
