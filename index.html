@@ -671,6 +671,19 @@ const CALIFICACIONES = [
   { id:"E", label:"E — Perdido",        desc:"Decidido a retirarse o ya migró" }
 ];
 
+/* Cómo se contactó al ejecutivo de BBVA para confirmar los datos del comercio.
+   Un comercio de cartera no aparece solo: alguien coordinó con el banco antes
+   de registrarlo. Sin este dato no se puede dar de alta. No aplica a ventas
+   nuevas: ahí todavía no hay ejecutivo BBVA de por medio. */
+const CONTACTO_BBVA = [
+  { id:"CORREO",   label:"Correo enviado",      desc:"Se le escribió al ejecutivo de BBVA y confirmó los datos" },
+  { id:"LLAMADA",  label:"Llamada telefónica",  desc:"Se coordinó por teléfono con el ejecutivo de BBVA" },
+  { id:"WHATSAPP", label:"Mensaje WhatsApp",    desc:"Se coordinó por WhatsApp con el ejecutivo de BBVA" },
+  { id:"VISITA",   label:"Visita presencial",   desc:"Se fue a las oficinas de BBVA y se coordinó en persona" },
+  { id:"CHAT",     label:"Chat BBVA",           desc:"Se coordinó por el chat interno del banco" }
+];
+const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
+
 const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
 
 /* Cierre de la gestión. Es lo que alimenta la columna "Gestión" del archivo
@@ -1623,6 +1636,11 @@ function viewFicha(c){
         : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>
              ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}</dd></div>`}
+      ${!esClienteNuevo(c) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
+        c.contacto_bbva
+          ? esc(nomContactoBBVA(c.contacto_bbva))
+          : `<span class="chip warn">Sin indicar</span><div style="font-size:12px;color:var(--muted);margin-top:3px">Se registró antes de que el dato fuera obligatorio</div>`
+      }</dd></div>` : ""}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
       ${c.direccion ? `<div style="margin-top:11px">
@@ -1714,7 +1732,8 @@ function nuevoFormCliente(){
     tipo_registro:"CARTERA", customer_id:"", ruc:"", razon_social:"",
     nombre_comercio:"", rubro:"", rubro_otro:"",
     distrito:"", direccion:"", estado:"ACTIVO",
-    resultado_gestion:"PENDIENTE", motivo_no_retencion:"", observacion:""
+    resultado_gestion:"PENDIENTE", motivo_no_retencion:"", observacion:"",
+    contacto_bbva:""
   };
 }
 
@@ -1729,7 +1748,8 @@ function formDeCliente(c){
     estado: c.estado || "ACTIVO",
     resultado_gestion: c.resultado_gestion || "PENDIENTE",
     motivo_no_retencion: c.motivo_no_retencion || "",
-    observacion: c.observacion || ""
+    observacion: c.observacion || "",
+    contacto_bbva: c.contacto_bbva || ""
   };
 }
 
@@ -1806,6 +1826,21 @@ function renderFormCliente(){
     </div>
   </div>
 
+  <div class="card" id="cardContactoBBVA">
+    <h3>¿Cómo se contactó al ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Este comercio llega porque alguien coordinó con el banco y el ejecutivo de BBVA
+      confirmó los datos del cliente. Indica por dónde fue esa coordinación:
+      es lo que sostiene que el caso viene de una gestión real y no de una lista suelta.
+    </div>
+    <div class="opts">
+      ${CONTACTO_BBVA.map(x => `
+        <div class="opt ${f.contacto_bbva===x.id?"on":""}" data-cbbva="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
   <div class="card" id="cardUbicacion">
     <h3>Ubicación del comercio</h3>
     <div class="field">
@@ -1860,6 +1895,11 @@ function renderFormCliente(){
   </div>
   `;
 
+  $("#view").querySelectorAll("[data-cbbva]").forEach(el => el.onclick = () => {
+    f.contacto_bbva = el.dataset.cbbva;
+    $("#view").querySelectorAll("[data-cbbva]").forEach(x =>
+      x.classList.toggle("on", x.dataset.cbbva === f.contacto_bbva));
+  });
   $("#view").querySelectorAll("[data-backcli]").forEach(b => b.onclick = () => {
     const volver = S.editCli;
     S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = volver || null;
@@ -2000,7 +2040,8 @@ const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual"
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
   const ocultarSiCartera = ["#cardCierre", "#cardEvidencia"];
-  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo], ["#cardGestion", nuevo]]
+  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
+   ["#cardGestion", nuevo], ["#cardContactoBBVA", nuevo]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
   ocultarSiCartera.forEach(sel => { const el = $(sel); if (el) el.style.display = nuevo ? "" : "none"; });
 
@@ -2122,6 +2163,8 @@ async function guardarCliente(){
       if (!String(g.Comentario_Ejecutivo || "").trim()) errores.push("Escribe el comentario del ejecutivo.");
     }
   } else {
+    if (!f.contacto_bbva)
+      errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
     if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
     if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
     if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
@@ -2157,6 +2200,7 @@ async function guardarCliente(){
     fila.direccion       = String(f.direccion).trim();
     fila.estado          = f.estado;
     fila.observacion     = String(f.observacion).trim() || null;
+    fila.contacto_bbva   = f.contacto_bbva || null;
     if (!editando) fila.customer_id = cid;
   }
 
@@ -3389,6 +3433,19 @@ function viewPanel(){
 
   const visibles = new Set(base.map(c => String(c.customer_id)));
   const regs = DB.todos().filter(r => visibles.has(String(r.Customer_id)));
+
+  /* Por dónde llega la cartera: el canal con el que se coordinó con el
+     ejecutivo de BBVA antes de registrar cada comercio. Los registros
+     anteriores a la regla no lo tienen, y se cuentan aparte para que el
+     porcentaje no mienta. */
+  const deCarteraBBVA = base.filter(c => !esClienteNuevo(c));
+  const canalBBVA = CONTACTO_BBVA.map(x => ({
+    label: x.label,
+    n: deCarteraBBVA.filter(c => c.contacto_bbva === x.id).length
+  }));
+  const sinCanalBBVA = deCarteraBBVA.filter(c => !c.contacto_bbva).length;
+  const conCanalBBVA = deCarteraBBVA.length - sinCanalBBVA;
+  const maxCanalBBVA = Math.max(1, ...canalBBVA.map(x => x.n));
   const intentos = regs.length;
   const efectivos = regs.filter(r => esEfectivo(r.Resultado)).length;
   const pctEf = intentos ? Math.round(efectivos / intentos * 100) : 0;
@@ -3562,6 +3619,24 @@ function viewPanel(){
 
    <div>
     <div class="card">
+      <h3>Contacto con el ejecutivo de BBVA · por dónde llega la cartera</h3>
+      ${conCanalBBVA ? `
+        ${canalBBVA.map(x => `
+        <div class="bar-row">
+          <span class="nm">${esc(x.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanalBBVA*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${x.n}</span>
+        </div>`).join("")}
+        <div class="note" style="margin-top:11px">
+          ${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado el canal.
+          ${sinCanalBBVA ? `Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el dato fuera
+            obligatorio; se completan al editar el comercio.` : "Están todos."}
+        </div>`
+      : `<div class="note">Todavía ningún comercio tiene declarado el canal. Se pide desde el alta:
+         sin él no se puede registrar un comercio de cartera.</div>`}
+    </div>
+
+    <div class="card">
       <h3>Medio de contacto utilizado</h3>
       ${tipos.length ? tipos.map(t => `
         <div class="bar-row">
@@ -3616,7 +3691,7 @@ function viewPanel(){
    Exportación a Excel — estructura v3 (cartera en campo, sin datos sensibles)
    ========================================================================= */
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
-  "Estado_Gestion","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Estado_Gestion","Contacto_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
   "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
@@ -3640,6 +3715,7 @@ function filasBase(){
     return [c.customer_id, esClienteNuevo(c) ? "Cliente nuevo" : "Cartera BBVA",
       c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
       c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
+      esClienteNuevo(c) ? "No aplica" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
       c.asignado, c.asignado_correo,
       String(c.creado_en || "").slice(0,10),
       tipoCierre(c),
@@ -3896,7 +3972,7 @@ const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas"
    el análisis y las tablas dinámicas del lado de Stratis. Van en la misma hoja
    para que el pegado sea uno solo. */
 const COLS_DETALLE = [
-  "Nombre_Comercio","Rubro","Distrito",
+  "Nombre_Comercio","Rubro","Distrito","Contacto_BBVA",
   "Estado_Contacto","Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta",
   "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
   "Visitas_Validas","Visita_Presencial","Visita_Virtual",
@@ -3959,6 +4035,7 @@ function filasBBVA(soloEntrega){
       titulo(c.nombre_comercio || ""),
       rubroLabel(c),
       titulo(c.distrito || ""),
+      nomContactoBBVA(c.contacto_bbva) || "Sin indicar",
       estadoContacto(regs.length, efectivos.length),
       efectivos.length,
       regs.length - efectivos.length,
@@ -3996,6 +4073,7 @@ function alertasDe(c, regs, efectivos, suma){
   if (suma !== regs.length)                              a.push("Los medios no cuadran");
   if (efectivos.length && !regs.some(r => String(r.Calificacion || "").trim())) a.push("Respondió sin calificar");
   if (/^\d+$/.test(String(c.nombre_comercio || "").trim())) a.push("El nombre parece un RUC");
+  if (!esClienteNuevo(c) && !c.contacto_bbva) a.push("Sin indicar el contacto con BBVA");
   return a.join(" · ");
 }
 
