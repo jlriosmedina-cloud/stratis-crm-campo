@@ -128,9 +128,44 @@ nav.bottom button.on{color:var(--brand-2)}
 nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-width:16px;height:16px;border-radius:8px;background:var(--crit);color:#fff;font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700}
 
 /* ---------- COMPONENTS ---------- */
-.card{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);box-shadow:var(--sh);padding:14px;margin-bottom:11px}
-.card h3{margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--ink-2)}
+/* Una tarjeta es un contenedor, no un objeto que compite por atención: borde
+   fino, sin sombra. La sombra queda para lo que sí se lee primero —los
+   números de arriba— y así la pantalla se lee como una página, no como una
+   pila de cajas. */
+.card{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);padding:15px 16px;margin-bottom:11px}
+/* Los títulos van en su caja y media, no en mayúsculas. Cuando todo grita al
+   mismo volumen no se distingue lo importante de lo accesorio. */
+.card h3{margin:0 0 10px;font-size:14.5px;font-weight:640;letter-spacing:-.15px;color:var(--ink)}
+.card h3 .h3-sub{font-weight:400;color:var(--muted);font-size:12.5px;margin-left:6px}
 .sec-title{font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:16px 2px 8px}
+
+/* Un bloque dentro de una tarjeta no es otra tarjeta: se separa con una línea,
+   no con un marco. Marcos dentro de marcos es lo que hace ver todo apretado. */
+.bloque{padding-top:13px;margin-top:13px;border-top:1px solid var(--grid)}
+.bloque:first-child{padding-top:0;margin-top:0;border-top:0}
+.bloque > h4{margin:0 0 9px;font-size:13px;font-weight:640;color:var(--ink)}
+
+/* Vacío no es un aviso. Antes cada «todavía no hay datos» pintaba un recuadro
+   azul, y una pantalla sin actividad se veía como una pantalla llena de
+   alertas. Ahora es una línea gris y ya. */
+.vacio{color:var(--muted);font-size:13px;padding:14px 2px;line-height:1.5}
+
+/* Una nota al pie: contexto de una línea que no merece un recuadro. */
+.pie{font-size:12px;color:var(--muted);line-height:1.45;margin-top:8px}
+.pie b{color:var(--ink-2);font-weight:600}
+
+/* La explicación larga existe, pero plegada. El que ya sabe leer el número no
+   tiene que pasar por encima de tres párrafos cada vez que entra. */
+details.explica{margin-top:11px;border-top:1px solid var(--grid);padding-top:9px}
+details.explica > summary{cursor:pointer;font-size:12.5px;color:var(--brand-2);font-weight:600;
+  list-style:none;display:inline-flex;align-items:center;gap:6px}
+details.explica > summary::-webkit-details-marker{display:none}
+details.explica > summary:before{content:"›";display:inline-block;transition:transform .15s;font-size:15px;line-height:1}
+details.explica[open] > summary:before{transform:rotate(90deg)}
+details.explica .cuerpo{font-size:12.8px;color:var(--ink-2);line-height:1.55;margin-top:9px}
+details.explica .cuerpo p{margin:0 0 8px}
+details.explica .cuerpo p:last-child{margin-bottom:0}
+details.explica .cuerpo b{color:var(--ink)}
 
 /* ================= AJUSTES =================
    La pantalla se lee como secciones, no como una pila de tarjetas iguales.
@@ -139,7 +174,7 @@ nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-widt
 .aj-sec{margin:0 0 22px}
 .aj-sec > .aj-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 2px 9px;
   padding-bottom:7px;border-bottom:1px solid var(--line)}
-.aj-sec > .aj-h h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.2px;color:var(--ink)}
+.aj-sec > .aj-h h2{margin:0;font-size:17px;font-weight:700;letter-spacing:-.3px;color:var(--ink)}
 .aj-sec > .aj-h span{font-size:12.5px;color:var(--muted)}
 .aj-grid{display:grid;grid-template-columns:1fr;gap:11px;align-items:start}
 .aj-grid > .card{margin-bottom:0}
@@ -310,6 +345,45 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   .acc-nueva{flex-direction:column}
 }
 
+/* ---- Incentivos ----------------------------------------------------------
+   La llave y el cumplimiento se leen distinto: la primera es un semáforo de
+   tres luces, el segundo una tabla. El borde de la tarjeta dice de un vistazo
+   si ese ejecutivo tiene el cálculo habilitado. */
+.bn-card{border-left:3px solid var(--grid)}
+.bn-card.ok{border-left-color:var(--good)}
+.bn-card.medio{border-left-color:var(--warn)}
+.bn-card.no{border-left-color:var(--crit)}
+.bn-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.bn-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.bn-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin:15px 0 8px}
+.bn-reqs{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.bn-req{border:1px solid var(--grid);border-radius:10px;padding:10px 12px}
+.bn-req.ok{background:var(--good-bg)}
+.bn-req.no{background:var(--crit-bg)}
+.bn-req-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.bn-req-h b{font-size:13px}
+.bn-req-d{font-size:12px;color:var(--ink)}
+.bn-req-n{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35}
+.bn-obj .falta{opacity:.62}
+.bn-det{font-size:11.5px;color:var(--muted);font-weight:400}
+.bn-cierre{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;
+  padding-top:13px;border-top:1px solid var(--grid)}
+.bn-num .k{display:block;font-size:11px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--muted)}
+.bn-num b{display:block;font-size:26px;font-weight:680;line-height:1.15;margin-top:3px}
+.bn-num b.si{color:var(--good-ink)}
+.bn-num b.cero{color:var(--muted)}
+.bn-num b .sep{color:var(--muted);font-weight:400}
+.bn-num .s{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+.bn-params{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.bn-params .field{margin:0}
+.in-num{width:100%;text-align:right;padding:8px 10px;font-size:14px}
+@media (max-width:900px){
+  .bn-reqs,.bn-cierre{grid-template-columns:1fr}
+  .bn-params{grid-template-columns:repeat(2,1fr)}
+}
+
 /* ---- Bitácora de gestiones: control del equipo ---------------------------- */
 .seg-periodo{margin-bottom:13px}
 .ctrl{padding-bottom:6px}
@@ -366,6 +440,8 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .opt.on .rd:after{content:"";width:9px;height:9px;border-radius:50%;background:var(--brand-2)}
 .opt b{font-size:14px;font-weight:620;display:block}
 .opt span{font-size:12px;color:var(--muted);display:block;margin-top:1px}
+/* El recuadro azul queda para la guía que hace falta AHORA, una por tarjeta
+   como mucho. Lo demás es .pie, .vacio o va plegado en un details. */
 .note{background:var(--info-bg);border-radius:10px;padding:11px 12px;font-size:12.8px;color:var(--ink-2);line-height:1.5}
 .note b{color:var(--ink)}
 .note.ok{background:var(--good-bg);color:var(--good-ink)} .note.ok b{color:var(--good-ink)}
@@ -419,8 +495,10 @@ table.tbl tr:last-child td{border-bottom:0}
 .page-head .btn{flex:none;width:100%}
 
 /* ---------- BLOQUE DE FILTROS ---------- */
-.filtros{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);
-  box-shadow:var(--sh);padding:12px;margin-bottom:14px;display:grid;gap:10px}
+.filtros{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  padding:12px;margin-bottom:14px;display:grid;gap:10px}
+.filtros-mas{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.filtros-cuenta{font-size:12.5px;color:var(--muted);margin-left:auto}
 .filtros .search{flex:none}
 .seg{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
   padding:3px;gap:2px;overflow-x:auto;scrollbar-width:none}
@@ -536,7 +614,7 @@ table.tbl tr:last-child td{border-bottom:0}
    sin llegar nunca a estirar el texto de borde a borde: eso cansa de leer. */
 @media(min-width:1180px){
   main{max-width:1400px;padding:24px 28px 48px}
-  .card{padding:17px 19px}
+  .card{padding:18px 20px}
   .cl-grid{grid-template-columns:repeat(2,1fr);gap:12px}
   .cl{padding:14px 15px}
   .stat-row{gap:12px}
@@ -856,6 +934,117 @@ const cerroEn = (c, periodo) => !!c.cerrado_en && mesDelCierre(c) === periodo;
    no: esa nunca estuvo en la cartera de nadie. */
 const esRetencion  = c => !esClienteNuevo(c) && c.resultado_gestion === "RETENIDO";
 const esRecuperado = c => !esClienteNuevo(c) && c.resultado_gestion === "VENTA";
+/* =========================================================================
+   El modelo de incentivos
+
+   El bono tiene dos capas y conviene no mezclarlas. La primera es una llave:
+   tres mínimos de gestión que, cumplidos, habilitan el cálculo — no suman
+   nada al monto. La segunda son los objetivos del proyecto, que sí deciden
+   cuánto. Se puede tener un cumplimiento excelente y no cobrar nada porque
+   la llave no abrió, y se puede tener la llave abierta y no cobrar porque el
+   cumplimiento quedó bajo 80%.
+
+   El mes del bono tampoco es el del calendario: corta el 18 y arranca el 19
+   del mes anterior. Un periodo se nombra por el mes en que cierra, que es el
+   mes en que se paga.
+   ========================================================================= */
+const PROYECTO = { inicio:"2026-07-20", fin:"2026-12-18", corte:18 };
+
+/* Los parámetros no están clavados en el código: la revisión de octubre
+   estaba prevista desde el principio. Viven en config y se editan en Ajustes. */
+const BONO_DEF = {
+  metas:      { reactivacion_pp:18, facturacion_pct:15, ventas_mes:7 },
+  pesos:      { reactivacion:30, facturacion:50, venta:20 },
+  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95 },
+  piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
+  sobre:110, tope:30, pago_mensual:80
+};
+let BONO = JSON.parse(JSON.stringify(BONO_DEF));
+let FACTURACION = [];
+
+function ventanaPeriodo(p){
+  const [a, m] = String(p || "").split("-").map(Number);
+  if (!a || !m) return { ini:"", fin:"" };
+  let am = m - 1, aa = a; if (am === 0){ am = 12; aa -= 1; }
+  let ini = `${aa}-${pad(am)}-${pad(PROYECTO.corte + 1)}`;
+  if (ini < PROYECTO.inicio) ini = PROYECTO.inicio;   // el primero arranca con el proyecto
+  return { ini, fin: `${a}-${pad(m)}-${pad(PROYECTO.corte)}` };
+}
+/* «enPeriodo» ya está tomado por el filtro de fechas de Registros; esta es la
+   ventana del bono, que es otra cosa. */
+const enVentana = (fecha, p) => {
+  const f = String(fecha || "").slice(0,10), v = ventanaPeriodo(p);
+  return !!f && !!v.ini && f >= v.ini && f <= v.fin;
+};
+/* A qué periodo pertenece un día: hasta el 18 cierra este mes, del 19 en
+   adelante ya cuenta para el siguiente. */
+function periodoDe(iso){
+  const f = String(iso || "").slice(0,10); if (!f) return "";
+  let [a, m, d] = f.split("-").map(Number);
+  if (d > PROYECTO.corte){ m += 1; if (m === 13){ m = 1; a += 1; } }
+  return `${a}-${pad(m)}`;
+}
+const periodoHoy = () => periodoDe(hoyISO());
+function periodosProyecto(){
+  const l = []; let p = periodoDe(PROYECTO.inicio); const ult = periodoDe(PROYECTO.fin);
+  while (p <= ult){ l.push(p); const [a,m] = p.split("-").map(Number);
+    p = m === 12 ? `${a+1}-01` : `${a}-${pad(m+1)}`; }
+  return l;
+}
+const diasPeriodo = p => {
+  const v = ventanaPeriodo(p); if (!v.ini) return 0;
+  return Math.round((new Date(v.fin) - new Date(v.ini)) / 86400000) + 1;
+};
+/* Las semanas no se redondean: 31 días son 4,43 semanas y el mínimo de
+   visitas se escala igual. Redondear a 4 regalaría diez visitas. */
+const semanasPeriodo = p => diasPeriodo(p) / 7;
+function textoPeriodo(p){
+  const v = ventanaPeriodo(p); if (!v.ini) return "";
+  return `${fmtFecha(v.ini)} al ${fmtFecha(v.fin)}`;
+}
+/* El periodo se nombra por el mes en que cierra y se paga. */
+const nombrePeriodo = p => nombreMes(p);
+
+/* Demora en días trabajados. Un contacto del sábado registrado el lunes
+   llegó al día siguiente de trabajo; el domingo no cuenta. */
+function demoraHabil(r){
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const c = String(r.Creado_En || "").slice(0,10);
+  if (!f || !c || c <= f) return 0;
+  let n = 0;
+  for (let d = new Date(f); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (d.getUTCDay() !== 0) n++;              // solo el domingo no es día trabajado
+    if (iso >= c) break;
+  }
+  return n;
+}
+const aTiempo = r => demoraHabil(r) <= 1;
+
+const factDe = (correo, p) =>
+  FACTURACION.find(x => x.correo === correo && x.periodo === p) || null;
+function crecimientoFact(correo, p){
+  const f = factDe(correo, p);
+  if (!f || !(Number(f.monto_inicial) > 0) || f.monto_final === null || f.monto_final === undefined) return null;
+  return (Number(f.monto_final) - Number(f.monto_inicial)) / Number(f.monto_inicial) * 100;
+}
+
+/* Tramos: bajo el piso no hay incentivo; del piso a la meta sube parejo, y de
+   la meta al sobrecumplimiento sigue subiendo hasta el tope. Pasado el tope
+   no paga más: 200% de cumplimiento paga lo mismo que 110%. */
+function tramoIncentivo(pct){
+  const b = BONO;
+  if (!(pct >= b.piso)) return 0;
+  if (pct <= 100) return b.pago_en_piso + (pct - b.piso) / (100 - b.piso) * (b.pago_en_meta - b.pago_en_piso);
+  if (pct <= b.sobre) return b.pago_en_meta + (pct - 100) / (b.sobre - 100) * (b.tope - b.pago_en_meta);
+  return b.tope;
+}
+const nombreTramo = pct =>
+  !(pct >= BONO.piso) ? "Sin incentivo"
+  : pct < 100         ? "Progresión"
+  : pct <= BONO.sobre ? "Sobrecumplimiento" : "Tope";
+
 const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
 
 const rubroLabel = c => {
@@ -1027,6 +1216,8 @@ const S = {
   fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   mesPanel:"",   /* mes que se está mirando; vacío = el actual */
+  pBono:"",      /* periodo del bono; vacío = el que corre */
+  filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
   limite:40, cargando:false
 };
 
@@ -1359,6 +1550,24 @@ async function cargarSeguimientos(){
   } catch (e){ /* sin agenda, pero con CRM */ }
 }
 
+/* La facturación la carga el Analista a mano y los parámetros del modelo
+   viven en config. Ninguno de los dos lo ve el ejecutivo: la consulta
+   simplemente vuelve vacía por RLS y la pestaña no existe para él. */
+async function cargarFacturacion(){
+  if (!S.user || S.demo) return;
+  try {
+    const [fac, cfg] = await Promise.all([
+      sb.from("facturacion").select("*"),
+      sb.from("config").select("valor").eq("clave", "bono_parametros").maybeSingle()
+    ]);
+    if (!fac.error) FACTURACION = fac.data || [];
+    if (!cfg.error && cfg.data && cfg.data.valor){
+      try { BONO = Object.assign(JSON.parse(JSON.stringify(BONO_DEF)), JSON.parse(cfg.data.valor)); }
+      catch (e){ /* si el JSON quedó roto, se sigue con los del documento */ }
+    }
+  } catch (e){ /* sin incentivos, pero con CRM */ }
+}
+
 async function cargarMetas(){
   METAS = [];
   if (!S.user || S.demo) return;
@@ -1461,11 +1670,15 @@ const NAV = [
   { id:"agenda",   ic:"◷", label:"Agenda" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
+  { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
+/* El seguimiento del incentivo lo miran el Analista y el Manager; al ejecutivo
+   ni siquiera se le ofrece la pestaña. */
+const navVisible = () => NAV.filter(n => !n.soloMando || (S.user && S.user.rol !== "Ejecutivo"));
 
 function renderNav(){
-  $("#nav").innerHTML = NAV.map(n => `
+  $("#nav").innerHTML = navVisible().map(n => `
     <button data-tab="${n.id}" class="${S.tab === n.id ? "on" : ""}">
       <span class="ic">${n.ic}</span>${n.label}
     </button>`).join("");
@@ -1510,6 +1723,7 @@ function render(){
   else if (S.tab === "form_visita")       return renderFormulario();
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
   else if (S.tab === "agenda")            v.innerHTML = viewAgenda();
+  else if (S.tab === "bono")              v.innerHTML = viewBono();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
   else if (S.tab === "guia")              v.innerHTML = viewGuia();   // sin pestaña: el equipo no la usaba
@@ -1652,26 +1866,36 @@ function viewCartera(){
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
     </div>
 
-    <div class="sel-row">
-      <label class="fsel"><span>Estado</span>
-        <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
-          ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
-            .concat([["NUEVO", `Clientes nuevos · ${nuevos.length}`]]))}</select></label>
-      <label class="fsel"><span>Rubro</span>
-        <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`,
-          rubrosUsados.map(r => [r.codigo, `${r.nombre} · ${cuenta(base, c => c.rubro === r.codigo)}`]))}</select></label>
-      <label class="fsel"><span>Distrito</span>
-        <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`,
-          distritos.map(d => [d, `${titulo(d)} · ${cuenta(base, c => c.distrito === d)}`]))}</select></label>
-      ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo · Customer ID</span>
-        <select data-f="ejecutivo">${opciones(S.fEjecutivo, `Todo el equipo · ${deCartera.length} ID${nuevos.length ? " + " + nuevos.length + " nuevos" : ""}`,
-          USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, etiquetaEjec(u.nombre)]))}</select></label>` : ""}
-    </div>
-
-    ${filtrando ? `<div class="filtros-pie">
-      <span>${lista.length} de ${total} comercios</span>
-      <button class="btn ghost sm" id="limpiarFiltros">Quitar filtros</button>
-    </div>` : ""}
+    <!-- Los cuatro desplegables ocupaban más alto que la lista que filtran.
+         Ahora se piden: quedan plegados, y el botón dice cuántos hay puestos
+         para que nadie los deje activos sin darse cuenta. -->
+    ${(() => {
+      const puestos = [S.fEstadoCli, S.fRubro, S.fDistrito, S.fEjecutivo].filter(x => x !== "todos").length;
+      const abierto = S.filtrosAbiertos || puestos > 0;
+      return `
+      <div class="filtros-mas">
+        <button class="btn ghost sm" id="masFiltros" aria-expanded="${abierto}">
+          ${abierto ? "Ocultar filtros" : "Más filtros"}${puestos ? ` · ${puestos}` : ""}
+        </button>
+        ${filtrando ? `<span class="filtros-cuenta">${lista.length} de ${total} comercios</span>
+          <button class="btn ghost sm" id="limpiarFiltros">Quitar filtros</button>` : ""}
+      </div>
+      ${abierto ? `<div class="sel-row">
+        <label class="fsel"><span>Estado</span>
+          <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
+            ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
+              .concat([["NUEVO", `Clientes nuevos · ${nuevos.length}`]]))}</select></label>
+        <label class="fsel"><span>Rubro</span>
+          <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`,
+            rubrosUsados.map(r => [r.codigo, `${r.nombre} · ${cuenta(base, c => c.rubro === r.codigo)}`]))}</select></label>
+        <label class="fsel"><span>Distrito</span>
+          <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`,
+            distritos.map(d => [d, `${titulo(d)} · ${cuenta(base, c => c.distrito === d)}`]))}</select></label>
+        ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo · Customer ID</span>
+          <select data-f="ejecutivo">${opciones(S.fEjecutivo, `Todo el equipo · ${deCartera.length} ID${nuevos.length ? " + " + nuevos.length + " nuevos" : ""}`,
+            USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, etiquetaEjec(u.nombre)]))}</select></label>` : ""}
+      </div>` : ""}`;
+    })()}
   </div>
 
   <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
@@ -2729,7 +2953,7 @@ function renderFormulario(){
   <div class="card">
     <h3 style="margin-bottom:4px">${S.editId ? "Editar" : "Registrar"} contacto / intento</h3>
     <div style="font-size:13px;color:var(--muted)">${esc(titulo(nombreCliente(c)))} · ID ${esc(c.customer_id)} · ${esc(titulo(c.distrito))}</div>
-    ${S.editId ? `<div class="note" style="margin-top:11px">La <b>ubicación capturada no se puede modificar</b>: queda como constancia del lugar donde se hizo el registro.</div>` : ""}
+    ${S.editId ? `<div class="pie">La <b>ubicación capturada no se puede modificar</b>: queda como constancia del lugar donde se hizo el registro.</div>` : ""}
   </div>
 
   ${S.editId ? "" : `
@@ -2748,7 +2972,7 @@ function renderFormulario(){
       Estás registrando una gestión de hace ${esc(textoDias(diasDeAtraso(f.Fecha_Contacto)))}. Se puede,
       pero mientras más cerca del día en que ocurrió, más confiable el seguimiento.
     </div>` : ""}
-    <div class="note" style="margin-top:4px">Se registra automáticamente a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> (${esc(S.user.correo)}).</div>
+    <div class="pie">Se registra a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> · ${esc(S.user.correo)}</div>
   </div>`}
 
   ${S.editId ? (corregible(f) ? `
@@ -2836,7 +3060,7 @@ function renderFormulario(){
 
   <div class="card">
     <h3>¿Cuál fue el resultado? <span class="req">*</span></h3>
-    <div class="note" style="margin-bottom:11px">Todo registro cuenta como intento de comunicación. Solo <b>“Habló con el contacto”</b> cuenta como contacto logrado y puede calificar como visita.</div>
+    <div class="pie" style="margin:0 0 11px">Todo registro cuenta como intento de comunicación. Solo <b>“Habló con el contacto”</b> cuenta como contacto logrado y puede calificar como visita.</div>
     <div class="opts">
       ${RESULTADOS.map(r => `
         <div class="opt ${f.Resultado === r.id ? "on" : ""}" data-res="${r.id}">
@@ -2987,7 +3211,7 @@ function pintarCierre(c){
 function pintarDerivado(){
   const f = S.form, box = $("#derivado");
   if (!box) return;
-  if (!f.Tipo_Contacto){ box.innerHTML = `<div class="note">Selecciona el medio de contacto para calcular <b>Cumple_Visita</b>.</div>`; return; }
+  if (!f.Tipo_Contacto){ box.innerHTML = `<div class="pie" style="margin-top:0">Elige el medio para saber si esta gestión cuenta como visita.</div>`; return; }
   const cumple = RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado);
   const efectivo = esEfectivo(f.Resultado);
   box.innerHTML = `
@@ -3618,9 +3842,8 @@ function viewRegistros(){
   ${lista.length > mostrar.length ? `<button class="btn ghost block" id="masReg">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}
 
   <div class="card" style="margin-top:14px">
-    <div class="note"><b>Editar no suma un intento.</b> El contador solo sube cuando se registra un contacto
-    nuevo desde la ficha del comercio. Al editar solo se corrigen comentarios y calificación:
-    el medio, el resultado, la fecha y la ubicación quedan fijos.</div>
+    <div class="pie" style="margin:0"><b>Editar no suma un intento.</b> El contador solo sube cuando se registra
+    un contacto nuevo desde la ficha del comercio.</div>
   </div>`;
 }
 
@@ -3723,12 +3946,12 @@ function cardAlcance(){
       </tr>`).join("")}</tbody>
     </table></div>
 
-    <div class="note" style="margin-top:11px">
-      <b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban de
-      baja y volvieron: cierran como Venta, pero salían de la misma cartera asignada y por eso
-      suman al alcance. Las ventas nuevas por RUC no entran acá.
-      Un cierre cuenta en el mes en que se decidió.
-    </div>
+    <details class="explica"><summary>Qué cuenta como retenido y qué como recuperado</summary>
+      <div class="cuerpo"><p><b>Retenidos</b> son comercios que ya operaban y se quedaron.
+      <b>Recuperados</b> estaban de baja y volvieron: cierran como Venta, pero salían de la misma
+      cartera asignada y por eso suman al alcance. Las ventas nuevas por RUC no entran acá.
+      Un cierre cuenta en el mes en que se decidió.</p></div>
+    </details>
   </div>`;
 }
 
@@ -3851,19 +4074,18 @@ function viewPanel(){
     <div class="g-leyenda">
       ${repartoCierre.map(x => `<span><i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></span>`).join("")}
     </div>
-    <div class="note" style="margin-top:12px">
-      <b>Los dos números dicen cosas distintas.</b> El <b>avance</b> es cuánto de la cartera ya está
-      cerrado con objetivo cumplido; al empezar la campaña va a ser bajo, y está bien.
-      La <b>efectividad de cierre</b> mira solo lo ya decidido: de cada comercio que dejó de estar
-      pendiente, cuántos se ganaron. Un 100% de efectividad con 3 comercios decididos de 200 no es
-      una buena campaña — por eso van juntos.
-    </div>
-    <div class="note" style="margin-top:9px">
-      Nada de esto es lo mismo que la <b>tasa de respuesta</b> de arriba, que solo mide en cuántos
-      intentos el cliente contestó. Que respondan no es que se queden: se puede tener 100% de
-      respuesta y 0% de retención. Y mandar un correo o un WhatsApp no cuenta como respuesta
-      mientras nadie conteste.
-    </div>` : `<div class="note">Todavía no hay comercios registrados en la campaña.</div>`}
+    <details class="explica"><summary>Por qué van dos números y no uno</summary>
+      <div class="cuerpo">
+        <p>El <b>avance</b> es cuánto de la cartera ya está cerrado con objetivo cumplido; al empezar
+        la campaña va a ser bajo, y está bien. La <b>efectividad de cierre</b> mira solo lo ya
+        decidido: de cada comercio que dejó de estar pendiente, cuántos se ganaron. Un 100% de
+        efectividad con 3 comercios decididos de 200 no es una buena campaña — por eso van juntos.</p>
+        <p>Nada de esto es lo mismo que la <b>tasa de respuesta</b> de arriba, que solo mide en cuántos
+        intentos el cliente contestó. Que respondan no es que se queden: se puede tener 100% de
+        respuesta y 0% de retención. Y mandar un correo o un WhatsApp no cuenta como respuesta
+        mientras nadie conteste.</p>
+      </div>
+    </details>` : `<div class="vacio">Todavía no hay comercios registrados en la campaña.</div>`}
   </div>
 
   <div class="grid2">
@@ -3877,15 +4099,13 @@ function viewPanel(){
           <span class="bar-val">${Math.round(e.pct)}%</span>
         </div>
         <div class="bar-sub">${e.ids} Customer ID${e.nuevos ? " + " + e.nuevos + " nuevo" + (e.nuevos===1?"":"s") : ""} · ${e.intentos} intentos · ${e.efectivos} con respuesta · ${e.cumple} visitas válidas</div>
-      `).join("") : `<div class="note">Todavía no hay actividad registrada en la campaña.</div>`}
+      `).join("") : `<div class="vacio">Todavía no hay actividad registrada en la campaña.</div>`}
     </div>
 
     <div class="card">
       <h3>Customer ID registrados · por ejecutivo</h3>
-      <div class="note" style="margin-bottom:11px">
-        Cuántos comercios de la cartera de BBVA lleva cargado cada uno. Las ventas nuevas van
-        aparte: no tienen Customer ID.
-      </div>
+      <div class="pie" style="margin:-4px 0 11px">Cuántos comercios de la cartera lleva cargado cada uno.
+        Las ventas nuevas van aparte: no tienen Customer ID.</div>
       ${(() => {
         const reg = ejecutivos.slice().sort((a,b) => b.ids - a.ids);
         const maxId = Math.max(1, ...reg.map(e => e.ids));
@@ -3896,7 +4116,7 @@ function viewPanel(){
             <span class="bar-val">${e.ids}</span>
           </div>
           ${e.nuevos ? `<div class="bar-sub">+ ${e.nuevos} venta${e.nuevos===1?"":"s"} nueva${e.nuevos===1?"":"s"} por RUC</div>` : ""}
-        `).join("") : `<div class="note">Todavía no hay comercios registrados.</div>`;
+        `).join("") : `<div class="vacio">Todavía no hay comercios registrados.</div>`;
       })()}
       <div class="bar-sub" style="margin-top:9px">
         Total de la campaña: <b>${base.filter(c => !esClienteNuevo(c)).length}</b> Customer ID${
@@ -3911,8 +4131,9 @@ function viewPanel(){
           <span class="nm">${esc(x.label)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxRes*100).toFixed(1)}%;background:${x.ok?"var(--good)":"var(--serious)"}"></span></span>
           <span class="bar-val">${x.n}</span>
-        </div>`).join("") : `<div class="note">Aún no hay intentos registrados.</div>`}
-      <div class="note" style="margin-top:9px">Cada registro cuenta como intento, aunque sea el cuarto con el mismo comercio. Solo el resultado <b>“Habló con el contacto”</b> suma como comunicación lograda.</div>
+        </div>`).join("") : `<div class="vacio">Aún no hay intentos registrados.</div>`}
+      <div class="pie">Cada registro cuenta como intento, aunque sea el cuarto con el mismo comercio.
+        Solo el resultado <b>“Habló con el contacto”</b> suma como comunicación lograda.</div>
     </div>
 
     <div class="card">
@@ -3922,7 +4143,7 @@ function viewPanel(){
           <span class="nm">${x.k} intento${x.k===1?"":"s"}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxIns*100).toFixed(1)}%"></span></span>
           <span class="bar-val">${x.n}</span>
-        </div>`).join("") : `<div class="note">Sin datos todavía.</div>`}
+        </div>`).join("") : `<div class="vacio">Sin datos todavía.</div>`}
     </div>
    </div>
 
@@ -3936,12 +4157,12 @@ function viewPanel(){
           <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanalBBVA*100).toFixed(1)}%"></span></span>
           <span class="bar-val">${x.n}</span>
         </div>`).join("")}
-        <div class="note" style="margin-top:11px">
+        <div class="pie">
           ${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado el canal.
           ${sinCanalBBVA ? `Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el dato fuera
             obligatorio; se completan al editar el comercio.` : "Están todos."}
         </div>`
-      : `<div class="note">Todavía ningún comercio tiene declarado el canal. Se pide desde el alta:
+      : `<div class="vacio">Todavía ningún comercio tiene declarado el canal. Se pide desde el alta:
          sin él no se puede registrar un comercio de cartera.</div>`}
     </div>
 
@@ -3952,7 +4173,7 @@ function viewPanel(){
           <span class="nm">${esc(t.label)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${(t.n/maxTipo*100).toFixed(1)}%"></span></span>
           <span class="bar-val">${t.n}</span>
-        </div>`).join("") : `<div class="note">Aún no hay contactos registrados.</div>`}
+        </div>`).join("") : `<div class="vacio">Aún no hay contactos registrados.</div>`}
     </div>
 
     <div class="card">
@@ -3962,7 +4183,7 @@ function viewPanel(){
           <span class="nm">${esc(r.label)} <span style="color:var(--muted)">(${r.total})</span></span>
           <span class="bar-track"><span class="bar-fill" style="width:${r.pct.toFixed(1)}%"></span></span>
           <span class="bar-val">${Math.round(r.pct)}%</span>
-        </div>`).join("") : `<div class="note">Todavía no hay comercios registrados.</div>`}
+        </div>`).join("") : `<div class="vacio">Todavía no hay comercios registrados.</div>`}
     </div>
 
 
@@ -3983,17 +4204,16 @@ function viewPanel(){
         <div class="note warn" style="margin-top:9px">Las coordenadas siempre las toma el GPS del equipo: nadie las escribe
         ni las corrige. Un registro sin verificar significa que en ese momento no hubo señal o permiso de ubicación.</div>`
         : `<div class="note ok" style="margin-top:9px">Todas las visitas presenciales tienen coordenadas tomadas por GPS.</div>`}`
-      : `<div class="note">Aún no hay visitas presenciales registradas.</div>`}
+      : `<div class="vacio">Aún no hay visitas presenciales registradas.</div>`}
     </div>
 
    </div>
   </div>
 
-  ${S.user.rol !== "Ejecutivo" ? `<div class="card">
-    <h3>Descargar la base</h3>
-    <div class="note" style="margin-bottom:11px">Excel completo con los datos actualizados al momento de generarlo.</div>
-    <button class="btn block" id="expXlsx2">Descargar Excel completo</button>
-  </div>` : ""}`;
+  ${S.user.rol !== "Ejecutivo"
+    ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
+        <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
+    : ""}`;
 }
 
 /* =========================================================================
@@ -4806,6 +5026,8 @@ function viewAyuda(){
   ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
   ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
   ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
+  ${admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : ""}
+  ${admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""}
   ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
   ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
@@ -5594,8 +5816,7 @@ function cardAcciones(){
   const usos = cod => SEGUIMIENTOS.filter(x => x.accion === cod).length;
   return `
   <div class="card">
-    <h3>Próximas acciones · el catálogo del equipo</h3>
-    <div class="note" style="margin-bottom:12px">
+    <div class="pie" style="margin:0 0 13px">
       Es la lista que ve el ejecutivo cuando una gestión no cierra el comercio. Lo que cambies acá
       lo ven todos en cuanto se sincronicen. Una acción que ya no se usa se <b>desactiva</b>: así
       desaparece del formulario pero las que ya se registraron con ella conservan su nombre.
@@ -5679,6 +5900,455 @@ function bindAcciones(){
 }
 
 /* =========================================================================
+   Incentivos: la llave de acceso y el cumplimiento
+
+   Dos capas que no se mezclan. La llave son tres mínimos de gestión —
+   cobertura, visitas efectivas y puntualidad del registro— que habilitan el
+   cálculo pero no aportan un sol al monto. El cumplimiento son los tres
+   objetivos del proyecto, que sí deciden cuánto.
+
+   Todo se mide en la ventana del bono, del 19 al 18, no en el mes del
+   calendario. Y todo sale del CRM salvo la facturación, que vive en la
+   plataforma de BBVA y se carga a mano cada periodo.
+   ========================================================================= */
+const periodoBono = () => S.pBono || periodoHoy();
+
+const ejecutivosDelBono = () => USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+
+/* La cartera de la que responde un ejecutivo. Se prefiere lo que BBVA asignó
+   —vive en Metas— y si no está cargado se cuenta lo que tiene en el CRM. */
+function carteraDe(correo, p){
+  const asignada = metaDe(correo, p);
+  if (asignada > 0) return { n: asignada, fuente: "asignada" };
+  const n = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c)).length;
+  return { n, fuente: "crm" };
+}
+
+const gestionesDe = (correo, p) =>
+  DB.todos().filter(r => r.Correo_Stratis === correo && enVentana(r.Fecha_Contacto, p));
+
+/* ---- La llave ----------------------------------------------------------
+   Tres requisitos. Cumplir los tres habilita el cálculo; fallar uno deja
+   solo el bono base; fallar dos o más deja sin incentivo. */
+function llaveDe(correo, p){
+  const cart  = carteraDe(correo, p);
+  const gest  = gestionesDe(correo, p);
+  const req   = BONO.requisitos;
+
+  const tocados = new Set(gest.map(r => String(r.Customer_id)));
+  const mios    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const cubiertos = mios.filter(c => tocados.has(String(c.customer_id))).length;
+  const cobertura = cart.n ? cubiertos / cart.n * 100 : 0;
+
+  const efectivas = gest.filter(r => r.Cumple_Visita === "SI").length;
+  const semanas   = semanasPeriodo(p);
+  const pide      = Math.round(req.visitas_semana * semanas);
+  const porSemana = semanas ? efectivas / semanas : 0;
+
+  const puntuales = gest.filter(aTiempo).length;
+  const puntualidad = gest.length ? puntuales / gest.length * 100 : 0;
+
+  const r1 = { valor:cobertura,   meta:req.cobertura_pct,    ok: cobertura   >= req.cobertura_pct,
+               detalle:`${cubiertos} de ${cart.n} comercios` };
+  const r2 = { valor:porSemana,   meta:req.visitas_semana,   ok: efectivas   >= pide,
+               detalle:`${efectivas} efectivas, se piden ${pide}` };
+  const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
+               detalle: gest.length ? `${puntuales} de ${gest.length} a tiempo` : "sin gestiones en el periodo" };
+
+  const cumplidos = [r1,r2,r3].filter(x => x.ok).length;
+  return { cobertura:r1, visitas:r2, puntualidad:r3, cumplidos, gestiones:gest.length,
+           cartera:cart, efectivas, semanas, pide,
+           estado: cumplidos === 3 ? "activo" : cumplidos === 2 ? "base" : "sin" };
+}
+
+const TEXTO_LLAVE = {
+  activo:"Habilitado",
+  base:"Solo bono base",
+  sin:"Sin incentivo"
+};
+
+/* ---- El cumplimiento ---------------------------------------------------
+   Reactivación y venta salen del CRM; la facturación se carga a mano. Si
+   falta la facturación no se inventa un cero: se dice que falta, porque un
+   cero hundiría el ponderado y haría ver mal a quien quizá va bien. */
+function cumplimientoDe(correo, p){
+  const cart = carteraDe(correo, p);
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+
+  const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
+  const pp       = cart.n ? logrados / cart.n * 100 : 0;
+  const cReact   = BONO.metas.reactivacion_pp ? pp / BONO.metas.reactivacion_pp * 100 : 0;
+
+  const crec  = crecimientoFact(correo, p);
+  const cFact = crec === null ? null
+              : BONO.metas.facturacion_pct ? crec / BONO.metas.facturacion_pct * 100 : 0;
+
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
+                                   && enVentana(c.creado_en, p)).length;
+  const cVenta = BONO.metas.ventas_mes ? ventas / BONO.metas.ventas_mes * 100 : 0;
+
+  const objetivos = [
+    { id:"react", nombre:"Reactivación del portafolio", peso:BONO.pesos.reactivacion,
+      meta:`+${BONO.metas.reactivacion_pp} p.p.`, logro:`${pp.toFixed(1)} p.p.`,
+      detalle:`${logrados} de ${cart.n} comercios con objetivo cumplido`, cumpl:cReact },
+    { id:"fact", nombre:"Facturación", peso:BONO.pesos.facturacion,
+      meta:`+${BONO.metas.facturacion_pct}%`,
+      logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
+      detalle: crec === null ? "falta cargar el monto del periodo" : montoFact(correo, p),
+      cumpl:cFact },
+    { id:"venta", nombre:"Venta (afiliación)", peso:BONO.pesos.venta,
+      meta:`${BONO.metas.ventas_mes} por periodo`, logro:String(ventas),
+      detalle: ventas === 1 ? "1 afiliación nueva" : `${ventas} afiliaciones nuevas`, cumpl:cVenta }
+  ];
+
+  /* El ponderado se reparte solo entre lo que sí se puede medir: si falta la
+     facturación, el 50% no se cuenta como cero, se saca del reparto y se
+     avisa que el número está incompleto. */
+  const medibles = objetivos.filter(o => o.cumpl !== null);
+  const peso = medibles.reduce((n,o) => n + o.peso, 0);
+  const total = peso ? medibles.reduce((n,o) => n + o.cumpl * o.peso, 0) / peso : 0;
+
+  return { objetivos, total, completo: medibles.length === objetivos.length,
+           pesoMedido:peso, ventas, logrados, pp };
+}
+
+function montoFact(correo, p){
+  const f = factDe(correo, p);
+  if (!f) return "";
+  return `${soles(f.monto_inicial)} → ${soles(f.monto_final)}`;
+}
+
+/* Lo que se cobraría, en porcentaje del sueldo. El CRM no guarda sueldos:
+   ese dato no tiene por qué vivir acá. */
+function incentivoDe(correo, p){
+  const ll = llaveDe(correo, p);
+  const cu = cumplimientoDe(correo, p);
+  const bruto = tramoIncentivo(cu.total);
+  let pago = 0, nota = "";
+  if (ll.estado === "sin"){ pago = 0; nota = "No cumplió dos o más requisitos de gestión"; }
+  else if (ll.estado === "base"){
+    pago = bruto > 0 ? Math.min(bruto, BONO.base_incumple_uno) : 0;
+    nota = "Incumplió un requisito: solo bono base";
+  } else {
+    pago = bruto;
+    nota = bruto > 0 ? "" : `El cumplimiento no llega al ${BONO.piso}%`;
+  }
+  return { llave:ll, cumpl:cu, bruto, pago, nota,
+           mensual: pago * BONO.pago_mensual / 100,
+           retenido: pago * (100 - BONO.pago_mensual) / 100 };
+}
+
+/* =========================================================================
+   La pantalla
+   ========================================================================= */
+const pct1 = n => (Math.round(n * 10) / 10).toFixed(1).replace(/\.0$/, "") + "%";
+
+/* Una cifra por semana no es un porcentaje: cada requisito trae su forma de
+   leerse para que el chip no diga «12,4%» donde debería decir «12,4 por semana». */
+function filaRequisito(nombre, r, fmt, comoSeMide){
+  return `<div class="bn-req ${r.ok ? "ok" : "no"}">
+    <div class="bn-req-h">
+      <b>${esc(nombre)}</b>
+      <span class="chip ${r.ok ? "ok" : "crit"}">${r.ok ? "✓" : "✕"} ${esc(fmt(r.valor))}</span>
+    </div>
+    <div class="bn-req-d">${esc(r.detalle)} · mínimo ${esc(fmt(r.meta))}</div>
+    <div class="bn-req-n">${esc(comoSeMide)}</div>
+  </div>`;
+}
+const comoPct    = v => pct1(v);
+const porSemana1 = v => (Math.round(v * 10) / 10).toString().replace(".", ",") + " por semana";
+
+function tarjetaEjecutivo(u, p){
+  const x = incentivoDe(u.correo, p);
+  const ll = x.llave, cu = x.cumpl;
+  const clase = ll.estado === "activo" ? "ok" : ll.estado === "base" ? "medio" : "no";
+
+  return `<div class="card bn-card ${clase}">
+    <div class="bn-top">
+      <div>
+        <h3 style="margin:0">${esc(u.nombre)}</h3>
+        <div class="bn-sub">${ll.gestiones} gestiones en el periodo · cartera de ${ll.cartera.n}${
+          ll.cartera.fuente === "crm" ? " (contada en el CRM, sin meta cargada)" : ""}</div>
+      </div>
+      <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
+    </div>
+
+    <div class="bn-sec">Llave de acceso · ${ll.cumplidos} de 3 requisitos</div>
+    <div class="bn-reqs">
+      ${filaRequisito("Cobertura de cartera", ll.cobertura, comoPct,
+        "Comercios asignados con al menos una gestión en el periodo")}
+      ${filaRequisito("Visitas efectivas", ll.visitas, porSemana1,
+        `Presenciales o virtuales en las que se logró hablar. El periodo tiene ${
+          ll.semanas.toFixed(1).replace(".", ",")} semanas: se piden ${ll.pide}`)}
+      ${filaRequisito("Puntualidad del registro", ll.puntualidad, comoPct,
+        "Registradas el mismo día trabajado o el siguiente; el domingo no cuenta")}
+    </div>
+
+    <div class="bn-sec">Cumplimiento de objetivos</div>
+    <div class="tbl-wrap"><table class="tbl bn-obj">
+      <thead><tr><th>Objetivo</th><th style="text-align:right">Meta</th>
+        <th style="text-align:right">Va en</th><th style="text-align:right">Peso</th>
+        <th style="text-align:right">Cumplimiento</th></tr></thead>
+      <tbody>${cu.objetivos.map(o => `<tr${o.cumpl === null ? ' class="falta"' : ""}>
+        <td><b>${esc(o.nombre)}</b><div class="bn-det">${esc(o.detalle)}</div></td>
+        <td style="text-align:right">${esc(o.meta)}</td>
+        <td style="text-align:right"><b>${esc(o.logro)}</b></td>
+        <td style="text-align:right">${o.peso}%</td>
+        <td style="text-align:right">${o.cumpl === null ? "—" : pct1(o.cumpl)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+
+    <div class="bn-cierre">
+      <div class="bn-num">
+        <span class="k">Cumplimiento ponderado</span>
+        <b>${pct1(cu.total)}</b>
+        <span class="s">${cu.completo ? nombreTramo(cu.total)
+          : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
+      </div>
+      <div class="bn-num">
+        <span class="k">Incentivo del periodo</span>
+        <b class="${x.pago > 0 ? "si" : "cero"}">${pct1(x.pago)}</b>
+        <span class="s">del sueldo base${x.nota ? " · " + esc(x.nota) : ""}</span>
+      </div>
+      <div class="bn-num">
+        <span class="k">Se paga ahora / se retiene</span>
+        <b>${pct1(x.mensual)} <span class="sep">/</span> ${pct1(x.retenido)}</b>
+        <span class="s">${BONO.pago_mensual}% con la remuneración, el resto al cierre</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function viewBono(){
+  if (S.user.rol === "Ejecutivo")
+    return `<div class="card"><h3>Solo para supervisión</h3>
+      <p style="margin:0">El seguimiento del incentivo lo revisan el Analista y el Manager.</p></div>`;
+
+  const p = periodoBono();
+  const ejec = ejecutivosDelBono();
+  const periodos = periodosProyecto();
+  const v = ventanaPeriodo(p);
+  const abierto = hoyISO() <= v.fin && hoyISO() >= v.ini;
+
+  const res = ejec.map(u => incentivoDe(u.correo, p));
+  const habilitados = res.filter(x => x.llave.estado === "activo").length;
+  const conBono     = res.filter(x => x.pago > 0).length;
+  const prom = res.length ? res.reduce((n,x) => n + x.cumpl.total, 0) / res.length : 0;
+  const faltaFact   = ejec.filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  return `
+  <h2 style="margin:0 0 3px">Incentivos</h2>
+  <div class="sub">Periodo del ${esc(textoPeriodo(p))} — se paga en ${esc(nombrePeriodo(p))}${
+    abierto ? " · el periodo sigue abierto, los números se mueven" : ""}</div>
+
+  <div class="stat-row" style="margin-top:12px">
+    <div class="stat"><div class="lbl">Con la llave abierta</div><div class="val">${habilitados}</div>
+      <div class="sub">de ${ejec.length} cumplen los 3 requisitos</div></div>
+    <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
+      <div class="sub">llegan al ${BONO.piso}% de cumplimiento</div></div>
+    <div class="stat"><div class="lbl">Cumplimiento promedio</div><div class="val">${pct1(prom)}</div>
+      <div class="sub">del equipo, sobre lo medible</div></div>
+    <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
+      <div class="sub">${faltaFact === 1 ? "ejecutivo sin monto cargado" : "ejecutivos sin monto cargado"}</div></div>
+  </div>
+
+  ${faltaFact ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+    <h3 style="margin-bottom:4px">Falta la facturación de ${faltaFact} ${
+      faltaFact === 1 ? "ejecutivo" : "ejecutivos"} en este periodo</h3>
+    <div class="note" style="margin-bottom:0">
+      Es el ${BONO.pesos.facturacion}% del peso y el CRM no la ve: sale de la plataforma de BBVA.
+      Mientras falte, el cumplimiento que se muestra está calculado solo sobre lo demás y
+      <b>no sirve para liquidar</b>. Se carga en <b>Ajustes → Facturación del periodo</b>.
+    </div>
+  </div>` : ""}
+
+  <div class="card" style="margin-top:12px">
+    <label class="fsel"><span>Periodo</span>
+      <select id="selPeriodoBono">${periodos.map(x =>
+        `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
+      </select></label>
+  </div>
+
+  ${ejec.length ? ejec.map(u => tarjetaEjecutivo(u, p)).join("")
+    : `<div class="card"><p style="margin:0">No hay ejecutivos activos cargados.</p></div>`}
+
+  <div class="card">
+    <details class="explica" style="margin-top:0;border-top:0;padding-top:0">
+      <summary>Cómo se lee este cálculo</summary>
+    <div class="aj-reglas" style="margin-top:12px">
+      <div class="kv"><dt>La llave no suma</dt><dd>Los tres requisitos habilitan el cálculo, no aportan al monto.
+        Con los tres, se calcula normal. Con uno incumplido, solo el bono base del ${BONO.base_incumple_uno}%.
+        Con dos o más, no corresponde incentivo.</dd></div>
+      <div class="kv"><dt>El periodo corta el 18</dt><dd>Del 19 al 18 del mes siguiente. Nada acá se mide por mes calendario.</dd></div>
+      <div class="kv"><dt>Reactivación</dt><dd>Comercios retenidos y recuperados sobre la cartera asignada,
+        solo los que tienen Customer ID. Las ventas nuevas por RUC cuentan aparte, en su propio objetivo.</dd></div>
+      <div class="kv"><dt>Facturación</dt><dd>El CRM no la ve. Se carga el monto inicial y el final del periodo
+        y el crecimiento se calcula solo.</dd></div>
+      <div class="kv"><dt>Visitas efectivas</dt><dd>Las que el CRM marca como <b>cumple visita</b>: presencial o virtual
+        <b>y</b> con el cliente respondiendo. El mínimo se escala a las semanas reales del periodo.</dd></div>
+      <div class="kv"><dt>Sin sueldos</dt><dd>Todo se expresa en porcentaje del sueldo base. Las remuneraciones
+        no viven en el CRM y no tienen por qué.</dd></div>
+    </div>
+    </details>
+  </div>`;
+}
+
+/* =========================================================================
+   Carga de la facturación, en Ajustes
+   ========================================================================= */
+function cardFacturacion(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const p = periodoBono();
+  const ejec = ejecutivosDelBono();
+
+  return `
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      Es el ${BONO.pesos.facturacion}% del peso del incentivo y el CRM no puede verlo. Carga el monto con el
+      que arrancó el periodo y el que quedó al cierre; el crecimiento lo calcula solo.
+      Se guarda con tu nombre y la fecha.
+    </div>
+    <label class="fsel" style="margin-bottom:10px"><span>Periodo</span>
+      <select id="selPeriodoFact">${periodosProyecto().map(x =>
+        `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
+      </select></label>
+
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Facturación inicial</th>
+        <th style="text-align:right">Facturación final</th><th style="text-align:right">Crecimiento</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const f = factDe(u.correo, p) || {};
+        const cr = crecimientoFact(u.correo, p);
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>${f.actualizado_por
+            ? `<div class="bn-det">último cambio: ${esc(f.actualizado_por)}</div>` : ""}</td>
+          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+            data-fact="ini|${esc(u.correo)}" value="${f.monto_inicial == null ? "" : esc(f.monto_inicial)}" placeholder="S/"></td>
+          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+            data-fact="fin|${esc(u.correo)}" value="${f.monto_final == null ? "" : esc(f.monto_final)}" placeholder="S/"></td>
+          <td style="text-align:right">${cr === null ? "—"
+            : `<b class="${cr >= BONO.metas.facturacion_pct ? "si" : ""}">${cr >= 0 ? "+" : ""}${cr.toFixed(1)}%</b>`}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+    <button class="btn block" id="factGuardar" style="margin-top:12px">Guardar la facturación</button>
+  </div>`;
+}
+
+async function guardarFacturacion(){
+  const p = ($("#selPeriodoFact") && $("#selPeriodoFact").value) || periodoBono();
+  const num = v => { const s = String(v || "").replace(/[^\d.\-]/g, ""); return s === "" ? null : Number(s); };
+  const filas = {};
+  document.querySelectorAll("[data-fact]").forEach(el => {
+    const [cual, correo] = el.dataset.fact.split("|");
+    filas[correo] = filas[correo] || { periodo:p, correo, monto_inicial:null, monto_final:null };
+    filas[correo][cual === "ini" ? "monto_inicial" : "monto_final"] = num(el.value);
+  });
+  const lista = Object.values(filas).filter(f => f.monto_inicial !== null || f.monto_final !== null);
+  const malos = lista.filter(f => (f.monto_inicial !== null && !(f.monto_inicial >= 0))
+                               || (f.monto_final   !== null && !(f.monto_final   >= 0)));
+  if (malos.length) return toast("Hay montos que no son números válidos");
+  if (!lista.length) return toast("No hay montos que guardar");
+
+  const b = $("#factGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("facturacion").upsert(lista, { onConflict:"periodo,correo" });
+  b.disabled = false; b.textContent = "Guardar la facturación";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); render();
+  toast(`Facturación de ${nombrePeriodo(p)} guardada`);
+}
+
+/* =========================================================================
+   Los parámetros del modelo
+
+   La revisión de octubre estaba prevista desde el principio: si las metas o
+   los pesos cambian, se cambian acá y no en el código.
+   ========================================================================= */
+const CAMPOS_BONO = [
+  ["metas.reactivacion_pp",      "Meta de reactivación",        "p.p."],
+  ["metas.facturacion_pct",      "Meta de facturación",         "%"],
+  ["metas.ventas_mes",           "Ventas por periodo",          ""],
+  ["pesos.reactivacion",         "Peso de reactivación",        "%"],
+  ["pesos.facturacion",          "Peso de facturación",         "%"],
+  ["pesos.venta",                "Peso de venta",               "%"],
+  ["requisitos.cobertura_pct",   "Cobertura mínima",            "%"],
+  ["requisitos.visitas_semana",  "Visitas efectivas por semana",""],
+  ["requisitos.puntualidad_pct", "Puntualidad mínima",          "%"],
+  ["piso",                       "Piso del incentivo",          "%"],
+  ["pago_en_piso",               "Paga en el piso",             "%"],
+  ["pago_en_meta",               "Paga al 100%",                "%"],
+  ["sobre",                      "Sobrecumplimiento hasta",     "%"],
+  ["tope",                       "Tope de pago",                "%"],
+  ["base_incumple_uno",          "Bono base (1 requisito caído)","%"],
+  ["pago_mensual",               "Se paga cada mes",            "%"]
+];
+const leerBono = ruta => ruta.split(".").reduce((o,k) => o[k], BONO);
+function ponerBono(obj, ruta, valor){
+  const ks = ruta.split("."); const ult = ks.pop();
+  ks.reduce((o,k) => o[k], obj)[ult] = valor;
+}
+
+function cardParametrosBono(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const suma = BONO.pesos.reactivacion + BONO.pesos.facturacion + BONO.pesos.venta;
+  return `
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      La revisión de octubre estaba prevista: si una meta o un peso cambia, se cambia acá y el
+      cálculo lo toma al instante, sin tocar el sistema.
+    </div>
+    ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
+    <div class="bn-params">
+      ${CAMPOS_BONO.map(([ruta, label, uni]) => `
+        <label class="field">
+          <span style="font-size:12px;color:var(--muted)">${esc(label)}${uni ? ` (${uni})` : ""}</span>
+          <input class="in-num" type="text" inputmode="decimal" data-bono="${esc(ruta)}"
+                 value="${esc(leerBono(ruta))}">
+        </label>`).join("")}
+    </div>
+    <div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="bonoGuardar" style="flex:1;min-width:180px">Guardar los parámetros</button>
+      <button class="btn ghost" id="bonoReset">Volver a los del documento</button>
+    </div>
+  </div>`;
+}
+
+async function guardarParametros(){
+  const nuevo = JSON.parse(JSON.stringify(BONO));
+  let malo = "";
+  document.querySelectorAll("[data-bono]").forEach(el => {
+    const n = Number(String(el.value).replace(",", "."));
+    if (!isFinite(n) || n < 0) malo = el.dataset.bono;
+    else ponerBono(nuevo, el.dataset.bono, n);
+  });
+  if (malo) return toast("Hay un valor que no es un número: " + malo);
+  const suma = nuevo.pesos.reactivacion + nuevo.pesos.facturacion + nuevo.pesos.venta;
+  if (Math.round(suma) !== 100) return toast(`Los pesos suman ${suma}%: tienen que sumar 100%`);
+  if (nuevo.piso >= 100) return toast("El piso tiene que ser menor al 100%");
+  if (nuevo.sobre <= 100) return toast("El sobrecumplimiento tiene que ser mayor al 100%");
+
+  const b = $("#bonoGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("config")
+    .upsert({ clave:"bono_parametros", valor: JSON.stringify(nuevo) }, { onConflict:"clave" });
+  b.disabled = false; b.textContent = "Guardar los parámetros";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  BONO = nuevo; render();
+  toast("Parámetros actualizados");
+}
+
+function bindBono(){
+  if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
+  if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
+  if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
+  if ($("#bonoGuardar"))    $("#bonoGuardar").onclick     = () => guardarParametros();
+  if ($("#bonoReset"))      $("#bonoReset").onclick       = () => {
+    document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRutaDef(el.dataset.bono));
+    toast("Valores del documento cargados — falta guardar");
+  };
+}
+const leerRutaDef = ruta => ruta.split(".").reduce((o,k) => o[k], BONO_DEF);
+
+/* =========================================================================
    Sincronización — el CRM se actualiza solo
 
    Tres disparadores, del más barato al más caro:
@@ -5740,6 +6410,7 @@ async function sincronizar(motivo){
     await refrescar();
     await cargarMetas();
     await cargarSeguimientos();
+    await cargarFacturacion();
     await cargarAuditoria();
 
     const primera = SYNC.firma === null;
@@ -5857,9 +6528,10 @@ function bindExtras(){
     S[MAPA_F[el.dataset.f]] = el.value; S.limite = 40; render();
   });
   const limpiar = () => { S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fEjecutivo = S.fDistrito = "todos";
-    S.limite = 40; render(); };
+    S.filtrosAbiertos = false; S.limite = 40; render(); };
   ["limpiarFiltros","limpiarFiltros2"].forEach(id => { if ($("#"+id)) $("#"+id).onclick = limpiar; });
   if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
+  if ($("#masFiltros")) $("#masFiltros").onclick = () => { S.filtrosAbiertos = !S.filtrosAbiertos; render(); };
   if ($("#masReg")) $("#masReg").onclick = () => { S.limiteReg += 40; render(); };
 
   /* Bitácora: buscador, filtros y por tandas dentro de su propio recuadro.
@@ -5927,6 +6599,7 @@ function bindExtras(){
   if (typeof bindEquipo === "function") bindEquipo();
   if (typeof bindMetas === "function") bindMetas();
   if (typeof bindAcciones === "function") bindAcciones();
+  if (typeof bindBono === "function") bindBono();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
   if ($("#mesPanel")) $("#mesPanel").onchange = e => { S.mesPanel = e.target.value; render(); };
   if ($("#salir")) $("#salir").onclick = salir;
