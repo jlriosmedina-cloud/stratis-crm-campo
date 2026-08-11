@@ -280,6 +280,36 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   .corr-campo{grid-column:1/-1}
 }
 
+/* ---- Agenda y catálogo de acciones --------------------------------------- */
+.ag-item{border-left:3px solid var(--grid)}
+.ag-item.vencida{border-left-color:var(--crit)}
+.ag-item.hoy{border-left-color:var(--warn)}
+.ag-item.semana{border-left-color:var(--s1)}
+.ag-h{display:flex;justify-content:space-between;align-items:flex-start;gap:9px}
+.ag-h .who{font-weight:660;font-size:14px}
+.ag-h .dt{font-size:12.5px;color:var(--muted);margin-top:2px}
+.ag-acc{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.stat.malo .val{color:var(--crit-ink)}
+.huerf{display:flex;flex-wrap:wrap;gap:7px}
+.huerf-x{text-align:left;border:1px solid var(--grid);background:var(--surface-1);border-radius:9px;
+  padding:7px 10px;cursor:pointer;font:inherit}
+.huerf-x:hover{border-color:var(--brand-2)}
+.huerf-x b{display:block;font-size:13px;font-weight:640}
+.huerf-x span{display:block;font-size:11.5px;color:var(--muted)}
+.acc-lista{display:flex;flex-direction:column;gap:8px}
+.acc-fila{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,1.4fr) auto auto;
+  gap:8px;align-items:center}
+.acc-fila.off{opacity:.5}
+.acc-fila input{padding:8px 10px;font-size:14px}
+.acc-uso{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.acc-nueva{display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--grid)}
+.acc-nueva input{flex:1;padding:9px 11px;font-size:14px}
+@media (max-width:720px){
+  .acc-fila{grid-template-columns:1fr auto;row-gap:6px}
+  .acc-fila .acc-desc{grid-column:1/-1}
+  .acc-nueva{flex-direction:column}
+}
+
 /* ---- Bitácora de gestiones: control del equipo ---------------------------- */
 .seg-periodo{margin-bottom:13px}
 .ctrl{padding-bottom:6px}
@@ -712,6 +742,27 @@ const CONTACTO_BBVA = [
 ];
 const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
 
+/* Próximas acciones. El catálogo vive en la base y lo mantiene el Analista
+   desde Ajustes: acá solo se guarda lo que llegó, para no clavar en el código
+   una lista que la campaña va a cambiar. */
+let ACCIONES = [], SEGUIMIENTOS = [];
+const accionesActivas = () => ACCIONES.filter(a => a.activo !== false);
+const nomAccion = cod => (ACCIONES.find(a => a.codigo === cod) || {}).nombre || cod || "";
+
+/* La acción abierta de un comercio: la que dice qué sigue */
+const seguimientoDe = cid =>
+  SEGUIMIENTOS.find(x => String(x.customer_id) === String(cid) && !x.cerrado_en) || null;
+const diasParaAccion = s => s ? Math.round((new Date(String(s.fecha_objetivo).slice(0,10)) - new Date(hoyISO())) / 86400000) : null;
+function estadoAccion(s){
+  if (!s) return "";
+  const d = diasParaAccion(s);
+  if (d < 0)  return "vencida";
+  if (d === 0) return "hoy";
+  if (d <= 7) return "semana";
+  return "despues";
+}
+const ETIQUETA_PLAZO = { vencida:"Vencida", hoy:"Para hoy", semana:"Esta semana", despues:"Más adelante" };
+
 const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
 
 /* Cierre de la gestión. Es lo que alimenta la columna "Gestión" del archivo
@@ -972,6 +1023,7 @@ const S = {
   user:null, tab:"cartera", cid:null, editId:null, form:null, formCli:null, editCli:null,
   q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
   qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
+  fEjecAgenda:"todos",   // Agenda: por ejecutivo, solo para supervisión
   fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   mesPanel:"",   /* mes que se está mirando; vacío = el actual */
@@ -1248,12 +1300,14 @@ async function salir(){
 /* ---- Carga de datos ----------------------------------------------------- */
 async function cargarDatos(){
   pantallaCarga("Cargando tu cartera…");
-  const [cli, inter, usr, cfg, rub] = await Promise.all([
+  const [cli, inter, usr, cfg, rub, acc, seg] = await Promise.all([
     sb.from("clientes").select("*").limit(5000),
     sb.from("interacciones").select("*").limit(20000),
     sb.from("usuarios").select("*").order("rol"),
     sb.from("config").select("*"),
-    sb.from("rubros").select("*").order("orden")
+    sb.from("rubros").select("*").order("orden"),
+    sb.from("acciones_seguimiento").select("*").order("orden"),
+    sb.from("seguimientos").select("*").order("fecha_objetivo")
   ]);
   const fallo = [cli, inter, usr].find(r => r.error);
   if (fallo) throw new Error(fallo.error.message);
@@ -1269,6 +1323,8 @@ async function cargarDatos(){
   }
 
   RUBROS = rub.data || [];
+  ACCIONES = acc.data || [];
+  SEGUIMIENTOS = seg.data || [];
   CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
   byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
   USUARIOS = (usr.data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
@@ -1288,6 +1344,21 @@ async function cargarDatos(){
 
 /* Cartera asignada por mes. La base filtra sola: el ejecutivo recibe solo la
    suya, el Analista y el Manager las de todos. */
+/* La agenda cambia todo el día: se recarga con cada sincronización */
+async function cargarSeguimientos(){
+  if (!S.user || S.demo) return;
+  /* Si esto falla no se cae la sincronización entera: la agenda es una
+     ayuda, no el corazón del CRM. Se queda con lo último que tenía. */
+  try {
+    const [acc, seg] = await Promise.all([
+      sb.from("acciones_seguimiento").select("*").order("orden"),
+      sb.from("seguimientos").select("*").order("fecha_objetivo")
+    ]);
+    if (!acc.error) ACCIONES = acc.data || [];
+    if (!seg.error) SEGUIMIENTOS = seg.data || [];
+  } catch (e){ /* sin agenda, pero con CRM */ }
+}
+
 async function cargarMetas(){
   METAS = [];
   if (!S.user || S.demo) return;
@@ -1387,6 +1458,7 @@ function modoDemo(){
    ========================================================================= */
 const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
+  { id:"agenda",   ic:"◷", label:"Agenda" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
@@ -1437,6 +1509,7 @@ function render(){
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
   else if (S.tab === "form_visita")       return renderFormulario();
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
+  else if (S.tab === "agenda")            v.innerHTML = viewAgenda();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
   else if (S.tab === "guia")              v.innerHTML = viewGuia();   // sin pestaña: el equipo no la usaba
@@ -1453,6 +1526,7 @@ function bindComunes(){
   document.querySelectorAll("[data-edit]").forEach(el => el.onclick = e => { e.stopPropagation(); editarRegistro(el.dataset.edit); });
   document.querySelectorAll("[data-editcli]").forEach(el => el.onclick = e => { e.stopPropagation(); editarCliente(el.dataset.editcli); });
   document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
+  document.querySelectorAll("[data-segdel]").forEach(el => el.onclick = e => { e.stopPropagation(); descartarSeguimiento(el.dataset.segdel); });
   document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
   document.querySelectorAll("[data-img]").forEach(el => el.onclick = e => {
     e.stopPropagation();
@@ -1692,6 +1766,16 @@ function viewFicha(c){
         : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>
              ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}</dd></div>`}
+      ${(() => {
+        const sg = seguimientoDe(c.customer_id);
+        if (!sg) return "";
+        const est = estadoAccion(sg), d = diasParaAccion(sg);
+        return `<div class="kv"><dt>Qué sigue</dt><dd>
+          <b>${esc(nomAccion(sg.accion))}</b>
+          <span class="chip ${est==="vencida"?"crit":est==="hoy"?"warn":"no"}" style="margin-left:6px">${
+            esc(fmtFecha(sg.fecha_objetivo))}${est==="vencida"?` · venció hace ${esc(textoDias(Math.abs(d)))}`:""}</span>
+          ${sg.comentario ? `<div style="font-size:12.5px;color:var(--muted);margin-top:3px">${esc(sg.comentario)}</div>` : ""}
+        </dd></div>` ; })()}
       ${!esClienteNuevo(c) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
         c.contacto_bbva
           ? esc(nomContactoBBVA(c.contacto_bbva))
@@ -2582,6 +2666,54 @@ function confirmarCorreccion(cambios){
   });
 }
 
+/* ---- Qué sigue con este comercio ---------------------------------------
+   Si la gestión no cierra el comercio, hay que decir qué sigue y para cuándo.
+   Es lo que convierte la lista de gestiones en un pipeline: sin esto, un
+   comercio trabajado a medias desaparece hasta que alguien se acuerda.
+   El catálogo de acciones lo mantiene el Analista desde Ajustes. */
+const requiereSeguimiento = f =>
+  !S.editId && !(f.Cierre && f.Cierre !== "PENDIENTE");
+
+function pintarSeguimiento(){
+  const f = S.form, box = $("#boxSeguimiento");
+  if (!box) return;
+  if (!requiereSeguimiento(f)){ box.innerHTML = ""; f.Accion = ""; return; }
+  const activas = accionesActivas();
+  if (!activas.length){ box.innerHTML = ""; return; }
+  if (!f.Fecha_Accion) f.Fecha_Accion = hoyISO();
+
+  box.innerHTML = `
+  <div class="card">
+    <h3>¿Qué sigue con este comercio? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Esta gestión no cierra el comercio, así que queda algo por hacer. Anótalo acá y aparece
+      en tu <b>Agenda</b> el día que toca. Al registrar la siguiente gestión se marca como cumplido solo.
+    </div>
+    <div class="opts">
+      ${activas.map(a => `
+        <div class="opt ${f.Accion === a.codigo ? "on" : ""}" data-acc="${esc(a.codigo)}">
+          <span class="rd"></span><span><b>${esc(a.nombre)}</b>${a.descripcion ? `<span>${esc(a.descripcion)}</span>` : ""}</span>
+        </div>`).join("")}
+    </div>
+    <div class="field" style="margin-top:11px">
+      <label>¿Para cuándo? <span class="req">*</span></label>
+      <input type="date" data-f="Fecha_Accion" value="${esc(f.Fecha_Accion)}" min="${hoyISO()}">
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Detalle <span class="hint">— qué pidió exactamente</span></label>
+      <input type="text" data-f="Comentario_Accion" value="${esc(f.Comentario_Accion || "")}"
+             placeholder="Ej.: llevarle el tarifario de POS y hablar con el dueño, no con la cajera">
+    </div>
+  </div>`;
+  box.querySelectorAll("[data-acc]").forEach(el => el.onclick = () => {
+    f.Accion = el.dataset.acc;
+    box.querySelectorAll("[data-acc]").forEach(x => x.classList.toggle("on", x.dataset.acc === f.Accion));
+  });
+  box.querySelectorAll("[data-f]").forEach(el => {
+    el.oninput = el.onchange = () => { f[el.dataset.f] = el.value; };
+  });
+}
+
 function renderFormulario(){
   const c = byId[S.cid];
   if (!c) return go("cartera");
@@ -2725,6 +2857,8 @@ function renderFormulario(){
 
   <div id="boxCierre"></div>
 
+  <div id="boxSeguimiento"></div>
+
   <div class="card">
     <h3>Comentarios</h3>
     <div class="field"><label>Calificación del cliente</label>
@@ -2762,15 +2896,15 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.tipo;
     $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps(); pintarCierre(c);
+    pintarDerivado(); pintarGps(); pintarCierre(c); pintarSeguimiento();
   });
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
     $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
-    pintarDerivado(); pintarCierre(c);
+    pintarDerivado(); pintarCierre(c); pintarSeguimiento();
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarCierre(c);
+  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarCierre(c); pintarSeguimiento();
 }
 
 /* -------------------------------------------------------------------------
@@ -3039,6 +3173,11 @@ function comprimir(file, cb){
 async function guardar(c){
   const f = S.form, errores = [];
   if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
+  if (requiereSeguimiento(f) && accionesActivas().length){
+    if (!f.Accion) errores.push("Indica qué sigue con este comercio: sin próxima acción el caso se pierde de vista.");
+    if (!f.Fecha_Accion) errores.push("Ponle fecha a la próxima acción.");
+    else if (f.Fecha_Accion < hoyISO()) errores.push("La próxima acción no puede quedar en una fecha que ya pasó.");
+  }
   if (S.editId && volverPresencialProhibido(f))
     errores.push(`No puedes cambiar el medio a ${nomTipo(f.Tipo_Contacto).toLowerCase()}: una gestión presencial necesita la ubicación capturada en el momento, y esa no se modifica. Elimina el registro y créalo de nuevo desde el local.`);
   if (fechaFutura(f.Fecha_Contacto))
@@ -3114,6 +3253,21 @@ async function guardar(c){
         ? await sb.from("interacciones").update(fila).eq("id", S.editId)
         : await sb.from("interacciones").insert(fila);
       if (error) throw new Error(error.message);
+
+      /* La próxima acción se guarda después de la gestión: la base cierra sola
+         la que estuviera abierta cuando entra una gestión nueva, así que esta
+         tiene que llegar al final para quedar como la vigente. */
+      if (requiereSeguimiento(f) && f.Accion){
+        const { error: eSeg } = await sb.from("seguimientos").insert({
+          customer_id: String(c.customer_id),
+          accion: f.Accion,
+          fecha_objetivo: f.Fecha_Accion,
+          comentario: String(f.Comentario_Accion || "").trim() || null,
+          correo_stratis: S.user.correo,
+          ejecutivo: S.user.nombre
+        });
+        if (eSeg) toast("La gestión se guardó, pero la próxima acción no: " + eSeg.message);
+      }
 
       // El cierre va después de la gestión, nunca antes: la base exige que ya
       // exista el contacto logrado que lo respalda.
@@ -4651,6 +4805,7 @@ function viewAyuda(){
   ${ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta)}
   ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
   ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
+  ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
   ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
   ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
@@ -5289,6 +5444,241 @@ function viewGuia(){
 }
 
 /* =========================================================================
+   Agenda — lo que quedó comprometido con cada comercio
+
+   Es la primera pantalla de la mañana: qué vencí, qué toca hoy, qué viene.
+   El ejecutivo ve lo suyo; el Analista y el Manager, lo de todo el equipo,
+   con el filtro por persona. Las vencidas van primero y en rojo, porque son
+   las que cuestan plata.
+   ========================================================================= */
+const ORDEN_PLAZO = ["vencida", "hoy", "semana", "despues"];
+
+function agendaVisible(){
+  const mia = S.user.rol === "Ejecutivo";
+  let l = SEGUIMIENTOS.filter(x => !x.cerrado_en);
+  if (mia) l = l.filter(x => x.correo_stratis === S.user.correo);
+  else if (S.fEjecAgenda !== "todos") l = l.filter(x => x.ejecutivo === S.fEjecAgenda);
+  return l.sort((a,b) => String(a.fecha_objetivo).localeCompare(String(b.fecha_objetivo)));
+}
+
+function tarjetaAccion(s){
+  const c = byId[String(s.customer_id)];
+  const est = estadoAccion(s);
+  const d = diasParaAccion(s);
+  const cuando = est === "vencida" ? `venció hace ${textoDias(Math.abs(d))}`
+               : est === "hoy"     ? "para hoy"
+               : d === 1           ? "para mañana"
+               : `en ${textoDias(d)}`;
+  return `<div class="card ag-item ${est}">
+    <div class="ag-h">
+      <div>
+        <div class="who" data-cid="${esc(s.customer_id)}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</div>
+        <div class="dt">${esc(nomAccion(s.accion))}${c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
+          S.user.rol !== "Ejecutivo" ? " · " + esc(s.ejecutivo) : ""}</div>
+      </div>
+      <span class="chip ${est === "vencida" ? "crit" : est === "hoy" ? "warn" : "no"}">${esc(fmtFecha(s.fecha_objetivo))} · ${esc(cuando)}</span>
+    </div>
+    ${s.comentario ? `<div class="quote" style="margin-top:7px">${esc(s.comentario)}</div>` : ""}
+    <div class="ag-acc">
+      ${esDeCampo() && c ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar gestión</button>` : ""}
+      <button class="btn ghost sm" data-cid="${esc(s.customer_id)}">Ver comercio</button>
+      ${(s.correo_stratis === S.user.correo || S.user.rol !== "Ejecutivo")
+        ? `<button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)">Ya no aplica</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function viewAgenda(){
+  const mando = S.user.rol !== "Ejecutivo";
+  const lista = agendaVisible();
+  const porPlazo = {};
+  ORDEN_PLAZO.forEach(k => porPlazo[k] = lista.filter(s => estadoAccion(s) === k));
+
+  /* Comercios trabajados que quedaron sin próxima acción: el hueco que la
+     agenda existe para tapar. */
+  const conAccion = new Set(lista.map(s => String(s.customer_id)));
+  const huerfanos = cartera().filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" &&
+    (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0 &&
+    !conAccion.has(String(c.customer_id)));
+
+  return `
+  <div class="page-head">
+    <div>
+      <h2>${mando ? "Agenda del equipo" : "Mi agenda"}</h2>
+      <div class="sub">Lo que quedó comprometido con cada comercio, del más urgente al más lejano</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat ${porPlazo.vencida.length ? "malo" : ""}"><div class="lbl">Vencidas</div><div class="val">${porPlazo.vencida.length}</div><div class="sub">pasó la fecha y nadie retomó</div></div>
+    <div class="stat"><div class="lbl">Para hoy</div><div class="val">${porPlazo.hoy.length}</div><div class="sub">comprometidas para ${fmtFecha(hoyISO())}</div></div>
+    <div class="stat"><div class="lbl">Esta semana</div><div class="val">${porPlazo.semana.length}</div><div class="sub">en los próximos 7 días</div></div>
+    <div class="stat"><div class="lbl">Sin próxima acción</div><div class="val">${huerfanos.length}</div><div class="sub">trabajados y sin nada agendado</div></div>
+  </div>
+
+  ${mando ? `<div class="filtros">
+    <div class="sel-row">
+      <label class="fsel"><span>Ejecutivo</span>
+        <select id="ejecAgenda">
+          <option value="todos"${S.fEjecAgenda==="todos"?" selected":""}>Todo el equipo · ${SEGUIMIENTOS.filter(x=>!x.cerrado_en).length}</option>
+          ${USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
+            const n = SEGUIMIENTOS.filter(x => !x.cerrado_en && x.ejecutivo === u.nombre).length;
+            return `<option value="${esc(u.nombre)}"${S.fEjecAgenda===u.nombre?" selected":""}>${esc(u.nombre)} · ${n}</option>`;
+          }).join("")}
+        </select></label>
+    </div>
+  </div>` : ""}
+
+  ${lista.length ? ORDEN_PLAZO.map(k => porPlazo[k].length ? `
+    <div class="sec-title">${ETIQUETA_PLAZO[k]} · ${porPlazo[k].length}</div>
+    ${porPlazo[k].map(tarjetaAccion).join("")}` : "").join("")
+   : `<div class="empty"><div class="big">✓</div>No hay nada pendiente por ahora.<br><br>
+      <span style="font-size:13px;color:var(--muted)">Las próximas acciones se anotan al registrar una gestión que no cierra el comercio.</span></div>`}
+
+  ${huerfanos.length ? `
+  <div class="card" style="margin-top:16px;border-left:3px solid var(--warn)">
+    <h3>Comercios trabajados sin próxima acción · ${huerfanos.length}</h3>
+    <div class="note" style="margin-bottom:11px">
+      Tienen gestiones y siguen pendientes, pero nadie anotó qué sigue. Se resuelve registrando
+      la siguiente gestión: ahí el CRM va a pedir la próxima acción.
+    </div>
+    <div class="huerf">
+      ${huerfanos.slice(0, 30).map(c => `
+        <button class="huerf-x" data-cid="${esc(c.customer_id)}">
+          <b>${esc(titulo(nombreCliente(c)))}</b>
+          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
+        </button>`).join("")}
+    </div>
+    ${huerfanos.length > 30 ? `<div class="note" style="margin-top:9px">…y ${huerfanos.length - 30} más.</div>` : ""}
+  </div>` : ""}`;
+}
+
+async function descartarSeguimiento(id){
+  const s = SEGUIMIENTOS.find(x => String(x.id) === String(id));
+  if (!s) return;
+  const c = byId[String(s.customer_id)];
+  const ok = await new Promise(res => {
+    modal(`<h3>Ya no aplica</h3>
+      <p style="margin-top:0">Se dará por cerrada la acción <b>${esc(nomAccion(s.accion))}</b> de
+      <b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b>, sin registrar una gestión.</p>
+      <div class="note">Úsalo cuando el compromiso dejó de tener sentido. Si sí hiciste algo,
+      regístralo como gestión: así queda la evidencia y la acción se cierra sola.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn danger" id="sgOk" style="flex:1">Cerrarla</button>
+        <button class="btn ghost" id="sgNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#sgOk").onclick = () => { cerrarModal(); res(true); };
+    $("#sgNo").onclick = () => { cerrarModal(); res(false); };
+  });
+  if (!ok) return;
+  const { error } = await sb.from("seguimientos")
+    .update({ cerrado_en: new Date().toISOString(), cerrado_por: S.user.correo })
+    .eq("id", id);
+  if (error) return toast("No se pudo cerrar: " + error.message);
+  await cargarSeguimientos(); render();
+  toast("Acción cerrada");
+}
+
+/* =========================================================================
+   El catálogo de acciones, editable desde Ajustes
+
+   La campaña va a cambiar y la lista de «qué sigue» con ella. En vez de
+   pedirla por chat cada vez, el Analista y el Manager la mantienen acá y los
+   ejecutivos la ven al instante. Las que dejan de usarse se desactivan, no se
+   borran: si se borraran, las acciones ya registradas con ese código se
+   quedarían sin nombre.
+   ========================================================================= */
+function cardAcciones(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const usos = cod => SEGUIMIENTOS.filter(x => x.accion === cod).length;
+  return `
+  <div class="card">
+    <h3>Próximas acciones · el catálogo del equipo</h3>
+    <div class="note" style="margin-bottom:12px">
+      Es la lista que ve el ejecutivo cuando una gestión no cierra el comercio. Lo que cambies acá
+      lo ven todos en cuanto se sincronicen. Una acción que ya no se usa se <b>desactiva</b>: así
+      desaparece del formulario pero las que ya se registraron con ella conservan su nombre.
+    </div>
+    <div class="acc-lista">
+      ${ACCIONES.slice().sort((a,b) => (a.orden||50) - (b.orden||50)).map(a => `
+        <div class="acc-fila ${a.activo === false ? "off" : ""}">
+          <input type="text" class="acc-nom" data-accnom="${esc(a.codigo)}" value="${esc(a.nombre)}"
+                 placeholder="Nombre de la acción">
+          <input type="text" class="acc-desc" data-accdesc="${esc(a.codigo)}" value="${esc(a.descripcion || "")}"
+                 placeholder="Cuándo se usa — opcional">
+          <span class="acc-uso">${usos(a.codigo)} en uso</span>
+          <button class="btn ghost sm" data-accsw="${esc(a.codigo)}">${a.activo === false ? "Activar" : "Desactivar"}</button>
+        </div>`).join("")}
+    </div>
+    <div class="acc-nueva">
+      <input type="text" id="accNueva" placeholder="Agregar una acción nueva — ej.: Coordinar con el contador">
+      <button class="btn sm" id="accAdd">Agregar</button>
+    </div>
+    <div id="accMsg" style="margin-top:9px"></div>
+    <button class="btn block" id="accGuardar" style="margin-top:11px">Guardar los cambios</button>
+  </div>`;
+}
+
+async function guardarAcciones(){
+  const msg = $("#accMsg");
+  const cambios = [];
+  document.querySelectorAll("[data-accnom]").forEach(el => {
+    const cod = el.dataset.accnom;
+    const a = ACCIONES.find(x => x.codigo === cod);
+    const nombre = el.value.trim();
+    const desc = (document.querySelector(`[data-accdesc="${CSS.escape(cod)}"]`) || {}).value;
+    if (!a || !nombre) return;
+    if (nombre !== a.nombre || (desc || "").trim() !== (a.descripcion || ""))
+      cambios.push({ codigo: cod, nombre, descripcion: (desc || "").trim() || null });
+  });
+  if (!cambios.length) return toast("No hay cambios que guardar");
+  const btn = $("#accGuardar"); btn.disabled = true; btn.textContent = "Guardando…";
+  for (const c of cambios){
+    const { error } = await sb.from("acciones_seguimiento")
+      .update({ nombre: c.nombre, descripcion: c.descripcion }).eq("codigo", c.codigo);
+    if (error){ btn.disabled = false; btn.textContent = "Guardar los cambios";
+      if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  }
+  await cargarSeguimientos(); render();
+  toast(`${cambios.length} acción${cambios.length===1?"":"es"} actualizada${cambios.length===1?"":"s"}`);
+}
+
+async function alternarAccion(cod){
+  const a = ACCIONES.find(x => x.codigo === cod); if (!a) return;
+  const { error } = await sb.from("acciones_seguimiento")
+    .update({ activo: a.activo === false }).eq("codigo", cod);
+  if (error) return toast("No se pudo cambiar: " + error.message);
+  await cargarSeguimientos(); render();
+}
+
+async function agregarAccion(){
+  const inp = $("#accNueva"), msg = $("#accMsg");
+  const nombre = (inp.value || "").trim();
+  if (!nombre) return toast("Escribe el nombre de la acción");
+  /* El código sale del nombre: en mayúsculas, sin tildes ni espacios. Es lo
+     que guardan las acciones ya registradas, así que tiene que ser estable. */
+  const codigo = nombre.normalize("NFD").replace(/[̀-ͯ]/g, "")
+                   .toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 24);
+  if (!codigo) return toast("Ese nombre no sirve como acción");
+  if (ACCIONES.some(a => a.codigo === codigo)) return toast("Ya existe una acción parecida");
+  const orden = Math.max(0, ...ACCIONES.map(a => a.orden || 50)) + 1;
+  const { error } = await sb.from("acciones_seguimiento")
+    .insert({ codigo, nombre, orden, activo: true });
+  if (error){ if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  inp.value = "";
+  await cargarSeguimientos(); render();
+  toast("Acción agregada");
+}
+
+function bindAcciones(){
+  if ($("#accGuardar")) $("#accGuardar").onclick = () => guardarAcciones();
+  if ($("#accAdd")) $("#accAdd").onclick = () => agregarAccion();
+  if ($("#accNueva")) $("#accNueva").onkeydown = e => { if (e.key === "Enter") agregarAccion(); };
+  document.querySelectorAll("[data-accsw]").forEach(b => b.onclick = () => alternarAccion(b.dataset.accsw));
+}
+
+/* =========================================================================
    Sincronización — el CRM se actualiza solo
 
    Tres disparadores, del más barato al más caro:
@@ -5349,6 +5739,7 @@ async function sincronizar(motivo){
     await recargarCartera();
     await refrescar();
     await cargarMetas();
+    await cargarSeguimientos();
     await cargarAuditoria();
 
     const primera = SYNC.firma === null;
@@ -5535,6 +5926,8 @@ function bindExtras(){
 
   if (typeof bindEquipo === "function") bindEquipo();
   if (typeof bindMetas === "function") bindMetas();
+  if (typeof bindAcciones === "function") bindAcciones();
+  if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
   if ($("#mesPanel")) $("#mesPanel").onchange = e => { S.mesPanel = e.target.value; render(); };
   if ($("#salir")) $("#salir").onclick = salir;
   if ($("#guardarNuevaClave")) $("#guardarNuevaClave").onclick = async () => {

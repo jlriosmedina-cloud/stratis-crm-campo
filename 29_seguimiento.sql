@@ -88,7 +88,10 @@ returns trigger language plpgsql as $fn$
 begin
   if tg_op = 'INSERT' then
     -- El dueño es quien lo crea: no se agenda trabajo a nombre de otro.
-    if auth.role() = 'authenticated' then
+    -- La condición mira el correo de la sesión, no el rol del token: así vale
+    -- igual desde el CRM, desde la API o desde el editor SQL con un correo
+    -- puesto a mano. Solo se salta cuando no hay ninguna sesión detrás.
+    if public.correo_actual() is not null then
       new.correo_stratis := public.correo_actual();
       new.ejecutivo := coalesce(
         (select coalesce(nombre_corto, nombre) from public.usuarios
