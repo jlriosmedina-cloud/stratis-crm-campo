@@ -789,28 +789,37 @@ function textoVentana(){
   return `Hoy hasta las ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 }
 
-/* La ubicación de un registro presencial tiene tres estados, no dos, y
-   confundirlos costaba caro: una gestión con la coordenada escrita a mano
-   aparecía igual que una sin ninguna ubicación.
+/* La ubicación de un registro presencial tiene cuatro estados, y confundirlos
+   costaba caro: una gestión con la coordenada escrita a mano aparecía igual
+   que una sin ninguna ubicación.
 
      gps        el equipo la midió en el local y en el momento — es la que
                 respalda la visita ante BBVA
      declarada  alguien la escribió después: sirve para ubicar el comercio en
                 el mapa, pero no prueba que se estuvo ahí
-     falta      no hay ninguna coordenada
+     exenta     la visita ya pasó y la coordenada no se puede recuperar; la
+                supervisión lo aceptó por escrito, con motivo y firma
+     falta      no hay ninguna coordenada y nadie la eximió
 
-   «Sin ubicación» a secas significa el tercero. El segundo se cuenta aparte. */
+   «Sin ubicación» a secas significa el último. Los otros dos se cuentan
+   aparte: ninguno vale como respaldo de GPS, pero tampoco son un descuido. */
 function estadoUbicacion(r){
   if (!RULES.requiereUbicacion(r.Tipo_Contacto)) return "";
   if (r.Ubicacion_Verificada === true) return "gps";
-  return String(r.Ubicacion || "").trim() ? "declarada" : "falta";
+  if (String(r.Ubicacion || "").trim()) return "declarada";
+  /* La visita ya pasó y la coordenada no se puede recuperar. La supervisión
+     lo aceptó por escrito: no es un hueco, es una excepción con motivo. Se
+     cuenta aparte de las que sí trajeron GPS, nunca junto a ellas. */
+  return r.Ubicacion_Exenta === true ? "exenta" : "falta";
 }
 const sinUbicacion         = r => estadoUbicacion(r) === "falta";
 const ubicacionDeclarada   = r => estadoUbicacion(r) === "declarada";
+const ubicacionExenta      = r => estadoUbicacion(r) === "exenta";
 /* Sigue existiendo para lo que de verdad mide respaldo de GPS: una declarada
    no cuenta como verificada. */
 const sinUbicacionVerificada = r =>
-  RULES.requiereUbicacion(r.Tipo_Contacto) && r.Ubicacion_Verificada !== true;
+  RULES.requiereUbicacion(r.Tipo_Contacto) && r.Ubicacion_Verificada !== true
+  && !ubicacionExenta(r);
 
 const CALIFICACIONES = [
   { id:"A", label:"A — Muy interesado", desc:"Cliente receptivo, alta probabilidad de retención" },
@@ -1094,6 +1103,8 @@ function deDB(f){
     Cumple_Visita: f.cumple_visita, Fecha_Visita_Actualizada: f.fecha_visita_actualizada,
     Ubicacion: f.ubicacion || "",
     Ubicacion_Verificada: f.ubicacion_verificada === true,
+    Ubicacion_Exenta: f.ubicacion_exenta === true,
+    Ubicacion_Exenta_Motivo: f.ubicacion_exenta_motivo || "",
     Evidencia_Path: f.evidencia_path || "", Evidencia: "",
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
@@ -2083,6 +2094,9 @@ function itemTimeline(r){
         ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
         : ubicacionDeclarada(r)
           ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)}</div>`
+        : ubicacionExenta(r)
+          ? `<div class="pie" style="margin-top:6px">Ubicación no exigible${
+              r.Ubicacion_Exenta_Motivo ? " — " + esc(r.Ubicacion_Exenta_Motivo) : ""}</div>`
         : sinUbicacion(r)
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
@@ -3722,6 +3736,7 @@ function tarjetaGestion(r){
             ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
             ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
+              : ubicacionExenta(r)?`<span class="chip no" title="${esc(r.Ubicacion_Exenta_Motivo||"")}">Ubicación no exigible</span>`
               : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
             ${!r.Evidencia && !r.Evidencia_Path?`<span class="chip warn">Sin evidencia</span>`:""}
             ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
@@ -4249,6 +4264,7 @@ const marcaUbicacion = r => {
   const e = estadoUbicacion(r);
   if (e === "gps")       return "SI";
   if (e === "declarada") return "Escrita a mano — sin respaldo de GPS";
+  if (e === "exenta")    return "No aplica — exenta por supervisión";
   if (e === "falta")     return "NO — sin ubicación";
   return "";
 };
