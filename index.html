@@ -293,6 +293,10 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .stat-row .stat .lbl{font-size:10.5px;letter-spacing:.4px}
 .stat-row .stat .val{font-size:21px;margin-top:1px}
 .stat-row .stat .sub{display:none}
+/* Un número que lleva a su lista tiene que verse tocable, no adivinarse. */
+.stat-link{text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%;display:block}
+.stat-link:hover{border-color:var(--brand-2)}
+.stat-link .sub b{color:var(--brand-2);font-weight:640}
 .stat{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px 13px;box-shadow:var(--sh)}
 .stat .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
 .stat .val{font-size:25px;font-weight:730;letter-spacing:-.8px;margin-top:3px;line-height:1.1}
@@ -504,6 +508,12 @@ table.tbl tr:last-child td{border-bottom:0}
 .back{display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--brand-2);font-weight:650;font-size:13.5px;cursor:pointer;padding:2px 0;margin-bottom:9px}
 .req{color:var(--crit)}
 .mono{font-variant-numeric:tabular-nums}
+.cifra-link{background:none;border:0;padding:0;font:inherit;color:var(--brand-2);cursor:pointer;
+  font-weight:640;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+.cifra-link:hover{text-decoration-style:solid}
+.g-ley-x{background:none;border:0;padding:2px 0;font:inherit;color:inherit;cursor:pointer;
+  display:inline-flex;align-items:center}
+.g-ley-x:hover{color:var(--brand-2)}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
 /* ---------- CABECERA DE PANTALLA ---------- */
@@ -884,6 +894,26 @@ const RESULTADOS_GESTION = [
 ];
 const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
 
+/* Los cuatro cierres que de verdad se miran, cada uno con su nombre propio.
+   «Venta» en la base cubre dos cosas distintas —un comercio de cartera que
+   estaba de baja y volvió, y un RUC que Stratis trajo de cero— y contarlas
+   juntas escondía justo lo que se quiere ver por separado. */
+const esVentaNueva = c => esClienteNuevo(c) && c.resultado_gestion === "VENTA";
+/* Los test van envueltos en una función y no como referencia directa: varias
+   de estas se declaran más abajo en el archivo, y apuntarlas acá reventaría
+   al cargar. Envueltas, se resuelven recién cuando se llaman. */
+const CIERRES = [
+  { id:"cumplido",   label:"Objetivo cumplido", desc:"Retenidos, recuperados y ventas nuevas", test:c => gestionCumplida(c) },
+  { id:"retenido",   label:"Retenidos",         desc:"Ya operaban y se quedaron",     test:c => esRetencion(c) },
+  { id:"recuperado", label:"Recuperados",       desc:"Estaban de baja y volvieron",   test:c => esRecuperado(c) },
+  { id:"venta",      label:"Ventas nuevas",     desc:"RUC que trajo Stratis",         test:c => esVentaNueva(c) },
+  { id:"perdido",    label:"Perdidos",          desc:"Se fueron o cerraron",          test:c => c.resultado_gestion === "PERDIDO" },
+  { id:"pendiente",  label:"Pendientes",        desc:"Todavía en trabajo",
+    test:c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" }
+];
+const cierreById = id => CIERRES.find(x => x.id === id) || null;
+const pasaCierre = (c, id) => { const f = cierreById(id); return !f || f.test(c); };
+
 /* Por qué se perdió. Lista cerrada a propósito: un campo libre se llena de
    textos que después no se pueden agrupar, y el motivo solo sirve si se puede
    contar. Se pide en el momento del cierre, que es cuando está fresco. */
@@ -1253,6 +1283,7 @@ const S = {
   mesPanel:"",   /* mes que se está mirando; vacío = el actual */
   pBono:"",      /* periodo del bono; vacío = el que corre */
   filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
+  fCierre:"todos",              /* retenidos, recuperados, ventas nuevas, perdidos */
   limite:40, cargando:false
 };
 
@@ -1687,6 +1718,20 @@ function renderNav(){
     </button>`).join("");
   $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.tab));
 }
+/* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
+   los filtros desplegados, para que se vea por qué la lista es esa. */
+function verCierre(id, ejecutivo){
+  S.fCierre = id; S.filtrosAbiertos = true;
+  S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = "todos";
+  S.fEjecutivo = ejecutivo || "todos";
+  go("cartera");
+  const f = cierreById(id);
+  if (f){
+    const n = cartera().filter(c => f.test(c) && (!ejecutivo || c.asignado === ejecutivo)).length;
+    toast(`${f.label}${ejecutivo ? " de " + ejecutivo : ""}: ${n} ${n === 1 ? "comercio" : "comercios"}`);
+  }
+}
+
 function go(tab, cid){
   S.tab = tab; S.cid = cid || null;
   S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
@@ -1745,6 +1790,9 @@ function bindComunes(){
   document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
   document.querySelectorAll("[data-segdel]").forEach(el => el.onclick = e => { e.stopPropagation(); descartarSeguimiento(el.dataset.segdel); });
   document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
+  document.querySelectorAll("[data-vercierre]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCierre(el.dataset.vercierre, el.dataset.verejec || "");
+  });
   if (typeof bindExtras === "function") bindExtras();
 }
 
@@ -1798,6 +1846,7 @@ function viewCartera(){
   if (S.fRubro !== "todos")      lista = lista.filter(c => c.rubro === S.fRubro);
   if (S.fDistrito !== "todos")   lista = lista.filter(c => c.distrito === S.fDistrito);
   if (S.fEstadoCli !== "todos")  lista = lista.filter(c => (c.estado || "NUEVO") === S.fEstadoCli);
+  if (S.fCierre !== "todos")     lista = lista.filter(c => pasaCierre(c, S.fCierre));
   if (S.fContacto !== "todos") lista = lista.filter(c => {
     const b = c._base || RULES.recomputarBase(c.customer_id);
     if (S.fContacto === "sin")     return b._intentos === 0;
@@ -1831,7 +1880,7 @@ function viewCartera(){
   };
   const cuenta = (arr, pred) => arr.filter(pred).length;
   const mostrar = lista.slice(0, S.limite);
-  const filtrando = q || [S.fContacto,S.fEstadoCli,S.fRubro,S.fDistrito,S.fEjecutivo].some(x => x !== "todos");
+  const filtrando = q || [S.fContacto,S.fEstadoCli,S.fRubro,S.fDistrito,S.fEjecutivo,S.fCierre].some(x => x !== "todos");
 
   const opciones = (valor, todos, items) =>
     `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
@@ -1853,7 +1902,9 @@ function viewCartera(){
     <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera respondió</div></div>
     <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
     <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
-    <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div><div class="sub">${total?Math.round(cerrados/total*100):0}% · retenidos y ventas</div></div>
+    <button class="stat stat-link" data-vercierre="cumplido" title="Ver los comercios con objetivo cumplido">
+      <div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div>
+      <div class="sub">${total?Math.round(cerrados/total*100):0}% · retenidos y ventas — <b>ver cuáles</b></div></button>
   </div>
 
   <div class="filtros">
@@ -1869,7 +1920,7 @@ function viewCartera(){
          Ahora se piden: quedan plegados, y el botón dice cuántos hay puestos
          para que nadie los deje activos sin darse cuenta. -->
     ${(() => {
-      const puestos = [S.fEstadoCli, S.fRubro, S.fDistrito, S.fEjecutivo].filter(x => x !== "todos").length;
+      const puestos = [S.fEstadoCli, S.fRubro, S.fDistrito, S.fEjecutivo, S.fCierre].filter(x => x !== "todos").length;
       const abierto = S.filtrosAbiertos || puestos > 0;
       return `
       <div class="filtros-mas">
@@ -1880,6 +1931,11 @@ function viewCartera(){
           <button class="btn ghost sm" id="limpiarFiltros">Quitar filtros</button>` : ""}
       </div>
       ${abierto ? `<div class="sel-row">
+        <!-- «De qué comercios estamos hablando»: los conteos ya estaban en el
+             Panel, pero no había forma de llegar a la lista. -->
+        <label class="fsel"><span>Resultado de la gestión</span>
+          <select data-f="cierre">${opciones(S.fCierre, `Todo resultado (${total})`,
+            CIERRES.map(x => [x.id, `${x.label} · ${cuenta(base, x.test)}`]))}</select></label>
         <label class="fsel"><span>Estado</span>
           <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
             ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
@@ -3644,6 +3700,10 @@ function tarjetaGestion(r){
           ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
           ${r.Comentario_Cliente?`<div class="quote cli"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>`:""}
           <div class="ges-chips">
+            ${/* En qué terminó ese comercio: la gestión sola no lo dice, y era
+                 lo que impedía ver «de qué comercios estamos hablando». */
+              c && gestionCumplida(c) ? `<span class="chip ok">${esc(tipoCierre(c))}</span>`
+              : c && c.resultado_gestion === "PERDIDO" ? `<span class="chip crit">Perdido</span>` : ""}
             ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
             ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
@@ -3868,22 +3928,38 @@ function cardAlcance(){
       <thead><tr><th>${admin ? "Ejecutivo" : "Tu mes"}</th>
         <th style="text-align:right">Asignados</th><th style="text-align:right">Trabajados</th>
         <th style="text-align:right">Retenidos</th><th style="text-align:right">Recuperados</th>
+        <th style="text-align:right" title="No suman al % de alcance: no salían de la cartera asignada">Ventas nuevas</th>
         <th style="text-align:right">% alcance</th></tr></thead>
-      <tbody>${filas.map(f => `<tr>
+      <tbody>${filas.map(f => {
+        /* Cada cifra de cierre lleva a sus comercios: el número solo no deja
+           hacer nada, y la pregunta siempre es «¿cuáles?». */
+        const link = (n, cierre) => n
+          ? `<button class="cifra-link" data-vercierre="${cierre}" data-verejec="${esc(f.nombre)}"
+               title="Ver los comercios">${n}</button>`
+          : "—";
+        return `<tr>
         <td><b>${esc(f.nombre)}</b></td>
         <td style="text-align:right" class="mono">${f.asignada || "—"}</td>
         <td style="text-align:right" class="mono">${f.trabajados || "—"}</td>
-        <td style="text-align:right" class="mono">${f.retenidos || "—"}</td>
-        <td style="text-align:right" class="mono">${f.recuperados || "—"}</td>
+        <td style="text-align:right" class="mono">${link(f.retenidos, "retenido")}</td>
+        <td style="text-align:right" class="mono">${link(f.recuperados, "recuperado")}</td>
+        <td style="text-align:right" class="mono">${link(f.ventasNuevas, "venta")}</td>
         <td style="text-align:right" class="mono"><b>${f.asignada ? Math.round(f.pct*1000)/10 + "%" : "—"}</b></td>
-      </tr>`).join("")}</tbody>
+      </tr>`;
+      }).join("")}</tbody>
     </table></div>
 
-    <details class="explica"><summary>Qué cuenta como retenido y qué como recuperado</summary>
-      <div class="cuerpo"><p><b>Retenidos</b> son comercios que ya operaban y se quedaron.
-      <b>Recuperados</b> estaban de baja y volvieron: cierran como Venta, pero salían de la misma
-      cartera asignada y por eso suman al alcance. Las ventas nuevas por RUC no entran acá.
-      Un cierre cuenta en el mes en que se decidió.</p></div>
+    <details class="explica"><summary>Qué cuenta como retenido, qué como recuperado y qué como venta nueva</summary>
+      <div class="cuerpo">
+        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban
+        dados de baja y volvieron. Los dos salían de la cartera asignada, así que los dos suman al
+        <b>% de alcance</b>.</p>
+        <p><b>Ventas nuevas</b> son RUC que trajo Stratis y que BBVA todavía no tenía. Es trabajo
+        que cuenta —y pesa en el incentivo— pero <b>no suma al % de alcance</b>, porque no salía de
+        la cartera de nadie. Por eso va en su propia columna y no mezclada con las otras dos.</p>
+        <p>Un cierre cuenta en el mes en que se decidió. Toca cualquier cifra para ver de qué
+        comercios se trata.</p>
+      </div>
     </details>
   </div>`;
 }
@@ -3943,11 +4019,13 @@ function viewPanel(){
   const decididos = cumplido + perdidos;
   const pctAvance = total ? Math.round(cumplido / total * 100) : 0;
   const pctCierre = decididos ? Math.round(cumplido / decididos * 100) : 0;
+  /* Cada tramo lleva a su lista: el número sin los nombres detrás no deja
+     hacer nada con él. */
   const repartoCierre = [
-    { label:"Retenidos",  n:retenidos,  color:"var(--good)" },
-    { label:"Ventas",     n:ventas,     color:"var(--brand-2)" },
-    { label:"Perdidos",   n:perdidos,   color:"var(--crit)" },
-    { label:"Pendientes", n:pendientes, color:"var(--line)" }
+    { label:"Retenidos",  n:retenidos,  color:"var(--good)",    ver:"retenido" },
+    { label:"Ventas",     n:ventas,     color:"var(--brand-2)", ver:"venta" },
+    { label:"Perdidos",   n:perdidos,   color:"var(--crit)",    ver:"perdido" },
+    { label:"Pendientes", n:pendientes, color:"var(--line)",    ver:"pendiente" }
   ].filter(x => x.n > 0);
 
   const porResultado = RESULTADOS.map(x => ({ label:x.label, ok:x.ok,
@@ -3994,8 +4072,9 @@ function viewPanel(){
     <h3>Cierre de la gestión · lo que BBVA lee como objetivo cumplido</h3>
     ${total ? `
     <div class="stat-row" style="margin-bottom:13px">
-      <div class="stat"><div class="lbl">Avance de la campaña</div><div class="val">${pctAvance}%</div>
-        <div class="sub">${cumplido} de ${total} comercios ya cerraron con objetivo cumplido</div></div>
+      <button class="stat stat-link" data-vercierre="cumplido"><div class="lbl">Avance de la campaña</div>
+        <div class="val">${pctAvance}%</div>
+        <div class="sub">${cumplido} de ${total} comercios ya cerraron con objetivo cumplido — <b>ver cuáles</b></div></button>
       <div class="stat"><div class="lbl">Efectividad de cierre</div><div class="val">${decididos ? pctCierre + "%" : "—"}</div>
         <div class="sub">${decididos ? cumplido + " de " + decididos + " comercios ya decididos" : "Todavía no hay ningún comercio decidido"}</div></div>
       <div class="stat"><div class="lbl">Todavía abiertos</div><div class="val">${pendientes}</div>
@@ -4005,7 +4084,8 @@ function viewPanel(){
       ${repartoCierre.map(x => `<span style="width:${(x.n/total*100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${x.n}"></span>`).join("")}
     </div>
     <div class="g-leyenda">
-      ${repartoCierre.map(x => `<span><i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></span>`).join("")}
+      ${repartoCierre.map(x => `<button class="g-ley-x" data-vercierre="${x.ver}"
+          title="Ver los comercios"><i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></button>`).join("")}
     </div>
     <details class="explica"><summary>Por qué van dos números y no uno</summary>
       <div class="cuerpo">
@@ -5233,10 +5313,15 @@ function alcanceDe(correo, periodo){
   const retenidos   = suyos.filter(c => esRetencion(c)  && cerroEn(c, periodo)).length;
   const recuperados = suyos.filter(c => esRecuperado(c) && cerroEn(c, periodo)).length;
   const perdidos    = suyos.filter(c => c.resultado_gestion === "PERDIDO" && cerroEn(c, periodo)).length;
+  /* La venta nueva no sale de la cartera asignada, así que no suma al % de
+     alcance. Pero es trabajo hecho y hasta ahora no se veía en ningún lado:
+     un ejecutivo con dos ventas nuevas aparecía en cero. Va aparte. */
+  const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === correo && esVentaNueva(c)
+                                         && cerroEn(c, periodo)).length;
   const logrado  = retenidos + recuperados;
   const trabajados = suyos.filter(c => DB.delCliente(c.customer_id)
       .some(r => mesISO(r.Fecha_Contacto) === periodo)).length;
-  return { asignada, retenidos, recuperados, perdidos, logrado, trabajados,
+  return { asignada, retenidos, recuperados, perdidos, logrado, trabajados, ventasNuevas,
            pct: asignada ? logrado / asignada : 0,
            pctTrabajo: asignada ? trabajados / asignada : 0 };
 }
@@ -6481,7 +6566,7 @@ function bindExtras(){
     };
   }
   const MAPA_F = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
-                   ejecutivo:"fEjecutivo", distrito:"fDistrito" };
+                   ejecutivo:"fEjecutivo", distrito:"fDistrito", cierre:"fCierre" };
   document.querySelectorAll(".seg button[data-f], .pill[data-f]").forEach(b => b.onclick = () => {
     S[MAPA_F[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
   });
@@ -6489,7 +6574,7 @@ function bindExtras(){
     S[MAPA_F[el.dataset.f]] = el.value; S.limite = 40; render();
   });
   const limpiar = () => { S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fEjecutivo = S.fDistrito = "todos";
-    S.filtrosAbiertos = false; S.limite = 40; render(); };
+    S.fCierre = "todos"; S.filtrosAbiertos = false; S.limite = 40; render(); };
   ["limpiarFiltros","limpiarFiltros2"].forEach(id => { if ($("#"+id)) $("#"+id).onclick = limpiar; });
   if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
   if ($("#masFiltros")) $("#masFiltros").onclick = () => { S.filtrosAbiertos = !S.filtrosAbiertos; render(); };
