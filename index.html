@@ -512,7 +512,7 @@ table.tbl tr:last-child td{border-bottom:0}
   font-weight:640;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
 .cifra-link:hover{text-decoration-style:solid}
 .g-ley-x{background:none;border:0;padding:2px 0;font:inherit;color:inherit;cursor:pointer;
-  display:inline-flex;align-items:center}
+  display:inline-flex;align-items:center;gap:6px}
 .g-ley-x:hover{color:var(--brand-2)}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
@@ -564,6 +564,45 @@ table.tbl tr:last-child td{border-bottom:0}
 .g-leyenda span{display:flex;align-items:center;gap:6px}
 .g-leyenda i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .g-leyenda b{color:var(--ink)}
+
+/* ---------- Panel: un reloj y cuatro bloques ----------------------------
+   El Panel era una pila de tarjetas sin jerarquía: había que leerlas todas
+   para saber cuál contestaba la pregunta. Ahora cada bloque se anuncia. */
+.pnl-per{display:grid;gap:9px;margin-bottom:15px}
+.pnl-per .seg{width:100%}
+.pnl-per .seg button{flex:1}
+.pnl-per-txt{font-size:12.5px;color:var(--muted)}
+.pnl-per-txt b{color:var(--ink-2);font-weight:640}
+.pnl-h{display:flex;align-items:flex-start;gap:10px;margin:22px 2px 11px}
+.pnl-h:first-child{margin-top:4px}
+.pnl-n{flex:none;width:22px;height:22px;border-radius:7px;background:var(--brand-2);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;margin-top:1px}
+.pnl-h b{display:block;font-size:15px;font-weight:730;letter-spacing:-.25px;line-height:1.25}
+/* Ojo con el selector: el número del bloque también es un span dentro de
+   .pnl-h, y «.pnl-h span» le ganaba en especificidad y lo pintaba gris sobre
+   azul. Se apunta solo al subtítulo. */
+.pnl-h > div span{display:block;font-size:12.5px;color:var(--muted);margin-top:1px;line-height:1.4}
+/* Lo accionable: número grande, título, y por qué importa */
+.pnl-fix{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
+.pnl-fix-x{text-align:left;font:inherit;color:inherit;cursor:pointer;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:11px 12px;display:block}
+.pnl-fix-x:hover{border-color:var(--brand-2);background:var(--info-bg)}
+.pnl-fix-x .n{display:block;font-size:22px;font-weight:730;letter-spacing:-.6px;line-height:1.1}
+.pnl-fix-x .t{display:block;font-size:13px;font-weight:650;margin-top:2px}
+.pnl-fix-x .d{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+.pnl-fix-x.grave .n{color:var(--crit-ink)}
+/* La explicación que cuelga de una fila de números no necesita su propia
+   tarjeta: una tarjeta con un solo enlace adentro se lee como un error. */
+details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
+.tbl-ctrl tfoot td{border-top:1px solid var(--line);border-bottom:0;font-weight:700;
+  padding-top:10px;color:var(--ink)}
+.tbl-ctrl tfoot td.nom{background:var(--card)}
+/* En el celular las tres opciones tienen que verse las tres: una que quede
+   fuera del borde deslizable es una opción que nadie descubre. */
+@media(max-width:759px){ .pnl-per .seg{flex-wrap:wrap;overflow:visible}
+  .pnl-per .seg button{flex:1 1 auto;padding:8px 10px} }
+@media(min-width:760px){ .pnl-per{grid-template-columns:auto auto 1fr;align-items:end}
+  .pnl-per .seg{width:auto} .pnl-per .seg button{flex:none} .pnl-per-txt{text-align:right} }
 
 /* ---------- Guía de uso: la infografía dentro del CRM ---------- */
 .g-pasos{display:grid;gap:12px}
@@ -904,6 +943,13 @@ const esVentaNueva = c => esClienteNuevo(c) && c.resultado_gestion === "VENTA";
    al cargar. Envueltas, se resuelven recién cuando se llaman. */
 const CIERRES = [
   { id:"cumplido",   label:"Objetivo cumplido", desc:"Retenidos, recuperados y ventas nuevas", test:c => gestionCumplida(c) },
+  /* El mismo nombre para dos números distintos era el peor enredo del Panel:
+     salía «Objetivo cumplido 1» y «Objetivo cumplido 4» en la misma pantalla.
+     Uno medía sobre la cartera asignada y el otro sobre todo lo registrado.
+     Ahora cada uno tiene su nombre y su lista. */
+  { id:"cumplido_cartera", label:"Objetivo cumplido en cartera",
+    desc:"Retenidos y recuperados; la venta nueva no salía de la cartera asignada",
+    test:c => esRetencion(c) || esRecuperado(c) },
   { id:"retenido",   label:"Retenidos",         desc:"Ya operaban y se quedaron",     test:c => esRetencion(c) },
   { id:"recuperado", label:"Recuperados",       desc:"Estaban de baja y volvieron",   test:c => esRecuperado(c) },
   { id:"venta",      label:"Ventas nuevas",     desc:"RUC que trajo Stratis",         test:c => esVentaNueva(c) },
@@ -1065,6 +1111,69 @@ function textoPeriodo(p){
 }
 /* El periodo se nombra por el mes en que cierra y se paga. */
 const nombrePeriodo = p => nombreMes(p);
+
+/* =========================================================================
+   El reloj del Panel
+
+   Antes cada pantalla medía con su propio calendario: la Cartera sin ventana,
+   Registros con su filtro, el Panel con el mes y el bono con el corte del 18.
+   Los mismos hechos daban cuatro números y ninguno estaba mal. Acá hay un solo
+   selector y tres relojes declarados, y toda métrica dice contra cuál se midió.
+   ========================================================================= */
+const VENTANAS_PANEL = [
+  { id:"bono",     label:"Periodo del bono" },
+  { id:"mes",      label:"Mes calendario" },
+  { id:"proyecto", label:"Todo el proyecto" }
+];
+function finDeMes(p){
+  const [a, m] = String(p || "").split("-").map(Number);
+  if (!a || !m) return "";
+  return `${a}-${pad(m)}-${pad(new Date(Date.UTC(a, m, 0)).getUTCDate())}`;
+}
+/* Meses del proyecto, del más reciente al más antiguo */
+function mesesProyecto(){
+  const l = []; let p = mesISO(PROYECTO.inicio); const ult = mesISO(PROYECTO.fin);
+  while (p <= ult){ l.push(p); const [a,m] = p.split("-").map(Number);
+    p = m === 12 ? `${a+1}-01` : `${a}-${pad(m+1)}`; }
+  return l.reverse();
+}
+function rangoPanel(){
+  const v = S.vPanel || "bono";
+  if (v === "proyecto")
+    return { id:"proyecto", ini:PROYECTO.inicio, fin:PROYECTO.fin, periodo:"",
+             label:"todo el proyecto",
+             detalle:`${fmtFecha(PROYECTO.inicio)} al ${fmtFecha(PROYECTO.fin)}` };
+  if (v === "mes"){
+    const p = mesesProyecto().includes(S.pPanel) ? S.pPanel : mesHoy();
+    return { id:"mes", periodo:p, ini:`${p}-01`, fin:finDeMes(p),
+             label:nombreMes(p),
+             detalle:`${fmtFecha(`${p}-01`)} al ${fmtFecha(finDeMes(p))}` };
+  }
+  const p = periodosProyecto().includes(S.pPanel) ? S.pPanel : periodoHoy();
+  const w = ventanaPeriodo(p);
+  return { id:"bono", periodo:p, ini:w.ini, fin:w.fin,
+           label:`periodo ${nombrePeriodo(p)}`, detalle:textoPeriodo(p) };
+}
+const enRango = (fecha, r) => {
+  const f = String(fecha || "").slice(0,10);
+  return !!f && !!r.ini && f >= r.ini && f <= r.fin;
+};
+const semanasRango = r => {
+  if (!r.ini || !r.fin) return 0;
+  const fin = r.fin > hoyISO() ? hoyISO() : r.fin;      // no se exige por días que no han pasado
+  if (fin < r.ini) return 0;
+  return (Math.round((new Date(fin) - new Date(r.ini)) / 86400000) + 1) / 7;
+};
+
+/* Cuánto lleva corrido el proyecto. No depende del selector: el proyecto es
+   uno solo, del 20 de julio al 18 de diciembre. */
+function avanceProyecto(){
+  const ini = new Date(PROYECTO.inicio), fin = new Date(PROYECTO.fin), hoy = new Date(hoyISO());
+  const total = Math.round((fin - ini) / 86400000) + 1;
+  const corrido = Math.min(total, Math.max(0, Math.round((hoy - ini) / 86400000) + 1));
+  return { total, corrido, restante: Math.max(0, total - corrido),
+           pct: total ? corrido / total * 100 : 0 };
+}
 
 /* Demora en días trabajados. Un contacto del sábado registrado el lunes
    llegó al día siguiente de trabajo; el domingo no cuenta. */
@@ -1280,8 +1389,11 @@ const S = {
   fEjecAgenda:"todos",   // Agenda: por ejecutivo, solo para supervisión
   fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
-  mesPanel:"",   /* mes que se está mirando; vacío = el actual */
+  mesPanel:"",   /* mes de la cartera asignada, en Ajustes; vacío = el actual */
   pBono:"",      /* periodo del bono; vacío = el que corre */
+  vPanel:"bono", /* el reloj del Panel: bono | mes | proyecto */
+  pPanel:"",     /* qué periodo o mes; vacío = el que corre */
+  verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
   filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
   fCierre:"todos",              /* retenidos, recuperados, ventas nuevas, perdidos */
   limite:40, cargando:false
@@ -1732,6 +1844,24 @@ function verCierre(id, ejecutivo){
   }
 }
 
+/* Del Panel a la bitácora, con el filtro puesto. El número solo no deja hacer
+   nada: la pregunta que sigue siempre es «¿cuáles?». */
+function verGestiones(filtro, ejecutivo){
+  S.qReg = ""; S.fMedio = "todos"; S.limiteReg = 40;
+  S.fResultado  = filtro || "todos";
+  S.fEjecReg    = ejecutivo || "todos";
+  /* La bitácora tiene su propio filtro de fechas y no entiende el periodo del
+     bono. Se abre en «Todo» para que la lista no salga vacía sin explicación. */
+  S.fPeriodoReg = "todo";
+  go("registros");
+}
+/* Del Panel a la cartera, por situación del comercio */
+function verCarteraPor(filtro){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = filtro || "todos"; S.limite = 40; S.filtrosAbiertos = false;
+  go("cartera");
+}
+
 function go(tab, cid){
   S.tab = tab; S.cid = cid || null;
   S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
@@ -1774,7 +1904,6 @@ function render(){
   else if (S.tab === "bono")              v.innerHTML = viewBono();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
-  else if (S.tab === "guia")              v.innerHTML = viewGuia();   // sin pestaña: el equipo no la usaba
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
 }
@@ -1792,6 +1921,12 @@ function bindComunes(){
   document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
   document.querySelectorAll("[data-vercierre]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verCierre(el.dataset.vercierre, el.dataset.verejec || "");
+  });
+  document.querySelectorAll("[data-verges]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verGestiones(el.dataset.verges, el.dataset.verejec || "");
+  });
+  document.querySelectorAll("[data-vercartera]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCarteraPor(el.dataset.vercartera);
   });
   if (typeof bindExtras === "function") bindExtras();
 }
@@ -1864,6 +1999,9 @@ function viewCartera(){
   const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
   const cumplen = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cumple_Visita === "SI").length;
   const cerrados = base.filter(gestionCumplida).length;
+  /* El mismo número decía «Objetivo cumplido» acá y en el Panel con valores
+     distintos: acá incluye las ventas nuevas, allá no. Se dice cuál es cuál. */
+  const nuevosCumplidos = base.filter(c => esVentaNueva(c)).length;
   const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
   const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
 
@@ -1897,14 +2035,17 @@ function viewCartera(){
 
   ${avisoVentana()}
 
+  <!-- Todo lo de esta fila cuenta COMERCIOS. La bitácora cuenta gestiones, y
+       antes las dos pantallas usaban las mismas palabras para las dos unidades:
+       «Con respuesta 29» acá y «Con respuesta 46» allá, sin decir de qué. -->
   <div class="stat-row">
     <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
-    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${conEf}</div><div class="sub">${total?Math.round(conEf/total*100):0}% de la cartera respondió</div></div>
-    <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumplen}</div><div class="sub">presenciales o virtuales logradas</div></div>
+    <div class="stat"><div class="lbl">Comercios con respuesta</div><div class="val">${conEf}</div><div class="sub">respondieron al menos una vez · ${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
+    <div class="stat"><div class="lbl">Gestiones</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
+    <div class="stat"><div class="lbl">Con visita efectiva</div><div class="val">${cumplen}</div><div class="sub">comercios con al menos una visita cumplida</div></div>
     <button class="stat stat-link" data-vercierre="cumplido" title="Ver los comercios con objetivo cumplido">
       <div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div>
-      <div class="sub">${total?Math.round(cerrados/total*100):0}% · retenidos y ventas — <b>ver cuáles</b></div></button>
+      <div class="sub">${cerrados - nuevosCumplidos} de cartera${nuevosCumplidos ? ` + ${nuevosCumplidos} venta${nuevosCumplidos===1?"":"s"} nueva${nuevosCumplidos===1?"":"s"}` : ""} — <b>ver cuáles</b></div></button>
   </div>
 
   <div class="filtros">
@@ -3396,23 +3537,9 @@ function notaSinUbicacion(){
    comprobantes en el formulario. Lo que se declaró antes sigue guardado y se
    puede consultar en el Excel; simplemente no se pide nada nuevo. */
 
-function comprimir(file, cb){
-  const rd = new FileReader();
-  rd.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      const max = 1100, r = Math.min(1, max / Math.max(img.width, img.height));
-      const cv = document.createElement("canvas");
-      cv.width = Math.round(img.width * r); cv.height = Math.round(img.height * r);
-      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-      cb(cv.toDataURL("image/jpeg", 0.72));
-    };
-    img.onerror = () => cb(rd.result);
-    img.src = rd.result;
-  };
-  rd.readAsDataURL(file);
-}
-
+/* «comprimir()» achicaba la foto de evidencia antes de subirla. Al retirar las
+   evidencias quedó sin un solo llamado, y el código que nadie llama es código
+   que nadie mantiene: se fue con ellas. */
 
 /* ---- Guardar ----------------------------------------------------------- */
 async function guardar(c){
@@ -3649,7 +3776,7 @@ function tablaControl(filas){
     <div class="ctrl-scroll">
     <table class="tbl-ctrl">
       <thead><tr>
-        <th>Ejecutivo</th><th>Gestiones</th><th>Comercios</th><th>Días con actividad</th>
+        <th>Ejecutivo</th><th>Gestiones</th><th title="Comercios distintos con al menos una gestión">Comercios tocados</th><th>Días con actividad</th>
         <th>Por día</th><th>Respuestas</th><th>% respuesta</th>
         <th title="Gestiones registradas el mismo día en que ocurrieron">En el día</th>
         <th>Última gestión</th>
@@ -3705,7 +3832,7 @@ function tarjetaGestion(r){
               c && gestionCumplida(c) ? `<span class="chip ok">${esc(tipoCierre(c))}</span>`
               : c && c.resultado_gestion === "PERDIDO" ? `<span class="chip crit">Perdido</span>` : ""}
             ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
-            ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita válida</span>`:""}
+            ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita efectiva</span>`:""}
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
               : ubicacionExenta(r)?`<span class="chip no" title="${esc(r.Ubicacion_Exenta_Motivo||"")}">Ubicación no exigible</span>`
               : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
@@ -3743,6 +3870,9 @@ function viewRegistros(){
   if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacion);
+  /* El Panel avisa cuántas se registraron tarde; sin este filtro el número
+     llevaba a la lista completa, que es lo mismo que no llevar a ninguna. */
+  else if (S.fResultado === "fuera_plazo")    lista = lista.filter(r => demoraHabil(r) > 1);
   else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -3789,7 +3919,7 @@ function viewRegistros(){
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Gestiones</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
-    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
+    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">gestiones · ${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
     <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div><div class="sub">${dias?`${(todos.length/dias).toFixed(1)} gestiones por día`:"sin movimiento"}</div></div>
     <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">presenciales sin ninguna coordenada</div></div>
   </div>
@@ -3805,6 +3935,8 @@ function viewRegistros(){
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
+      ${todos.some(r => demoraHabil(r) > 1)
+        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día hábil después del contacto">Fuera de plazo</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -3860,6 +3992,7 @@ function gestionesFiltradas(){
   if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
+  else if (S.fResultado === "fuera_plazo")    l = l.filter(r => demoraHabil(r) > 1);
   else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -3868,295 +4001,428 @@ function gestionesFiltradas(){
 
 
 
-/* ---------- Alcance sobre la cartera asignada ----------------------------
-   Lo que sigue es el único bloque del panel que tiene denominador de verdad:
-   no mide sobre lo registrado, mide sobre lo que BBVA entregó ese mes. */
-function cardAlcance(){
-  const p     = periodoActivo();
-  const admin = S.user.rol !== "Ejecutivo";
-  const meses = mesesConMeta();
-  const quienes = admin
-    ? USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
-    : [{ nombre: S.user.nombre, correo: S.user.correo }];
+/* =========================================================================
+   Panel — cuatro bloques y un solo reloj
 
-  const filas = quienes.map(u => Object.assign({ nombre:u.nombre }, alcanceDe(u.correo, p)));
-  const sum = k => filas.reduce((n,f) => n + f[k], 0);
-  const asign = sum("asignada"), logrado = sum("logrado"), trab = sum("trabajados");
-  const pct = asign ? Math.round(logrado / asign * 1000) / 10 : 0;
-  const pctT = asign ? Math.round(trab / asign * 1000) / 10 : 0;
+   El desorden anterior no era estético. La misma palabra significaba cosas
+   distintas a diez centímetros de distancia: «Objetivo cumplido» salía con 1
+   y con 4, «Con respuesta» eran comercios acá y gestiones allá, y cada
+   tarjeta medía con un calendario propio. Nadie estaba mal calculado; nadie
+   decía contra qué medía.
 
-  const anterior = mesAnterior(p);
-  const prev = quienes.reduce((n,u) => n + alcanceDe(u.correo, anterior).logrado, 0);
-  const prevAs = quienes.reduce((n,u) => n + metaDe(u.correo, anterior), 0);
+   Acá hay una regla y se cumple sin excepción: cada métrica dice su unidad
+   —comercios o gestiones— y todo el bloque 2 en adelante se mide con el
+   periodo que se elige arriba. El bloque 1 no: el proyecto es uno solo.
+   ========================================================================= */
 
-  if (!asign) return `
-    <div class="card">
-      <h3>Alcance sobre la cartera asignada · ${esc(nombreMes(p))}</h3>
-      <div class="note warn" style="margin:0">
-        ${admin
-          ? `Todavía no cargaste cuántos casos tiene asignado cada ejecutivo en ${esc(nombreMes(p))}.
-             Se cargan en <b>Ajustes → Cartera asignada</b>. Sin ese número el avance solo se puede
-             medir sobre lo que ya está registrado, que siempre se ve mejor de lo que es.`
-          : `Tu supervisor todavía no cargó tu cartera asignada de ${esc(nombreMes(p))}.`}
+/* La cartera que mira el Panel no depende de los filtros de la pantalla de
+   Cartera. Antes sí, y bastaba con haber tocado «ver cuáles» para que el
+   Panel entero se quedara filtrado por un ejecutivo sin avisarlo. */
+const universoPanel = () => !S.user ? []
+  : S.user.rol === "Ejecutivo" ? CLIENTES.filter(c => c.asignado_correo === S.user.correo)
+  : CLIENTES;
+
+const ejecutivosPanel = () => S.user.rol === "Ejecutivo"
+  ? USUARIOS.filter(u => u.correo === S.user.correo)
+  : USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+
+/* ---- El selector, uno para toda la pantalla ----------------------------- */
+function selectorPanel(r){
+  const opciones = r.id === "proyecto" ? []
+    : r.id === "mes" ? mesesProyecto().map(m => [m, nombreMes(m)])
+    : periodosProyecto().slice().reverse().map(p => [p, `${nombrePeriodo(p)} · ${textoPeriodo(p)}`]);
+
+  return `
+  <div class="page-head">
+    <div>
+      <h2>Panel de la campaña</h2>
+      <div class="sub">Cartera asignada, alcance y actividad — todo medido contra el mismo periodo</div>
+    </div>
+  </div>
+
+  <div class="pnl-per">
+    <div class="seg" role="group" aria-label="Periodo">
+      ${VENTANAS_PANEL.map(v => `<button class="${(S.vPanel||"bono")===v.id?"on":""}" data-vpanel="${v.id}">${v.label}</button>`).join("")}
+    </div>
+    ${opciones.length > 1 ? `<label class="fsel"><span>${r.id === "mes" ? "Mes" : "Periodo"}</span>
+      <select id="pPanel">${opciones.map(([v,l]) =>
+        `<option value="${esc(v)}"${v === r.periodo ? " selected" : ""}>${esc(l)}</option>`).join("")}
+      </select></label>` : ""}
+    <div class="pnl-per-txt">Del <b>${esc(r.detalle)}</b>${
+      r.id === "bono" ? " · el mes del bono corta el 18" : ""}</div>
+  </div>`;
+}
+
+/* ---- 1 · El proyecto ----------------------------------------------------
+   Siempre el proyecto entero, sin importar el selector: la cartera asignada
+   no se reparte por mes y el avance se mide contra los cinco meses. */
+function bloqueProyecto(){
+  const base   = universoPanel();
+  const quien  = ejecutivosPanel();
+  const rTodo  = { id:"proyecto", ini:PROYECTO.inicio, fin:PROYECTO.fin, periodo:"" };
+  const asignada = quien.reduce((n,u) => n + asignadaDe(u.correo, rTodo), 0);
+
+  const deCartera = base.filter(c => !esClienteNuevo(c));
+  const nuevos    = base.filter(esClienteNuevo);
+  const cumplidos = deCartera.filter(c => esRetencion(c) || esRecuperado(c)).length;
+  const ventas    = nuevos.filter(c => c.resultado_gestion === "VENTA").length;
+  const trabajados = deCartera.filter(c =>
+    (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0).length;
+
+  const av = avanceProyecto();
+  const pct  = asignada ? cumplidos / asignada * 100 : 0;
+  const pctT = asignada ? trabajados / asignada * 100 : 0;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">1</span>
+    <div><b>El proyecto</b><span>Del ${fmtFecha(PROYECTO.inicio)} al ${fmtFecha(PROYECTO.fin)} — no cambia con el periodo de arriba</span></div>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Cartera asignada</div><div class="val">${asignada || "—"}</div>
+      <div class="sub">${asignada ? "comercios que entregó BBVA" : "todavía no se cargó en Ajustes"}</div></div>
+    <div class="stat"><div class="lbl">Registrados en el CRM</div><div class="val">${deCartera.length}</div>
+      <div class="sub">comercios de cartera${nuevos.length ? ` · ${nuevos.length} venta${nuevos.length===1?"":"s"} nueva${nuevos.length===1?"":"s"} aparte` : ""}</div></div>
+    <button class="stat stat-link" data-vercierre="cumplido_cartera">
+      <div class="lbl">Objetivo cumplido</div><div class="val">${cumplidos}</div>
+      <div class="sub">comercios${asignada ? ` · ${pct.toFixed(1)}% de los ${asignada} asignados` : ""} — <b>ver cuáles</b></div></button>
+    <button class="stat stat-link" data-vercierre="venta">
+      <div class="lbl">Ventas nuevas</div><div class="val">${ventas}</div>
+      <div class="sub">RUC que trajo Stratis · no salen de la cartera — <b>ver cuáles</b></div></button>
+    <div class="stat"><div class="lbl">Avance del proyecto</div><div class="val">${Math.round(av.pct)}%</div>
+      <div class="sub">día ${av.corrido} de ${av.total} · ${av.restante ? `quedan ${textoDias(av.restante)}` : "cerrado"}</div></div>
+  </div>
+
+  ${asignada ? `<div class="card">
+    <div class="g-barra">
+      <span style="width:${Math.min(100, pct).toFixed(1)}%;background:var(--good)"></span>
+      <span style="width:${Math.min(100 - Math.min(100,pct), Math.max(0, pctT - pct)).toFixed(1)}%;background:var(--warn)"></span>
+    </div>
+    <div class="g-leyenda">
+      <button class="g-ley-x" data-vercierre="cumplido_cartera"><i style="background:var(--good)"></i>Objetivo cumplido · <b>${cumplidos}</b></button>
+      <span><i style="background:var(--warn)"></i>Trabajados sin cerrar · <b>${Math.max(0, trabajados - cumplidos)}</b></span>
+      <span><i style="background:var(--grid)"></i>Sin tocar · <b>${Math.max(0, asignada - trabajados)}</b></span>
+    </div>
+    <details class="explica"><summary>Por qué la barra suma ${asignada} y el CRM tiene ${deCartera.length}</summary>
+      <div class="cuerpo">
+        <p>La barra se mide sobre la <b>cartera asignada</b>: los ${asignada} comercios que BBVA
+        entregó. Lo registrado en el CRM son ${deCartera.length}, porque un comercio entra recién
+        cuando alguien lo trabaja. La diferencia es el tramo gris: <b>sin tocar</b>.</p>
+        <p>Las <b>ventas nuevas</b> no entran en esta barra. Son RUC que Stratis trajo de cero y que
+        no salían de la cartera de nadie: sumarlas al porcentaje inflaría el alcance sobre un
+        denominador al que nunca pertenecieron. Cuentan —y pesan en el incentivo— en su propia cifra.</p>
       </div>
-    </div>`;
+    </details>
+  </div>` : `<div class="card"><div class="note warn" style="margin:0">
+    Falta cargar la cartera asignada por ejecutivo en <b>Ajustes → Cartera asignada</b>.
+    Sin ese número el avance solo se puede medir sobre lo ya registrado, que siempre se ve
+    mejor de lo que es.</div></div>`}
+
+  ${cardReparto(base)}`;
+}
+
+/* En qué terminó cada comercio ya registrado. Es la otra mitad de la historia:
+   la barra de arriba mide contra los 841 asignados y siempre va a verse baja
+   al principio; esta mide contra lo que el equipo ya tocó, y dice si de lo
+   decidido se está ganando o perdiendo. */
+function cardReparto(base){
+  const total = base.length;
+  if (!total) return `<div class="card"><div class="vacio">Todavía no hay comercios registrados en la campaña.</div></div>`;
+
+  const n = t => base.filter(t).length;
+  const retenidos = n(esRetencion), recuperados = n(esRecuperado);
+  const ventas    = n(esVentaNueva);
+  const perdidos  = n(c => c.resultado_gestion === "PERDIDO");
+  const pendientes = n(c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE");
+  const cumplido  = retenidos + recuperados + ventas;
+  const decididos = cumplido + perdidos;
+
+  const reparto = [
+    { label:"Retenidos",     n:retenidos,   color:"var(--good)",    ver:"retenido" },
+    { label:"Recuperados",   n:recuperados, color:"var(--s2)",      ver:"recuperado" },
+    { label:"Ventas nuevas", n:ventas,      color:"var(--brand-2)", ver:"venta" },
+    { label:"Perdidos",      n:perdidos,    color:"var(--crit)",    ver:"perdido" },
+    { label:"Pendientes",    n:pendientes,  color:"var(--line)",    ver:"pendiente" }
+  ].filter(x => x.n > 0);
 
   return `
   <div class="card">
-    <div class="eq-top">
-      <div class="eq-conteo"><b>${pct}%</b> de alcance en ${esc(nombreMes(p))}
-        <div style="font-size:12.5px;color:var(--muted);margin-top:2px">
-          ${logrado} de ${asign} casos asignados${prevAs ? ` · ${esc(nombreMes(anterior))}: ${prev}` : ""}</div>
-      </div>
-      ${meses.length > 1 ? `<label class="fsel" style="min-width:170px"><span>Mes</span>
-        <select id="mesPanel">${meses.map(m =>
-          `<option value="${m}"${m === p ? " selected" : ""}>${esc(nombreMes(m))}</option>`).join("")}
-        </select></label>` : ""}
+    <h3>En qué terminó lo registrado · ${total} comercios en el CRM</h3>
+    <div class="stat-row" style="margin-bottom:13px">
+      <div class="stat"><div class="lbl">Efectividad de cierre</div>
+        <div class="val">${decididos ? Math.round(cumplido/decididos*100) + "%" : "—"}</div>
+        <div class="sub">${decididos ? `${cumplido} de ${decididos} comercios ya decididos` : "todavía no hay ningún comercio decidido"}</div></div>
+      <button class="stat stat-link" data-vercierre="pendiente"><div class="lbl">Todavía abiertos</div>
+        <div class="val">${pendientes}</div>
+        <div class="sub">${Math.round(pendientes/total*100)}% de lo registrado sigue en trabajo — <b>ver cuáles</b></div></button>
     </div>
-
-    <div class="g-barra" style="margin:4px 0 6px">
-      <span style="width:${Math.min(100, pct)}%;background:var(--good)"></span>
-      <span style="width:${Math.min(100 - Math.min(100,pct), Math.max(0, pctT - pct))}%;background:var(--warn)"></span>
+    <div class="g-barra">
+      ${reparto.map(x => `<span style="width:${(x.n/total*100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${x.n}"></span>`).join("")}
     </div>
     <div class="g-leyenda">
-      <span><i style="background:var(--good)"></i>Objetivo cumplido ${logrado}</span>
-      <span><i style="background:var(--warn)"></i>Trabajados sin cerrar ${Math.max(0, trab - logrado)}</span>
-      <span><i style="background:var(--grid)"></i>Sin tocar ${Math.max(0, asign - trab)}</span>
+      ${reparto.map(x => `<button class="g-ley-x" data-vercierre="${x.ver}" title="Ver los comercios">
+        <i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></button>`).join("")}
     </div>
-
-    <div class="tbl-wrap" style="margin-top:13px"><table class="tbl">
-      <thead><tr><th>${admin ? "Ejecutivo" : "Tu mes"}</th>
-        <th style="text-align:right">Asignados</th><th style="text-align:right">Trabajados</th>
-        <th style="text-align:right">Retenidos</th><th style="text-align:right">Recuperados</th>
-        <th style="text-align:right" title="No suman al % de alcance: no salían de la cartera asignada">Ventas nuevas</th>
-        <th style="text-align:right">% alcance</th></tr></thead>
-      <tbody>${filas.map(f => {
-        /* Cada cifra de cierre lleva a sus comercios: el número solo no deja
-           hacer nada, y la pregunta siempre es «¿cuáles?». */
-        const link = (n, cierre) => n
-          ? `<button class="cifra-link" data-vercierre="${cierre}" data-verejec="${esc(f.nombre)}"
-               title="Ver los comercios">${n}</button>`
-          : "—";
-        return `<tr>
-        <td><b>${esc(f.nombre)}</b></td>
-        <td style="text-align:right" class="mono">${f.asignada || "—"}</td>
-        <td style="text-align:right" class="mono">${f.trabajados || "—"}</td>
-        <td style="text-align:right" class="mono">${link(f.retenidos, "retenido")}</td>
-        <td style="text-align:right" class="mono">${link(f.recuperados, "recuperado")}</td>
-        <td style="text-align:right" class="mono">${link(f.ventasNuevas, "venta")}</td>
-        <td style="text-align:right" class="mono"><b>${f.asignada ? Math.round(f.pct*1000)/10 + "%" : "—"}</b></td>
-      </tr>`;
-      }).join("")}</tbody>
-    </table></div>
-
-    <details class="explica"><summary>Qué cuenta como retenido, qué como recuperado y qué como venta nueva</summary>
+    <details class="explica"><summary>Por qué van dos barras y no una</summary>
       <div class="cuerpo">
-        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban
-        dados de baja y volvieron. Los dos salían de la cartera asignada, así que los dos suman al
-        <b>% de alcance</b>.</p>
-        <p><b>Ventas nuevas</b> son RUC que trajo Stratis y que BBVA todavía no tenía. Es trabajo
-        que cuenta —y pesa en el incentivo— pero <b>no suma al % de alcance</b>, porque no salía de
-        la cartera de nadie. Por eso va en su propia columna y no mezclada con las otras dos.</p>
-        <p>Un cierre cuenta en el mes en que se decidió. Toca cualquier cifra para ver de qué
-        comercios se trata.</p>
+        <p>La de arriba mide contra la <b>cartera asignada</b>: es el número que le importa a BBVA y
+        al principio de campaña va a ser bajo, porque casi todo está sin tocar. Esta mide contra lo
+        que el equipo ya <b>registró</b>: dice cómo se está trabajando lo que sí se agarró.</p>
+        <p>La <b>efectividad de cierre</b> mira solo lo ya decidido. Un 100% con tres comercios
+        decididos de doscientos no es una buena campaña — por eso nunca va sola.</p>
+        <p>Nada de esto es la <b>tasa de respuesta</b>, que solo mide en cuántas gestiones el cliente
+        contestó. Que respondan no es que se queden: se puede tener 100% de respuesta y 0% de
+        retención.</p>
       </div>
     </details>
   </div>`;
 }
 
-/* ---------- Panel de avance y efectividad -------------------------------- */
-function viewPanel(){
-  const base = cartera();
-  base.forEach(c => RULES.recomputarBase(c.customer_id));
-  const total = base.length;
-  const conEf = base.filter(c => c._base._efectivos > 0).length;
-  const cumple = base.filter(c => c._base.Cumple_Visita === "SI").length;
+/* ---- 2 · La actividad del periodo --------------------------------------
+   Todo en gestiones. La confusión de fondo era contar unas veces comercios y
+   otras gestiones bajo el mismo rótulo. */
+function bloqueActividad(r, regs){
+  const gestiones  = regs.length;
+  const respuestas = regs.filter(x => esEfectivo(x.Resultado)).length;
+  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const comercios  = new Set(regs.map(x => String(x.Customer_id))).size;
+  const dias       = new Set(regs.map(x => String(x.Fecha_Contacto).slice(0,10))).size;
 
-  const visibles = new Set(base.map(c => String(c.customer_id)));
-  const regs = DB.todos().filter(r => visibles.has(String(r.Customer_id)));
+  const sem   = semanasRango(r);
+  const gente = ejecutivosPanel().length || 1;
+  const ritmo = sem ? efectivas / sem / gente : 0;
+  const pide  = BONO.requisitos.visitas_semana;
 
-  /* Por dónde llega la cartera: el canal con el que se coordinó con el
-     ejecutivo de BBVA antes de registrar cada comercio. Los registros
-     anteriores a la regla no lo tienen, y se cuentan aparte para que el
-     porcentaje no mienta. */
-  const deCarteraBBVA = base.filter(c => !esClienteNuevo(c));
-  const canalBBVA = CONTACTO_BBVA.map(x => ({
-    label: x.label,
-    n: deCarteraBBVA.filter(c => c.contacto_bbva === x.id).length
-  }));
-  const sinCanalBBVA = deCarteraBBVA.filter(c => !c.contacto_bbva).length;
-  const conCanalBBVA = deCarteraBBVA.length - sinCanalBBVA;
-  const maxCanalBBVA = Math.max(1, ...canalBBVA.map(x => x.n));
-  const intentos = regs.length;
-  const efectivos = regs.filter(r => esEfectivo(r.Resultado)).length;
-  const pctEf = intentos ? Math.round(efectivos / intentos * 100) : 0;
+  return `
+  <div class="pnl-h"><span class="pnl-n">2</span>
+    <div><b>La actividad</b><span>${esc(r.detalle)} — todo contado en gestiones</span></div>
+  </div>
+  <div class="stat-row">
+    <button class="stat stat-link" data-verges="todos"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
+      <div class="sub">intentos de comunicación — <b>ver la lista</b></div></button>
+    <button class="stat stat-link" data-verges="efectivos"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
+      <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo — <b>ver cuáles</b></div></button>
+    <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${efectivas}</div>
+      <div class="sub">gestiones que cumplen visita</div></div>
+    <div class="stat"><div class="lbl">Comercios tocados</div><div class="val">${comercios}</div>
+      <div class="sub">comercios distintos con al menos una gestión</div></div>
+    <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div>
+      <div class="sub">${dias ? `${(gestiones/dias).toFixed(1)} gestiones por día` : "sin movimiento"}</div></div>
+    <div class="stat ${sem && ritmo < pide ? "malo" : ""}"><div class="lbl">Ritmo semanal</div>
+      <div class="val">${sem ? ritmo.toFixed(1) : "—"}</div>
+      <div class="sub">visitas efectivas por semana y por ejecutivo · se piden ${pide}</div></div>
+  </div>
+  <details class="explica suelta"><summary>Por qué acá dice ${efectivas} gestiones y en la Cartera otro número</summary>
+      <div class="cuerpo">
+        <p>Este bloque cuenta <b>gestiones</b>: cada registro es uno, aunque sea el cuarto intento con
+        el mismo comercio. La Cartera cuenta <b>comercios</b>: uno que recibió tres visitas efectivas
+        sigue siendo un comercio. Los dos números son correctos y miden cosas distintas; por eso
+        cada uno dice su unidad.</p>
+        <p>El <b>ritmo semanal</b> es el requisito del incentivo: ${pide} visitas efectivas por semana
+        y por ejecutivo. Las semanas no se redondean y no se cuentan días que todavía no ocurren.</p>
+      </div>
+  </details>`;
+}
 
-  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
-    const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
-    cs.forEach(c => RULES.recomputarBase(c.customer_id));
-    const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
-    const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
-    return { nombre:u.nombre, clientes:cs.length, intentos:rs.length, efectivos:ef,
-      ids: cs.filter(c => !esClienteNuevo(c)).length,
-      nuevos: cs.filter(esClienteNuevo).length,
-      cumple: rs.filter(r => r.Cumple_Visita === "SI").length,
-      trabajados: new Set(rs.map(r => String(r.Customer_id))).size,
-      pct: rs.length ? ef / rs.length * 100 : 0 };
-  }).filter(e => e.clientes || e.intentos).sort((a,b) => b.pct - a.pct);
+/* ---- 3 · Una sola tabla por ejecutivo -----------------------------------
+   Antes eran tres tablas con tres ventanas: «Trabajados» y «Comercios» eran
+   lo mismo y nunca coincidían. */
+const COLS_PANEL = [
+  { k:"asignada",    th:"Asignados",        ttl:"Cartera que entregó BBVA", val:f => f.asignada || "—" },
+  { k:"registrados", th:"Registrados",      extra:true, ttl:"Customer ID cargados en el CRM", val:f => f.registrados || "—" },
+  { k:"sinTocar",    th:"Sin tocar",        extra:true, ttl:"Asignados que no recibieron ninguna gestión en el periodo",
+    val:f => f.asignada ? f.sinTocar : "—" },
+  { k:"trabajados",  th:"Trabajados",       ttl:"Comercios con al menos una gestión en el periodo", val:f => f.trabajados || "—" },
+  { k:"gestiones",   th:"Gestiones",        extra:true, val:f => f.gestiones || "—" },
+  { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
+  { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
+    val:f => f.tasa === null ? "—" : Math.round(f.tasa) + "%" },
+  { k:"puntualidad", th:"Puntualidad",      extra:true, ttl:"Gestiones registradas dentro del día hábil siguiente",
+    val:f => f.puntualidad === null ? "—" : Math.round(f.puntualidad) + "%" },
+  { k:"retenidos",   th:"Retenidos",    cierre:"retenido" },
+  { k:"recuperados", th:"Recuperados",  cierre:"recuperado" },
+  { k:"ventasNuevas",th:"Ventas nuevas",cierre:"venta", ttl:"No suman al % de alcance: no salían de la cartera asignada" },
+  { k:"pct",         th:"% alcance",        ttl:"Retenidos y recuperados sobre la cartera asignada",
+    val:f => f.pct === null ? "—" : `<b>${(Math.round(f.pct*10)/10)}%</b>` },
+  { k:"ultima",      th:"Última gestión",   extra:true, txt:true,
+    val:f => f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}` : "sin gestiones" }
+];
 
-  /* ---- Cierre de la gestión --------------------------------------------
-     Dos números distintos y los dos hacen falta:
-     · Avance: cuánto de la cartera ya tiene el objetivo cumplido. Al inicio
-       de campaña es bajo por definición, porque casi todo está pendiente.
-     · Efectividad de cierre: de lo ya decidido, cuánto se ganó. Dice qué tan
-       bien cierran, sin castigarlos por lo que todavía están trabajando.
-     Por separado engañan: 100% de efectividad de cierre con 3 comercios
-     decididos de 200 no es una buena campaña. */
-  const nCierre = id => base.filter(c => (c.resultado_gestion || "PENDIENTE") === id).length;
-  const retenidos = nCierre("RETENIDO"), ventas = nCierre("VENTA");
-  const perdidos  = nCierre("PERDIDO"),  pendientes = nCierre("PENDIENTE");
-  const cumplido  = retenidos + ventas;
-  const decididos = cumplido + perdidos;
-  const pctAvance = total ? Math.round(cumplido / total * 100) : 0;
-  const pctCierre = decididos ? Math.round(cumplido / decididos * 100) : 0;
-  /* Cada tramo lleva a su lista: el número sin los nombres detrás no deja
-     hacer nada con él. */
-  const repartoCierre = [
-    { label:"Retenidos",  n:retenidos,  color:"var(--good)",    ver:"retenido" },
-    { label:"Ventas",     n:ventas,     color:"var(--brand-2)", ver:"venta" },
-    { label:"Perdidos",   n:perdidos,   color:"var(--crit)",    ver:"perdido" },
-    { label:"Pendientes", n:pendientes, color:"var(--line)",    ver:"pendiente" }
+function bloqueEquipo(r){
+  const filas = ejecutivosPanel().map(u => filaEjecutivo(u, r));
+  const todo  = !!S.verTodo;
+  const cols  = COLS_PANEL.filter(c => todo || !c.extra);
+  const suma  = k => filas.reduce((n,f) => n + (f[k] || 0), 0);
+
+  const celda = (f, c) => {
+    if (c.cierre) return f[c.k]
+      ? `<button class="cifra-link" data-vercierre="${c.cierre}" data-verejec="${esc(f.nombre)}" title="Ver los comercios">${f[c.k]}</button>`
+      : "—";
+    return c.val(f);
+  };
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">3</span>
+    <div><b>Cada ejecutivo</b><span>${esc(r.detalle)} — toca cualquier cifra de cierre para ver de qué comercios se trata</span></div>
+  </div>
+
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Alcance y actividad por ejecutivo</h3>
+      <button class="btn ghost sm" id="verTodoPanel">${todo ? "Ver lo esencial" : `Ver las ${COLS_PANEL.length} columnas`}</button>
+    </div>
+    ${filas.length ? `<div class="ctrl-scroll">
+    <table class="tbl-ctrl">
+      <thead><tr><th>Ejecutivo</th>
+        ${cols.map(c => `<th${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.th}</th>`).join("")}
+      </tr></thead>
+      <tbody>
+        ${filas.map(f => `<tr>
+          <td class="nom">${esc(f.nombre)}</td>
+          ${cols.map(c => `<td class="${c.txt ? "" : "num"}">${celda(f, c)}</td>`).join("")}
+        </tr>`).join("")}
+      </tbody>
+      ${filas.length > 1 ? `<tfoot><tr>
+        <td class="nom">Equipo</td>
+        ${cols.map(c => {
+          if (c.k === "pct"){ const a = suma("asignada"), l = suma("logrado");
+            return `<td class="num"><b>${a ? (Math.round(l/a*1000)/10) + "%" : "—"}</b></td>`; }
+          if (c.k === "tasa"){ const g = suma("gestiones"), s = suma("respuestas");
+            return `<td class="num">${g ? Math.round(s/g*100) + "%" : "—"}</td>`; }
+          if (c.k === "puntualidad"){ const g = suma("gestiones"), s = suma("puntuales");
+            return `<td class="num">${g ? Math.round(s/g*100) + "%" : "—"}</td>`; }
+          if (c.k === "ultima") return `<td></td>`;
+          return `<td class="num">${suma(c.k) || "—"}</td>`;
+        }).join("")}
+      </tr></tfoot>` : ""}
+    </table>
+    </div>` : `<div class="vacio">Todavía no hay ejecutivos activos en la campaña.</div>`}
+    <details class="explica"><summary>Qué cuenta como retenido, qué como recuperado y qué como venta nueva</summary>
+      <div class="cuerpo">
+        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban
+        dados de baja y volvieron. Los dos salían de la cartera asignada, así que los dos suman al
+        <b>% de alcance</b>.</p>
+        <p><b>Ventas nuevas</b> son RUC que trajo Stratis y que BBVA todavía no tenía. Es trabajo que
+        cuenta —y pesa en el incentivo— pero <b>no suma al % de alcance</b>, porque no salía de la
+        cartera de nadie.</p>
+        <p>Un cierre cuenta en el periodo en que se decidió, no en el que se registró la primera
+        gestión. La base sella esa fecha al cerrar.</p>
+      </div>
+    </details>
+  </div>
+
+  ${filas.some(f => f.gestiones) ? `<div class="card">
+    <h3>Tasa de respuesta por ejecutivo · % de gestiones que obtuvieron respuesta</h3>
+    ${filas.slice().sort((a,b) => (b.tasa||0) - (a.tasa||0)).map(f => `
+      <div class="bar-row">
+        <span class="nm">${esc(f.nombre)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${(f.tasa||0).toFixed(1)}%"></span></span>
+        <span class="bar-val">${f.tasa === null ? "—" : Math.round(f.tasa) + "%"}</span>
+      </div>
+      <div class="bar-sub">${f.gestiones} gestiones · ${f.respuestas} con respuesta · ${f.efectivas} visitas efectivas</div>
+    `).join("")}
+  </div>` : ""}`;
+}
+
+/* ---- 4 · Lo que hay que corregir ----------------------------------------
+   Lo accionable, junto y con su enlace. Estaba repartido entre cuatro
+   pantallas y por eso nadie lo miraba. */
+function bloqueCorregir(r, regs){
+  const base = universoPanel();
+  const mando = S.user.rol !== "Ejecutivo";
+
+  const sinUbi   = regs.filter(sinUbicacion);
+  const tarde    = regs.filter(x => demoraHabil(x) > 1);
+  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+
+  const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en
+    && (mando ? true : x.correo_stratis === S.user.correo));
+  const vencidas = abiertas.filter(x => estadoAccion(x) === "vencida");
+  const conAccion = new Set(abiertas.map(x => String(x.customer_id)));
+  const huerfanos = base.filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0
+    && !conAccion.has(String(c.customer_id)));
+
+  const puntos = [
+    { n:sinUbi.length,   t:"Gestiones sin ubicación", d:"presenciales sin coordenada y sin exención",
+      ir:`data-verges="sin_ubicacion"`, grave:true },
+    { n:tarde.length,    t:"Gestiones fuera de plazo", d:"registradas más de un día hábil después del contacto",
+      ir:`data-verges="fuera_plazo"` },
+    { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
+      ir:`data-vercartera="sin_bbva"` },
+    { n:vencidas.length, t:"Acciones vencidas", d:"pasó la fecha comprometida y nadie retomó",
+      ir:`data-go="agenda"`, grave:true },
+    { n:huerfanos.length,t:"Comercios sin próxima acción", d:"trabajados, abiertos y sin nada agendado",
+      ir:`data-go="agenda"` }
   ].filter(x => x.n > 0);
 
+  return `
+  <div class="pnl-h"><span class="pnl-n">4</span>
+    <div><b>Lo que hay que corregir</b><span>${puntos.length ? "Cada uno lleva a su lista" : "Nada pendiente de corregir"}</span></div>
+  </div>
+  <div class="card">
+    ${puntos.length ? `<div class="pnl-fix">
+      ${puntos.map(p => `<button class="pnl-fix-x ${p.grave ? "grave" : ""}" ${p.ir}>
+        <span class="n">${p.n}</span>
+        <span class="t">${p.t}</span>
+        <span class="d">${p.d}</span>
+      </button>`).join("")}
+    </div>` : `<div class="vacio">No hay gestiones sin ubicación, ni registros fuera de plazo, ni
+      acciones vencidas${sinCanal.length ? "" : ", ni comercios sin canal BBVA"}. Todo al día.</div>`}
+  </div>`;
+}
+
+/* ---- El detalle, para cuando el número de arriba no alcanza -------------- */
+function bloqueDetalle(r, regs){
+  const base = universoPanel();
+  const deCarteraBBVA = base.filter(c => !esClienteNuevo(c));
+  const canalBBVA = CONTACTO_BBVA.map(x => ({ label:x.label,
+    n: deCarteraBBVA.filter(c => c.contacto_bbva === x.id).length }));
+  const sinCanalBBVA = deCarteraBBVA.filter(c => !c.contacto_bbva).length;
+  const conCanalBBVA = deCarteraBBVA.length - sinCanalBBVA;
+  const maxCanal = Math.max(1, ...canalBBVA.map(x => x.n));
+
   const porResultado = RESULTADOS.map(x => ({ label:x.label, ok:x.ok,
-    n: regs.filter(r => r.Resultado === x.id).length })).filter(x => x.n > 0);
+    n: regs.filter(y => y.Resultado === x.id).length })).filter(x => x.n > 0);
   const maxRes = Math.max(1, ...porResultado.map(x => x.n));
 
-  const tipos = TIPOS_CONTACTO.map(t => ({ label:t.label, n: regs.filter(r => r.Tipo_Contacto === t.id).length }))
+  const tipos = TIPOS_CONTACTO.map(t => ({ label:t.label, n: regs.filter(y => y.Tipo_Contacto === t.id).length }))
     .filter(x => x.n > 0).sort((a,b) => b.n - a.n);
   const maxTipo = Math.max(1, ...tipos.map(t => t.n));
 
-  const rubros = RUBROS.map(r => {
-    const cs = base.filter(c => c.rubro === r.codigo);
-    const ct = cs.filter(c => c._base._efectivos > 0).length;
-    return { label:r.nombre, total:cs.length, cont:ct, pct: cs.length ? ct/cs.length*100 : 0 };
-  }).filter(x => x.total > 0).sort((a,b) => b.total - a.total);
-
-  const insistencia = [1,2,3].map(k => ({ k,
-    n: base.filter(c => c._base._intentos === k).length }))
-    .concat([{ k:"4+", n: base.filter(c => c._base._intentos >= 4).length }])
-    .filter(x => x.n > 0);
-  const maxIns = Math.max(1, ...insistencia.map(x => x.n));
-
-  // Respaldo de ubicación: cuántos registros presenciales tienen coordenadas de GPS
-  const presenciales = regs.filter(r => RULES.requiereUbicacion(r.Tipo_Contacto));
-  const sinUbi = presenciales.filter(r => r.Ubicacion_Verificada !== true);
-  const pctUbi = presenciales.length ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
-
-  const sinUbiEjec = [...new Set(sinUbi.map(r => r.Ejecutivo))]
-    .map(n => ({ nombre:n, n: sinUbi.filter(r => r.Ejecutivo === n).length }))
-    .sort((a,b) => b.n - a.n);
-
+  const presenciales = regs.filter(x => RULES.requiereUbicacion(x.Tipo_Contacto));
+  const sinUbi = presenciales.filter(sinUbicacionVerificada);
+  const pctUbi = presenciales.length
+    ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
+  const sinUbiEjec = [...new Set(sinUbi.map(x => x.Ejecutivo))]
+    .map(n => ({ nombre:n, n: sinUbi.filter(x => x.Ejecutivo === n).length })).sort((a,b) => b.n - a.n);
 
   return `
-  ${cardAlcance()}
-  <div class="stat-row">
-    <div class="stat"><div class="lbl">Comercios</div><div class="val">${total}</div><div class="sub">registrados en campo</div></div>
-    <div class="stat"><div class="lbl">Intentos</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Tasa de respuesta</div><div class="val">${pctEf}%</div><div class="sub">${efectivos} de ${intentos} intentos obtuvieron respuesta</div></div>
-    <div class="stat"><div class="lbl">Visitas válidas</div><div class="val">${cumple}</div><div class="sub">${total?Math.round(cumple/total*100):0}% de la cartera</div></div>
-    <div class="stat"><div class="lbl">Objetivo cumplido</div><div class="val">${cumplido}</div><div class="sub">${pctAvance}% de la cartera · Gestión = SI</div></div>
+  <div class="pnl-h"><span class="pnl-n">·</span>
+    <div><b>El detalle</b><span>Cómo se está trabajando, ${esc(r.detalle)}</span></div>
   </div>
-
-  <div class="card">
-    <h3>Cierre de la gestión · lo que BBVA lee como objetivo cumplido</h3>
-    ${total ? `
-    <div class="stat-row" style="margin-bottom:13px">
-      <button class="stat stat-link" data-vercierre="cumplido"><div class="lbl">Avance de la campaña</div>
-        <div class="val">${pctAvance}%</div>
-        <div class="sub">${cumplido} de ${total} comercios ya cerraron con objetivo cumplido — <b>ver cuáles</b></div></button>
-      <div class="stat"><div class="lbl">Efectividad de cierre</div><div class="val">${decididos ? pctCierre + "%" : "—"}</div>
-        <div class="sub">${decididos ? cumplido + " de " + decididos + " comercios ya decididos" : "Todavía no hay ningún comercio decidido"}</div></div>
-      <div class="stat"><div class="lbl">Todavía abiertos</div><div class="val">${pendientes}</div>
-        <div class="sub">${total?Math.round(pendientes/total*100):0}% de la cartera en trabajo</div></div>
-    </div>
-    <div class="g-barra">
-      ${repartoCierre.map(x => `<span style="width:${(x.n/total*100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${x.n}"></span>`).join("")}
-    </div>
-    <div class="g-leyenda">
-      ${repartoCierre.map(x => `<button class="g-ley-x" data-vercierre="${x.ver}"
-          title="Ver los comercios"><i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></button>`).join("")}
-    </div>
-    <details class="explica"><summary>Por qué van dos números y no uno</summary>
-      <div class="cuerpo">
-        <p>El <b>avance</b> es cuánto de la cartera ya está cerrado con objetivo cumplido; al empezar
-        la campaña va a ser bajo, y está bien. La <b>efectividad de cierre</b> mira solo lo ya
-        decidido: de cada comercio que dejó de estar pendiente, cuántos se ganaron. Un 100% de
-        efectividad con 3 comercios decididos de 200 no es una buena campaña — por eso van juntos.</p>
-        <p>Nada de esto es lo mismo que la <b>tasa de respuesta</b> de arriba, que solo mide en cuántos
-        intentos el cliente contestó. Que respondan no es que se queden: se puede tener 100% de
-        respuesta y 0% de retención. Y mandar un correo o un WhatsApp no cuenta como respuesta
-        mientras nadie conteste.</p>
-      </div>
-    </details>` : `<div class="vacio">Todavía no hay comercios registrados en la campaña.</div>`}
-  </div>
-
   <div class="grid2">
    <div>
     <div class="card">
-      <h3>Tasa de respuesta por ejecutivo · % de intentos que obtuvieron respuesta</h3>
-      ${ejecutivos.length ? ejecutivos.map(e => `
-        <div class="bar-row">
-          <span class="nm">${esc(e.nombre)}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${e.pct.toFixed(1)}%"></span></span>
-          <span class="bar-val">${Math.round(e.pct)}%</span>
-        </div>
-        <div class="bar-sub">${e.ids} Customer ID${e.nuevos ? " + " + e.nuevos + " nuevo" + (e.nuevos===1?"":"s") : ""} · ${e.intentos} intentos · ${e.efectivos} con respuesta · ${e.cumple} visitas válidas</div>
-      `).join("") : `<div class="vacio">Todavía no hay actividad registrada en la campaña.</div>`}
-    </div>
-
-    <div class="card">
-      <h3>Customer ID registrados · por ejecutivo</h3>
-      <div class="pie" style="margin:-4px 0 11px">Cuántos comercios de la cartera lleva cargado cada uno.
-        Las ventas nuevas van aparte: no tienen Customer ID.</div>
-      ${(() => {
-        const reg = ejecutivos.slice().sort((a,b) => b.ids - a.ids);
-        const maxId = Math.max(1, ...reg.map(e => e.ids));
-        return reg.length ? reg.map(e => `
-          <div class="bar-row">
-            <span class="nm">${esc(e.nombre)}</span>
-            <span class="bar-track"><span class="bar-fill" style="width:${(e.ids/maxId*100).toFixed(1)}%"></span></span>
-            <span class="bar-val">${e.ids}</span>
-          </div>
-          ${e.nuevos ? `<div class="bar-sub">+ ${e.nuevos} venta${e.nuevos===1?"":"s"} nueva${e.nuevos===1?"":"s"} por RUC</div>` : ""}
-        `).join("") : `<div class="vacio">Todavía no hay comercios registrados.</div>`;
-      })()}
-      <div class="bar-sub" style="margin-top:9px">
-        Total de la campaña: <b>${base.filter(c => !esClienteNuevo(c)).length}</b> Customer ID${
-          base.filter(esClienteNuevo).length ? ` · <b>${base.filter(esClienteNuevo).length}</b> ventas nuevas` : ""}
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Resultado de los intentos</h3>
+      <h3>Resultado de las gestiones</h3>
       ${porResultado.length ? porResultado.map(x => `
         <div class="bar-row">
           <span class="nm">${esc(x.label)}</span>
           <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxRes*100).toFixed(1)}%;background:${x.ok?"var(--good)":"var(--serious)"}"></span></span>
           <span class="bar-val">${x.n}</span>
-        </div>`).join("") : `<div class="vacio">Aún no hay intentos registrados.</div>`}
-      <div class="pie">Cada registro cuenta como intento, aunque sea el cuarto con el mismo comercio.
-        Solo el resultado <b>“Habló con el contacto”</b> suma como comunicación lograda.</div>
+        </div>`).join("") : `<div class="vacio">No hay gestiones en este periodo.</div>`}
+      <div class="pie">Cada registro es una gestión, aunque sea el cuarto intento con el mismo
+        comercio. Solo <b>“Habló con el contacto”</b> cuenta como respuesta.</div>
     </div>
 
     <div class="card">
-      <h3>Insistencia · comercios por cantidad de intentos</h3>
-      ${insistencia.length ? insistencia.map(x => `
+      <h3>Medio de contacto utilizado</h3>
+      ${tipos.length ? tipos.map(t => `
         <div class="bar-row">
-          <span class="nm">${x.k} intento${x.k===1?"":"s"}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxIns*100).toFixed(1)}%"></span></span>
-          <span class="bar-val">${x.n}</span>
-        </div>`).join("") : `<div class="vacio">Sin datos todavía.</div>`}
+          <span class="nm">${esc(t.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(t.n/maxTipo*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${t.n}</span>
+        </div>`).join("") : `<div class="vacio">No hay gestiones en este periodo.</div>`}
     </div>
    </div>
 
@@ -4167,38 +4433,14 @@ function viewPanel(){
         ${canalBBVA.map(x => `
         <div class="bar-row">
           <span class="nm">${esc(x.label)}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanalBBVA*100).toFixed(1)}%"></span></span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanal*100).toFixed(1)}%"></span></span>
           <span class="bar-val">${x.n}</span>
         </div>`).join("")}
-        <div class="pie">
-          ${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado el canal.
-          ${sinCanalBBVA ? `Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el dato fuera
-            obligatorio; se completan al editar el comercio.` : "Están todos."}
-        </div>`
-      : `<div class="vacio">Todavía ningún comercio tiene declarado el canal. Se pide desde el alta:
-         sin él no se puede registrar un comercio de cartera.</div>`}
+        <div class="pie">${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado
+          el canal.${sinCanalBBVA ? ` Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el
+          dato fuera obligatorio; se completan al editar el comercio.` : " Están todos."}</div>`
+      : `<div class="vacio">Todavía ningún comercio tiene declarado el canal.</div>`}
     </div>
-
-    <div class="card">
-      <h3>Medio de contacto utilizado</h3>
-      ${tipos.length ? tipos.map(t => `
-        <div class="bar-row">
-          <span class="nm">${esc(t.label)}</span>
-          <span class="bar-track"><span class="bar-fill" style="width:${(t.n/maxTipo*100).toFixed(1)}%"></span></span>
-          <span class="bar-val">${t.n}</span>
-        </div>`).join("") : `<div class="vacio">Aún no hay contactos registrados.</div>`}
-    </div>
-
-    <div class="card">
-      <h3>Cartera por rubro · % contactado</h3>
-      ${rubros.length ? rubros.map(r => `
-        <div class="bar-row">
-          <span class="nm">${esc(r.label)} <span style="color:var(--muted)">(${r.total})</span></span>
-          <span class="bar-track"><span class="bar-fill" style="width:${r.pct.toFixed(1)}%"></span></span>
-          <span class="bar-val">${Math.round(r.pct)}%</span>
-        </div>`).join("") : `<div class="vacio">Todavía no hay comercios registrados.</div>`}
-    </div>
-
 
     <div class="card">
       <h3>Respaldo de ubicación · visitas presenciales</h3>
@@ -4209,20 +4451,35 @@ function viewPanel(){
           <span class="bar-val">${presenciales.length - sinUbi.length}</span>
         </div>
         ${sinUbi.length ? `<div class="bar-row">
-          <span class="nm">Sin ubicación verificada</span>
+          <span class="nm">Sin verificar</span>
           <span class="bar-track"><span class="bar-fill" style="width:${100-pctUbi}%;background:var(--crit)"></span></span>
           <span class="bar-val">${sinUbi.length}</span>
         </div>
         <div class="bar-sub">${sinUbiEjec.map(e => `${esc(e.nombre)} (${e.n})`).join(" · ")}</div>
-        <div class="note warn" style="margin-top:9px">Las coordenadas siempre las toma el GPS del equipo: nadie las escribe
-        ni las corrige. Un registro sin verificar significa que en ese momento no hubo señal o permiso de ubicación.</div>`
-        : `<div class="note ok" style="margin-top:9px">Todas las visitas presenciales tienen coordenadas tomadas por GPS.</div>`}`
-      : `<div class="vacio">Aún no hay visitas presenciales registradas.</div>`}
+        <div class="pie">Las coordenadas siempre las toma el GPS del equipo: nadie las escribe ni las
+        corrige. Un registro sin verificar significa que en ese momento no hubo señal o permiso de
+        ubicación.</div>`
+        : `<div class="pie">Todas las visitas presenciales tienen coordenadas tomadas por GPS.</div>`}`
+      : `<div class="vacio">No hay visitas presenciales en este periodo.</div>`}
     </div>
-
    </div>
-  </div>
+  </div>`;
+}
 
+function viewPanel(){
+  const r = rangoPanel();
+  universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
+
+  const visibles = new Set(universoPanel().map(c => String(c.customer_id)));
+  const regs = DB.todos().filter(x => visibles.has(String(x.Customer_id)) && enRango(x.Fecha_Contacto, r));
+
+  return `
+  ${selectorPanel(r)}
+  ${bloqueProyecto()}
+  ${bloqueActividad(r, regs)}
+  ${bloqueEquipo(r)}
+  ${bloqueCorregir(r, regs)}
+  ${bloqueDetalle(r, regs)}
   ${S.user.rol !== "Ejecutivo"
     ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
         <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
@@ -4331,7 +4588,7 @@ function hojaAvance(){
   const cols = ["Ejecutivo","Cartera asignada","% Alcance del mes","Retenidos del mes","Recuperados del mes",
                 "Comercios registrados","Comercios trabajados","Comercios sin intentar","Intentos",
                 "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
-                "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas válidas",
+                "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas efectivas",
                 "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
                 "Sin ubicación","Con ubicación escrita a mano"];
   const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
@@ -4763,7 +5020,7 @@ function hojaReporte(admin){
       return dec ? Math.round(cum/dec*100) + "%" : "—";
     })()],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
-    ["Visitas válidas", regs.filter(r => r.Cumple_Visita === "SI").length],
+    ["Visitas efectivas", regs.filter(r => r.Cumple_Visita === "SI").length],
     [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
@@ -5326,6 +5583,52 @@ function alcanceDe(correo, periodo){
            pctTrabajo: asignada ? trabajados / asignada : 0 };
 }
 
+/* La cartera asignada vale para el rango que se esté mirando. Es un número
+   que está parado, no una suma: si se miran cinco meses no son cinco carteras,
+   es la misma cartera. Se toma la del periodo, y si ese mes no se cargó, la
+   última cargada. */
+function asignadaDe(correo, r){
+  if (r.periodo){
+    const n = metaDe(correo, r.periodo);
+    if (n > 0) return n;
+  }
+  const suyas = METAS.filter(m => m.correo === correo && m.asignada > 0)
+                     .sort((a,b) => String(a.periodo).localeCompare(String(b.periodo)));
+  return suyas.length ? suyas[suyas.length - 1].asignada : 0;
+}
+
+/* Todo lo que el Panel muestra de un ejecutivo, medido contra un solo reloj.
+   Antes esto vivía repartido en tres tablas con tres ventanas distintas y por
+   eso «Trabajados» y «Comercios» nunca coincidían. */
+function filaEjecutivo(u, r){
+  const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo && !esClienteNuevo(c));
+  const gest  = DB.todos().filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r));
+  const tocados = new Set(gest.map(x => String(x.Customer_id)));
+
+  const asignada    = asignadaDe(u.correo, r);
+  const trabajados  = suyos.filter(c => tocados.has(String(c.customer_id))).length;
+  const retenidos   = suyos.filter(c => esRetencion(c)  && enRango(c.cerrado_en, r)).length;
+  const recuperados = suyos.filter(c => esRecuperado(c) && enRango(c.cerrado_en, r)).length;
+  const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === u.correo && esVentaNueva(c)
+                          && enRango(c.cerrado_en || c.creado_en, r)).length;
+  const respuestas  = gest.filter(x => esEfectivo(x.Resultado)).length;
+  const efectivas   = gest.filter(x => x.Cumple_Visita === "SI").length;
+  const puntuales   = gest.filter(aTiempo).length;
+  const ultima      = gest.length
+    ? gest.map(x => String(x.Fecha_Contacto).slice(0,10)).sort().pop() : "";
+  const logrado = retenidos + recuperados;
+
+  return { nombre:u.nombre, correo:u.correo,
+    asignada, registrados:suyos.length, trabajados,
+    sinTocar: Math.max(0, asignada - trabajados),
+    gestiones: gest.length, respuestas, efectivas, puntuales,
+    tasa: gest.length ? respuestas / gest.length * 100 : null,
+    puntualidad: gest.length ? puntuales / gest.length * 100 : null,
+    retenidos, recuperados, ventasNuevas, logrado,
+    pct: asignada ? logrado / asignada * 100 : null,
+    ultima, silencio: ultima ? diasDeAtraso(ultima) : null };
+}
+
 function cardMetas(){
   const p = periodoActivo();
   const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
@@ -5412,274 +5715,6 @@ function bindMetas(){
       msg.innerHTML = `<div class="err">${esc(String(e.message))}</div>`;
     }
   };
-}
-
-/* =========================================================================
-   Guía de uso — la infografía dentro del CRM
-
-   No es un manual: es lo que el ejecutivo mira cuando está parado frente al
-   local y no sabe qué marcar. Por eso va por escenarios y no por pantallas,
-   y por eso las reglas se enuncian como decisiones, no como funcionalidades.
-
-   Vive dentro de la aplicación a propósito: si mañana cambia una regla,
-   cambia acá también y nadie queda leyendo un PDF viejo.
-   ========================================================================= */
-
-const PASOS_GUIA = [
-  { n:"1", t:"Registra el comercio",
-    d:"Solo la primera vez que lo tocas. Después ya está en tu cartera.",
-    chips:["Customer ID","Nombre","Rubro","Distrito y dirección","Estado"] },
-  { n:"2", t:"Registra cada gestión",
-    d:"Cada intento cuenta, aunque no te contesten. Es lo que mide tu esfuerzo.",
-    chips:["Medio","Resultado","Ubicación","Evidencia","Comentarios"] },
-  { n:"3", t:"Cierra cuando cierres",
-    d:"En la misma pantalla, al final. Es lo que BBVA lee como objetivo cumplido.",
-    chips:["Retenido","Venta","Perdido","Sigue abierta"] }
-];
-
-const ESCENARIOS = [
-  { s:"Fui al local y estaba cerrado",
-    medio:"Visita presencial", res:"Local cerrado",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Cuenta como intento. La visita queda registrada aunque no hayas hablado." },
-  { s:"Fui, hablé con el titular y se queda con BBVA",
-    medio:"Visita presencial", res:"El cliente respondió",
-    cumple:"SI", cierre:"Retenido",
-    nota:"El caso completo. Cumple visita y cierra como retención." },
-  { s:"Atendió el hijo, no el titular",
-    medio:"Visita presencial", res:"Titular ausente",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Hubo visita pero no conversación con quien decide. Vuelve otro día." },
-  { s:"Lo llamé y no contestó",
-    medio:"Llamada telefónica", res:"No respondió",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Suma intento. Una llamada nunca cumple visita, ni contestando." },
-  { s:"Reunión por Teams con el titular, sin ir al local",
-    medio:"Reunión virtual", res:"El cliente respondió",
-    cumple:"SI", cierre:"Retenido",
-    nota:"La reunión virtual cumple visita igual que ir al local." },
-  { s:"El comercio estaba de baja y logré que vuelva",
-    medio:"Visita o reunión", res:"El cliente respondió",
-    cumple:"SI", cierre:"Venta",
-    nota:"Deja el estado en «Dado de baja»: es como estaba cuando lo gestionaste." },
-  { s:"Me dijo que se va a la competencia",
-    medio:"Cualquiera", res:"El cliente respondió",
-    cumple:"según el medio", cierre:"Perdido",
-    nota:"Hubo contacto, no hubo objetivo. Escribe en el comentario del cliente por qué se va." },
-  { s:"Un comercio sin POS quiere afiliarse",
-    medio:"Visita o reunión", res:"Se registra solo",
-    cumple:"SI", cierre:"Venta automática",
-    nota:"Es una venta nueva: se da de alta con RUC y razón social, junto con la visita." },
-  { s:"Le mandé un correo o un WhatsApp y todavía no me responde",
-    medio:"Correo o WhatsApp", res:"No respondió",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Mandar el mensaje es un intento, no una respuesta. Solo marca «El cliente respondió» cuando conteste, y ahí el CRM te pedirá escribir qué te dijo." },
-  { s:"Le escribí por WhatsApp y me contestó para coordinar la visita",
-    medio:"Mensaje WhatsApp", res:"El cliente respondió",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Sí hubo respuesta, así que cuenta. Pero un chat nunca cumple visita: eso llega recién cuando lo visites." },
-  { s:"El teléfono que tengo no es del comercio",
-    medio:"Llamada telefónica", res:"Datos errados",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"Déjalo escrito en el comentario del ejecutivo para que se pueda corregir." },
-  { s:"No me quiso atender",
-    medio:"Cualquiera", res:"No quiso atender",
-    cumple:"No", cierre:"Sigue abierta",
-    nota:"No es lo mismo que perderlo: todavía no dijo que se va." }
-];
-
-const ERRORES_GUIA = [
-  { q:"No me deja marcar «Retenido»",
-    a:"Todavía no hay ninguna gestión donde hayas hablado con el titular. Registra esa conversación y la opción aparece." },
-  { q:"El comercio está de baja y no me aparece «Retenido»",
-    a:"Correcto: un comercio dado de baja no se retiene. Si lograste que vuelva es «Venta»; si no, no hay retención que contar." },
-  { q:"El GPS no responde o no me da permiso",
-    a:"Toca «No puedo capturar la ubicación» y guarda igual. El registro es válido y cuenta lo mismo: solo queda marcado como sin respaldo de GPS." },
-  { q:"Estoy registrando una visita de días anteriores",
-    a:"Cambia la fecha al día real de la visita y usa «No puedo capturar la ubicación»: el GPS de hoy no probaría dónde estuviste ese día. Explica en el comentario del ejecutivo que es un registro posterior." },
-  { q:"Me equivoqué de medio o de resultado",
-    a:"No se puede corregir: elimina el registro y créalo de nuevo. La eliminación queda en la bitácora." },
-  { q:"Se abrió el CRM vacío, sin mis comercios",
-    a:"Tu sesión caducó. Cierra sesión, vuelve a entrar y todo reaparece: no se borró nada." }
-];
-
-function viewGuia(){
-  const paso = p => `
-    <div class="g-paso">
-      <span class="g-num">${p.n}</span>
-      <div>
-        <div class="g-t">${p.t}</div>
-        <div class="g-d">${esc(p.d)}</div>
-        <div class="g-chips">${p.chips.map(c => `<span class="chip info">${esc(c)}</span>`).join("")}</div>
-      </div>
-    </div>`;
-
-  const esc2 = t => esc(t);
-
-  return `
-  <div class="page-head">
-    <div>
-      <h2>Cómo se registra</h2>
-      <div class="sub">Los escenarios de la calle, y qué marcar en cada uno</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3>El recorrido, de principio a fin</h3>
-    <div class="g-pasos">${PASOS_GUIA.map(paso).join("")}</div>
-  </div>
-
-  <div class="grid2">
-   <div>
-    <div class="card">
-      <h3>Qué cuenta como visita cumplida</h3>
-      <div class="note" style="margin-bottom:12px">
-        Es la métrica que mira BBVA. Se calcula sola: nadie la marca a mano.
-      </div>
-      <div class="g-formula">
-        <span class="g-caja ok">Presencial <b>o</b> virtual</span>
-        <span class="g-mas">+</span>
-        <span class="g-caja ok">Hablaste con el titular</span>
-        <span class="g-mas">=</span>
-        <span class="g-caja res">Cumple visita</span>
-      </div>
-      <div class="g-medios">
-        ${[["Visita presencial","si"],["Reunión presencial","si"],["Reunión virtual","si"],
-           ["Videollamada","si"],["Llamada telefónica","no"],["Mensaje WhatsApp","no"],
-           ["Correo electrónico","no"]]
-          .map(([m,v]) => `<div class="g-medio ${v}"><span>${v === "si" ? "✓" : "✕"}</span>${esc(m)}</div>`).join("")}
-      </div>
-      <div class="note warn" style="margin-top:12px">
-        Una llamada telefónica <b>nunca</b> cumple visita, aunque el cliente conteste y la
-        conversación sea perfecta. Cuenta como intento y como respuesta del cliente, no como visita.
-      </div>
-    </div>
-   </div>
-
-   <div>
-    <div class="card">
-      <h3>Cómo cierra cada comercio</h3>
-      <div class="note" style="margin-bottom:12px">
-        El estado del comercio decide si el cierre es retención o venta. El CRM solo te ofrece
-        el que corresponde.
-      </div>
-      <div class="g-arbol">
-        <div class="g-rama">
-          <div class="g-cond">¿Hablaste con el titular?</div>
-          <div class="g-no">NO → solo puedes dejarla abierta o darla por perdida</div>
-        </div>
-        <div class="g-rama">
-          <div class="g-cond">SÍ, y el comercio está <b>activo</b></div>
-          <div class="g-si"><span class="chip ok">Retenido</span> → BBVA lee Gestión = SI</div>
-        </div>
-        <div class="g-rama">
-          <div class="g-cond">SÍ, y el comercio está <b>dado de baja</b></div>
-          <div class="g-si"><span class="chip ok">Venta</span> → se deriva al ejecutivo BBVA</div>
-        </div>
-        <div class="g-rama">
-          <div class="g-cond">Se va a la competencia o cerró</div>
-          <div class="g-no"><span class="chip crit">Perdido</span> → BBVA lee Gestión = NO</div>
-        </div>
-      </div>
-      <div class="note" style="margin-top:12px">
-        Mientras la dejes abierta, a BBVA le llega <b>Gestión = NO</b>. No pasa nada: significa
-        que sigues trabajándola.
-      </div>
-    </div>
-   </div>
-  </div>
-
-  <div class="card">
-    <h3>Situación por situación</h3>
-    <div class="note" style="margin-bottom:12px">
-      Si dudas frente al local, busca acá tu caso.
-    </div>
-    <div class="g-esc">
-      ${ESCENARIOS.map(e => `
-        <div class="g-caso">
-          <div class="g-caso-t">${esc(e.s)}</div>
-          <div class="g-caso-k">
-            <span><b>Medio</b> ${esc(e.medio)}</span>
-            <span><b>Resultado</b> ${esc(e.res)}</span>
-            <span><b>Cumple visita</b> <span class="chip ${e.cumple==="SI"?"ok":"no"}">${esc(e.cumple)}</span></span>
-            <span><b>Cierre</b> <span class="chip ${/Retenido|Venta/.test(e.cierre)?"ok":(e.cierre==="Perdido"?"crit":"no")}">${esc(e.cierre)}</span></span>
-          </div>
-          <div class="g-caso-n">${esc(e.nota)}</div>
-        </div>`).join("")}
-    </div>
-  </div>
-
-  <div class="grid2">
-   <div>
-    <div class="card">
-      <h3>Lo que no se puede cambiar después</h3>
-      <div class="note" style="margin-bottom:12px">
-        Al editar una gestión solo se corrigen los comentarios y la calificación.
-        Lo demás queda fijo porque alimenta los conteos.
-      </div>
-      <div class="g-fijos">
-        ${["Fecha y hora","Medio de contacto","Resultado","Ubicación y su sello de GPS",
-           "Evidencia","Comercio y ejecutivo"]
-          .map(x => `<div class="g-fijo">🔒 ${esc(x)}</div>`).join("")}
-      </div>
-      <div class="note warn" style="margin-top:12px">
-        Si te equivocaste en alguno, <b>elimina el registro y créalo de nuevo</b>. Editar nunca
-        suma un intento, y cada eliminación queda en la bitácora.
-      </div>
-    </div>
-   </div>
-
-   <div>
-    <div class="card">
-      <h3>Si algo no te deja avanzar</h3>
-      <div class="g-faq">
-        ${ERRORES_GUIA.map(e => `
-          <div class="g-faq-i">
-            <div class="g-faq-q">${esc(e.q)}</div>
-            <div class="g-faq-a">${esc(e.a)}</div>
-          </div>`).join("")}
-      </div>
-    </div>
-   </div>
-  </div>
-
-  <div class="card">
-    <h3>Tus números, y qué mide cada uno</h3>
-    <div class="note" style="margin-bottom:12px">
-      Los tres suben por motivos distintos. Ninguno es «el bueno»: se leen juntos.
-    </div>
-    <div class="g-esc">
-      <div class="g-caso">
-        <div class="g-caso-t">Intentos</div>
-        <div class="g-caso-n" style="border:0;padding:0;margin:0">Cuántas gestiones registraste, contestaran o no.
-        Mide cuánto saliste a buscar. Un día de cinco locales cerrados sube este número, y está bien.</div>
-      </div>
-      <div class="g-caso">
-        <div class="g-caso-t">Tasa de respuesta</div>
-        <div class="g-caso-n" style="border:0;padding:0;margin:0">De esos intentos, en cuántos el cliente respondió.
-        <b>Respondió no es retenido:</b> puedes tener 100% de respuesta y ningún comercio cerrado todavía.
-        Y mandar un correo no cuenta hasta que conteste.</div>
-      </div>
-      <div class="g-caso">
-        <div class="g-caso-t">Visitas válidas</div>
-        <div class="g-caso-n" style="border:0;padding:0;margin:0">Comercios donde hubo visita o reunión <b>y</b> se
-        habló con el titular. Es el cumplimiento que mide BBVA.</div>
-      </div>
-      <div class="g-caso">
-        <div class="g-caso-t">Objetivo cumplido</div>
-        <div class="g-caso-n" style="border:0;padding:0;margin:0">Comercios que cerraste como retención o venta.
-        Este sí es el resultado final: es lo que el banco lee como <b>Gestión = SI</b>.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="note">
-      <b>Una regla que resume todas.</b> Registra lo que pasó, no lo que te gustaría que hubiera
-      pasado. El CRM está hecho para que un día malo —cinco locales cerrados— se vea como lo que
-      es: trabajo hecho. Inflar el cumplimiento no ayuda a nadie y la base lo rechaza sola.
-    </div>
-  </div>`;
 }
 
 /* =========================================================================
@@ -6647,7 +6682,14 @@ function bindExtras(){
   if (typeof bindAcciones === "function") bindAcciones();
   if (typeof bindBono === "function") bindBono();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
-  if ($("#mesPanel")) $("#mesPanel").onchange = e => { S.mesPanel = e.target.value; render(); };
+  /* El reloj del Panel: al cambiar de tipo de ventana se suelta el periodo
+     elegido, porque «2026-08» significa cosas distintas en cada uno. */
+  document.querySelectorAll("[data-vpanel]").forEach(b => b.onclick = () => {
+    if (S.vPanel !== b.dataset.vpanel){ S.vPanel = b.dataset.vpanel; S.pPanel = ""; }
+    render();
+  });
+  if ($("#pPanel")) $("#pPanel").onchange = e => { S.pPanel = e.target.value; render(); };
+  if ($("#verTodoPanel")) $("#verTodoPanel").onclick = () => { S.verTodo = !S.verTodo; render(); };
   if ($("#salir")) $("#salir").onclick = salir;
   if ($("#guardarNuevaClave")) $("#guardarNuevaClave").onclick = async () => {
     const a = ($("#nc1").value || ""), b = ($("#nc2").value || "");
