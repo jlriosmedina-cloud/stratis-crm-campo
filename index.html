@@ -1020,10 +1020,24 @@ function mesAnterior(p){
   m -= 1; if (m === 0){ m = 12; a -= 1; }
   return `${a}-${String(m).padStart(2, "0")}`;
 }
+/* Lo que se cargó para ese mes exacto. Es lo que se edita en Ajustes. */
 const metaDe = (correo, periodo) => {
   const m = METAS.find(x => x.correo === correo && x.periodo === periodo);
   return m ? m.asignada : 0;
 };
+/* Lo que rige. Con la base congelada por el acuerdo del 12/08, la cartera de
+   un ejecutivo no cambia mes a mes: si nadie cargó la del periodo nuevo, se
+   hereda la última cargada en vez de contar cero y hacer ver el alcance como
+   si no hubiera denominador. La herencia se dice en pantalla, no se esconde. */
+function metaVigente(correo, periodo){
+  const propia = metaDe(correo, periodo);
+  if (propia > 0) return { n: propia, heredada: false, de: periodo };
+  const previas = METAS.filter(x => x.correo === correo && x.asignada > 0
+                                 && String(x.periodo) <= String(periodo))
+                       .sort((a,b) => String(a.periodo).localeCompare(String(b.periodo)));
+  const u = previas.pop();
+  return u ? { n: u.asignada, heredada: true, de: u.periodo } : { n: 0, heredada: false, de: "" };
+}
 /* Meses con meta cargada, del más reciente al más antiguo, y siempre el actual */
 function mesesConMeta(){
   const s = new Set(METAS.map(m => m.periodo));
@@ -1066,8 +1080,34 @@ const BONO_DEF = {
   piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
   sobre:110, tope:30, pago_mensual:80
 };
-let BONO = JSON.parse(JSON.stringify(BONO_DEF));
+/* Los parámetros no son uno solo: son una lista de versiones, cada una
+   vigente desde un periodo del bono. Un periodo se calcula con la versión que
+   regía entonces, y por eso cambiar una meta en octubre ya no reescribe el
+   cumplimiento de agosto. La revisión de octubre entra como una versión más.
+
+   La vigencia se dice en periodos, no en fechas: un parámetro no empieza a
+   regir un martes a las tres de la tarde. */
+let PARAMS = [];                 // [{ vigente_desde, valor, creado_por, creado_en, nota }]
+let BONO = JSON.parse(JSON.stringify(BONO_DEF));   // los del periodo que corre
 let FACTURACION = [];
+let FACT_BASE = [];              // la base del proyecto, congelada por acuerdo
+let CIERRES_PERIODO = [];        // sellos de periodos ya liquidados
+
+function paramsDe(p){
+  const base = JSON.parse(JSON.stringify(BONO_DEF));
+  if (!p || !PARAMS.length) return base;
+  const v = PARAMS.filter(x => String(x.vigente_desde) <= String(p))
+                  .sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
+                  .pop();
+  return v ? Object.assign(base, v.valor) : base;
+}
+/* Qué versión rigió un periodo, para poder decirlo en pantalla */
+const versionDe = p => PARAMS.filter(x => String(x.vigente_desde) <= String(p))
+  .sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde))).pop() || null;
+
+/* Un sello es una foto firmada: mientras exista, el periodo no se recalcula */
+const selloDe = p => CIERRES_PERIODO.find(x => x.periodo === p && !x.anulado_en) || null;
+const periodoSellado = p => !!selloDe(p);
 
 function ventanaPeriodo(p){
   const [a, m] = String(p || "").split("-").map(Number);
@@ -1194,26 +1234,43 @@ const aTiempo = r => demoraHabil(r) <= 1;
 
 const factDe = (correo, p) =>
   FACTURACION.find(x => x.correo === correo && x.periodo === p) || null;
-function crecimientoFact(correo, p){
+
+/* La base del proyecto quedó congelada por el acuerdo del 12/08: se carga una
+   vez y todos los periodos crecen contra ella. Si nadie la fijó todavía, se
+   usa el monto inicial que se hubiera cargado en ese periodo, que era como
+   funcionaba antes. */
+const baseFactDe = correo => {
+  const b = FACT_BASE.find(x => x.correo === correo);
+  return b && Number(b.monto) > 0 ? Number(b.monto) : null;
+};
+function inicioFact(correo, p){
+  const b = baseFactDe(correo);
+  if (b !== null) return { monto:b, fuente:"base" };
   const f = factDe(correo, p);
-  if (!f || !(Number(f.monto_inicial) > 0) || f.monto_final === null || f.monto_final === undefined) return null;
-  return (Number(f.monto_final) - Number(f.monto_inicial)) / Number(f.monto_inicial) * 100;
+  return f && Number(f.monto_inicial) > 0
+    ? { monto:Number(f.monto_inicial), fuente:"periodo" } : { monto:null, fuente:"falta" };
+}
+function crecimientoFact(correo, p){
+  const ini = inicioFact(correo, p);
+  const f = factDe(correo, p);
+  if (ini.monto === null || !f || f.monto_final === null || f.monto_final === undefined) return null;
+  return (Number(f.monto_final) - ini.monto) / ini.monto * 100;
 }
 
 /* Tramos: bajo el piso no hay incentivo; del piso a la meta sube parejo, y de
    la meta al sobrecumplimiento sigue subiendo hasta el tope. Pasado el tope
    no paga más: 200% de cumplimiento paga lo mismo que 110%. */
-function tramoIncentivo(pct){
-  const b = BONO;
+function tramoIncentivo(pct, params){
+  const b = params || BONO;
   if (!(pct >= b.piso)) return 0;
   if (pct <= 100) return b.pago_en_piso + (pct - b.piso) / (100 - b.piso) * (b.pago_en_meta - b.pago_en_piso);
   if (pct <= b.sobre) return b.pago_en_meta + (pct - 100) / (b.sobre - 100) * (b.tope - b.pago_en_meta);
   return b.tope;
 }
-const nombreTramo = pct =>
-  !(pct >= BONO.piso) ? "Sin incentivo"
-  : pct < 100         ? "Progresión"
-  : pct <= BONO.sobre ? "Sobrecumplimiento" : "Tope";
+const nombreTramo = (pct, params) => { const b = params || BONO;
+  return !(pct >= b.piso) ? "Sin incentivo"
+    : pct < 100    ? "Progresión"
+    : pct <= b.sobre ? "Sobrecumplimiento" : "Tope"; };
 
 const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
 
@@ -1392,6 +1449,7 @@ const S = {
   mesPanel:"",   /* mes de la cartera asignada, en Ajustes; vacío = el actual */
   pBono:"",      /* periodo del bono; vacío = el que corre */
   vPanel:"bono", /* el reloj del Panel: bono | mes | proyecto */
+  pParam:"",     /* qué versión de los parámetros se está editando */
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
   filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
@@ -1732,15 +1790,23 @@ async function cargarSeguimientos(){
 async function cargarFacturacion(){
   if (!S.user || S.demo) return;
   try {
-    const [fac, cfg] = await Promise.all([
+    const [fac, base, par, cie] = await Promise.all([
       sb.from("facturacion").select("*"),
-      sb.from("config").select("valor").eq("clave", "bono_parametros").maybeSingle()
+      sb.from("facturacion_base").select("*"),
+      sb.from("bono_parametros").select("*").order("vigente_desde"),
+      sb.from("periodos_cerrados").select("*").order("cerrado_en")
     ]);
-    if (!fac.error) FACTURACION = fac.data || [];
-    if (!cfg.error && cfg.data && cfg.data.valor){
-      try { BONO = Object.assign(JSON.parse(JSON.stringify(BONO_DEF)), JSON.parse(cfg.data.valor)); }
-      catch (e){ /* si el JSON quedó roto, se sigue con los del documento */ }
+    if (!fac.error)  FACTURACION = fac.data || [];
+    if (!base.error) FACT_BASE = base.data || [];
+    if (!cie.error)  CIERRES_PERIODO = cie.data || [];
+    if (!par.error && (par.data || []).length){
+      PARAMS = par.data.map(x => ({ vigente_desde: String(x.vigente_desde),
+        valor: typeof x.valor === "string" ? JSON.parse(x.valor) : (x.valor || {}),
+        nota: x.nota, creado_por: x.creado_por, creado_en: x.creado_en }));
     }
+    /* BONO es el atajo para el periodo que corre: lo usan los formularios y
+       los textos de ayuda. Los cálculos de un periodo piden paramsDe(p). */
+    BONO = paramsDe(periodoHoy());
   } catch (e){ /* sin incentivos, pero con CRM */ }
 }
 
@@ -4195,7 +4261,7 @@ function bloqueActividad(r, regs){
   const sem   = semanasRango(r);
   const gente = ejecutivosPanel().length || 1;
   const ritmo = sem ? efectivas / sem / gente : 0;
-  const pide  = BONO.requisitos.visitas_semana;
+  const pide  = paramsDe(r.periodo || periodoHoy()).requisitos.visitas_semana;
 
   return `
   <div class="pnl-h"><span class="pnl-n">2</span>
@@ -4360,11 +4426,14 @@ function bloqueLlave(r){
   const faltaFact = ejec.filter(u => crecimientoFact(u.correo, p) === null).length;
 
   const chip = (ok, txt) => `<span class="chip ${ok ? "ok" : "crit"}">${ok ? "✓" : "✕"} ${esc(txt)}</span>`;
-  const req  = BONO.requisitos;
+  const B    = paramsDe(p);
+  const req  = B.requisitos;
+  const sello = selloDe(p);
 
   return `
   <div class="pnl-h"><span class="pnl-n">4</span>
     <div><b>La llave del bono</b><span>Periodo ${esc(nombrePeriodo(p))} · ${esc(textoPeriodo(p))}${
+      sello ? " — periodo sellado el " + fmtFecha(String(sello.cerrado_en).slice(0,10)) + ": estos números ya no se recalculan" : ""}${
       propio ? "" : " — la llave siempre se mide en la ventana del bono, no en el periodo elegido arriba"}</span></div>
   </div>
 
@@ -4373,7 +4442,7 @@ function bloqueLlave(r){
       <div class="val">${abiertos}</div>
       <div class="sub">de ${ejec.length} cumplen los 3 requisitos de gestión</div></div>
     <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
-      <div class="sub">llegan al ${BONO.piso}% de cumplimiento</div></div>
+      <div class="sub">llegan al ${B.piso}% de cumplimiento</div></div>
     <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
       <div class="sub">${faltaFact ? "sin el monto del periodo cargado: el cumplimiento no sirve para liquidar"
         : "todos los montos del periodo están cargados"}</div></div>
@@ -4421,7 +4490,7 @@ function bloqueLlave(r){
       <div class="cuerpo">
         <p>Los tres requisitos <b>habilitan el cálculo</b>, no aportan nada al monto. Con los tres
         cumplidos se calcula normal; con uno incumplido queda solo el bono base del
-        ${BONO.base_incumple_uno}%; con dos o más no corresponde incentivo, por bueno que sea el
+        ${B.base_incumple_uno}%; con dos o más no corresponde incentivo, por bueno que sea el
         cumplimiento.</p>
         <p>Por eso están acá y no solo en Incentivos: son lo único de todo el modelo que se puede
         corregir <b>mientras el periodo sigue abierto</b>. Un registro tardío ya no se arregla el 19.</p>
@@ -5676,7 +5745,9 @@ function periodoActivo(){
 /* Lo que un ejecutivo logró en un mes, medido contra lo que le asignaron. */
 function alcanceDe(correo, periodo){
   const suyos    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
-  const asignada = metaDe(correo, periodo);
+  /* Con la base congelada, si no se cargó la del mes se hereda la última: el
+     alcance no puede caer a cero solo porque nadie retipeó 841. */
+  const asignada = metaVigente(correo, periodo).n;
   const retenidos   = suyos.filter(c => esRetencion(c)  && cerroEn(c, periodo)).length;
   const recuperados = suyos.filter(c => esRecuperado(c) && cerroEn(c, periodo)).length;
   const perdidos    = suyos.filter(c => c.resultado_gestion === "PERDIDO" && cerroEn(c, periodo)).length;
@@ -5698,10 +5769,7 @@ function alcanceDe(correo, periodo){
    es la misma cartera. Se toma la del periodo, y si ese mes no se cargó, la
    última cargada. */
 function asignadaDe(correo, r){
-  if (r.periodo){
-    const n = metaDe(correo, r.periodo);
-    if (n > 0) return n;
-  }
+  if (r.periodo) return metaVigente(correo, r.periodo).n;
   const suyas = METAS.filter(m => m.correo === correo && m.asignada > 0)
                      .sort((a,b) => String(a.periodo).localeCompare(String(b.periodo)));
   return suyas.length ? suyas[suyas.length - 1].asignada : 0;
@@ -6116,8 +6184,8 @@ const ejecutivosDelBono = () => USUARIOS.filter(u => u.rol === "Ejecutivo" && u.
 /* La cartera de la que responde un ejecutivo. Se prefiere lo que BBVA asignó
    —vive en Metas— y si no está cargado se cuenta lo que tiene en el CRM. */
 function carteraDe(correo, p){
-  const asignada = metaDe(correo, p);
-  if (asignada > 0) return { n: asignada, fuente: "asignada" };
+  const m = metaVigente(correo, p);
+  if (m.n > 0) return { n: m.n, fuente: m.heredada ? "heredada" : "asignada", de: m.de };
   const n = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c)).length;
   return { n, fuente: "crm" };
 }
@@ -6131,7 +6199,8 @@ const gestionesDe = (correo, p) =>
 function llaveDe(correo, p){
   const cart  = carteraDe(correo, p);
   const gest  = gestionesDe(correo, p);
-  const req   = BONO.requisitos;
+  /* Los requisitos son los que regían en ese periodo, no los de hoy. */
+  const req   = paramsDe(p).requisitos;
 
   const tocados = new Set(gest.map(r => String(r.Customer_id)));
   const mios    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
@@ -6170,32 +6239,33 @@ const TEXTO_LLAVE = {
    falta la facturación no se inventa un cero: se dice que falta, porque un
    cero hundiría el ponderado y haría ver mal a quien quizá va bien. */
 function cumplimientoDe(correo, p){
+  const B    = paramsDe(p);
   const cart = carteraDe(correo, p);
   const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
 
   const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
   const pp       = cart.n ? logrados / cart.n * 100 : 0;
-  const cReact   = BONO.metas.reactivacion_pp ? pp / BONO.metas.reactivacion_pp * 100 : 0;
+  const cReact   = B.metas.reactivacion_pp ? pp / B.metas.reactivacion_pp * 100 : 0;
 
   const crec  = crecimientoFact(correo, p);
   const cFact = crec === null ? null
-              : BONO.metas.facturacion_pct ? crec / BONO.metas.facturacion_pct * 100 : 0;
+              : B.metas.facturacion_pct ? crec / B.metas.facturacion_pct * 100 : 0;
 
   const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
                                    && enVentana(c.creado_en, p)).length;
-  const cVenta = BONO.metas.ventas_mes ? ventas / BONO.metas.ventas_mes * 100 : 0;
+  const cVenta = B.metas.ventas_mes ? ventas / B.metas.ventas_mes * 100 : 0;
 
   const objetivos = [
-    { id:"react", nombre:"Reactivación del portafolio", peso:BONO.pesos.reactivacion,
-      meta:`+${BONO.metas.reactivacion_pp} p.p.`, logro:`${pp.toFixed(1)} p.p.`,
+    { id:"react", nombre:"Reactivación del portafolio", peso:B.pesos.reactivacion,
+      meta:`+${B.metas.reactivacion_pp} p.p.`, logro:`${pp.toFixed(1)} p.p.`,
       detalle:`${logrados} de ${cart.n} comercios con objetivo cumplido`, cumpl:cReact },
-    { id:"fact", nombre:"Facturación", peso:BONO.pesos.facturacion,
-      meta:`+${BONO.metas.facturacion_pct}%`,
+    { id:"fact", nombre:"Facturación", peso:B.pesos.facturacion,
+      meta:`+${B.metas.facturacion_pct}%`,
       logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
-      detalle: crec === null ? "falta cargar el monto del periodo" : montoFact(correo, p),
+      detalle: crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
       cumpl:cFact },
-    { id:"venta", nombre:"Venta (afiliación)", peso:BONO.pesos.venta,
-      meta:`${BONO.metas.ventas_mes} por periodo`, logro:String(ventas),
+    { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
+      meta:`${B.metas.ventas_mes} por periodo`, logro:String(ventas),
       detalle: ventas === 1 ? "1 afiliación nueva" : `${ventas} afiliaciones nuevas`, cumpl:cVenta }
   ];
 
@@ -6211,29 +6281,66 @@ function cumplimientoDe(correo, p){
 }
 
 function montoFact(correo, p){
-  const f = factDe(correo, p);
+  const f = factDe(correo, p), ini = inicioFact(correo, p);
   if (!f) return "";
-  return `${soles(f.monto_inicial)} → ${soles(f.monto_final)}`;
+  return `${soles(ini.monto)} → ${soles(f.monto_final)}${
+    ini.fuente === "base" ? " · sobre la base del proyecto" : ""}`;
+}
+/* Decir qué falta exactamente: no es lo mismo que nadie fijó la base del
+   proyecto a que falta el monto de cierre de este periodo. */
+function textoFaltaFact(correo, p){
+  const ini = inicioFact(correo, p), f = factDe(correo, p);
+  if (ini.monto === null) return "falta fijar la base de facturación del proyecto";
+  if (!f || f.monto_final === null || f.monto_final === undefined)
+    return "falta el monto de cierre del periodo";
+  return "falta cargar la facturación";
 }
 
 /* Lo que se cobraría, en porcentaje del sueldo. El CRM no guarda sueldos:
    ese dato no tiene por qué vivir acá. */
-function incentivoDe(correo, p){
+/* El cálculo vivo, con los datos de hoy y los parámetros de ese periodo. */
+function incentivoVivo(correo, p){
+  const B  = paramsDe(p);
   const ll = llaveDe(correo, p);
   const cu = cumplimientoDe(correo, p);
-  const bruto = tramoIncentivo(cu.total);
+  const bruto = tramoIncentivo(cu.total, B);
   let pago = 0, nota = "";
   if (ll.estado === "sin"){ pago = 0; nota = "No cumplió dos o más requisitos de gestión"; }
   else if (ll.estado === "base"){
-    pago = bruto > 0 ? Math.min(bruto, BONO.base_incumple_uno) : 0;
+    pago = bruto > 0 ? Math.min(bruto, B.base_incumple_uno) : 0;
     nota = "Incumplió un requisito: solo bono base";
   } else {
     pago = bruto;
-    nota = bruto > 0 ? "" : `El cumplimiento no llega al ${BONO.piso}%`;
+    nota = bruto > 0 ? "" : `El cumplimiento no llega al ${B.piso}%`;
   }
-  return { llave:ll, cumpl:cu, bruto, pago, nota,
-           mensual: pago * BONO.pago_mensual / 100,
-           retenido: pago * (100 - BONO.pago_mensual) / 100 };
+  return { llave:ll, cumpl:cu, bruto, pago, nota, sellado:false,
+           mensual: pago * B.pago_mensual / 100,
+           retenido: pago * (100 - B.pago_mensual) / 100 };
+}
+
+/* Lo que vale. Si el periodo está sellado se devuelve la foto y no se vuelve a
+   calcular: eso es lo que hace que un periodo liquidado no cambie de número
+   porque alguien corrigió una gestión de hace tres semanas. */
+function incentivoDe(correo, p){
+  const s = selloDe(p);
+  const foto = s && s.foto && s.foto.ejecutivos && s.foto.ejecutivos[correo];
+  if (foto) return Object.assign({}, foto, { sellado:true, selladoEn:s.cerrado_en, selladoPor:s.cerrado_por });
+  return incentivoVivo(correo, p);
+}
+
+/* La foto que se sella: los números de cada ejecutivo y los parámetros con
+   los que se calcularon. Se guarda todo junto para que dentro de tres meses
+   se pueda releer sin depender de nada más. */
+function fotoPeriodo(p){
+  const ejecutivos = {};
+  ejecutivosDelBono().forEach(u => {
+    ejecutivos[u.correo] = Object.assign({ nombre:u.nombre }, incentivoVivo(u.correo, p));
+  });
+  const v = versionDe(p);
+  return { periodo:p, ventana:ventanaPeriodo(p), tomada_en:new Date().toISOString(),
+           parametros:paramsDe(p),
+           parametros_version: v ? v.vigente_desde : "documento",
+           ejecutivos };
 }
 
 /* =========================================================================
@@ -6257,16 +6364,19 @@ const comoPct    = v => pct1(v);
 const porSemana1 = v => (Math.round(v * 10) / 10).toString().replace(".", ",") + " por semana";
 
 function tarjetaEjecutivo(u, p){
-  const x = incentivoDe(u.correo, p);
+  const B  = paramsDe(p);
+  const x  = incentivoDe(u.correo, p);
   const ll = x.llave, cu = x.cumpl;
   const clase = ll.estado === "activo" ? "ok" : ll.estado === "base" ? "medio" : "no";
+  const fuente = ll.cartera.fuente;
 
   return `<div class="card bn-card ${clase}">
     <div class="bn-top">
       <div>
         <h3 style="margin:0">${esc(u.nombre)}</h3>
         <div class="bn-sub">${ll.gestiones} gestiones en el periodo · cartera de ${ll.cartera.n}${
-          ll.cartera.fuente === "crm" ? " (contada en el CRM, sin meta cargada)" : ""}</div>
+          fuente === "crm" ? " (contada en el CRM, sin meta cargada)"
+          : fuente === "heredada" ? ` (heredada de ${esc(nombreMes(ll.cartera.de))})` : ""}</div>
       </div>
       <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
     </div>
@@ -6300,7 +6410,7 @@ function tarjetaEjecutivo(u, p){
       <div class="bn-num">
         <span class="k">Cumplimiento ponderado</span>
         <b>${pct1(cu.total)}</b>
-        <span class="s">${cu.completo ? nombreTramo(cu.total)
+        <span class="s">${cu.completo ? nombreTramo(cu.total, B)
           : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
       </div>
       <div class="bn-num">
@@ -6311,10 +6421,120 @@ function tarjetaEjecutivo(u, p){
       <div class="bn-num">
         <span class="k">Se paga ahora / se retiene</span>
         <b>${pct1(x.mensual)} <span class="sep">/</span> ${pct1(x.retenido)}</b>
-        <span class="s">${BONO.pago_mensual}% con la remuneración, el resto al cierre</span>
+        <span class="s">${B.pago_mensual}% con la remuneración, el resto al cierre</span>
       </div>
     </div>
   </div>`;
+}
+
+/* =========================================================================
+   El sello del periodo
+
+   Mientras el periodo está abierto los números se mueven, y está bien. Lo que
+   no puede pasar es que se muevan después de liquidar: alguien corrige una
+   gestión del 5 de agosto en septiembre y el bono ya pagado cambia de monto.
+
+   Sellar guarda la foto —los números de cada ejecutivo y los parámetros con
+   los que se calcularon— y a partir de ahí la pantalla muestra la foto, no el
+   cálculo. Si hay que corregir, se anula el sello y se vuelve a sellar: las
+   dos cosas quedan en la bitácora.
+   ========================================================================= */
+function cardSello(p, sello, ver, abierto){
+  const puede = S.user.rol !== "Ejecutivo";
+  const faltan = ejecutivosDelBono().filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  if (sello) return `
+    <div class="card" style="margin-top:12px;border-left:3px solid var(--good)">
+      <div class="eq-top">
+        <div>
+          <h3 style="margin:0">Periodo cerrado</h3>
+          <div class="bn-sub">Sellado el ${fmtFecha(String(sello.cerrado_en).slice(0,10))}${
+            sello.cerrado_por ? " por " + esc(sello.cerrado_por) : ""} · lo que ves es la foto de
+            ese momento, no un cálculo de hoy${
+            sello.foto && sello.foto.parametros_version
+              ? ` · parámetros vigentes desde ${esc(nombreMes(sello.foto.parametros_version))}` : ""}</div>
+        </div>
+        ${puede ? `<button class="btn ghost sm" id="anularCierre" style="color:var(--crit-ink)">Anular el cierre</button>` : ""}
+      </div>
+    </div>`;
+
+  if (!puede) return "";
+  return `
+    <div class="card" style="margin-top:12px">
+      <div class="eq-top">
+        <div>
+          <h3 style="margin:0">Periodo abierto</h3>
+          <div class="bn-sub">${abierto
+            ? `Cierra el ${fmtFecha(ventanaPeriodo(p).fin)}. Hasta entonces los números se mueven con cada gestión que se registre.`
+            : `La ventana ya terminó. Sellarlo deja los números firmes: después se puede corregir una gestión, pero lo liquidado no cambia.`}
+            ${ver ? `Se está calculando con los parámetros vigentes desde <b>${esc(nombreMes(ver.vigente_desde))}</b>.` : ""}</div>
+        </div>
+        <button class="btn sm" id="cerrarPeriodo">Cerrar y sellar el periodo</button>
+      </div>
+      ${faltan ? `<div class="note warn" style="margin:11px 0 0">
+        Faltan <b>${faltan}</b> ${faltan === 1 ? "ejecutivo" : "ejecutivos"} con la facturación del
+        periodo. Si sellas ahora, el cumplimiento queda firme sin ese peso.</div>` : ""}
+    </div>`;
+}
+
+async function cerrarPeriodo(){
+  const p = periodoBono();
+  if (selloDe(p)) return toast("Este periodo ya está sellado");
+  const foto = fotoPeriodo(p);
+  const faltan = ejecutivosDelBono().filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  modal(`<h3>Cerrar el periodo ${esc(nombrePeriodo(p))}</h3>
+    <p>Se guarda una foto de los números de los ${Object.keys(foto.ejecutivos).length} ejecutivos y de
+    los parámetros con los que se calcularon. A partir de ahí el periodo <b>deja de recalcularse</b>:
+    si después se corrige una gestión, se ve en la bitácora pero el monto liquidado no cambia.</p>
+    ${faltan ? `<div class="err">Faltan ${faltan} ${faltan===1?"ejecutivo":"ejecutivos"} con la
+      facturación cargada. Se puede sellar igual, pero el cumplimiento quedará firme sin ese peso.</div>` : ""}
+    <div class="field"><label>Nota del cierre <span class="hint">(opcional)</span></label>
+      <input type="text" id="notaCierre" placeholder="Ej.: cierre revisado con Gabriel"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="okCerrar">Cerrar y sellar</button>
+    </div>`);
+
+  $("#okCerrar").onclick = async () => {
+    const b = $("#okCerrar"); b.disabled = true; b.textContent = "Sellando…";
+    const { error } = await sb.from("periodos_cerrados")
+      .insert({ periodo:p, foto, nota: ($("#notaCierre").value || "").trim() || null });
+    if (error){ b.disabled = false; b.textContent = "Cerrar y sellar";
+      return toast("No se pudo cerrar: " + error.message); }
+    cerrarModal();
+    await cargarFacturacion(); render();
+    toast(`Periodo ${nombrePeriodo(p)} cerrado y sellado`);
+  };
+}
+
+async function anularCierre(){
+  const p = periodoBono();
+  const s = selloDe(p);
+  if (!s) return toast("Este periodo no está sellado");
+
+  modal(`<h3>Anular el cierre de ${esc(nombrePeriodo(p))}</h3>
+    <p>El periodo vuelve a calcularse con los datos de hoy. La foto anterior <b>no se borra</b>:
+    queda guardada y anulada, con tu nombre, y la anulación entra en la bitácora.</p>
+    <div class="field"><label>Por qué se anula</label>
+      <input type="text" id="notaAnular" placeholder="Ej.: faltaba la facturación de Vanessa"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn danger" style="flex:1" id="okAnular">Anular el cierre</button>
+    </div>`);
+
+  $("#okAnular").onclick = async () => {
+    const nota = ($("#notaAnular").value || "").trim();
+    if (!nota) return toast("Escribe por qué se anula: queda en la bitácora");
+    const b = $("#okAnular"); b.disabled = true; b.textContent = "Anulando…";
+    const { error } = await sb.from("periodos_cerrados")
+      .update({ anulado_en: new Date().toISOString(), anulado_nota: nota }).eq("id", s.id);
+    if (error){ b.disabled = false; b.textContent = "Anular el cierre";
+      return toast("No se pudo anular: " + error.message); }
+    cerrarModal();
+    await cargarFacturacion(); render();
+    toast("Cierre anulado — el periodo vuelve a calcularse");
+  };
 }
 
 function viewBono(){
@@ -6323,10 +6543,13 @@ function viewBono(){
       <p style="margin:0">El seguimiento del incentivo lo revisan el Analista y el Manager.</p></div>`;
 
   const p = periodoBono();
+  const B = paramsDe(p);
   const ejec = ejecutivosDelBono();
   const periodos = periodosProyecto();
   const v = ventanaPeriodo(p);
   const abierto = hoyISO() <= v.fin && hoyISO() >= v.ini;
+  const sello = selloDe(p);
+  const ver  = versionDe(p);
 
   const res = ejec.map(u => incentivoDe(u.correo, p));
   const habilitados = res.filter(x => x.llave.estado === "activo").length;
@@ -6337,24 +6560,26 @@ function viewBono(){
   return `
   <h2 style="margin:0 0 3px">Incentivos</h2>
   <div class="sub">Periodo del ${esc(textoPeriodo(p))} — se paga en ${esc(nombrePeriodo(p))}${
-    abierto ? " · el periodo sigue abierto, los números se mueven" : ""}</div>
+    abierto && !sello ? " · el periodo sigue abierto, los números se mueven" : ""}</div>
+
+  ${cardSello(p, sello, ver, abierto)}
 
   <div class="stat-row" style="margin-top:12px">
     <div class="stat"><div class="lbl">Con la llave abierta</div><div class="val">${habilitados}</div>
       <div class="sub">de ${ejec.length} cumplen los 3 requisitos</div></div>
     <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
-      <div class="sub">llegan al ${BONO.piso}% de cumplimiento</div></div>
+      <div class="sub">llegan al ${B.piso}% de cumplimiento</div></div>
     <div class="stat"><div class="lbl">Cumplimiento promedio</div><div class="val">${pct1(prom)}</div>
       <div class="sub">del equipo, sobre lo medible</div></div>
     <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
       <div class="sub">${faltaFact === 1 ? "ejecutivo sin monto cargado" : "ejecutivos sin monto cargado"}</div></div>
   </div>
 
-  ${faltaFact ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+  ${faltaFact && !sello ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
     <h3 style="margin-bottom:4px">Falta la facturación de ${faltaFact} ${
       faltaFact === 1 ? "ejecutivo" : "ejecutivos"} en este periodo</h3>
     <div class="note" style="margin-bottom:0">
-      Es el ${BONO.pesos.facturacion}% del peso y el CRM no la ve: sale de la plataforma de BBVA.
+      Es el ${B.pesos.facturacion}% del peso y el CRM no la ve: sale de la plataforma de BBVA.
       Mientras falte, el cumplimiento que se muestra está calculado solo sobre lo demás y
       <b>no sirve para liquidar</b>. Se carga en <b>Ajustes → Facturación del periodo</b>.
     </div>
@@ -6375,7 +6600,7 @@ function viewBono(){
       <summary>Cómo se lee este cálculo</summary>
     <div class="aj-reglas" style="margin-top:12px">
       <div class="kv"><dt>La llave no suma</dt><dd>Los tres requisitos habilitan el cálculo, no aportan al monto.
-        Con los tres, se calcula normal. Con uno incumplido, solo el bono base del ${BONO.base_incumple_uno}%.
+        Con los tres, se calcula normal. Con uno incumplido, solo el bono base del ${B.base_incumple_uno}%.
         Con dos o más, no corresponde incentivo.</dd></div>
       <div class="kv"><dt>El periodo corta el 18</dt><dd>Del 19 al 18 del mes siguiente. Nada acá se mide por mes calendario.</dd></div>
       <div class="kv"><dt>Reactivación</dt><dd>Comercios retenidos y recuperados sobre la cartera asignada,
@@ -6397,60 +6622,112 @@ function viewBono(){
 function cardFacturacion(){
   if (S.user.rol === "Ejecutivo") return "";
   const p = periodoBono();
+  const B = paramsDe(p);
   const ejec = ejecutivosDelBono();
+  const sello = selloDe(p);
+  const totalBase = ejec.reduce((n,u) => n + (baseFactDe(u.correo) || 0), 0);
+  const faltaBase = ejec.filter(u => baseFactDe(u.correo) === null).length;
 
   return `
   <div class="card">
     <div class="pie" style="margin:0 0 13px">
-      Es el ${BONO.pesos.facturacion}% del peso del incentivo y el CRM no puede verlo. Carga el monto con el
-      que arrancó el periodo y el que quedó al cierre; el crecimiento lo calcula solo.
-      Se guarda con tu nombre y la fecha.
+      <b>La base del proyecto se carga una sola vez.</b> El acuerdo del 12 de agosto la congeló, así
+      que ya no se pide periodo a periodo: todos los periodos crecen contra ella. Se guarda con tu
+      nombre y la fecha, y cualquier cambio queda en la bitácora.
+    </div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Facturación de la base inicial</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const b = FACT_BASE.find(x => x.correo === u.correo) || {};
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>${b.actualizado_por
+            ? `<div class="bn-det">fijada por ${esc(b.actualizado_por)}</div>` : ""}</td>
+          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+            data-base="${esc(u.correo)}" value="${b.monto == null ? "" : esc(b.monto)}" placeholder="S/"></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+    <div class="pie" style="margin-top:9px">${totalBase
+      ? `Suman <b>${soles(totalBase)}</b>. El acuerdo con BBVA fija la base del proyecto en S/ 35,3 millones: si el total no cuadra, falta repartir alguno.`
+      : "Todavía no se fijó la base de ningún ejecutivo. Sin ella el objetivo de facturación no se puede calcular."}</div>
+    <button class="btn block" id="baseGuardar" style="margin-top:12px">Guardar la base del proyecto</button>
+  </div>
+
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      Es el ${B.pesos.facturacion}% del peso del incentivo y el CRM no puede verlo: sale de la
+      plataforma de BBVA. De cada periodo solo hace falta <b>el monto de cierre</b>; el crecimiento
+      se calcula contra la base de arriba.
     </div>
     <label class="fsel" style="margin-bottom:10px"><span>Periodo</span>
       <select id="selPeriodoFact">${periodosProyecto().map(x =>
         `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
       </select></label>
 
+    ${sello ? `<div class="note" style="margin:0 0 11px">Este periodo está <b>sellado</b>. Puedes
+      corregir el monto, pero el incentivo liquidado no cambia hasta que se anule el cierre.</div>` : ""}
+    ${faltaBase ? `<div class="note warn" style="margin:0 0 11px">Faltan <b>${faltaBase}</b>
+      ${faltaBase === 1 ? "ejecutivo" : "ejecutivos"} sin base fijada arriba: para ${
+      faltaBase === 1 ? "ese" : "esos"} el crecimiento no se puede calcular.</div>` : ""}
+
     <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Facturación inicial</th>
-        <th style="text-align:right">Facturación final</th><th style="text-align:right">Crecimiento</th></tr></thead>
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Base</th>
+        <th style="text-align:right">Cierre del periodo</th><th style="text-align:right">Crecimiento</th></tr></thead>
       <tbody>${ejec.map(u => {
         const f = factDe(u.correo, p) || {};
+        const ini = inicioFact(u.correo, p);
         const cr = crecimientoFact(u.correo, p);
         return `<tr>
           <td><b>${esc(u.nombre)}</b>${f.actualizado_por
             ? `<div class="bn-det">último cambio: ${esc(f.actualizado_por)}</div>` : ""}</td>
-          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
-            data-fact="ini|${esc(u.correo)}" value="${f.monto_inicial == null ? "" : esc(f.monto_inicial)}" placeholder="S/"></td>
+          <td style="text-align:right" class="mono">${ini.monto === null
+            ? `<span style="color:var(--muted)">sin base</span>` : esc(soles(ini.monto))}</td>
           <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
             data-fact="fin|${esc(u.correo)}" value="${f.monto_final == null ? "" : esc(f.monto_final)}" placeholder="S/"></td>
           <td style="text-align:right">${cr === null ? "—"
-            : `<b class="${cr >= BONO.metas.facturacion_pct ? "si" : ""}">${cr >= 0 ? "+" : ""}${cr.toFixed(1)}%</b>`}</td>
+            : `<b class="${cr >= B.metas.facturacion_pct ? "si" : ""}">${cr >= 0 ? "+" : ""}${cr.toFixed(1)}%</b>`}</td>
         </tr>`;
       }).join("")}</tbody>
     </table></div>
-    <button class="btn block" id="factGuardar" style="margin-top:12px">Guardar la facturación</button>
+    <button class="btn block" id="factGuardar" style="margin-top:12px">Guardar el cierre del periodo</button>
   </div>`;
+}
+
+async function guardarBaseFact(){
+  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
+  const lista = [];
+  document.querySelectorAll("[data-base]").forEach(el => {
+    const m = num(el.value);
+    if (m !== null) lista.push({ correo: el.dataset.base, monto: m });
+  });
+  if (!lista.length) return toast("No hay montos que guardar");
+  if (lista.some(x => !(x.monto >= 0))) return toast("Hay un monto que no es un número válido");
+
+  const b = $("#baseGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("facturacion_base").upsert(lista, { onConflict:"correo" });
+  b.disabled = false; b.textContent = "Guardar la base del proyecto";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); render();
+  toast("Base del proyecto guardada");
 }
 
 async function guardarFacturacion(){
   const p = ($("#selPeriodoFact") && $("#selPeriodoFact").value) || periodoBono();
-  const num = v => { const s = String(v || "").replace(/[^\d.\-]/g, ""); return s === "" ? null : Number(s); };
-  const filas = {};
+  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
+  /* Solo se manda el monto de cierre. El inicial ya no se pide acá: vive en la
+     base del proyecto, y no mandarlo evita pisarlo con un nulo sin querer. */
+  const lista = [];
   document.querySelectorAll("[data-fact]").forEach(el => {
-    const [cual, correo] = el.dataset.fact.split("|");
-    filas[correo] = filas[correo] || { periodo:p, correo, monto_inicial:null, monto_final:null };
-    filas[correo][cual === "ini" ? "monto_inicial" : "monto_final"] = num(el.value);
+    const correo = el.dataset.fact.split("|")[1];
+    const m = num(el.value);
+    if (m !== null) lista.push({ periodo:p, correo, monto_final:m });
   });
-  const lista = Object.values(filas).filter(f => f.monto_inicial !== null || f.monto_final !== null);
-  const malos = lista.filter(f => (f.monto_inicial !== null && !(f.monto_inicial >= 0))
-                               || (f.monto_final   !== null && !(f.monto_final   >= 0)));
-  if (malos.length) return toast("Hay montos que no son números válidos");
+  if (lista.some(f => !(f.monto_final >= 0))) return toast("Hay montos que no son números válidos");
   if (!lista.length) return toast("No hay montos que guardar");
 
   const b = $("#factGuardar"); b.disabled = true; b.textContent = "Guardando…";
   const { error } = await sb.from("facturacion").upsert(lista, { onConflict:"periodo,correo" });
-  b.disabled = false; b.textContent = "Guardar la facturación";
+  b.disabled = false; b.textContent = "Guardar el cierre del periodo";
   if (error) return toast("No se pudo guardar: " + error.message);
   await cargarFacturacion(); render();
   toast(`Facturación de ${nombrePeriodo(p)} guardada`);
@@ -6480,39 +6757,88 @@ const CAMPOS_BONO = [
   ["base_incumple_uno",          "Bono base (1 requisito caído)","%"],
   ["pago_mensual",               "Se paga cada mes",            "%"]
 ];
-const leerBono = ruta => ruta.split(".").reduce((o,k) => o[k], BONO);
+function leerRuta(obj, ruta){ return ruta.split(".").reduce((o,k) => o[k], obj); }
 function ponerBono(obj, ruta, valor){
   const ks = ruta.split("."); const ult = ks.pop();
   ks.reduce((o,k) => o[k], obj)[ult] = valor;
 }
+/* Qué versión se está editando. Por defecto la que rige hoy; se puede elegir
+   otra para corregir una que se cargó mal, o crear una nueva desde el periodo
+   en que empieza a regir. */
+const periodoParam = () => S.pParam || (versionDe(periodoHoy()) || {}).vigente_desde || periodoHoy();
 
 function cardParametrosBono(){
   if (S.user.rol === "Ejecutivo") return "";
-  const suma = BONO.pesos.reactivacion + BONO.pesos.facturacion + BONO.pesos.venta;
+  const pv    = periodoParam();
+  const edita = PARAMS.find(x => x.vigente_desde === pv);
+  const val   = edita ? Object.assign(JSON.parse(JSON.stringify(BONO_DEF)), edita.valor) : paramsDe(pv);
+  const suma  = val.pesos.reactivacion + val.pesos.facturacion + val.pesos.venta;
+  const usada = periodosProyecto().filter(x => (versionDe(x) || {}).vigente_desde === pv);
+  const selladas = usada.filter(periodoSellado);
+
   return `
   <div class="card">
     <div class="pie" style="margin:0 0 13px">
-      La revisión de octubre estaba prevista: si una meta o un peso cambia, se cambia acá y el
-      cálculo lo toma al instante, sin tocar el sistema.
+      <b>Los parámetros tienen fecha de vigencia.</b> Cada periodo se calcula con la versión que
+      regía entonces, así que cambiar una meta hoy <b>no reescribe lo ya liquidado</b>. Para la
+      revisión de octubre se crea una versión nueva vigente desde ese periodo; la de agosto queda
+      como está.
     </div>
+
+    <div class="sel-row" style="margin-bottom:12px">
+      <label class="fsel"><span>Versión que se está editando</span>
+        <select id="selVersionParam">
+          ${PARAMS.slice().sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
+            .map(x => `<option value="${esc(x.vigente_desde)}"${x.vigente_desde === pv ? " selected" : ""}
+              >Vigente desde ${esc(nombreMes(x.vigente_desde))}</option>`).join("")}
+          ${PARAMS.some(x => x.vigente_desde === pv) ? "" :
+            `<option value="${esc(pv)}" selected>Nueva, vigente desde ${esc(nombreMes(pv))}</option>`}
+        </select></label>
+      <label class="fsel"><span>Crear una versión nueva desde</span>
+        <select id="selNuevaVersion">
+          <option value="">—</option>
+          ${periodosProyecto().filter(x => !PARAMS.some(y => y.vigente_desde === x))
+            .map(x => `<option value="${esc(x)}">${esc(nombreMes(x))}</option>`).join("")}
+        </select></label>
+    </div>
+
+    <div class="pie" style="margin:-4px 0 12px">
+      ${edita ? `Creada por <b>${esc(edita.creado_por || "—")}</b>${
+        edita.creado_en ? " el " + fmtFecha(String(edita.creado_en).slice(0,10)) : ""}. ` : "Versión nueva, todavía sin guardar. "}
+      ${usada.length ? `Rige ${usada.length === 1 ? "el periodo" : "los periodos"}
+        <b>${usada.map(x => esc(nombreMes(x))).join(", ")}</b>.` : "Todavía no rige ningún periodo."}
+    </div>
+
+    ${selladas.length ? `<div class="note warn" style="margin:0 0 11px">
+      ${selladas.length === 1 ? "El periodo" : "Los periodos"}
+      <b>${selladas.map(x => esc(nombreMes(x))).join(", ")}</b>
+      ${selladas.length === 1 ? "ya está sellado" : "ya están sellados"}: cambiar esta versión
+      <b>no altera lo liquidado</b>. Para que cambie hay que anular el cierre.</div>` : ""}
+
     ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
     <div class="bn-params">
       ${CAMPOS_BONO.map(([ruta, label, uni]) => `
         <label class="field">
           <span style="font-size:12px;color:var(--muted)">${esc(label)}${uni ? ` (${uni})` : ""}</span>
           <input class="in-num" type="text" inputmode="decimal" data-bono="${esc(ruta)}"
-                 value="${esc(leerBono(ruta))}">
+                 value="${esc(leerRuta(val, ruta))}">
         </label>`).join("")}
     </div>
+    <div class="field" style="margin-top:11px">
+      <label>Nota del cambio <span class="hint">(queda en la bitácora)</span></label>
+      <input type="text" id="notaParam" value="${esc(edita && edita.nota || "")}"
+             placeholder="Ej.: revisión de octubre acordada con BBVA">
+    </div>
     <div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn" id="bonoGuardar" style="flex:1;min-width:180px">Guardar los parámetros</button>
+      <button class="btn" id="bonoGuardar" style="flex:1;min-width:180px">Guardar esta versión</button>
       <button class="btn ghost" id="bonoReset">Volver a los del documento</button>
     </div>
   </div>`;
 }
 
 async function guardarParametros(){
-  const nuevo = JSON.parse(JSON.stringify(BONO));
+  const pv = periodoParam();
+  const nuevo = paramsDe(pv);
   let malo = "";
   document.querySelectorAll("[data-bono]").forEach(el => {
     const n = Number(String(el.value).replace(",", "."));
@@ -6522,29 +6848,37 @@ async function guardarParametros(){
   if (malo) return toast("Hay un valor que no es un número: " + malo);
   const suma = nuevo.pesos.reactivacion + nuevo.pesos.facturacion + nuevo.pesos.venta;
   if (Math.round(suma) !== 100) return toast(`Los pesos suman ${suma}%: tienen que sumar 100%`);
-  if (nuevo.piso >= 100) return toast("El piso tiene que ser menor al 100%");
+  if (nuevo.piso >= 100)  return toast("El piso tiene que ser menor al 100%");
   if (nuevo.sobre <= 100) return toast("El sobrecumplimiento tiene que ser mayor al 100%");
 
   const b = $("#bonoGuardar"); b.disabled = true; b.textContent = "Guardando…";
-  const { error } = await sb.from("config")
-    .upsert({ clave:"bono_parametros", valor: JSON.stringify(nuevo) }, { onConflict:"clave" });
-  b.disabled = false; b.textContent = "Guardar los parámetros";
+  const { error } = await sb.from("bono_parametros").upsert(
+    { vigente_desde: pv, valor: nuevo, nota: ($("#notaParam") && $("#notaParam").value || "").trim() || null },
+    { onConflict:"vigente_desde" });
+  b.disabled = false; b.textContent = "Guardar esta versión";
   if (error) return toast("No se pudo guardar: " + error.message);
-  BONO = nuevo; render();
-  toast("Parámetros actualizados");
+  await cargarFacturacion(); render();
+  toast(`Parámetros vigentes desde ${nombreMes(pv)} guardados`);
 }
 
 function bindBono(){
   if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
+  if ($("#baseGuardar"))    $("#baseGuardar").onclick     = () => guardarBaseFact();
   if ($("#bonoGuardar"))    $("#bonoGuardar").onclick     = () => guardarParametros();
-  if ($("#bonoReset"))      $("#bonoReset").onclick       = () => {
-    document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRutaDef(el.dataset.bono));
+  if ($("#cerrarPeriodo"))  $("#cerrarPeriodo").onclick   = () => cerrarPeriodo();
+  if ($("#anularCierre"))   $("#anularCierre").onclick    = () => anularCierre();
+  if ($("#selVersionParam")) $("#selVersionParam").onchange = e => { S.pParam = e.target.value; render(); };
+  if ($("#selNuevaVersion")) $("#selNuevaVersion").onchange = e => {
+    if (e.target.value){ S.pParam = e.target.value; render();
+      toast(`Versión nueva desde ${nombreMes(S.pParam)} — ajusta los valores y guarda`); }
+  };
+  if ($("#bonoReset")) $("#bonoReset").onclick = () => {
+    document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRuta(BONO_DEF, el.dataset.bono));
     toast("Valores del documento cargados — falta guardar");
   };
 }
-const leerRutaDef = ruta => ruta.split(".").reduce((o,k) => o[k], BONO_DEF);
 
 /* =========================================================================
    Sincronización — el CRM se actualiza solo
