@@ -2102,8 +2102,8 @@ function itemTimeline(r){
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
-      ${r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`
-        : `<div style="margin-top:8px"><span class="chip warn">Sin evidencia adjunta</span></div>`}
+      ${/* La foto dejó de pedirse; la que ya existía se sigue viendo. */
+        r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">` : ""}
       ${editable ? `<div style="display:flex;gap:7px;margin-top:11px">
         <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
         <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
@@ -2269,11 +2269,6 @@ function renderFormCliente(){
 
   <div id="boxGps"></div>
 
-  <div class="card" id="cardEvidencia">
-    <h3>Evidencia de la gestión <span class="req">*</span></h3>
-    <div id="evBox"></div>
-  </div>
-
 
   <div class="card">
     <h3 id="tituloNotas">Observación</h3>
@@ -2432,7 +2427,7 @@ const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual"
 
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
-  const ocultarSiCartera = ["#cardCierre", "#cardEvidencia"];
+  const ocultarSiCartera = ["#cardCierre"];
   [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
    ["#cardGestion", nuevo], ["#cardContactoBBVA", nuevo]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
@@ -2464,7 +2459,7 @@ function pintarMediosVenta(){
     box.querySelectorAll("[data-medio]").forEach(x => x.classList.toggle("on", x.dataset.medio === f.Tipo_Contacto));
     pintarDerivado(); pintarGps();
   });
-  pintarDerivado(); pintarGps(); pintarEvidencia();
+  pintarDerivado(); pintarGps();
 }
 
 /* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
@@ -2552,7 +2547,6 @@ async function guardarCliente(){
       if (!g.Tipo_Contacto) errores.push("Indica cómo se cerró la venta: visita al local o reunión.");
       if (RULES.requiereUbicacion(g.Tipo_Contacto) && !g.Ubicacion_Verificada && !g._sinUbicacion)
         errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
-      if (!g.Evidencia) errores.push("Adjunta la evidencia de la gestión.");
       if (!String(g.Comentario_Ejecutivo || "").trim()) errores.push("Escribe el comentario del ejecutivo.");
     }
   } else {
@@ -2604,10 +2598,6 @@ async function guardarCliente(){
     } else if (nuevo){
       // El comercio y la gestión que lo cerró entran juntos o no entra ninguno.
       const g = S.form;
-      if (g.Evidencia && !g.Evidencia_Path){
-        const ruta = await subirEvidencia(g.Evidencia);
-        if (ruta) g.Evidencia_Path = ruta;
-      }
       const { error } = await sb.rpc("crear_venta_nueva", {
         p_ruc: ruc,
         p_razon_social: fila.razon_social,
@@ -2616,7 +2606,7 @@ async function guardarCliente(){
         p_tipo_contacto: g.Tipo_Contacto,
         p_fecha: g.Fecha_Contacto,
         p_hora: g.Hora_Contacto,
-        p_evidencia_path: g.Evidencia_Path || "",
+        p_evidencia_path: "",          // la foto se retiró del flujo
         p_comentario_ejecutivo: String(g.Comentario_Ejecutivo || "").trim(),
         p_comentario_cliente: String(g.Comentario_Cliente || "").trim() || null,
         p_calificacion: g.Calificacion || null,
@@ -2681,7 +2671,7 @@ function confirmarEliminarCliente(cid){
 
    La llave con la que se cruza contra la cartera del banco. Si se registró
    con un dedazo, el comercio no le pega a nada en el archivo de BBVA, y hasta
-   ahora la única salida era borrarlo —perdiendo sus gestiones y su evidencia—
+   ahora la única salida era borrarlo —perdiendo sus gestiones—
    y volver a empezar. La corrección la hacen el Analista y el Manager: el
    error lo comete quien registra, así que no debería revisarse a sí mismo.
    ------------------------------------------------------------------------- */
@@ -2703,7 +2693,7 @@ function modalCorregirId(cid){
              placeholder="${esc(c.customer_id)}" value="">
     </div>
     <div class="note" style="margin-bottom:12px">
-      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} y la evidencia se mueven con él; no se pierde nada. `
+      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} se mueven con él; no se pierde nada. `
           : "El comercio todavía no tiene gestiones. "}
       La corrección queda en la bitácora con tu nombre.
     </div>
@@ -3007,9 +2997,9 @@ function renderFormulario(){
     <h3>Lo que quedó registrado</h3>
     <div class="note" style="margin-bottom:11px">
       ${mandoTotal()
-        ? "Puedes corregir <b>la fecha, la hora, el medio y el resultado</b>. La ubicación capturada y la evidencia no se tocan: son la constancia de dónde estuvo el ejecutivo y de qué mostró."
+        ? "Puedes corregir <b>la fecha, la hora, el medio y el resultado</b>. La ubicación capturada no se toca: es la constancia de dónde estuvo el ejecutivo."
         : "Puedes corregir <b>el medio y el resultado</b> si te equivocaste al elegirlos. " + esc(plazoCorreccion(f)) +
-          " La fecha, la hora, la ubicación y la evidencia no cambian: son la constancia de lo que pasó."}
+          " La fecha, la hora y la ubicación no cambian: son la constancia de lo que pasó."}
     </div>
     ${mandoTotal() ? `
     <div class="row2">
@@ -3100,11 +3090,10 @@ function renderFormulario(){
 
 
 
-  <div class="card">
-    <h3>Evidencia del contacto <span class="req">*</span></h3>
-    <div id="evBox"></div>
-  </div>
-
+  <!-- La foto de evidencia se retiró del flujo en agosto de 2026: se exigía en
+       cada gestión y no se revisaba ninguna. Lo que respalda un registro es el
+       GPS de la visita, lo que el cliente dijo y la fecha, que no puede ser
+       futura. Las fotos ya cargadas se siguen viendo en la ficha. -->
 
   <div id="boxCierre"></div>
 
@@ -3155,7 +3144,7 @@ function bindForm(c){
     pintarDerivado(); pintarCierre(c); pintarSeguimiento();
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarEvidencia(); pintarCierre(c); pintarSeguimiento();
+  pintarDerivado(); pintarGps(); pintarCierre(c); pintarSeguimiento();
 }
 
 /* -------------------------------------------------------------------------
@@ -3378,30 +3367,6 @@ function notaSinUbicacion(){
    comprobantes en el formulario. Lo que se declaró antes sigue guardado y se
    puede consultar en el Excel; simplemente no se pide nada nuevo. */
 
-function pintarEvidencia(){
-  const f = S.form, box = $("#evBox");
-  if (!box) return;
-  box.innerHTML = f.Evidencia ? `
-    <img class="ev-thumb" src="${f.Evidencia}" alt="Evidencia">
-    <div style="display:flex;gap:8px;margin-top:9px">
-      <button class="btn ghost sm" id="evChange">Reemplazar</button>
-      <button class="btn ghost sm" id="evDel" style="color:var(--crit-ink)">Quitar</button>
-    </div>` : `
-    <div class="drop" id="evDrop">
-      <div class="big">📷</div>
-      <p><b>Toca para tomar una foto</b> o adjuntar un print de pantalla</p>
-      <p style="font-size:11.5px">JPG o PNG · se comprime automáticamente</p>
-    </div>
-    ${S.demo ? '<button class="btn ghost sm block" id="evDemo" style="margin-top:9px">Usar imagen de ejemplo</button>' : ""}`;
-  box.insertAdjacentHTML("beforeend", `<input type="file" id="evFile" accept="image/*" capture="environment" class="hidden">`);
-  const file = $("#evFile");
-  file.onchange = e => { const fl = e.target.files[0]; if (fl) comprimir(fl, d => { f.Evidencia = d; pintarEvidencia(); }); };
-  if ($("#evDrop"))   $("#evDrop").onclick = () => file.click();
-  if ($("#evChange")) $("#evChange").onclick = () => file.click();
-  if ($("#evDel"))    $("#evDel").onclick = () => { f.Evidencia = ""; pintarEvidencia(); };
-  if ($("#evDemo"))   $("#evDemo").onclick = () => { f.Evidencia = EVIDENCIA_DEMO; pintarEvidencia(); };
-}
-
 function comprimir(file, cb){
   const rd = new FileReader();
   rd.onload = () => {
@@ -3437,7 +3402,6 @@ async function guardar(c){
   if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
   if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
     errores.push("Captura la ubicación con el botón, o marca “No puedo capturar la ubicación” si el GPS no responde o estás registrando una visita anterior.");
-  if (!f.Evidencia) errores.push("Adjunta la evidencia (foto o print de pantalla) del contacto.");
   if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
   if (f.Cierre === "PERDIDO" && !f.Motivo)
     errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
@@ -3454,11 +3418,6 @@ async function guardar(c){
   btn.disabled = true; btn.textContent = "Guardando…";
   try {
     {
-      // La evidencia va al bucket privado; en la fila solo queda la ruta.
-      if (f.Evidencia && !f.Evidencia_Path){
-        const ruta = await subirEvidencia(f.Evidencia);
-        if (ruta) f.Evidencia_Path = ruta;
-      }
       /* Editando, lo que cambia el medio, el resultado, la hora o la fecha va
          por funciones aparte: la base congela esos campos en un UPDATE normal
          y solo las deja pasar con la corrección autorizada, que además las
@@ -3613,7 +3572,7 @@ const EVIDENCIA_DEMO = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(
 
      · un tablero de control por ejecutivo, para leer la actividad de un golpe
      · las gestiones agrupadas por día, que es como se conversa en una reunión
-     · cada tarjeta con su respaldo: evidencia, lo que dijo el cliente y el GPS
+     · cada tarjeta con su respaldo: lo que dijo el cliente y el GPS
 
    Todo se puede filtrar por período, ejecutivo, medio y resultado, y bajar a
    Excel tal como se está viendo.
@@ -3658,7 +3617,6 @@ function controlEquipo(regs){
       porDia: dias.size ? Math.round(lista.length / dias.size * 10) / 10 : 0,
       respuestas,
       tasa: lista.length ? respuestas / lista.length : 0,
-      sinEvidencia: lista.filter(r => !r.Evidencia_Path && !r.Evidencia).length,
       sinGps: lista.filter(sinUbicacion).length,
       declaradas: lista.filter(ubicacionDeclarada).length,
       /* En el día: cuántas se registraron el mismo día en que se gestionaron */
@@ -3706,8 +3664,7 @@ function tablaControl(filas){
       </tbody>
     </table>
     </div>
-    ${filas.some(f => f.sinEvidencia || f.sinGps) ? `<div class="ctrl-pie">
-      ${filas.filter(f => f.sinEvidencia).map(f => `<span class="chip warn">${esc(f.nombre)}: ${f.sinEvidencia} sin evidencia</span>`).join("")}
+    ${filas.some(f => f.sinGps) ? `<div class="ctrl-pie">
       ${filas.filter(f => f.sinGps).map(f => `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
     </div>` : ""}
   </div>`;
@@ -3738,7 +3695,6 @@ function tarjetaGestion(r){
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
               : ubicacionExenta(r)?`<span class="chip no" title="${esc(r.Ubicacion_Exenta_Motivo||"")}">Ubicación no exigible</span>`
               : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
-            ${!r.Evidencia && !r.Evidencia_Path?`<span class="chip warn">Sin evidencia</span>`:""}
             ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
           </div>
         </div>
@@ -3774,7 +3730,6 @@ function viewRegistros(){
   if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacion);
-  else if (S.fResultado === "sin_evidencia")  lista = lista.filter(r => !r.Evidencia_Path && !r.Evidencia);
   else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -3837,8 +3792,6 @@ function viewRegistros(){
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
-      ${todos.some(r => !r.Evidencia_Path && !r.Evidencia)
-        ? `<button class="${S.fResultado==="sin_evidencia"?"on":""}" data-fr="sin_evidencia">Sin evidencia</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -3894,7 +3847,6 @@ function gestionesFiltradas(){
   if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
-  else if (S.fResultado === "sin_evidencia")  l = l.filter(r => !r.Evidencia_Path && !r.Evidencia);
   else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -4783,7 +4735,7 @@ function hojaReporte(admin){
     [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
-    ["", "La columna Evidencia guarda la ruta del archivo en el bucket privado; las imágenes solo se abren desde el CRM."],
+    ["", "La columna Evidencia guarda la ruta de las fotos cargadas antes de agosto de 2026, cuando se pedían; las imágenes solo se abren desde el CRM."],
     ["", "La ubicación capturada no puede modificarse una vez guardada."]];
   return XLSX.utils.aoa_to_sheet(filas);
 }
@@ -5026,7 +4978,7 @@ function viewAyuda(){
     ["Cumple_Visita", "SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar"],
     ["Intentos", "Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio"],
     ["Ubicación", "Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada"],
-    ["Evidencia", "Obligatoria en todo registro, en bucket privado"],
+    ["Evidencia", "Ya no se pide. Lo que respalda una gestión es el GPS de la visita, lo que dijo el cliente y la fecha, que no puede ser futura"],
     ["Datos sensibles", "No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para identificar la venta"],
     ["Dominio permitido", "@" + CONFIG.dominio],
     ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"]
