@@ -1765,6 +1765,12 @@ async function cargarDatos(){
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
   await cargarMetas();
+  /* Los parámetros del bono se cargaban recién con la primera sincronización.
+     Mientras tanto el CRM calculaba con los valores del documento, que hasta
+     ahora eran los mismos. Con versiones vigentes ya no da igual: si alguien
+     entra el 19 de octubre, tiene que ver la revisión de octubre desde el
+     primer render, no la de agosto. */
+  await cargarFacturacion();
 }
 
 /* Cartera asignada por mes. La base filtra sola: el ejecutivo recibe solo la
