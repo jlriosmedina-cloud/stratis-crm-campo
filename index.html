@@ -4184,7 +4184,12 @@ function bloqueActividad(r, regs){
   const gestiones  = regs.length;
   const respuestas = regs.filter(x => esEfectivo(x.Resultado)).length;
   const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
-  const comercios  = new Set(regs.map(x => String(x.Customer_id))).size;
+  const tocados    = new Set(regs.map(x => String(x.Customer_id)));
+  const comercios  = tocados.size;
+  /* La tabla de abajo cuenta «Trabajados» solo sobre la cartera asignada,
+     porque ese es su denominador. Acá entran también las ventas nuevas, y la
+     diferencia entre los dos números se dice en vez de dejarla adivinar. */
+  const tocadosNuevos = [...tocados].filter(id => byId[id] && esClienteNuevo(byId[id])).length;
   const dias       = new Set(regs.map(x => String(x.Fecha_Contacto).slice(0,10))).size;
 
   const sem   = semanasRango(r);
@@ -4204,7 +4209,9 @@ function bloqueActividad(r, regs){
     <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${efectivas}</div>
       <div class="sub">gestiones que cumplen visita</div></div>
     <div class="stat"><div class="lbl">Comercios tocados</div><div class="val">${comercios}</div>
-      <div class="sub">comercios distintos con al menos una gestión</div></div>
+      <div class="sub">comercios distintos con al menos una gestión${
+        tocadosNuevos ? ` · ${comercios - tocadosNuevos} de cartera + ${tocadosNuevos} venta${
+          tocadosNuevos===1?"":"s"} nueva${tocadosNuevos===1?"":"s"}` : ""}</div></div>
     <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div>
       <div class="sub">${dias ? `${(gestiones/dias).toFixed(1)} gestiones por día` : "sin movimiento"}</div></div>
     <div class="stat ${sem && ritmo < pide ? "malo" : ""}"><div class="lbl">Ritmo semanal</div>
