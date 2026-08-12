@@ -4235,10 +4235,17 @@ function bloqueActividad(r, regs){
    lo mismo y nunca coincidían. */
 const COLS_PANEL = [
   { k:"asignada",    th:"Asignados",        ttl:"Cartera que entregó BBVA", val:f => f.asignada || "—" },
-  { k:"registrados", th:"Registrados",      extra:true, ttl:"Customer ID cargados en el CRM", val:f => f.registrados || "—" },
+  /* Tres cuentas distintas de comercios, y hasta ahora se leían como una:
+     lo que BBVA asignó, lo que alguien cargó al CRM, y lo que de verdad
+     recibió una gestión. Entre la segunda y la tercera está el hueco que no
+     se veía en ninguna pantalla: fichas creadas y nunca trabajadas. */
+  { k:"registrados", th:"Registrados",      ttl:"Customer ID cargados en el CRM, se hayan trabajado o no", val:f => f.registrados || "—" },
+  { k:"trabajados",  th:"Gestionados",      ttl:"Comercios con al menos una gestión en el periodo", val:f => f.trabajados || "—" },
+  { k:"cargadosSinGestion", th:"Cargados sin gestión", extra:true,
+    ttl:"Registrados en el CRM que no tienen ni una gestión: ficha creada y nunca trabajada",
+    val:f => f.cargadosSinGestion || "—" },
   { k:"sinTocar",    th:"Sin tocar",        extra:true, ttl:"Asignados que no recibieron ninguna gestión en el periodo",
     val:f => f.asignada ? f.sinTocar : "—" },
-  { k:"trabajados",  th:"Trabajados",       ttl:"Comercios con al menos una gestión en el periodo", val:f => f.trabajados || "—" },
   { k:"gestiones",   th:"Gestiones",        extra:true, val:f => f.gestiones || "—" },
   { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
   { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
@@ -4278,7 +4285,7 @@ function bloqueEquipo(r){
       <button class="btn ghost sm" id="verTodoPanel">${todo ? "Ver lo esencial" : `Ver las ${COLS_PANEL.length} columnas`}</button>
     </div>
     ${filas.length ? `<div class="ctrl-scroll">
-    <table class="tbl-ctrl">
+    <table class="tbl-ctrl" id="tblEquipo">
       <thead><tr><th>Ejecutivo</th>
         ${cols.map(c => `<th${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.th}</th>`).join("")}
       </tr></thead>
@@ -4330,7 +4337,100 @@ function bloqueEquipo(r){
   </div>` : ""}`;
 }
 
-/* ---- 4 · Lo que hay que corregir ----------------------------------------
+/* ---- 4 · La llave del bono ----------------------------------------------
+   Los tres mínimos de gestión que habilitan el cálculo del incentivo. No
+   suman un sol al monto: abren o cierran la puerta. Vivían solo en Incentivos
+   y por eso nadie los miraba hasta el cierre del periodo, cuando ya no hay
+   nada que corregir.
+
+   El cálculo no se repite acá: se llama al mismo de Incentivos. Dos fórmulas
+   para el mismo bono es la forma más segura de que un día no coincidan. */
+function bloqueLlave(r){
+  /* La llave solo tiene sentido en la ventana del bono. Si el Panel está
+     mirando un mes o el proyecto entero, se muestra el periodo que corre y se
+     dice cuál es, en vez de mezclar relojes en silencio. */
+  const p = r.id === "bono" ? r.periodo : periodoHoy();
+  const propio = r.id === "bono";
+  const ejec = ejecutivosPanel();
+  if (!ejec.length) return "";
+
+  const res = ejec.map(u => ({ nombre:u.nombre, x: incentivoDe(u.correo, p) }));
+  const abiertos = res.filter(z => z.x.llave.estado === "activo").length;
+  const conBono  = res.filter(z => z.x.pago > 0).length;
+  const faltaFact = ejec.filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  const chip = (ok, txt) => `<span class="chip ${ok ? "ok" : "crit"}">${ok ? "✓" : "✕"} ${esc(txt)}</span>`;
+  const req  = BONO.requisitos;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">4</span>
+    <div><b>La llave del bono</b><span>Periodo ${esc(nombrePeriodo(p))} · ${esc(textoPeriodo(p))}${
+      propio ? "" : " — la llave siempre se mide en la ventana del bono, no en el periodo elegido arriba"}</span></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat ${abiertos === ejec.length ? "" : "malo"}"><div class="lbl">Con la llave abierta</div>
+      <div class="val">${abiertos}</div>
+      <div class="sub">de ${ejec.length} cumplen los 3 requisitos de gestión</div></div>
+    <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
+      <div class="sub">llegan al ${BONO.piso}% de cumplimiento</div></div>
+    <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
+      <div class="sub">${faltaFact ? "sin el monto del periodo cargado: el cumplimiento no sirve para liquidar"
+        : "todos los montos del periodo están cargados"}</div></div>
+  </div>
+
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Requisitos de gestión por ejecutivo</h3>
+      <button class="btn ghost sm" data-go="bono">Ver el detalle en Incentivos</button>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblLlave">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Comercios asignados con al menos una gestión en el periodo">Cobertura · mín ${req.cobertura_pct}%</th>
+        <th title="Presenciales o virtuales en las que se logró hablar, escaladas a las semanas reales">Visitas efectivas · mín ${req.visitas_semana}/sem</th>
+        <th title="Registradas el mismo día trabajado o el siguiente; el domingo no cuenta">Puntualidad · mín ${req.puntualidad_pct}%</th>
+        <th>Llave</th><th>Cumplimiento</th><th>Incentivo</th>
+      </tr></thead>
+      <tbody>
+      ${res.map(({nombre, x}) => {
+        const ll = x.llave;
+        return `<tr>
+          <td class="nom">${esc(nombre)}</td>
+          <td class="num">${chip(ll.cobertura.ok, pct1(ll.cobertura.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.cobertura.detalle)}</div></td>
+          <td class="num">${chip(ll.visitas.ok, porSemana1(ll.visitas.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.visitas.detalle)}</div></td>
+          <td class="num">${chip(ll.puntualidad.ok, pct1(ll.puntualidad.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.puntualidad.detalle)}</div></td>
+          <td class="num"><span class="chip ${ll.estado === "activo" ? "ok" : ll.estado === "base" ? "warn" : "crit"}">${
+            esc(TEXTO_LLAVE[ll.estado])}</span>
+            <div class="tenue" style="font-size:11.5px">${ll.cumplidos} de 3</div></td>
+          <td class="num"><b>${pct1(x.cumpl.total)}</b>
+            <div class="tenue" style="font-size:11.5px">${x.cumpl.completo ? esc(nombreTramo(x.cumpl.total))
+              : `sobre el ${x.cumpl.pesoMedido}% del peso`}</div></td>
+          <td class="num"><b>${pct1(x.pago)}</b>
+            <div class="tenue" style="font-size:11.5px">${x.nota ? esc(x.nota) : "del sueldo base"}</div></td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    </div>
+    <details class="explica"><summary>Por qué la llave no suma al monto</summary>
+      <div class="cuerpo">
+        <p>Los tres requisitos <b>habilitan el cálculo</b>, no aportan nada al monto. Con los tres
+        cumplidos se calcula normal; con uno incumplido queda solo el bono base del
+        ${BONO.base_incumple_uno}%; con dos o más no corresponde incentivo, por bueno que sea el
+        cumplimiento.</p>
+        <p>Por eso están acá y no solo en Incentivos: son lo único de todo el modelo que se puede
+        corregir <b>mientras el periodo sigue abierto</b>. Un registro tardío ya no se arregla el 19.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* ---- 5 · Lo que hay que corregir ----------------------------------------
    Lo accionable, junto y con su enlace. Estaba repartido entre cuatro
    pantallas y por eso nadie lo miraba. */
 function bloqueCorregir(r, regs){
@@ -4364,7 +4464,7 @@ function bloqueCorregir(r, regs){
   ].filter(x => x.n > 0);
 
   return `
-  <div class="pnl-h"><span class="pnl-n">4</span>
+  <div class="pnl-h"><span class="pnl-n">${mando ? 5 : 4}</span>
     <div><b>Lo que hay que corregir</b><span>${puntos.length ? "Cada uno lleva a su lista" : "Nada pendiente de corregir"}</span></div>
   </div>
   <div class="card">
@@ -4485,6 +4585,9 @@ function viewPanel(){
   ${bloqueProyecto()}
   ${bloqueActividad(r, regs)}
   ${bloqueEquipo(r)}
+  ${/* El seguimiento del incentivo lo miran el Analista y el Manager; al
+       ejecutivo no se le ofrece la pestaña y tampoco se le filtra por acá. */
+    S.user.rol !== "Ejecutivo" ? bloqueLlave(r) : ""}
   ${bloqueCorregir(r, regs)}
   ${bloqueDetalle(r, regs)}
   ${S.user.rol !== "Ejecutivo"
@@ -5625,8 +5728,15 @@ function filaEjecutivo(u, r){
     ? gest.map(x => String(x.Fecha_Contacto).slice(0,10)).sort().pop() : "";
   const logrado = retenidos + recuperados;
 
+  /* Ficha creada y nunca trabajada. No es lo mismo que «sin tocar»: a estos
+     alguien ya les dedicó tiempo, tienen ejecutivo y están a una gestión de
+     contar. Se mide sobre todo el historial, no sobre el periodo: un comercio
+     cargado en julio y trabajado en julio no es un pendiente de agosto. */
+  const conAlgunaGestion = suyos.filter(c => DB.delCliente(c.customer_id).length > 0).length;
+
   return { nombre:u.nombre, correo:u.correo,
     asignada, registrados:suyos.length, trabajados,
+    cargadosSinGestion: suyos.length - conAlgunaGestion,
     sinTocar: Math.max(0, asignada - trabajados),
     gestiones: gest.length, respuestas, efectivas, puntuales,
     tasa: gest.length ? respuestas / gest.length * 100 : null,
