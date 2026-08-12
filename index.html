@@ -1105,7 +1105,9 @@ function deDB(f){
     Ubicacion_Verificada: f.ubicacion_verificada === true,
     Ubicacion_Exenta: f.ubicacion_exenta === true,
     Ubicacion_Exenta_Motivo: f.ubicacion_exenta_motivo || "",
-    Evidencia_Path: f.evidencia_path || "", Evidencia: "",
+    /* La ruta se sigue leyendo porque sigue en la base y en la exportación
+       interna; la imagen ya no se trae ni se muestra en ninguna pantalla. */
+    Evidencia_Path: f.evidencia_path || "",
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
     /* Cuándo se grabó, que no es lo mismo que cuándo se gestionó: la distancia
@@ -1287,7 +1289,6 @@ function esDeCampo(){
    Acceso con enlace mágico y carga de datos desde Supabase
    ========================================================================= */
 const $ = s => document.querySelector(s);
-const EVID_URL = {};                 // cache de enlaces firmados
 
 function configurado(){ return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
 
@@ -1551,7 +1552,6 @@ async function cargarDatos(){
   });
 
   DB.cargar(inter.data || []);
-  await firmarEvidencias();
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
   await cargarMetas();
@@ -1612,24 +1612,16 @@ async function cargarAuditoria(){
   if (!error) AUDITORIA = data || [];
 }
 
-async function firmarEvidencias(){
-  const paths = [...new Set(DB.todos().map(r => r.Evidencia_Path).filter(p => p && !EVID_URL[p]))];
-  if (!paths.length) return aplicarEvidencias();
-  for (let i = 0; i < paths.length; i += 90){
-    const lote = paths.slice(i, i+90);
-    const { data } = await sb.storage.from("evidencias").createSignedUrls(lote, 3600);
-    (data || []).forEach(d => { if (d.signedUrl) EVID_URL[d.path] = d.signedUrl; });
-  }
-  aplicarEvidencias();
-}
-const aplicarEvidencias = () =>
-  DB.todos().forEach(r => { if (r.Evidencia_Path) r.Evidencia = EVID_URL[r.Evidencia_Path] || ""; });
+/* Las fotos de evidencia se retiraron del CRM en agosto de 2026. Ya no se
+   piden al registrar ni se muestran al consultar, ni siquiera en las
+   gestiones antiguas que las tienen. Los archivos no se borraron: siguen en
+   el bucket privado y la ruta sigue en cada fila. Lo que se quitó es el
+   pedido de enlaces firmados, que era lo que las traía a la pantalla. */
 
 async function refrescar(){
   const { data, error } = await sb.from("interacciones").select("*").limit(20000);
   if (error) return toast("No se pudo actualizar: " + error.message);
   DB.cargar(data || []);
-  await firmarEvidencias();
   CLIENTES.forEach(c => c._base = null);
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
 }
@@ -1641,28 +1633,6 @@ async function recargarCartera(){
   CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
   byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
-}
-
-/* ---- Subida de evidencias ---------------------------------------------- */
-function dataURLaBlob(d){
-  const [cab, b64] = d.split(",");
-  const mime = (cab.match(/:(.*?);/) || [,"image/jpeg"])[1];
-  const bin = atob(b64), u8 = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-  return new Blob([u8], { type:mime });
-}
-
-async function subirEvidencia(dataUrl){
-  if (!dataUrl) return null;
-  if (dataUrl.startsWith("http")) return null;                 // ya estaba subida
-  const blob = dataURLaBlob(dataUrl);
-  const nombre = `${S.user.correo}/${Date.now()}-${Math.floor(Math.random()*1e6)}.jpg`;
-  const { error } = await sb.storage.from("evidencias")
-    .upload(nombre, blob, { contentType:"image/jpeg", upsert:false });
-  if (error) throw new Error("No se pudo subir la evidencia: " + error.message);
-  const { data } = await sb.storage.from("evidencias").createSignedUrl(nombre, 3600);
-  if (data) EVID_URL[nombre] = data.signedUrl;
-  return nombre;
 }
 
 /* ---- Modo demostración (sin Supabase) ---------------------------------- */
@@ -1766,10 +1736,6 @@ function bindComunes(){
   document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
   document.querySelectorAll("[data-segdel]").forEach(el => el.onclick = e => { e.stopPropagation(); descartarSeguimiento(el.dataset.segdel); });
   document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
-  document.querySelectorAll("[data-img]").forEach(el => el.onclick = e => {
-    e.stopPropagation();
-    modal(`<h3>Evidencia del contacto</h3><img src="${el.dataset.img}" style="width:100%;border-radius:11px;border:1px solid var(--ring)"><div style="margin-top:14px"><button class="btn ghost block" onclick="cerrarModal()">Cerrar</button></div>`);
-  });
   if (typeof bindExtras === "function") bindExtras();
 }
 
@@ -2102,8 +2068,6 @@ function itemTimeline(r){
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
-      ${/* La foto dejó de pedirse; la que ya existía se sigue viendo. */
-        r.Evidencia ? `<img class="ev-thumb" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">` : ""}
       ${editable ? `<div style="display:flex;gap:7px;margin-top:11px">
         <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
         <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
@@ -2740,7 +2704,7 @@ function nuevoForm(){
   return {
     Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
-    Ubicacion: "", Ubicacion_Verificada: false, Evidencia: "", Calificacion: "",
+    Ubicacion: "", Ubicacion_Verificada: false, Calificacion: "",
     Comentario_Ejecutivo: "", Comentario_Cliente: "", Motivo: "",
     Cierre: null            // resultado_gestion del comercio, se define acá mismo
   };
@@ -3544,28 +3508,9 @@ function confirmarEliminar(id){
    Pantallas: Registros, Panel y Ajustes
    ========================================================================= */
 
-/* Imagen de ejemplo para probar el flujo de evidencia sin cámara */
-const EVIDENCIA_DEMO = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" width="620" height="380" viewBox="0 0 620 380">
-<rect width="620" height="380" fill="#e9e3db"/>
-<rect width="620" height="54" fill="#0b2545"/>
-<circle cx="34" cy="27" r="15" fill="#3987e5"/>
-<text x="60" y="26" font-family="system-ui" font-size="15" fill="#fff" font-weight="600">Cliente — Representante legal</text>
-<text x="60" y="43" font-family="system-ui" font-size="11.5" fill="#9fc0e8">en línea</text>
-<rect x="26" y="80" width="330" height="62" rx="12" fill="#fff"/>
-<text x="42" y="106" font-family="system-ui" font-size="13.5" fill="#1a1a19">Buenos días, le escribo de Stratis por su</text>
-<text x="42" y="126" font-family="system-ui" font-size="13.5" fill="#1a1a19">POS BBVA. ¿Puedo visitarlo hoy?</text>
-<rect x="250" y="158" width="344" height="62" rx="12" fill="#d6f2c8"/>
-<text x="266" y="184" font-family="system-ui" font-size="13.5" fill="#1a1a19">Claro, lo espero en el local a las 4 pm.</text>
-<text x="266" y="204" font-family="system-ui" font-size="13.5" fill="#1a1a19">Pregunte por mí en caja.</text>
-<rect x="26" y="236" width="300" height="42" rx="12" fill="#fff"/>
-<text x="42" y="262" font-family="system-ui" font-size="13.5" fill="#1a1a19">Perfecto, confirmado. Gracias.</text>
-<text x="26" y="330" font-family="system-ui" font-size="12" fill="#7a736a">Evidencia de ejemplo — reemplázala con tu captura real</text>
-</svg>`);
-
 /* ---------- Registros: historial con buscador y filtros ------------------ */
 /* =========================================================================
-   Bitácora de gestiones — la evidencia de lo que hizo el equipo
+   Bitácora de gestiones — el registro de lo que hizo el equipo
 
    El Analista y el Manager ven todo; el ejecutivo, lo suyo. La diferencia con
    la lista de antes no es que muestre más filas, es que ordena:
@@ -3698,7 +3643,6 @@ function tarjetaGestion(r){
             ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
           </div>
         </div>
-        ${r.Evidencia?`<img class="ev-thumb ges-ev" src="${r.Evidencia}" data-img="${r.Evidencia}" alt="Evidencia">`:""}
       </div>
 
       ${puedeEditar(r)?`<div class="ges-acc">
@@ -4209,7 +4153,7 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
-  "Ubicacion_Verificada","Evidencia","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+  "Ubicacion_Verificada","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
 const marcaUbicacion = r => {
@@ -4251,18 +4195,18 @@ function filasVisitas(){
     r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
     esEfectivo(r.Resultado) ? "SI" : "NO",
     r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
-    r.Ubicacion, marcaUbicacion(r), r.Evidencia_Path || "", r.Calificacion,
+    r.Ubicacion, marcaUbicacion(r), r.Calificacion,
     r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
 }
 
 /* Lo que se está viendo en «Gestiones del equipo», tal cual, a Excel. Sirve
-   para llevar la evidencia a una reunión sin bajar el archivo completo. */
+   para llevar el detalle a una reunión sin bajar el archivo completo. */
 function descargarGestiones(){
   const regs = typeof gestionesFiltradas === "function" ? gestionesFiltradas() : DB.todos();
   if (!regs.length) return toast("No hay gestiones que descargar con estos filtros");
   const cols = ["Fecha","Hora","Ejecutivo","Customer_id","Nombre_Comercio","Distrito",
                 "Medio","Resultado","El_Cliente_Respondio","Cumple_Visita",
-                "Ubicacion_Verificada","Tiene_Evidencia","Calificacion",
+                "Ubicacion_Verificada","Calificacion",
                 "Comentario_Ejecutivo","Lo_Que_Dijo_El_Cliente","Registrada_El","ID_Registro"];
   const filas = regs.map(r => {
     const c = byId[String(r.Customer_id)] || {};
@@ -4273,7 +4217,6 @@ function descargarGestiones(){
       esEfectivo(r.Resultado) ? "SI" : "NO",
       r.Cumple_Visita === "SI" ? "SI" : "NO",
       marcaUbicacion(r),
-      (r.Evidencia_Path || r.Evidencia) ? "SI" : "NO",
       r.Calificacion || "",
       r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
       String(r.Creado_En || "").slice(0,10), r._id
@@ -4409,7 +4352,7 @@ function hojaRubros(){
 }
 
 const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
-  calificacion:"Calificación", evidencia_path:"Evidencia", nombre_comercio:"Nombre del comercio",
+  calificacion:"Calificación", nombre_comercio:"Nombre del comercio",
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
   observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
@@ -4735,7 +4678,6 @@ function hojaReporte(admin){
     [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
-    ["", "La columna Evidencia guarda la ruta de las fotos cargadas antes de agosto de 2026, cuando se pedían; las imágenes solo se abren desde el CRM."],
     ["", "La ubicación capturada no puede modificarse una vez guardada."]];
   return XLSX.utils.aoa_to_sheet(filas);
 }
@@ -4978,7 +4920,7 @@ function viewAyuda(){
     ["Cumple_Visita", "SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar"],
     ["Intentos", "Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio"],
     ["Ubicación", "Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada"],
-    ["Evidencia", "Ya no se pide. Lo que respalda una gestión es el GPS de la visita, lo que dijo el cliente y la fecha, que no puede ser futura"],
+    ["Respaldo de la gestión", "El GPS de la visita, lo que dijo el cliente y la fecha, que no puede ser futura. La foto de evidencia se retiró en agosto de 2026"],
     ["Datos sensibles", "No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para identificar la venta"],
     ["Dominio permitido", "@" + CONFIG.dominio],
     ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"]
