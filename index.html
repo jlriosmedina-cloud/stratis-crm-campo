@@ -354,6 +354,15 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   .acc-nueva{flex-direction:column}
 }
 
+/* La leyenda de la Agenda: tres columnas de texto chico, sin marco por dentro.
+   No es una alerta ni una tarjeta más, es el pie de página que explica los
+   botones de arriba. */
+.ag-ley{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:14px}
+.ag-ley-x b{display:block;font-size:13px;font-weight:640;margin-bottom:3px}
+.ag-ley-x span{display:block;font-size:12px;color:var(--muted);line-height:1.45}
+.ag-ley-x span b{display:inline;font-size:inherit;color:var(--ink-2);margin:0}
+@media (max-width:820px){ .ag-ley{grid-template-columns:1fr;gap:11px} }
+
 /* ---- Incentivos ----------------------------------------------------------
    La llave y el cumplimiento se leen distinto: la primera es un semáforo de
    tres luces, el segundo una tabla. El borde de la tarjeta dice de un vistazo
@@ -5628,7 +5637,8 @@ function tarjetaAccion(s){
       ${esDeCampo() && c ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar gestión</button>` : ""}
       <button class="btn ghost sm" data-cid="${esc(s.customer_id)}">Ver comercio</button>
       ${(s.correo_stratis === S.user.correo || S.user.rol !== "Ejecutivo")
-        ? `<button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)">Ya no aplica</button>` : ""}
+        ? `<button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
+             title="Cierra esta acción sin registrar una gestión. Úsalo solo si el compromiso dejó de tener sentido; si sí hiciste algo, registra la gestión.">Ya no aplica</button>` : ""}
     </div>
   </div>`;
 }
@@ -5675,6 +5685,32 @@ function viewAgenda(){
     </div>
   </div>` : ""}
 
+  <!-- «Ya no aplica» solo se explicaba dentro del modal, o sea después de
+       tocarlo. Quien no sabe qué hace un botón no lo toca, y las acciones se
+       quedaban abiertas para siempre. La leyenda va antes. -->
+  ${lista.length ? `<div class="card ag-ley">
+    <div class="ag-ley-x">
+      ${esDeCampo()
+        ? `<b>Registrar gestión</b>
+           <span>Se hizo algo: se anota la gestión y la acción <b>se cierra sola</b>, con el
+             registro de lo que pasó. Es el camino normal.</span>`
+        : `<b>Se cierran solas</b>
+           <span>Cuando el ejecutivo registra una gestión nueva sobre ese comercio, la acción
+             se da por cumplida <b>sin que nadie la toque</b>. Que siga acá significa que
+             nadie volvió a trabajar ese comercio.</span>`}
+    </div>
+    <div class="ag-ley-x">
+      <b>Ya no aplica</b>
+      <span>El compromiso <b>dejó de tener sentido</b> —el cliente ya no atiende, se decidió
+        dejarlo enfriar, se agendó por error—. Cierra la acción <b>sin registrar ninguna
+        gestión</b>. No borra nada y queda con tu nombre.</span>
+    </div>
+    <div class="ag-ley-x">
+      <b>Ver comercio</b>
+      <span>Abre la ficha con todo su historial.</span>
+    </div>
+  </div>` : ""}
+
   ${lista.length ? ORDEN_PLAZO.map(k => porPlazo[k].length ? `
     <div class="sec-title">${ETIQUETA_PLAZO[k]} · ${porPlazo[k].length}</div>
     ${porPlazo[k].map(tarjetaAccion).join("")}` : "").join("")
@@ -5708,7 +5744,9 @@ async function descartarSeguimiento(id){
       <p style="margin-top:0">Se dará por cerrada la acción <b>${esc(nomAccion(s.accion))}</b> de
       <b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b>, sin registrar una gestión.</p>
       <div class="note">Úsalo cuando el compromiso dejó de tener sentido. Si sí hiciste algo,
-      regístralo como gestión: así queda la evidencia y la acción se cierra sola.</div>
+      regístralo como gestión: así queda el registro y la acción se cierra sola.</div>
+      <div class="pie">No se borra la gestión ni el comercio: solo se cierra este compromiso,
+      con tu nombre y la fecha.</div>
       <div style="display:flex;gap:8px;margin-top:15px">
         <button class="btn danger" id="sgOk" style="flex:1">Cerrarla</button>
         <button class="btn ghost" id="sgNo" style="flex:1">Cancelar</button>
