@@ -591,6 +591,80 @@ table.tbl tr:last-child td{border-bottom:0}
 .pnl-fix-x .t{display:block;font-size:13px;font-weight:650;margin-top:2px}
 .pnl-fix-x .d{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
 .pnl-fix-x.grave .n{color:var(--crit-ink)}
+/* ---- Reporte de avance ---------------------------------------------------
+   La pantalla no imita la lámina pixel a pixel: muestra los mismos números y
+   los mismos textos, en el idioma visual del CRM. Quien la mira está
+   verificando, no presentando; la lámina viene después, con el botón. */
+.rep-h{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin:0 2px 14px}
+.rep-h .sub{font-size:12.8px;color:var(--muted)}
+.rep-acc{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rep-t{margin-bottom:14px}
+.rep-t h3{margin:0 0 3px;font-size:15.5px;letter-spacing:-.25px}
+.rep-t span{font-size:12.5px;color:var(--muted);line-height:1.45}
+.rep-embudo{display:grid;gap:7px}
+.rep-paso{display:grid;grid-template-columns:1fr;gap:2px 10px;align-items:center}
+.rep-paso .lbl{font-size:13px;font-weight:680;color:var(--ink)}
+.rep-paso .via{height:20px;border-radius:5px;background:var(--surface-2);overflow:hidden}
+.rep-paso .via span{display:block;height:100%;border-radius:5px}
+.rep-paso .num{font-size:19px;font-weight:760;letter-spacing:-.6px;line-height:1}
+.rep-paso .pc{font-size:11.5px;color:var(--muted)}
+.rep-paso .cv{font-size:12px;color:var(--muted)}
+.rep-aparte{margin-top:12px;padding:9px 12px;border-radius:9px;background:var(--warn-bg);
+  color:var(--warn-ink);font-size:12.5px;font-weight:640}
+.rep-lecturas{display:grid;gap:10px;margin-top:14px}
+.rep-lec{background:var(--surface-2);border-radius:11px;padding:12px 14px}
+.rep-lec .t{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;
+  letter-spacing:-.2px;color:var(--ink)}
+.rep-lec .pt{flex:none;width:9px;height:9px;border-radius:50%}
+.rep-lec p{margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.55}
+.rep-pie{margin-top:14px;padding-top:11px;border-top:1px solid var(--line);
+  font-size:11.5px;color:var(--muted);line-height:1.5}
+.rep-kpis{display:grid;gap:11px}
+.rep-kpi{border:1px solid var(--line);border-radius:12px;padding:14px 15px;background:var(--card)}
+.rep-kpi.falta{border-style:dashed}
+.rep-kpi .k-top{display:flex;align-items:flex-start;gap:10px}
+.rep-kpi .k-top b{font-size:13.5px;font-weight:700;letter-spacing:-.2px;line-height:1.3}
+.rep-kpi .k-peso{margin-left:auto;flex:none;color:#fff;font-size:11px;font-weight:750;
+  border-radius:999px;padding:2px 9px}
+.rep-kpi .k-cifra{font-size:34px;font-weight:780;letter-spacing:-1.2px;line-height:1.1;margin-top:10px}
+.rep-kpi .k-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.rep-kpi .k-filas{margin-top:12px;display:grid;gap:6px}
+.rep-kpi .k-filas > div{display:flex;gap:10px;align-items:baseline;font-size:12.3px}
+.rep-kpi .k-filas span{color:var(--muted)}
+.rep-kpi .k-filas b{margin-left:auto;text-align:right;font-weight:680;white-space:nowrap}
+.rep-kpi .k-pie{margin-top:12px;padding:8px 10px;border-radius:8px;background:var(--surface-2);
+  font-size:12px;font-weight:660;text-align:center}
+.rep-cal{margin-top:16px}
+.rep-cal .t{font-size:12.5px;font-weight:680;margin-bottom:7px}
+.rep-cal .via{height:9px;border-radius:5px;background:var(--surface-2);overflow:hidden}
+.rep-cal .via span{display:block;height:100%;background:var(--brand-2);border-radius:5px}
+.rep-cal .pie{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;font-size:11.8px;color:var(--muted)}
+.rep-cal .pie span:last-child{margin-left:auto;text-align:right}
+.rep-hitos{display:grid;gap:11px}
+.rep-hito{position:relative;padding-left:20px}
+.rep-hito .pt{position:absolute;left:0;top:5px;width:10px;height:10px;border-radius:50%}
+.rep-hito .f{font-size:11.5px;font-weight:730;letter-spacing:.2px;text-transform:uppercase}
+.rep-hito .t{font-size:13.5px;font-weight:700;letter-spacing:-.2px;margin-top:1px}
+.rep-hito .d{font-size:12.3px;color:var(--muted);line-height:1.5;margin-top:2px}
+.rep-relato{margin-top:15px;background:var(--surface-2);border-radius:11px;padding:13px 15px;
+  font-size:12.8px;color:var(--muted);line-height:1.6}
+.rep-fuente{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:4px}
+.rep-fuente > div{background:var(--surface-2);border-radius:10px;padding:11px 12px}
+.rep-fuente b{display:block;font-size:21px;font-weight:760;letter-spacing:-.6px;line-height:1.15}
+.rep-fuente span{display:block;font-size:11.8px;color:var(--muted);margin-top:2px;line-height:1.4}
+.rep-bloque{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 0;
+  border-bottom:1px solid var(--line)}
+.rep-bloque:last-of-type{border-bottom:0}
+.rep-bloque .txt{flex:1 1 220px}
+.rep-bloque .txt b{font-size:14px;letter-spacing:-.1px}
+.rep-bloque .txt div{font-size:12.3px;color:var(--muted);margin-top:2px;line-height:1.45}
+.rep-sello{display:inline-block;margin-top:4px;font-size:11.3px;color:var(--muted)}
+@media(min-width:760px){
+  .rep-paso{grid-template-columns:190px 1fr 58px 52px 200px;gap:10px}
+  .rep-lecturas{grid-template-columns:1fr 1fr}
+  .rep-kpis{grid-template-columns:repeat(3,1fr)}
+  .rep-hitos{grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+}
 /* La explicación que cuelga de una fila de números no necesita su propia
    tarjeta: una tarjeta con un solo enlace adentro se lee como un error. */
 details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
@@ -651,7 +725,11 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 @media(min-width:760px){
   body{font-size:15.5px}
   main{max-width:1080px;margin:0 auto;width:100%;padding:20px 20px 40px}
-  nav.bottom{position:static;border-top:0;border-bottom:1px solid var(--grid);justify-content:center;gap:4px;padding:7px 10px}
+  /* Con seis pestañas la fila ya no entra en una tablet angosta y empujaba la
+     página entera a la derecha. Envuelve: una pestaña en la segunda línea se
+     encuentra; una fuera del borde derecho, no. */
+  nav.bottom{position:static;border-top:0;border-bottom:1px solid var(--grid);justify-content:center;
+    gap:4px;padding:7px 10px;flex-wrap:wrap}
   nav.bottom button{flex:none;flex-direction:row;gap:7px;padding:9px 15px;border-radius:9px;font-size:13.5px}
   nav.bottom button.on{background:var(--info-bg)}
   nav.bottom button .dot{position:static;margin-left:1px}
@@ -1272,6 +1350,42 @@ const nombreTramo = (pct, params) => { const b = params || BONO;
     : pct < 100    ? "Progresión"
     : pct <= b.sobre ? "Sobrecumplimiento" : "Tope"; };
 
+/* =========================================================================
+   El reporte de avance — el relato vive en la base, los números se calculan
+
+   La presentación que va a BBVA y a Mastercard tenía dos mitades que se
+   armaban en lugares distintos: los números, que salen de acá, y el relato
+   —hitos, lecturas, notas, metas—, que vivía en un script que solo se podía
+   correr desde afuera. Con reporte_config el relato pasa a ser un dato: se
+   edita en Ajustes, queda en la bitácora, y el reporte se arma leyendo la
+   tabla. Lo que se calcula no se escribe; lo que se escribe no se calcula.
+
+   REPORTE_DEF es la red de seguridad: si la tabla no respondió —o si alguien
+   entra en modo demostración— el reporte igual se arma, con el relato con el
+   que arrancó el proyecto, en vez de mostrar una pantalla vacía.
+   ========================================================================= */
+const REPORTE_DEF = {
+  proyecto: {
+    cliente:"Campaña BBVA Adquirencia",
+    subtitulo:"Reporte de avance del proyecto",
+    inicio:PROYECTO.inicio, fin:PROYECTO.fin,
+    base_comercios:0, base_facturacion:0
+  },
+  hitos: [],
+  relato: { hitos:"" },
+  lecturas: { embudo:[] },
+  notas: { hitos:"", embudo:"", kpis:"" },
+  objetivos: [
+    { id:"facturacion",  nombre:"Facturación", peso:50, color:"naranja",
+      tipo:"monto",  meta_pct:15, etiqueta_meta:"Meta al cierre  ·  +15%" },
+    { id:"reactivacion", nombre:"Reactivación del portafolio", peso:30, color:"azul",
+      tipo:"conteo", meta:151, etiqueta_meta:"Meta al cierre  ·  +18 p.p." },
+    { id:"venta",        nombre:"Venta · afiliación nueva", peso:20, color:"verde",
+      tipo:"conteo", meta:140, etiqueta_meta:"Meta al cierre  ·  7 por ejecutivo/mes" }
+  ]
+};
+let REPORTE = JSON.parse(JSON.stringify(REPORTE_DEF));
+
 const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
 
 const rubroLabel = c => {
@@ -1452,6 +1566,7 @@ const S = {
   pParam:"",     /* qué versión de los parámetros se está editando */
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
+  repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
   filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
   fCierre:"todos",              /* retenidos, recuperados, ventas nuevas, perdidos */
   limite:40, cargando:false
@@ -1771,6 +1886,7 @@ async function cargarDatos(){
      entra el 19 de octubre, tiene que ver la revisión de octubre desde el
      primer render, no la de agosto. */
   await cargarFacturacion();
+  await cargarReporte();
 }
 
 /* Cartera asignada por mes. La base filtra sola: el ejecutivo recibe solo la
@@ -1814,6 +1930,25 @@ async function cargarFacturacion(){
        los textos de ayuda. Los cálculos de un periodo piden paramsDe(p). */
     BONO = paramsDe(periodoHoy());
   } catch (e){ /* sin incentivos, pero con CRM */ }
+}
+
+/* El relato del reporte. Solo lo devuelve la base a Analista y Manager; para
+   un ejecutivo la consulta vuelve vacía y la pestaña no existe. Si algún
+   bloque falta o falla, se queda el de REPORTE_DEF: el reporte se arma igual,
+   con el relato de arranque, en vez de una pantalla en blanco. */
+async function cargarReporte(){
+  if (!S.user || S.demo) return;
+  try {
+    const { data, error } = await sb.from("reporte_config").select("*");
+    if (error || !data || !data.length) return;
+    const base = JSON.parse(JSON.stringify(REPORTE_DEF));
+    data.forEach(f => {
+      const v = typeof f.valor === "string" ? JSON.parse(f.valor) : f.valor;
+      if (v !== null && v !== undefined) base[f.clave] = v;
+      base["_" + f.clave] = { por:f.actualizado_por, cuando:f.actualizado_en, nota:f.nota };
+    });
+    REPORTE = base;
+  } catch (e){ /* sin relato nuevo, pero con reporte */ }
 }
 
 async function cargarMetas(){
@@ -1889,6 +2024,7 @@ const NAV = [
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
+  { id:"reporte",  ic:"▤", label:"Reporte", soloMando:true },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
 /* El seguimiento del incentivo lo miran el Analista y el Manager; al ejecutivo
@@ -1976,6 +2112,7 @@ function render(){
   else if (S.tab === "bono")              v.innerHTML = viewBono();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
+  else if (S.tab === "reporte")           v.innerHTML = viewReporte();
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
 }
@@ -5482,6 +5619,7 @@ function viewAyuda(){
   ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
   ${admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : ""}
   ${admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""}
+  ${admin ? ajSeccion("Reporte de avance", "El relato de la presentación — los hitos, las lecturas y las metas de los tres objetivos", cardReporte()) : ""}
   ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
   ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
@@ -6887,6 +7025,718 @@ function bindBono(){
 }
 
 /* =========================================================================
+   Reporte de avance — la presentación que se arma sola
+
+   Hasta acá la presentación se hacía a mano: alguien miraba el Panel, anotaba
+   los números en un archivo y los pegaba en las láminas. Eso tiene un costo
+   que no se ve hasta que aparece: entre la fecha del dato y la fecha de la
+   reunión siempre hay días, y en esos días los números cambiaron. Lo que se
+   presenta deja de ser lo que hay.
+
+   Acá el reporte se calcula del mismo lugar del que sale el Panel, al momento
+   de mirarlo. La pantalla es la fuente; el PowerPoint es una copia de esa
+   pantalla en la plantilla de Stratis, para la reunión. Si un número está
+   mal, se corrige el registro y el reporte cambia solo: no hay una segunda
+   versión de la verdad que haya que mantener al día.
+
+   Dos cosas que no se cruzan:
+
+     · Los números se calculan, no se escriben. Nadie puede tipear un 114.
+     · El relato se escribe, no se calcula. Los hitos, las lecturas y las
+       metas viven en reporte_config y se editan en Ajustes.
+
+   Y una restricción que es del negocio y no de la pantalla: nada de lo que
+   sale de acá menciona el CRM ni abre por ejecutivo. El CRM es la herramienta
+   de gestión de Stratis, y en una lámina para quien financia el proyecto se
+   lee como una etapa del proceso comercial que no es. El detalle por persona
+   es interno: en el reporte se ve el proyecto, no el equipo.
+   ========================================================================= */
+
+const REP_COLOR = {
+  navy:"#0C1137", azul:"#3B43FB", azul2:"#232C86", azul3:"#8189FD",
+  naranja:"#F86F35", verde:"#0BBC96", gris:"#3F5073", gris2:"#A0ABBC"
+};
+const repCol = k => REP_COLOR[k] || REP_COLOR.gris;
+const repHex = k => repCol(k).replace("#", "");
+
+/* Los fondos son las láminas de la plantilla de Stratis, exportadas como
+   imagen. Viven en el repositorio y no dentro del HTML: el CRM lo abren los
+   ejecutivos desde el celular y no tienen por qué descargar 700 KB de fondos
+   que solo usa el reporte. Se piden recién al generar el PowerPoint. */
+const REP_FONDOS = { caratula:"reporte/caratula.jpg", contenido:"reporte/contenido.jpg",
+                     cierre:"reporte/cierre.jpg" };
+const REP_PPTX_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+
+const repProyecto = () => Object.assign({}, REPORTE_DEF.proyecto, REPORTE.proyecto || {});
+const repObjetivo = id => (REPORTE.objetivos || REPORTE_DEF.objetivos).find(o => o.id === id) || {};
+const repNota = k => (REPORTE.notas || {})[k] || "";
+
+/* ---- Los números --------------------------------------------------------
+   Una sola función para toda la pantalla y para el PowerPoint. Si el reporte
+   y la lámina alguna vez discrepan, es porque alguien calculó dos veces; acá
+   se calcula una. */
+function fotoReporte(){
+  const P = repProyecto();
+  const hoy = hoyISO();
+  const ini = P.inicio || PROYECTO.inicio, fin = P.fin || PROYECTO.fin;
+
+  const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000) + 1;
+  const total    = dias(ini, fin);
+  const corrido  = Math.min(total, Math.max(0, dias(ini, hoy)));
+  const restante = Math.max(0, total - corrido);
+  const semanas  = restante / 7;
+
+  /* El universo es el portafolio que entregó BBVA, no lo que el CRM alcanzó a
+     cargar. Esa diferencia es justamente lo que el embudo tiene que mostrar:
+     si el denominador fuera lo cargado, el primer escalón daría 100% siempre
+     y la lámina no diría nada. */
+  const asignadaMetas = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    .reduce((n, u) => n + metaVigente(u.correo, mesHoy()).n, 0);
+  const portafolio = Number(P.base_comercios) > 0 ? Number(P.base_comercios) : asignadaMetas;
+
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const nuevos = CLIENTES.filter(c => esClienteNuevo(c));
+  const ges = DB.todos();
+
+  /* Cada escalón cuenta comercios, no gestiones: un comercio visitado tres
+     veces es un comercio, no tres. Confundirlos era el error que hacía ver
+     el embudo más ancho de lo que estaba. */
+  const conAlguna   = new Set(ges.map(g => String(g.Customer_id)));
+  const conRespuesta= new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
+  const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
+
+  const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
+  const contacto = enCartera(conAlguna);
+  const gestion  = enCartera(conRespuesta);
+  const visita   = enCartera(conVisita);
+
+  const retenidos   = cart.filter(esRetencion).length;
+  const recuperados = cart.filter(esRecuperado).length;
+  const objetivo    = retenidos + recuperados;
+  const perdidos    = cart.filter(c => c.resultado_gestion === "PERDIDO").length;
+  const ventasNuevas= nuevos.filter(esVentaNueva).length;
+
+  /* El ritmo de campo se mide sobre los días en que efectivamente hubo
+     actividad, no sobre los días corridos del proyecto. Dividir entre los
+     corridos castiga las dos primeras semanas, que fueron de coordinación
+     con los ejecutivos de BBVA y no de calle. */
+  const fechas = [...new Set(ges.map(g => String(g.Fecha_Contacto).slice(0,10)).filter(Boolean))].sort();
+  const diasActivos = fechas.length;
+  const primera = fechas[0] || "";
+  const diasDeCampo = primera ? Math.max(1, dias(primera, hoy)) : 0;
+  const porDia = diasDeCampo ? contacto / diasDeCampo : 0;
+  const faltanContactar = Math.max(0, portafolio - contacto);
+  const diasParaCubrir = porDia > 0 ? Math.ceil(faltanContactar / porDia) : null;
+  const fechaCobertura = diasParaCubrir === null ? "" :
+    new Date(new Date(hoy).getTime() + diasParaCubrir * 86400000).toISOString().slice(0,10);
+  const distritos = new Set(cart.map(c => c.distrito).filter(Boolean)).size;
+
+  const pct = n => portafolio ? n / portafolio * 100 : 0;
+  const cnv = (n, d) => d ? n / d * 100 : 0;
+
+  const embudo = [
+    { k:"portafolio", label:"Portafolio asignado", n:portafolio, color:"navy",
+      pct:100, conv:null, texto:"" },
+    { k:"contacto",   label:"Contacto",  n:contacto, color:"azul2",
+      pct:pct(contacto), conv:cnv(contacto, portafolio), texto:"del portafolio" },
+    { k:"gestion",    label:"Gestión",   n:gestion,  color:"azul",
+      pct:pct(gestion),  conv:cnv(gestion, contacto),   texto:"de los contactados" },
+    { k:"visita",     label:"Visita",    n:visita,   color:"naranja",
+      pct:pct(visita),   conv:cnv(visita, gestion),     texto:"de los gestionados" },
+    { k:"objetivo",   label:"Objetivo",  n:objetivo, color:"verde",
+      pct:pct(objetivo), conv:cnv(objetivo, visita),    texto:"de las visitas" }
+  ];
+
+  /* ---- Facturación: el único objetivo cuyo dato no genera el CRM --------
+     Lo carga el Analista periodo a periodo. Mientras no esté, el KPI se
+     muestra pendiente y se dice de dónde tiene que venir; inventar un número
+     acá sería exactamente lo que este reporte existe para evitar. */
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  const baseDeclarada = Number(P.base_facturacion) || 0;
+  const baseSuma = ejec.reduce((n, u) => n + (baseFactDe(u.correo) || 0), 0);
+  const baseFact = baseSuma > 0 ? baseSuma : baseDeclarada;
+
+  const conMonto = FACTURACION.filter(f => f.monto_final !== null && f.monto_final !== undefined);
+  const ultimoP = conMonto.map(f => f.periodo).sort().pop() || "";
+  const cerrados = conMonto.filter(f => f.periodo === ultimoP);
+  const factActual = cerrados.reduce((n, f) => n + Number(f.monto_final || 0), 0);
+
+  const oF = repObjetivo("facturacion");
+  const metaPct = Number(oF.meta_pct) || 0;
+  const metaFact = baseFact * (1 + metaPct / 100);
+  const hayFact = baseFact > 0 && cerrados.length > 0;
+  const crecimiento = hayFact ? (factActual - baseFact) / baseFact * 100 : null;
+
+  const oR = repObjetivo("reactivacion");
+  const oV = repObjetivo("venta");
+  const metaR = Number(oR.meta) || 0, metaV = Number(oV.meta) || 0;
+  const ritmo = (meta, hecho) => (semanas > 0 && meta > hecho) ? (meta - hecho) / semanas : 0;
+
+  const kpis = [
+    { id:"facturacion", nombre:oF.nombre, peso:oF.peso, color:oF.color, listo:hayFact,
+      cifra: hayFact ? (crecimiento >= 0 ? "+" : "\u2212") + Math.abs(crecimiento).toFixed(1).replace(".", ",") + "%" : "—",
+      sub: hayFact ? "de crecimiento sobre la base" : "falta cargar la facturación del periodo",
+      filas: [
+        ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
+        [ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado",
+         hayFact ? repSoles(factActual) : "pendiente"],
+        [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
+      ],
+      pie: hayFact
+        ? (metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
+                                 : "Meta de facturación alcanzada")
+        : "Se carga en Ajustes › Facturación del periodo",
+      avance: hayFact && metaPct ? Math.max(0, crecimiento) / metaPct * 100 : null },
+
+    { id:"reactivacion", nombre:oR.nombre, peso:oR.peso, color:oR.color, listo:true,
+      cifra: String(objetivo),
+      sub: objetivo === 1 ? "comercio con objetivo cumplido" : "comercios con objetivo cumplido",
+      filas: [
+        [oR.etiqueta_meta || "Meta al cierre", metaR + " comercios"],
+        ["Avance sobre la meta", metaR ? repPct(objetivo / metaR * 100) : "—"],
+        ["Faltan contactar", faltanContactar + " comercios"]
+      ],
+      pie: ritmo(metaR, objetivo) > 0
+        ? "Hacen falta " + repNum(ritmo(metaR, objetivo), 1) + " por semana"
+        : "Meta de reactivación alcanzada",
+      avance: metaR ? objetivo / metaR * 100 : null },
+
+    { id:"venta", nombre:oV.nombre, peso:oV.peso, color:oV.color, listo:true,
+      cifra: String(ventasNuevas),
+      sub: ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas",
+      filas: [
+        [oV.etiqueta_meta || "Meta al cierre", metaV + " afiliaciones"],
+        ["Avance sobre la meta", metaV ? repPct(ventasNuevas / metaV * 100) : "—"],
+        ["Ritmo actual", repNum(corrido ? ventasNuevas / (corrido / 7) : 0, 1) + " por semana"]
+      ],
+      pie: ritmo(metaV, ventasNuevas) > 0
+        ? "Hacen falta " + repNum(ritmo(metaV, ventasNuevas), 1) + " por semana"
+        : "Meta de venta alcanzada",
+      avance: metaV ? ventasNuevas / metaV * 100 : null }
+  ];
+
+  return { hoy, ini, fin, total, corrido, restante, semanas,
+    portafolio, asignadaMetas, registrados:cart.length,
+    contacto, gestion, visita, objetivo, retenidos, recuperados, perdidos, ventasNuevas,
+    embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
+    diasDeCampo, porDia, faltanContactar, fechaCobertura,
+    baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento,
+    faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
+}
+
+const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
+const repPct = n => repNum(n, n < 10 ? 1 : 0) + "%";
+const repSoles = n => {
+  const v = Number(n || 0);
+  return v >= 1000000 ? "S/ " + repNum(v / 1000000, 2) + " MM"
+       : "S/ " + v.toLocaleString("es-PE", { maximumFractionDigits:0 });
+};
+/* «afiliación» + «es» daba «afiliaciónes». El plural en español no siempre es
+   la palabra más una letra, así que se escriben las dos formas. */
+const repAparte = f =>
+  `${f.ventasNuevas} ${f.ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas"} ` +
+  `fuera del portafolio · ${f.perdidos} ${f.perdidos === 1 ? "comercio perdido" : "comercios perdidos"}`;
+const repFecha = iso => fmtFecha(String(iso || "").slice(0,10));
+/* En una lámina el 13/08/2026 se lee como un dato de sistema; el 13 de agosto
+   de 2026 se lee como una fecha. Es la diferencia entre un volcado y algo
+   escrito para alguien. */
+const repFechaLarga = iso => {
+  const f = String(iso || "").slice(0,10).split("-");
+  return f.length === 3 ? `${Number(f[2])} de ${MESES_ES[Number(f[1]) - 1]} de ${f[0]}` : "";
+};
+const repMesLargo = iso => {
+  const m = String(iso || "").slice(0,7);
+  return m ? nombreMes(m) : "";
+};
+
+/* ---- La pantalla --------------------------------------------------------- */
+function viewReporte(){
+  if (!S.user || S.user.rol === "Ejecutivo")
+    return `<div class="card"><h3>Solo para supervisión</h3>
+      <p style="margin:0">El reporte de avance lo arman el Analista y el Manager.</p></div>`;
+
+  const f = fotoReporte();
+  const P = repProyecto();
+  const lec = ((REPORTE.lecturas || {}).embudo) || [];
+  const hitos = REPORTE.hitos || [];
+  const relato = (REPORTE.relato || {}).hitos || "";
+
+  const avisos = [];
+  if (!f.portafolio) avisos.push("No hay portafolio asignado: cárgalo en Ajustes › Reporte o en Cartera asignada. Sin él, el embudo no tiene denominador.");
+  if (!f.hayFact) avisos.push("Falta la facturación del periodo, que es el objetivo de mayor peso. El reporte se genera igual, con ese KPI marcado como pendiente.");
+  if (!hitos.length) avisos.push("No hay hitos cargados: la lámina del relato saldrá vacía.");
+
+  const paso = (e, i) => {
+    const ancho = f.portafolio ? Math.max(0.6, e.n / f.portafolio * 100) : 0;
+    return `<div class="rep-paso">
+      <div class="lbl">${esc(e.label)}</div>
+      <div class="via"><span style="width:${ancho}%;background:${repCol(e.color)}"></span></div>
+      <div class="num" style="color:${repCol(e.color)}">${e.n}</div>
+      <div class="pc">${repPct(e.pct)}</div>
+      <div class="cv">${i === 0 ? "" : repPct(e.conv) + " " + esc(e.texto)}</div>
+    </div>`;
+  };
+
+  const tarjetaKPI = k => `
+    <div class="rep-kpi${k.listo ? "" : " falta"}">
+      <div class="k-top">
+        <b>${esc(k.nombre)}</b>
+        <span class="k-peso" style="background:${repCol(k.color)}">${k.peso}%</span>
+      </div>
+      <div class="k-cifra" style="color:${repCol(k.color)}">${esc(k.cifra)}</div>
+      <div class="k-sub">${esc(k.sub)}</div>
+      <div class="k-filas">${k.filas.map(([a,b]) =>
+        `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join("")}</div>
+      <div class="k-pie">${esc(k.pie)}</div>
+    </div>`;
+
+  return `
+  <div class="rep-h">
+    <div>
+      <h2 style="margin:0 0 3px">Reporte de avance</h2>
+      <div class="sub">${esc(P.cliente)} · corte al ${repFecha(f.hoy)} — día ${f.corrido} de ${f.total}
+        · quedan ${f.restante} días</div>
+    </div>
+    <div class="rep-acc">
+      <button class="btn" id="repPptx">Descargar PowerPoint</button>
+      <button class="btn ghost sm" id="repAjustes">Editar el relato</button>
+    </div>
+  </div>
+
+  ${avisos.map(a => `<div class="note warn" style="margin-bottom:11px">${esc(a)}</div>`).join("")}
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Del portafolio asignado al objetivo cumplido</h3>
+      <span>${f.portafolio} comercios asignados por BBVA${
+        f.portafolio && f.asignadaMetas && f.portafolio !== f.asignadaMetas
+          ? ` · la cartera cargada en el CRM suma ${f.asignadaMetas}` : ""}</span>
+    </div>
+    <div class="rep-embudo">${f.embudo.map(paso).join("")}</div>
+    <div class="rep-aparte">Además: ${repAparte(f)}</div>
+    ${lec.length ? `<div class="rep-lecturas">${lec.map(l => `
+      <div class="rep-lec">
+        <div class="t"><span class="pt" style="background:${repCol(l.color)}"></span>${esc(l.titulo)}</div>
+        <p>${esc(l.texto)}</p>
+      </div>`).join("")}</div>` : ""}
+    <div class="rep-pie">${esc(repNota("embudo"))}</div>
+  </div>
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Avance contra los tres objetivos del proyecto</h3>
+      <span>Medidos al cierre, sobre la base congelada de ${f.portafolio} comercios${
+        f.baseFact ? " y " + repSoles(f.baseFact) : ""}</span>
+    </div>
+    <div class="rep-kpis">${f.kpis.map(tarjetaKPI).join("")}</div>
+    <div class="rep-cal">
+      <div class="t">Avance del calendario</div>
+      <div class="via"><span style="width:${(f.corrido / f.total * 100).toFixed(1)}%"></span></div>
+      <div class="pie">
+        <span>${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} corrido</span>
+        <span>Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}</span>
+      </div>
+    </div>
+    <div class="rep-pie">${esc(repNota("kpis"))}</div>
+  </div>
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Cómo se ha construido el proyecto</h3>
+      <span>Del arranque el ${repFecha(f.ini)} al cierre el ${repFecha(f.fin)}</span>
+    </div>
+    ${hitos.length ? `<div class="rep-hitos">${hitos.map(h => `
+      <div class="rep-hito">
+        <span class="pt" style="background:${repCol(h.color)}"></span>
+        <div class="f" style="color:${repCol(h.color)}">${esc(h.fecha)}</div>
+        <div class="t">${esc(h.titulo)}</div>
+        <div class="d">${esc(h.detalle).replace(/\n/g, "<br>")}</div>
+      </div>`).join("")}</div>`
+      : `<div class="note">Todavía no hay hitos cargados.</div>`}
+    ${relato ? `<div class="rep-relato">${esc(relato)}</div>` : ""}
+    <div class="rep-pie">${esc(repNota("hitos"))}</div>
+  </div>
+
+  <div class="card">
+    <h3>De dónde sale cada número</h3>
+    <div class="rep-fuente">
+      <div><b>${f.gestiones}</b><span>gestiones registradas</span></div>
+      <div><b>${f.diasActivos}</b><span>días con actividad en campo</span></div>
+      <div><b>${f.distritos}</b><span>distritos con presencia</span></div>
+      <div><b>${repNum(f.porDia, 1)}</b><span>comercios contactados por día</span></div>
+    </div>
+    <details class="aj-mas">
+      <summary>Cómo se cuenta cada escalón del embudo</summary>
+      <div class="cuerpo">
+        <p><b>Portafolio asignado</b> es la base que entregó BBVA, congelada por el acuerdo del
+        12 de agosto. No es lo que hay cargado: si lo fuera, el primer escalón daría 100% siempre
+        y la lámina no diría nada.</p>
+        <p><b>Contacto</b> son los comercios de esa base con al menos un intento registrado.
+        <b>Gestión</b>, aquellos en los que hubo interacción con el comercio. <b>Visita</b>, los
+        que llegaron a una presencial o virtual con respuesta. <b>Objetivo</b>, los retenidos y
+        los recuperados: los dos salían de la cartera asignada.</p>
+        <p>Cada escalón cuenta <b>comercios y no gestiones</b>: un comercio visitado tres veces es
+        uno, no tres. Las afiliaciones nuevas van aparte porque nunca estuvieron en el portafolio.</p>
+        <p>La primera gestión del proyecto es del ${repFecha(f.primera)}; el ritmo se mide desde
+        ahí y no desde el arranque, porque las primeras semanas fueron de coordinación con los
+        ejecutivos de BBVA y no de calle.</p>
+      </div>
+    </details>
+    <details class="aj-mas">
+      <summary>Qué no sale en el reporte, y por qué</summary>
+      <div class="cuerpo">
+        <p>No aparece ninguna apertura por ejecutivo ni ningún nombre del equipo: el desempeño
+        individual es interno de Stratis y en una lámina para el cliente invita a una conversación
+        que no es la de esta reunión.</p>
+        <p>Tampoco aparece el CRM. Es la herramienta de gestión de Stratis, y puesta como escalón
+        del embudo se lee como una etapa del proceso comercial que no es.</p>
+        <p>Del modelo de incentivos no sale nada.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* ---- El PowerPoint -------------------------------------------------------
+   Se arma en el navegador, con la librería y los fondos que se bajan recién
+   al apretar el botón. La alternativa —tener un servidor que lo genere— es
+   más máquina de la que este proyecto necesita: son cinco láminas y los datos
+   ya están en la pantalla. */
+let _pptxLib = null;
+function cargarPptx(){
+  if (_pptxLib) return Promise.resolve(_pptxLib);
+  if (window.PptxGenJS){ _pptxLib = window.PptxGenJS; return Promise.resolve(_pptxLib); }
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = REP_PPTX_CDN;
+    s.onload = () => { _pptxLib = window.PptxGenJS;
+      _pptxLib ? ok(_pptxLib) : mal(new Error("La librería cargó pero no quedó disponible.")); };
+    s.onerror = () => mal(new Error("No se pudo bajar la librería de PowerPoint. Revisa la conexión o si la red bloquea jsdelivr.net."));
+    document.head.appendChild(s);
+  });
+}
+
+/* Los fondos se piden como imagen y se pasan a texto: PptxGenJS los quiere
+   así. Si alguno falla, la lámina sale con fondo blanco en vez de no salir. */
+async function bajarFondo(ruta){
+  try {
+    const r = await fetch(ruta, { cache:"force-cache" });
+    if (!r.ok) return null;
+    const b = await r.blob();
+    return await new Promise(ok => { const l = new FileReader();
+      l.onloadend = () => ok(l.result); l.readAsDataURL(b); });
+  } catch (e){ return null; }
+}
+
+async function generarPPTX(btn){
+  const antes = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
+  try {
+    const [Pptx, caratula, contenido, cierre] = await Promise.all([
+      cargarPptx(),
+      bajarFondo(REP_FONDOS.caratula),
+      bajarFondo(REP_FONDOS.contenido),
+      bajarFondo(REP_FONDOS.cierre)
+    ]);
+    armarPPTX(new Pptx(), { caratula, contenido, cierre });
+    toast("PowerPoint generado");
+  } catch (e){
+    toast("No se pudo generar: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = antes; }
+  }
+}
+
+function armarPPTX(pptx, fondos){
+  const f = fotoReporte();
+  const P = repProyecto();
+  const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
+  const H = repHex;
+
+  pptx.defineLayout({ name:"S16", width:13.333, height:7.5 });
+  pptx.layout = "S16";
+  pptx.author = "Stratis LATAM";
+  pptx.title  = P.cliente + " — reporte de avance";
+
+  const lamina = fondo => {
+    const s = pptx.addSlide();
+    if (fondo) s.background = { data:fondo };
+    else s.background = { color:"F6F9FF" };
+    return s;
+  };
+  const T = (s, t, o) => s.addText(String(t == null ? "" : t), Object.assign(
+    { fontFace:FUENTE, color:H("gris"), fontSize:11, margin:0, valign:"middle" }, o));
+  const caja = (s, x, y, w, h, fill, linea) => s.addShape(pptx.ShapeType.rect, {
+    x, y, w, h, fill:{ color:fill }, line: linea ? { color:linea, width:0.75 } : { type:"none" } });
+
+  /* ---- 1 · Carátula ---------------------------------------------------- */
+  /* El texto va debajo del lema de la plantilla y no encima: el fondo trae
+     «INNOVATE, PERFORM & GROW» horneado, y el título puesto donde iría en una
+     lámina en blanco se le montaba. Sobre la foto, en blanco; la fecha de
+     corte en naranja, que es lo único que cambia entre un reporte y el
+     siguiente y conviene que salte a la vista. */
+  const c = lamina(fondos.caratula);
+  T(c, P.cliente,   { x:0.82, y:5.02, w:8.6, h:0.52, fontSize:21, bold:true, fontFace:NEG, color:"FFFFFF" });
+  T(c, P.subtitulo, { x:0.82, y:5.84, w:8.6, h:0.38, fontSize:14, color:"FFFFFF" });
+  T(c, "Corte al " + repFechaLarga(f.hoy),
+    { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
+
+  /* ---- 2 · Hitos ------------------------------------------------------- */
+  const h = lamina(fondos.contenido);
+  T(h, "Cómo se ha construido el proyecto",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+  T(h, `Del arranque el ${repFechaLarga(f.ini)} al cierre el ${repFechaLarga(f.fin)} · hoy, día ${f.corrido} de ${f.total}`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
+
+  const HI = REPORTE.hitos || [];
+  const YL = 3.40;
+  h.addShape(pptx.ShapeType.rect, { x:1.20, y:YL - 0.018, w:11.20, h:0.036,
+    fill:{ color:"E0E5EE" }, line:{ type:"none" } });
+  if (HI.length > 1){
+    const X0 = 1.90, X1 = 11.55, pasoX = (X1 - X0) / (HI.length - 1), W = 3.30;
+    HI.forEach((x, i) => {
+      const cx = X0 + i * pasoX, col = H(x.color), arriba = (i % 2 === 0);
+      h.addShape(pptx.ShapeType.ellipse, { x:cx - 0.105, y:YL - 0.105, w:0.21, h:0.21,
+        fill:{ color:col }, line:{ color:"FFFFFF", width:2 } });
+      h.addShape(pptx.ShapeType.rect, { x:cx - 0.012, y: arriba ? YL - 0.34 : YL + 0.08,
+        w:0.024, h:0.26, fill:{ color:col }, line:{ type:"none" } });
+      const yt = arriba ? 1.86 : 3.74;
+      T(h, x.fecha,   { x:cx - W/2, y:yt,        w:W, h:0.22, fontSize:10.5, bold:true, color:col, align:"center" });
+      T(h, x.titulo,  { x:cx - W/2, y:yt + 0.28, w:W, h:0.46, fontSize:11.5, bold:true, color:H("navy"), align:"center" });
+      T(h, x.detalle, { x:cx - W/2, y:yt + 0.80, w:W, h:0.42, fontSize:9.5,  color:H("gris"), align:"center" });
+    });
+  }
+  const relato = (REPORTE.relato || {}).hitos || "";
+  if (relato){
+    caja(h, 0.57, 5.38, 12.38, 1.08, "F6F9FF");
+    T(h, relato, { x:0.95, y:5.56, w:11.62, h:0.74, fontSize:11.5, color:H("gris"), valign:"top" });
+  }
+  T(h, "Notas: datos al " + repFecha(f.hoy) + ". " + repNota("hitos"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+
+  /* ---- 3 · El embudo --------------------------------------------------- */
+  const e = lamina(fondos.contenido);
+  T(e, "Del portafolio asignado al objetivo cumplido",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+  T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
+
+  const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
+        X_VAL = 9.10, X_CNV = 10.55, W_CNV = 2.40,
+        Y0 = 1.98, ALTO = 0.46, GAP = 0.155;
+  f.embudo.forEach((p, i) => {
+    const y = Y0 + i * (ALTO + GAP), col = H(p.color);
+    T(e, p.label, { x:X_LBL, y, w:W_LBL, h:ALTO, fontSize:11.5, bold:true, align:"right",
+      color: (i === 0 || i === f.embudo.length - 1) ? H("navy") : H("gris") });
+    const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
+    e.addShape(pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
+    T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
+    T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:H("gris2") });
+    if (i > 0) T(e, repPct(p.conv) + " " + p.texto,
+      { x:X_CNV, y, w:W_CNV, h:ALTO, fontSize:10.5, color:H("gris") });
+  });
+
+  const yc = Y0 + f.embudo.length * (ALTO + GAP) - 0.02;
+  caja(e, X_BAR, yc, 7.25, 0.32, "FFF9F7");
+  T(e, "Además: " + repAparte(f),
+    { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:H("naranja") });
+
+  const LEC = ((REPORTE.lecturas || {}).embudo) || [];
+  const YC = 5.46, HC = 1.34, WC = 6.04;
+  LEC.slice(0, 2).forEach((l, i) => {
+    const x = 0.57 + i * (WC + 0.30);
+    caja(e, x, YC, WC, HC, "F6F9FF");
+    e.addShape(pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
+      fill:{ color:H(l.color) }, line:{ type:"none" } });
+    T(e, l.titulo, { x:x + 0.48, y:YC + 0.21, w:WC - 0.72, h:0.26, fontSize:12, bold:true, color:H("navy") });
+    T(e, l.texto,  { x:x + 0.24, y:YC + 0.60, w:WC - 0.48, h:0.66, fontSize:10.5, color:H("gris"), valign:"top" });
+  });
+  T(e, "Notas: " + repNota("embudo"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+
+  /* ---- 4 · Los tres objetivos ------------------------------------------ */
+  const k = lamina(fondos.contenido);
+  T(k, "Avance contra los tres objetivos del proyecto",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+  T(k, `Objetivos medidos al cierre del proyecto, sobre la base congelada de ${f.portafolio} comercios${
+    f.baseFact ? " y " + repSoles(f.baseFact) + " de facturación" : ""}`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
+
+  const YK = 1.90, HK = 3.86, WK = 3.926;
+  f.kpis.forEach((x, i) => {
+    const px = 0.57 + i * (WK + 0.30), col = H(x.color);
+    caja(k, px, YK, WK, HK, "FFFFFF", "DDE2EC");
+    T(k, x.nombre, { x:px + 0.26, y:YK + 0.24, w:WK - 1.30, h:0.56, fontSize:12.5, bold:true, color:H("navy"), valign:"top" });
+    k.addShape(pptx.ShapeType.roundRect, { x:px + WK - 0.92, y:YK + 0.24, w:0.66, h:0.26,
+      fill:{ color:col }, line:{ type:"none" }, rectRadius:0.13 });
+    T(k, x.peso + "%", { x:px + WK - 0.92, y:YK + 0.245, w:0.66, h:0.26, fontSize:9.5, bold:true, color:"FFFFFF", align:"center" });
+    T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:40, bold:true, fontFace:NEG, color:col });
+    T(k, x.sub,   { x:px + 0.26, y:YK + 1.64, w:WK - 0.52, h:0.24, fontSize:10, color:H("gris2") });
+    x.filas.forEach(([a, b], j) => {
+      const yy = YK + 2.04 + j * 0.44;
+      T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:H("gris") });
+      T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:H("navy"), align:"right" });
+    });
+    caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, "F6F9FF");
+    T(k, x.pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:H("navy"), align:"center" });
+  });
+
+  const YB = 6.00;
+  T(k, "Avance del calendario", { x:0.57, y:YB, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
+  k.addShape(pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38, h:0.17, fill:{ color:"E4E8F0" }, line:{ type:"none" } });
+  k.addShape(pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38 * f.corrido / f.total, h:0.17,
+    fill:{ color:H("navy") }, line:{ type:"none" } });
+  T(k, `${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} del proyecto corrido`,
+    { x:0.57, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:H("gris") });
+  T(k, `Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}`,
+    { x:6.95, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:H("gris"), align:"right" });
+  T(k, "Notas: " + repNota("kpis"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+
+  /* ---- 5 · Cierre ------------------------------------------------------ */
+  lamina(fondos.cierre);
+
+  pptx.writeFile({ fileName: `Reporte_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
+}
+
+/* ---- Editar el relato, desde Ajustes -------------------------------------
+   Seis bloques, uno por fila de reporte_config. Se editan de a uno y se
+   guardan enteros: un hito no se edita suelto porque el orden y la coherencia
+   entre hitos son de quien escribe, no de un formulario campo por campo. */
+const REP_BLOQUES = [
+  { k:"proyecto",  t:"Marco del proyecto",  d:"Nombre de la campaña, fechas y la base congelada de comercios y facturación" },
+  { k:"hitos",     t:"Hitos",               d:"La línea de tiempo: fecha, título y detalle de cada uno" },
+  { k:"relato",    t:"Relato de los hitos", d:"El párrafo que explica cómo arrancó el proyecto" },
+  { k:"lecturas",  t:"Lecturas del embudo", d:"Las dos frases que acompañan el embudo" },
+  { k:"notas",     t:"Notas al pie",        d:"La letra chica de cada lámina — es donde se definen los escalones" },
+  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" }
+];
+
+function cardReporte(){
+  const sello = k => {
+    const s = REPORTE["_" + k];
+    return s && s.cuando
+      ? `<span class="rep-sello">${esc(s.por || "—")} · ${repFecha(s.cuando)}</span>` : "";
+  };
+  return `
+  <div class="card">
+    <div class="note ok" style="margin-bottom:12px">
+      Acá se edita <b>lo que se escribe</b> del reporte. Los números no: esos se calculan de la
+      base cada vez que se abre la pestaña <b>Reporte</b>, y por eso nadie puede tipear uno mal.
+      Cada cambio queda en la bitácora con tu nombre.
+    </div>
+    ${REP_BLOQUES.map(b => `
+      <div class="rep-bloque">
+        <div class="txt"><b>${esc(b.t)}</b><div>${esc(b.d)}</div>${sello(b.k)}</div>
+        <button class="btn ghost sm" data-repedit="${b.k}">Editar</button>
+      </div>`).join("")}
+    <details class="aj-mas">
+      <summary>Por qué el relato vive en la base y no en la presentación</summary>
+      <div class="cuerpo">
+        <p>Una frase de una lámina que se presenta a quien financia el proyecto es un dato como
+        cualquier otro: tiene que poderse decir quién la escribió y cuándo cambió. Guardada en un
+        archivo que va y viene por correo, eso se pierde en la segunda versión.</p>
+        <p>El reporte no menciona el CRM ni abre por ejecutivo, y eso no depende de que alguien se
+        acuerde al armar la lámina: no hay dónde escribirlo.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bindReporte(){
+  if ($("#repPptx"))    $("#repPptx").onclick = e => generarPPTX(e.currentTarget);
+  if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
+  document.querySelectorAll("[data-repedit]").forEach(b =>
+    b.onclick = () => modalReporte(b.dataset.repedit));
+}
+
+function modalReporte(clave){
+  const b = REP_BLOQUES.find(x => x.k === clave);
+  if (!b) return;
+  const valor = REPORTE[clave] !== undefined ? REPORTE[clave] : REPORTE_DEF[clave];
+  const texto = JSON.stringify(valor, null, 2);
+
+  modal(`<h3>${esc(b.t)}</h3>
+    <p style="margin:-4px 0 12px;font-size:12.8px;color:var(--muted);line-height:1.5">${esc(b.d)}.
+      Se edita el bloque completo. Si algo queda mal escrito, el CRM te lo dice antes de guardar
+      y nada se pierde.</p>
+    <div class="field">
+      <textarea id="repTxt" rows="16" spellcheck="false"
+        style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55">${esc(texto)}</textarea>
+    </div>
+    <div id="repMsg"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="repOk">Guardar</button>
+    </div>`);
+
+  $("#repOk").onclick = async () => {
+    const msg = $("#repMsg");
+    let v;
+    try { v = JSON.parse($("#repTxt").value); }
+    catch (err){ return msg.innerHTML = `<div class="err">No se pudo leer: ${esc(err.message)}</div>`; }
+
+    const mal = validarBloqueReporte(clave, v);
+    if (mal) return msg.innerHTML = `<div class="err">${esc(mal)}</div>`;
+
+    const btn = $("#repOk"); btn.disabled = true; btn.textContent = "Guardando…";
+    const { error } = await sb.from("reporte_config")
+      .upsert({ clave, valor:v }, { onConflict:"clave" });
+    if (error){ btn.disabled = false; btn.textContent = "Guardar";
+      return msg.innerHTML = `<div class="err">No se pudo guardar: ${esc(error.message)}</div>`; }
+    cerrarModal();
+    await cargarReporte(); render();
+    toast(b.t + " actualizado");
+  };
+}
+
+/* Lo mínimo para que el reporte no salga roto. La base tiene sus propias
+   reglas; esto es para que el error se vea acá, con el texto todavía en
+   pantalla, y no después de guardar. */
+function validarBloqueReporte(clave, v){
+  const esObj = x => x && typeof x === "object" && !Array.isArray(x);
+  if (clave === "hitos" || clave === "objetivos"){
+    if (!Array.isArray(v)) return "Este bloque tiene que ser una lista, entre corchetes.";
+  } else if (!esObj(v)) return "Este bloque tiene que ser un objeto, entre llaves.";
+
+  if (clave === "hitos"){
+    for (const h of v){
+      if (!esObj(h) || !h.fecha || !h.titulo) return "Cada hito necesita al menos fecha y título.";
+      if (h.color && !REP_COLOR[h.color])
+        return `El color «${h.color}» no existe. Usa: ${Object.keys(REP_COLOR).join(", ")}.`;
+    }
+    if (v.length < 2) return "Con menos de dos hitos la línea de tiempo no se dibuja.";
+  }
+  if (clave === "objetivos"){
+    for (const o of v){
+      if (!esObj(o) || !o.id || !o.nombre) return "Cada objetivo necesita id y nombre.";
+      if (o.color && !REP_COLOR[o.color]) return `El color «${o.color}» no existe.`;
+    }
+    const suma = v.reduce((n, o) => n + (Number(o.peso) || 0), 0);
+    if (suma !== 100) return `Los pesos suman ${suma}% y tienen que sumar 100%.`;
+    ["facturacion","reactivacion","venta"].forEach(() => {});
+    for (const id of ["facturacion","reactivacion","venta"])
+      if (!v.some(o => o.id === id)) return `Falta el objetivo «${id}»: el reporte lo espera.`;
+  }
+  if (clave === "proyecto"){
+    if (!v.cliente) return "Falta el nombre de la campaña.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v.inicio || "")) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(String(v.fin || "")))
+      return "Las fechas van como 2026-07-20.";
+    if (String(v.fin) <= String(v.inicio)) return "El cierre tiene que ser posterior al arranque.";
+  }
+  if (clave === "lecturas"){
+    const l = v.embudo;
+    if (!Array.isArray(l)) return "«embudo» tiene que ser una lista de lecturas.";
+    for (const x of l){
+      if (!esObj(x) || !x.titulo || !x.texto) return "Cada lectura necesita título y texto.";
+      if (x.color && !REP_COLOR[x.color]) return `El color «${x.color}» no existe.`;
+    }
+    if (l.length > 2) return "En la lámina entran dos lecturas; la tercera se saldría del recuadro.";
+  }
+  return "";
+}
+
+/* =========================================================================
    Sincronización — el CRM se actualiza solo
 
    Tres disparadores, del más barato al más caro:
@@ -6949,6 +7799,7 @@ async function sincronizar(motivo){
     await cargarMetas();
     await cargarSeguimientos();
     await cargarFacturacion();
+    await cargarReporte();
     await cargarAuditoria();
 
     const primera = SYNC.firma === null;
@@ -7138,6 +7989,7 @@ function bindExtras(){
   if (typeof bindMetas === "function") bindMetas();
   if (typeof bindAcciones === "function") bindAcciones();
   if (typeof bindBono === "function") bindBono();
+  if (typeof bindReporte === "function") bindReporte();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
   /* El reloj del Panel: al cambiar de tipo de ventana se suelta el periodo
      elegido, porque «2026-08» significa cosas distintas en cada uno. */
