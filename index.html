@@ -659,6 +659,11 @@ table.tbl tr:last-child td{border-bottom:0}
 .rep-bloque .txt b{font-size:14px;letter-spacing:-.1px}
 .rep-bloque .txt div{font-size:12.3px;color:var(--muted);margin-top:2px;line-height:1.45}
 .rep-sello{display:inline-block;margin-top:4px;font-size:11.3px;color:var(--muted)}
+.rep-llaves{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 12px;margin-top:9px}
+.rep-llaves > div{display:flex;gap:8px;align-items:baseline;font-size:12px;min-width:0}
+.rep-llaves code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--brand-2)}
+.rep-llaves span{margin-left:auto;text-align:right;color:var(--muted);font-weight:640;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(min-width:760px){
   .rep-paso{grid-template-columns:190px 1fr 58px 52px 200px;gap:10px}
   .rep-lecturas{grid-template-columns:1fr 1fr}
@@ -7216,6 +7221,8 @@ function fotoReporte(){
   ];
 
   return { hoy, ini, fin, total, corrido, restante, semanas,
+    ritmoR: ritmo(metaR, objetivo), ritmoV: ritmo(metaV, ventasNuevas),
+    metaR, metaV, metaPct,
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, visita, objetivo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
@@ -7249,6 +7256,75 @@ const repMesLargo = iso => {
   return m ? nombreMes(m) : "";
 };
 
+/* ---- Los textos también llevan números -----------------------------------
+   Primera versión de esto: las dos lecturas del embudo eran texto libre, y
+   adentro decían «se contactó a 114 comercios: 8 por día». El embudo se
+   actualizaba solo y la frase de al lado seguía con los números de la semana
+   pasada — que es peor que no tener la frase, porque nadie mira dos veces un
+   párrafo que ya leyó.
+
+   El arreglo no es sacar los números del relato: sin ellos la lectura no dice
+   nada. Es que el relato pida el número en vez de guardarlo. Se escribe
+   {contacto} y al pintar se reemplaza por el que hay hoy. Sigue siendo texto
+   editable, pero ya no puede quedar viejo.
+
+   Lo que no está en esta lista no se puede escribir con llaves, y el CRM lo
+   avisa al guardar en vez de dejar un {loQueSea} suelto en la lámina. */
+function repDatos(f){
+  const e = k => f.embudo.find(x => x.k === k) || {};
+  const mesDe = iso => {
+    if (!iso) return "—";
+    const d = Number(iso.slice(8,10)), m = MESES_ES[Number(iso.slice(5,7)) - 1] || "";
+    return (d <= 10 ? "principios de " : d <= 20 ? "mediados de " : "fines de ") + m;
+  };
+  return {
+    /* el embudo */
+    portafolio:f.portafolio, contacto:f.contacto, gestion:f.gestion,
+    visita:f.visita, objetivo:f.objetivo,
+    ventasNuevas:f.ventasNuevas, perdidos:f.perdidos, faltanContactar:f.faltanContactar,
+    pctContacto:repPct(e("contacto").pct), pctGestion:repPct(e("gestion").pct),
+    pctVisita:repPct(e("visita").pct),    pctObjetivo:repPct(e("objetivo").pct),
+    convContacto:repPct(e("contacto").conv), convGestion:repPct(e("gestion").conv),
+    convVisita:repPct(e("visita").conv),     convObjetivo:repPct(e("objetivo").conv),
+    /* el ritmo */
+    gestiones:f.gestiones, distritos:f.distritos,
+    diasCampo:f.diasDeCampo, diasActivos:f.diasActivos,
+    porDia:repNum(f.porDia, f.porDia < 10 ? 1 : 0),
+    porSemana:repNum(f.porDia * 7, f.porDia * 7 < 10 ? 1 : 0),
+    mesCobertura:mesDe(f.fechaCobertura), fechaCobertura:repFecha(f.fechaCobertura),
+    /* La frase «antes del cierre» era una promesa escrita a mano que dejaba de
+       ser cierta sola. Acá la decide la fecha, no la memoria de quien escribió. */
+    coberturaVsCierre: !f.fechaCobertura ? "—"
+      : (f.fechaCobertura <= f.fin ? "antes del cierre" : "después del cierre"),
+    /* el calendario */
+    corte:repFecha(f.hoy), corteLargo:repFechaLarga(f.hoy),
+    dia:f.corrido, totalDias:f.total, restante:f.restante, semanas:repNum(f.semanas, 1),
+    pctCalendario:repPct(f.total ? f.corrido / f.total * 100 : 0),
+    cierre:repFecha(f.fin), cierreLargo:repFechaLarga(f.fin),
+    /* los objetivos */
+    baseFact:repSoles(f.baseFact), metaFact:repSoles(f.metaFact),
+    faltaFact:repSoles(Math.max(0, f.metaFact - f.factActual)),
+    crecimiento:f.hayFact
+      ? (f.crecimiento >= 0 ? "+" : "\u2212") + repNum(Math.abs(f.crecimiento), 1) + "%"
+      : "pendiente",
+    periodoFact: f.ultimoP ? nombrePeriodo(f.ultimoP) : "el último periodo cargado",
+    metaReactivacion:f.metaR, metaVenta:f.metaV,
+    ritmoReactivacion:repNum(f.ritmoR, 1), ritmoVenta:repNum(f.ritmoV, 1)
+  };
+}
+/* Solo cuentan como válidas las que de verdad traen un valor. Una clave que
+   existe pero devuelve undefined pasaría la validación y saldría impresa con
+   llaves en la lámina, que es el error que esto vino a evitar. */
+const REP_CLAVES = () => Object.entries(repDatos(fotoReporte()))
+  .filter(([, v]) => v !== undefined && v !== null).map(([k]) => k);
+
+/* Una llave desconocida se deja tal cual y se cuenta: el error tiene que
+   verse en la pantalla de edición, no aparecer en la lámina de la reunión. */
+function repTexto(t, d){
+  return String(t == null ? "" : t).replace(/\{([a-zA-Z]+)\}/g,
+    (todo, k) => (d && d[k] !== undefined && d[k] !== null) ? String(d[k]) : todo);
+}
+
 /* ---- La pantalla --------------------------------------------------------- */
 function viewReporte(){
   if (!S.user || S.user.rol === "Ejecutivo")
@@ -7257,6 +7333,7 @@ function viewReporte(){
 
   const f = fotoReporte();
   const P = repProyecto();
+  const D = repDatos(f);
   const lec = ((REPORTE.lecturas || {}).embudo) || [];
   const hitos = REPORTE.hitos || [];
   const relato = (REPORTE.relato || {}).hitos || "";
@@ -7316,10 +7393,10 @@ function viewReporte(){
     <div class="rep-aparte">Además: ${repAparte(f)}</div>
     ${lec.length ? `<div class="rep-lecturas">${lec.map(l => `
       <div class="rep-lec">
-        <div class="t"><span class="pt" style="background:${repCol(l.color)}"></span>${esc(l.titulo)}</div>
-        <p>${esc(l.texto)}</p>
+        <div class="t"><span class="pt" style="background:${repCol(l.color)}"></span>${esc(repTexto(l.titulo, D))}</div>
+        <p>${esc(repTexto(l.texto, D))}</p>
       </div>`).join("")}</div>` : ""}
-    <div class="rep-pie">${esc(repNota("embudo"))}</div>
+    <div class="rep-pie">${esc(repTexto(repNota("embudo"), D))}</div>
   </div>
 
   <div class="card">
@@ -7337,7 +7414,7 @@ function viewReporte(){
         <span>Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}</span>
       </div>
     </div>
-    <div class="rep-pie">${esc(repNota("kpis"))}</div>
+    <div class="rep-pie">${esc(repTexto(repNota("kpis"), D))}</div>
   </div>
 
   <div class="card">
@@ -7349,12 +7426,12 @@ function viewReporte(){
       <div class="rep-hito">
         <span class="pt" style="background:${repCol(h.color)}"></span>
         <div class="f" style="color:${repCol(h.color)}">${esc(h.fecha)}</div>
-        <div class="t">${esc(h.titulo)}</div>
-        <div class="d">${esc(h.detalle).replace(/\n/g, "<br>")}</div>
+        <div class="t">${esc(repTexto(h.titulo, D))}</div>
+        <div class="d">${esc(repTexto(h.detalle, D)).replace(/\n/g, "<br>")}</div>
       </div>`).join("")}</div>`
       : `<div class="note">Todavía no hay hitos cargados.</div>`}
-    ${relato ? `<div class="rep-relato">${esc(relato)}</div>` : ""}
-    <div class="rep-pie">${esc(repNota("hitos"))}</div>
+    ${relato ? `<div class="rep-relato">${esc(repTexto(relato, D))}</div>` : ""}
+    <div class="rep-pie">${esc(repTexto(repNota("hitos"), D))}</div>
   </div>
 
   <div class="card">
@@ -7448,6 +7525,7 @@ async function generarPPTX(btn){
 
 function armarPPTX(pptx, fondos){
   const f = fotoReporte();
+  const D = repDatos(f);
   const P = repProyecto();
   const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
   const H = repHex;
@@ -7463,7 +7541,10 @@ function armarPPTX(pptx, fondos){
     else s.background = { color:"F6F9FF" };
     return s;
   };
-  const T = (s, t, o) => s.addText(String(t == null ? "" : t), Object.assign(
+  /* Todo lo que se escribe en una lámina pasa por repTexto: es la única forma
+     de garantizar que ningún número escrito a mano sobreviva a un cambio en
+     la base. Los que genera el propio código no llevan llaves y no se tocan. */
+  const T = (s, t, o) => s.addText(repTexto(t, D), Object.assign(
     { fontFace:FUENTE, color:H("gris"), fontSize:11, margin:0, valign:"middle" }, o));
   const caja = (s, x, y, w, h, fill, linea) => s.addShape(pptx.ShapeType.rect, {
     x, y, w, h, fill:{ color:fill }, line: linea ? { color:linea, width:0.75 } : { type:"none" } });
@@ -7655,10 +7736,25 @@ function modalReporte(clave){
   const valor = REPORTE[clave] !== undefined ? REPORTE[clave] : REPORTE_DEF[clave];
   const texto = JSON.stringify(valor, null, 2);
 
+  /* Las llaves con su valor de hoy al lado. Sin esto hay que adivinar cómo se
+     llama cada una, y adivinar termina en un {contactos} impreso en la lámina. */
+  const D = repDatos(fotoReporte());
+  const llaves = `
+    <details class="aj-mas" style="margin:-4px 0 12px">
+      <summary>Los números que puedes escribir entre llaves</summary>
+      <div class="cuerpo">
+        <p>Lo que escribas entre llaves se reemplaza por el número de hoy cada vez que se abre
+        el reporte o se genera el PowerPoint. Así la frase no envejece.</p>
+        <div class="rep-llaves">${Object.entries(D).map(([k, v]) =>
+          `<div><code>{${esc(k)}}</code><span>${esc(v)}</span></div>`).join("")}</div>
+      </div>
+    </details>`;
+
   modal(`<h3>${esc(b.t)}</h3>
-    <p style="margin:-4px 0 12px;font-size:12.8px;color:var(--muted);line-height:1.5">${esc(b.d)}.
+    <p style="margin:-4px 0 10px;font-size:12.8px;color:var(--muted);line-height:1.5">${esc(b.d)}.
       Se edita el bloque completo. Si algo queda mal escrito, el CRM te lo dice antes de guardar
       y nada se pierde.</p>
+    ${llaves}
     <div class="field">
       <textarea id="repTxt" rows="16" spellcheck="false"
         style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55">${esc(texto)}</textarea>
@@ -7694,6 +7790,21 @@ function modalReporte(clave){
    pantalla, y no después de guardar. */
 function validarBloqueReporte(clave, v){
   const esObj = x => x && typeof x === "object" && !Array.isArray(x);
+
+  /* Una llave mal escrita —{contactos} en vez de {contacto}— no rompe nada:
+     simplemente sale impresa en la lámina. Por eso se caza acá, con el texto
+     todavía en pantalla, y no en la reunión. */
+  const validas = REP_CLAVES();
+  const malas = new Set();
+  (function mirar(x){
+    if (typeof x === "string") (x.match(/\{[a-zA-Z]+\}/g) || []).forEach(m => {
+      if (!validas.includes(m.slice(1, -1))) malas.add(m); });
+    else if (Array.isArray(x)) x.forEach(mirar);
+    else if (esObj(x)) Object.values(x).forEach(mirar);
+  })(v);
+  if (malas.size)
+    return `${[...malas].join(", ")} no ${malas.size === 1 ? "es una llave" : "son llaves"} que el reporte sepa calcular. `
+         + `Las que hay son: ${validas.map(k => "{" + k + "}").join(", ")}.`;
   if (clave === "hitos" || clave === "objetivos"){
     if (!Array.isArray(v)) return "Este bloque tiene que ser una lista, entre corchetes.";
   } else if (!esObj(v)) return "Este bloque tiene que ser un objeto, entre llaves.";

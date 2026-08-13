@@ -17,6 +17,13 @@
 --  todo lo demás, y el reporte se arma leyendo esta tabla. La regla es
 --  simple — lo que se calcula no se escribe, lo que se escribe no se calcula.
 --
+--  Con una vuelta de tuerca que costó aprender: un relato SIN números no dice
+--  nada («el ritmo de campo está instalado» no es una lectura, es un deseo),
+--  pero un relato CON números escritos a mano envejece mientras el embudo de
+--  al lado se actualiza solo. Por eso los textos llevan llaves —{contacto},
+--  {convGestion}, {mesCobertura}— que el CRM reemplaza al pintar. Se escribe
+--  la frase; el número lo pone la base.
+--
 --  Nada de lo que se guarda acá menciona el CRM. El CRM es la herramienta de
 --  gestión de Stratis; en una lámina para BBVA o Mastercard se lee como una
 --  etapa del proceso comercial, y no lo es. Esa restricción es del negocio,
@@ -131,7 +138,7 @@ insert into public.reporte_config (clave, valor, nota, actualizado_por) values
 
 ('hitos', jsonb_build_array(
   jsonb_build_object('fecha','20 jul', 'titulo','Arranque del proyecto',
-    'detalle',E'Línea base congelada:\n841 comercios y S/ 35,3 MM', 'color','navy'),
+    'detalle',E'Línea base congelada:\n{portafolio} comercios y {baseFact}', 'color','navy'),
   jsonb_build_object('fecha','20 jul – 2 ago', 'titulo','Vínculo con los ejecutivos de BBVA',
     'detalle',E'Cada comercio se coordina con su\nejecutivo antes de ser contactado', 'color','azul'),
   jsonb_build_object('fecha','30 jul', 'titulo','Arranca el trabajo de campo',
@@ -143,22 +150,22 @@ insert into public.reporte_config (clave, valor, nota, actualizado_por) values
 ), 'Línea de tiempo de la lámina de hitos', 'migración'),
 
 ('relato', jsonb_build_object(
-  'hitos', 'Las dos primeras semanas se dedicaron a construir el vínculo con los ejecutivos de BBVA: los comercios preparados para gestión están coordinados con su ejecutivo antes de cualquier contacto. El trabajo de campo —llamadas y visitas en 44 distritos— arrancó a fines de julio y tomó ritmo en la primera semana de agosto.'
+  'hitos', 'Las dos primeras semanas se dedicaron a construir el vínculo con los ejecutivos de BBVA: los comercios preparados para gestión están coordinados con su ejecutivo antes de cualquier contacto. El trabajo de campo —llamadas y visitas en {distritos} distritos— arrancó a fines de julio y tomó ritmo en la primera semana de agosto.'
 ), 'Párrafo pedido por Gabriel; pendiente de afinar con Gerald', 'migración'),
 
 ('lecturas', jsonb_build_object(
   'embudo', jsonb_build_array(
     jsonb_build_object('titulo','El ritmo de campo ya está instalado', 'color','verde',
-      'texto','En 14 días de trabajo de campo se contactó a 114 comercios: 8 por día. Sosteniendo ese ritmo, el portafolio completo queda contactado hacia mediados de noviembre, antes del cierre.'),
+      'texto','En {diasCampo} días de trabajo de campo se contactó a {contacto} comercios: {porDia} por día. Sosteniendo ese ritmo, el portafolio completo queda contactado hacia {mesCobertura}, {coberturaVsCierre}.'),
     jsonb_build_object('titulo','El cuello está entre el contacto y la gestión', 'color','naranja',
-      'texto','De los comercios contactados, 27% pasó a gestión y de esos 35% llegó a visita. Ensanchar ese tramo es lo que mueve el resultado.')
+      'texto','De los comercios contactados, {convGestion} pasó a gestión y de esos {convVisita} llegó a visita. Ensanchar ese tramo es lo que mueve el resultado.')
   )
-), 'Las dos lecturas que acompañan el embudo', 'migración'),
+), 'Las dos lecturas del embudo; los números van entre llaves para que no envejezcan', 'migración'),
 
 ('notas', jsonb_build_object(
   'hitos',  'El trabajo de campo comprende llamadas, visitas presenciales y reuniones virtuales con el comercio.',
-  'embudo', 'Universo, los comercios de la base congelada. Contacto, se registró al menos un intento; gestión, hubo interacción con el comercio; visita, presencial en el local.',
-  'kpis',   'Facturación al cierre del último mes completo; el mes en curso sigue abierto. Reactivación = retenidos + recuperados.'
+  'embudo', 'Universo, los {portafolio} comercios de la base congelada. Contacto, se registró al menos un intento; gestión, hubo interacción con el comercio; visita, presencial en el local.',
+  'kpis',   'Facturación al cierre de {periodoFact}; el periodo en curso sigue abierto. Reactivación = retenidos + recuperados.'
 ), 'Notas al pie de cada lámina; la fecha de corte la agrega el reporte', 'migración'),
 
 -- Los pesos y las metas viven acá y no en el código porque son lo primero que
