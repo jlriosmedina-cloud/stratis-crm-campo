@@ -4928,7 +4928,11 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
-  "Ubicacion_Verificada","Calificacion","Comentario_Ejecutivo","Comentario_Cliente","ID_Registro"];
+  "Ubicacion_Verificada","Calificacion","Comentario_Ejecutivo","Comentario_Cliente",
+  /* Cuándo se grabó, que no es cuándo se gestionó. Sin esta columna la
+     puntualidad no se puede recalcular fuera del CRM, y es justo el número
+     que se discute en la reunión de cierre. */
+  "Fecha_Registro","Dias_Trabajados_De_Demora","Registrada_A_Tiempo","ID_Registro"];
 
 /* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
 const marcaUbicacion = r => {
@@ -4971,7 +4975,8 @@ function filasVisitas(){
     esEfectivo(r.Resultado) ? "SI" : "NO",
     r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
     r.Ubicacion, marcaUbicacion(r), r.Calificacion,
-    r.Comentario_Ejecutivo, r.Comentario_Cliente, r._id]);
+    r.Comentario_Ejecutivo, r.Comentario_Cliente,
+    String(r.Creado_En || "").slice(0,10), demoraHabil(r), aTiempo(r) ? "SI" : "NO", r._id]);
 }
 
 /* Lo que se está viendo en «Gestiones del equipo», tal cual, a Excel. Sirve
@@ -8113,8 +8118,6 @@ function validarBloqueReporte(clave, v){
    sueldo base, igual que el CRM. La conversión a soles se hace fuera.
    ========================================================================= */
 
-const JSZIP_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-
 /* ---- Utilidades de celda ------------------------------------------------ */
 const L = i => XLSX.utils.encode_col(i);
 const A1 = (c, f) => L(c) + f;
@@ -8500,6 +8503,39 @@ function hojaEvolucion(d){
     anchos:[10,6,18,15,11,11,10,12,15,11,9,8,13,13,10,10] });
 }
 
+/* ---- El cruce por medio: la dinámica, hecha con fórmulas ----------------
+   Ejecutivos en filas, medios en columnas, y cada celda un CONTAR.SI.CONJUNTO
+   que se ve. Hace lo mismo que una dinámica para la pregunta que de verdad se
+   hace en la reunión —«¿por dónde estás contactando?»— y no depende de que un
+   formato escrito a mano le guste a Excel. */
+function hojaCruce(d, nG){
+  const medios = [...new Set(d.gestiones.map(g => g.medio).filter(Boolean))].sort();
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const filas = [
+    ["Gestiones por ejecutivo y medio", "", ""],
+    ["Del periodo que está en Parámetros. Cada celda es una fórmula: se puede abrir y ver de dónde sale.", "", ""],
+    [],
+    ["Ejecutivo"].concat(medios).concat(["Total", "A tiempo", "Con respuesta", "Visitas efectivas"])
+  ];
+  d.ejec.forEach((u, i) => {
+    const f = filas.length + 1;
+    const fila = [u.nombre];
+    medios.forEach((m, k) => fila.push(
+      `=COUNTIFS(${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)},${G("L")},"${m}")`));
+    fila.push(`=SUM(${A1(1,f)}:${A1(medios.length,f)})`);
+    fila.push(`=SUMIFS(${G("K")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("M")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("N")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    filas.push(fila);
+  });
+  const pri = 5, ult = filas.length;
+  const total = ["Total"];
+  for (let c = 1; c <= medios.length + 4; c++)
+    total.push(`=SUM(${A1(c,pri)}:${A1(c,ult)})`);
+  filas.push(total);
+  return hojaLibro(filas, { anchos:[22].concat(medios.map(() => 14)).concat([10,11,14,16]) });
+}
+
 /* ---- El libro ----------------------------------------------------------- */
 function armarLibroIncentivos(p){
   const d = datosLibro();
@@ -8513,13 +8549,7 @@ function armarLibroIncentivos(p){
   d.ejec.forEach(u => XLSX.utils.book_append_sheet(wb,
     hojaEjecutivo(u, p, d, nG, nC, nN), nombreHoja(u.nombre)));
   XLSX.utils.book_append_sheet(wb, hojaEvolucion(d), "Evolución");
-  /* La hoja donde vive la dinámica se crea acá, vacía salvo el título: así la
-     librería le asigna su archivo y sus relaciones, y la inyección solo tiene
-     que agregar la tabla. */
-  XLSX.utils.book_append_sheet(wb, hojaLibro([
-    ["Gestiones por ejecutivo"],
-    ["Se recalcula al abrir el archivo. Arrastra cualquier campo de la lista para cambiar el corte."],
-    []], { anchos:[26, 16, 16] }), "Dinámica");
+  XLSX.utils.book_append_sheet(wb, hojaCruce(d, nG), "Por medio");
   XLSX.utils.book_append_sheet(wb, hojaGestiones(d, par.nFeriados), "Gestiones");
   XLSX.utils.book_append_sheet(wb, hojaCartera(d), "Cartera");
   XLSX.utils.book_append_sheet(wb, hojaNuevosLibro(d), "Nuevos");
@@ -8543,17 +8573,10 @@ async function descargarLibroIncentivos(btn){
   HOJAS_USADAS.clear();
   try {
     const p = periodoBono();
-    const { wb, d, nG } = armarLibroIncentivos(p);
+    const { wb } = armarLibroIncentivos(p);
     const nombre = `Incentivos_${p.replace("-", "")}_${hoyISO().replace(/-/g, "")}.xlsx`;
 
-    /* La tabla dinámica no la sabe escribir la librería de hojas: se inyecta
-       en el archivo ya armado. Si eso falla —red caída, CDN bloqueado— el
-       libro se descarga igual sin ella, porque el cálculo no depende de la
-       dinámica. */
-    let bytes = XLSX.write(wb, { bookType:"xlsx", type:"array", cellStyles:true });
-    try { bytes = await inyectarDinamica(bytes, nG); }
-    catch (e){ toast("El libro salió sin la tabla dinámica: " + (e.message || e)); }
-
+    const bytes = XLSX.write(wb, { bookType:"xlsx", type:"array" });
     const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = nombre;
@@ -8568,147 +8591,23 @@ async function descargarLibroIncentivos(btn){
 }
 
 /* =========================================================================
-   La tabla dinámica
+   Por qué acá no hay tabla dinámica
 
-   La librería que arma las hojas no sabe escribir tablas dinámicas: son
-   cuatro piezas XML dentro del archivo —la caché, sus registros, la
-   definición de la tabla y las relaciones entre ellas— y ninguna se parece a
-   una celda. Así que el libro se arma completo primero y la dinámica se
-   inyecta después, abriendo el .xlsx como lo que es: un zip.
+   La hubo. Se escribía a mano el XML de la caché y de la tabla, se inyectaba
+   en el .xlsx ya armado y funcionaba: LibreOffice la abría y la recalculaba
+   con los números correctos. Excel de escritorio, no — declaraba el archivo
+   dañado y ofrecía repararlo.
 
-   La caché va con refreshOnLoad, que le pide a Excel rehacerla al abrir el
-   archivo. Eso evita el problema de fondo de escribir una dinámica a mano:
-   si los índices de la caché no coinciden exactamente con los datos, Excel
-   declara el archivo dañado. Pidiéndole que la recalcule, los datos mandan.
+   La lección no es que el XML estuviera mal, es que se probó donde se podía
+   probar y no donde se iba a usar. Un archivo que se abre en una reunión para
+   conversar el pago de alguien no puede empezar con un cuadro de diálogo que
+   dice «dañado»: a esa altura ya da igual si los números están bien.
 
-   Si algo de esto falla, el libro se descarga igual sin la dinámica. El
-   cálculo del incentivo vive en las fórmulas, no acá.
+   Así que el libro sale como Excel plano y el corte por ejecutivo lo hacen
+   las fórmulas, que no dependen de escribir formatos a mano. Para cruzar los
+   datos a gusto, la hoja Gestiones tiene autofiltro y desde ahí se inserta
+   una dinámica nativa en dos clics — hecha por Excel, que sabe hacerlas.
    ========================================================================= */
-let _jszip = null;
-function cargarZip(){
-  if (_jszip) return Promise.resolve(_jszip);
-  if (window.JSZip){ _jszip = window.JSZip; return Promise.resolve(_jszip); }
-  return new Promise((ok, mal) => {
-    const s = document.createElement("script");
-    s.src = JSZIP_CDN;
-    s.onload = () => { _jszip = window.JSZip; _jszip ? ok(_jszip) : mal(new Error("cargó pero no quedó disponible")); };
-    s.onerror = () => mal(new Error("no se pudo bajar la librería de zip"));
-    document.head.appendChild(s);
-  });
-}
-
-const COLS_DINAMICA = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
-  "Fecha de gestión","Fecha de registro","Días trabajados de demora","A tiempo",
-  "Medio","Respondió","Visita efectiva","Primera del comercio en el periodo"];
-
-async function inyectarDinamica(bytes, nG){
-  const JSZip = await cargarZip();
-  const zip = await JSZip.loadAsync(bytes);
-
-  const leer = async n => zip.file(n) ? await zip.file(n).async("string") : null;
-  const libro = await leer("xl/workbook.xml");
-  const tipos = await leer("[Content_Types].xml");
-  const relsLibro = await leer("xl/_rels/workbook.xml.rels");
-  if (!libro || !tipos || !relsLibro) throw new Error("el archivo no tiene la forma esperada");
-
-  /* Qué hoja es «Dinámica» y en qué archivo vive */
-  const hojas = [...libro.matchAll(/<sheet[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"/g)]
-    .map(m => ({ nombre:m[1], rid:m[2] }));
-  const dina = hojas.find(h => h.nombre === "Dinámica");
-  if (!dina) throw new Error("falta la hoja Dinámica");
-  const relDina = new RegExp(`<Relationship[^>]*Id="${dina.rid}"[^>]*Target="([^"]*)"`).exec(relsLibro);
-  if (!relDina) throw new Error("no se encontró el archivo de la hoja Dinámica");
-  const archivoHoja = "xl/" + relDina[1].replace(/^\/?xl\//, "");
-  const nHoja = archivoHoja.replace(/^.*\/([^/]+)\.xml$/, "$1");
-
-  const campos = COLS_DINAMICA;
-  const ref = `A1:${L(campos.length - 1)}${nG}`;
-
-  /* 1 · La caché: qué columnas hay y de dónde salen */
-  const cacheDef =
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
-    ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
-    ` r:id="rId1" refreshOnLoad="1" refreshedBy="Stratis CRM" createdVersion="3" refreshedVersion="3"` +
-    ` minRefreshableVersion="3" recordCount="0">` +
-    `<cacheSource type="worksheet"><worksheetSource ref="${ref}" sheet="Gestiones"/></cacheSource>` +
-    `<cacheFields count="${campos.length}">` +
-    campos.map(c => `<cacheField name="${esc(c)}" numFmtId="0"><sharedItems/></cacheField>`).join("") +
-    `</cacheFields></pivotCacheDefinition>`;
-
-  const cacheRec =
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>`;
-
-  /* 2 · La tabla: ejecutivo en filas, y dos medidas que son las que se
-     discuten en la reunión — cuántas gestiones y cuántas a tiempo. */
-  const iEjec = campos.indexOf("Ejecutivo");
-  const iTiempo = campos.indexOf("A tiempo");
-  const iCid = campos.indexOf("Customer ID");
-  const pivotTable =
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
-    ` name="Gestiones por ejecutivo" cacheId="1" applyNumberFormats="0" applyBorderFormats="0"` +
-    ` applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1"` +
-    ` dataCaption="Valores" updatedVersion="3" createdVersion="3" minRefreshableVersion="3"` +
-    ` itemPrintTitles="1" useAutoFormatting="1" indent="0" outline="1" outlineData="1" multipleFieldFilters="0">` +
-    `<location ref="A3:C20" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>` +
-    `<pivotFields count="${campos.length}">` +
-    campos.map((c, i) => {
-      if (i === iEjec) return `<pivotField axis="axisRow" compact="0" outline="0" showAll="0"><items count="1"><item t="default"/></items></pivotField>`;
-      if (i === iTiempo || i === iCid) return `<pivotField dataField="1" compact="0" outline="0" showAll="0"/>`;
-      return `<pivotField compact="0" outline="0" showAll="0"/>`;
-    }).join("") +
-    `</pivotFields>` +
-    `<rowFields count="1"><field x="${iEjec}"/></rowFields>` +
-    `<rowItems count="1"><i><x/></i></rowItems>` +
-    `<colItems count="1"><i/></colItems>` +
-    `<dataFields count="2">` +
-    `<dataField name="Gestiones" fld="${iCid}" subtotal="count" baseField="0" baseItem="0"/>` +
-    `<dataField name="A tiempo" fld="${iTiempo}" baseField="0" baseItem="0"/>` +
-    `</dataFields>` +
-    `<pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1"` +
-    ` showRowStripes="0" showColStripes="0" showLastColumn="1"/>` +
-    `</pivotTableDefinition>`;
-
-  zip.file("xl/pivotCache/pivotCacheDefinition1.xml", cacheDef);
-  zip.file("xl/pivotCache/pivotCacheRecords1.xml", cacheRec);
-  zip.file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords"` +
-    ` Target="pivotCacheRecords1.xml"/></Relationships>`);
-  zip.file("xl/pivotTables/pivotTable1.xml", pivotTable);
-  zip.file("xl/pivotTables/_rels/pivotTable1.xml.rels",
-    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition"` +
-    ` Target="../pivotCache/pivotCacheDefinition1.xml"/></Relationships>`);
-
-  /* 3 · Las relaciones: el libro apunta a la caché, la hoja a la tabla */
-  const relsHoja = `xl/worksheets/_rels/${nHoja}.xml.rels`;
-  const previo = await leer(relsHoja);
-  zip.file(relsHoja, previo
-    ? previo.replace("</Relationships>",
-        `<Relationship Id="rIdPivot1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>`)
-    : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-      `<Relationship Id="rIdPivot1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>`);
-
-  zip.file("xl/_rels/workbook.xml.rels", relsLibro.replace("</Relationships>",
-    `<Relationship Id="rIdCache1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/></Relationships>`));
-
-  zip.file("xl/workbook.xml", libro.replace("</sheets>",
-    `</sheets><pivotCaches><pivotCache cacheId="1" r:id="rIdCache1"/></pivotCaches>`));
-
-  zip.file("[Content_Types].xml", tipos.replace("</Types>",
-    `<Override PartName="/xl/pivotCache/pivotCacheDefinition1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>` +
-    `<Override PartName="/xl/pivotCache/pivotCacheRecords1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml"/>` +
-    `<Override PartName="/xl/pivotTables/pivotTable1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>` +
-    `</Types>`));
-
-  return await zip.generateAsync({ type:"uint8array", compression:"DEFLATE" });
-}
 
 /* =========================================================================
    Sincronización — el CRM se actualiza solo
