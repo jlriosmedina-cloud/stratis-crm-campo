@@ -669,6 +669,10 @@ table.tbl tr:last-child td{border-bottom:0}
 .bn-curva-fila .ins .field{margin:0}
 .bn-curva-fila .ins span{display:block;font-size:11px;color:var(--muted);margin-bottom:2px;
   text-transform:capitalize}
+.bn-fer{display:flex;flex-wrap:wrap;gap:6px}
+.bn-fer span{background:var(--card);border:1px solid var(--line);border-radius:999px;
+  padding:3px 10px;font-size:12px;font-weight:640}
+.bn-fer span.off{color:var(--muted);font-weight:500;background:transparent}
 .rep-llaves{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 12px;margin-top:9px}
 .rep-llaves > div{display:flex;gap:8px;align-items:baseline;font-size:12px;min-width:0}
 .rep-llaves code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--brand-2)}
@@ -1166,6 +1170,21 @@ const PROYECTO = { inicio:"2026-07-20", fin:"2026-12-18", corte:18 };
 
 /* Los parámetros no están clavados en el código: la revisión de octubre
    estaba prevista desde el principio. Viven en config y se editan en Ajustes. */
+/* El calendario de días no trabajados del proyecto. Va antes de BONO_DEF
+   porque BONO_DEF lo usa al construirse: declararlo después lo dejaría en la
+   zona muerta y la aplicación no cargaría. */
+const FERIADOS_DEF = [
+  "2026-07-23",  // Día de la Fuerza Aérea del Perú
+  "2026-07-28", "2026-07-29",  // Fiestas Patrias
+  "2026-08-06",  // Batalla de Junín
+  "2026-08-30",  // Santa Rosa de Lima
+  "2026-10-08",  // Combate de Angamos
+  "2026-11-01",  // Todos los Santos
+  "2026-12-08",  // Inmaculada Concepción
+  "2026-12-09",  // Batalla de Ayacucho
+  "2026-12-25"   // Navidad
+];
+
 const BONO_DEF = {
   metas:      { reactivacion_pp:18, facturacion_pct:15, ventas_mes:7 },
   /* La ruta mensual hacia la meta, tal como está en el documento de
@@ -1176,6 +1195,9 @@ const BONO_DEF = {
   curva:      { reactivacion_pp:[4, 8, 11, 15, 18], facturacion_pct:[3, 6, 9, 12, 15] },
   pesos:      { reactivacion:30, facturacion:50, venta:20 },
   requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95 },
+  /* Los días que no son de trabajo, además de sábados y domingos. Se editan
+     en Ajustes y viajan con la versión de parámetros. */
+  feriados:   FERIADOS_DEF,
   piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
   sobre:110, tope:30, pago_mensual:80
 };
@@ -1349,18 +1371,44 @@ function avanceProyecto(){
            pct: total ? corrido / total * 100 : 0 };
 }
 
-/* Demora en días trabajados. Un contacto del sábado registrado el lunes
-   llegó al día siguiente de trabajo; el domingo no cuenta. */
+/* Demora en días trabajados.
+
+   Lo acordado es «el mismo día trabajado o máximo el siguiente día
+   trabajado». La primera versión de esto solo saltaba el domingo, así que el
+   sábado contaba como día de trabajo: una gestión del viernes registrada el
+   lunes salía con dos días de demora y caía como fuera de plazo, cuando el
+   lunes ES el siguiente día trabajado. Con eso la puntualidad del equipo
+   quedaba por debajo de la mitad por una regla que nadie había acordado.
+
+   Ahora no cuentan los sábados, los domingos ni los feriados. Los feriados
+   viven en los parámetros del periodo —no en el código— porque el calendario
+   cambia de un año a otro y porque una empresa puede tener sus propios días
+   libres. Se leen los del periodo al que pertenece la gestión, no los de hoy:
+   corregir el calendario en noviembre no debe reescribir agosto. */
+const feriadosDe = p => {
+  const f = (paramsDe(p) || {}).feriados;
+  return new Set(Array.isArray(f) ? f : FERIADOS_DEF);
+};
+/* Sábado y domingo nunca; el resto depende del calendario del periodo. */
+function esDiaTrabajado(iso, fer){
+  if (!iso) return false;
+  const d = new Date(iso + "T12:00:00Z").getUTCDay();
+  return d !== 0 && d !== 6 && !(fer && fer.has(iso));
+}
+const esFeriado = (iso, p) => feriadosDe(p || periodoDe(iso)).has(String(iso).slice(0,10));
+
 function demoraHabil(r){
   const f = String(r.Fecha_Contacto || "").slice(0,10);
   const c = String(r.Creado_En || "").slice(0,10);
   if (!f || !c || c <= f) return 0;
+  const fer = feriadosDe(periodoDe(f));
   let n = 0;
-  for (let d = new Date(f); ; ){
+  for (let d = new Date(f + "T12:00:00Z"); ; ){
     d = new Date(d.getTime() + 86400000);
     const iso = d.toISOString().slice(0,10);
-    if (d.getUTCDay() !== 0) n++;              // solo el domingo no es día trabajado
+    if (esDiaTrabajado(iso, fer)) n++;
     if (iso >= c) break;
+    if (n > 400) break;                        // red de seguridad, nunca debería llegar
   }
   return n;
 }
@@ -4658,7 +4706,7 @@ function bloqueLlave(r){
         <th>Ejecutivo</th>
         <th title="Comercios asignados con al menos una gestión en el periodo">Cobertura · mín ${req.cobertura_pct}%</th>
         <th title="Presenciales o virtuales en las que se logró hablar, escaladas a las semanas reales">Visitas efectivas · mín ${req.visitas_semana}/sem</th>
-        <th title="Registradas el mismo día trabajado o el siguiente; el domingo no cuenta">Puntualidad · mín ${req.puntualidad_pct}%</th>
+        <th title="Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan">Puntualidad · mín ${req.puntualidad_pct}%</th>
         <th>Llave</th><th>Cumplimiento</th><th>Incentivo</th>
       </tr></thead>
       <tbody>
@@ -6607,7 +6655,7 @@ function tarjetaEjecutivo(u, p){
         `Presenciales o virtuales en las que se logró hablar. El periodo tiene ${
           ll.semanas.toFixed(1).replace(".", ",")} semanas: se piden ${ll.pide}`)}
       ${filaRequisito("Puntualidad del registro", ll.puntualidad, comoPct,
-        "Registradas el mismo día trabajado o el siguiente; el domingo no cuenta")}
+        "Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan")}
     </div>
 
     <div class="bn-sec">Cumplimiento de objetivos</div>
@@ -7012,6 +7060,38 @@ function cardCurva(val){
   </div>`;
 }
 
+/* ---- Los días que no son de trabajo -------------------------------------
+   Sábados y domingos los sabe el calendario. Los feriados no: cambian de un
+   año a otro, y una empresa puede tener además sus propios días libres. Se
+   escriben acá, viajan con la versión y por eso corregir el calendario en
+   noviembre no reescribe la puntualidad de agosto. */
+function cardFeriados(val){
+  const lista = Array.isArray(val.feriados) ? val.feriados : FERIADOS_DEF;
+  const delProyecto = lista.filter(f => f >= PROYECTO.inicio && f <= PROYECTO.fin);
+  const nombre = iso => {
+    const d = new Date(iso + "T12:00:00Z");
+    return `${d.getUTCDate()} ${MESES_ES[d.getUTCMonth()].slice(0,3)}`;
+  };
+  const finde = iso => { const d = new Date(iso + "T12:00:00Z").getUTCDay(); return d === 0 || d === 6; };
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Días que no son de trabajo</div>
+    <div class="pie" style="margin:-4px 0 10px">
+      Los sábados y domingos ya no cuentan como día trabajado, no hace falta escribirlos. Acá van
+      los <b>feriados</b>: una gestión del día anterior a un feriado sigue estando a tiempo si se
+      registra el primer día hábil siguiente.
+    </div>
+    <div class="bn-fer">${delProyecto.map(f =>
+      `<span class="${finde(f) ? "off" : ""}">${esc(nombre(f))}${finde(f) ? " · cae fin de semana" : ""}</span>`
+      ).join("") || `<span class="off">sin feriados cargados</span>`}</div>
+    <label class="field" style="margin-top:9px">
+      <span style="font-size:12px;color:var(--muted)">Fechas, separadas por coma (AAAA-MM-DD)</span>
+      <textarea id="feriadosParam" rows="2" spellcheck="false"
+        style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${esc(lista.join(", "))}</textarea>
+    </label>
+  </div>`;
+}
+
 function leerRuta(obj, ruta){ return ruta.split(".").reduce((o,k) => o[k], obj); }
 function ponerBono(obj, ruta, valor){
   const ks = ruta.split("."); const ult = ks.pop();
@@ -7073,6 +7153,7 @@ function cardParametrosBono(){
     ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
 
     ${cardCurva(val)}
+    ${cardFeriados(val)}
 
     <div class="bn-params">
       ${CAMPOS_BONO.map(([ruta, label, uni]) => `
@@ -7104,6 +7185,14 @@ async function guardarParametros(){
     else ponerBono(nuevo, el.dataset.bono, n);
   });
   if (malo) return toast("Hay un valor que no es un número: " + malo);
+
+  const campoFer = $("#feriadosParam");
+  if (campoFer){
+    const fs = campoFer.value.split(/[,\s;]+/).map(x => x.trim()).filter(Boolean);
+    const mala = fs.find(x => !/^\d{4}-\d{2}-\d{2}$/.test(x) || isNaN(new Date(x + "T12:00:00Z")));
+    if (mala) return toast(`«${mala}» no es una fecha. Van como 2026-12-25, separadas por coma.`);
+    nuevo.feriados = [...new Set(fs)].sort();
+  }
   const suma = nuevo.pesos.reactivacion + nuevo.pesos.facturacion + nuevo.pesos.venta;
   if (Math.round(suma) !== 100) return toast(`Los pesos suman ${suma}%: tienen que sumar 100%`);
   /* La curva tiene que ser creciente y terminar en la meta del proyecto. Una
@@ -7150,6 +7239,7 @@ function bindBono(){
   };
   if ($("#bonoReset")) $("#bonoReset").onclick = () => {
     document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRuta(BONO_DEF, el.dataset.bono));
+    if ($("#feriadosParam")) $("#feriadosParam").value = FERIADOS_DEF.join(", ");
     toast("Valores del documento cargados — falta guardar");
   };
 }
