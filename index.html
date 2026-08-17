@@ -659,6 +659,16 @@ table.tbl tr:last-child td{border-bottom:0}
 .rep-bloque .txt b{font-size:14px;letter-spacing:-.1px}
 .rep-bloque .txt div{font-size:12.3px;color:var(--muted);margin-top:2px;line-height:1.45}
 .rep-sello{display:inline-block;margin-top:4px;font-size:11.3px;color:var(--muted)}
+.bn-curva{background:var(--surface-2);border-radius:12px;padding:13px 14px;margin:0 0 13px}
+.bn-curva-fila{margin-top:11px}
+.bn-curva-fila:first-of-type{margin-top:4px}
+.bn-curva-fila .t{font-size:13px;font-weight:680;margin-bottom:6px;display:flex;
+  gap:8px;align-items:baseline;flex-wrap:wrap}
+.bn-curva-fila .t span{font-size:11.5px;font-weight:500;color:var(--muted)}
+.bn-curva-fila .ins{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:7px}
+.bn-curva-fila .ins .field{margin:0}
+.bn-curva-fila .ins span{display:block;font-size:11px;color:var(--muted);margin-bottom:2px;
+  text-transform:capitalize}
 .rep-llaves{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 12px;margin-top:9px}
 .rep-llaves > div{display:flex;gap:8px;align-items:baseline;font-size:12px;min-width:0}
 .rep-llaves code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:var(--brand-2)}
@@ -1158,6 +1168,12 @@ const PROYECTO = { inicio:"2026-07-20", fin:"2026-12-18", corte:18 };
    estaba prevista desde el principio. Viven en config y se editan en Ajustes. */
 const BONO_DEF = {
   metas:      { reactivacion_pp:18, facturacion_pct:15, ventas_mes:7 },
+  /* La ruta mensual hacia la meta, tal como está en el documento de
+     incentivos: no es la meta del proyecto dividida entre cinco, es una curva
+     que da más aire a los primeros meses. Los valores son ACUMULADOS —al mes
+     2 se esperan 8 p.p. en total, no 8 adicionales— y el último punto tiene
+     que coincidir con la meta del proyecto. */
+  curva:      { reactivacion_pp:[4, 8, 11, 15, 18], facturacion_pct:[3, 6, 9, 12, 15] },
   pesos:      { reactivacion:30, facturacion:50, venta:20 },
   requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95 },
   piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
@@ -1215,6 +1231,41 @@ function periodoDe(iso){
   return `${a}-${pad(m)}`;
 }
 const periodoHoy = () => periodoDe(hoyISO());
+/* En qué mes del proyecto estamos: 1 para el primer periodo del bono, 5 para
+   el último. Es el índice con el que se lee la curva. */
+const indicePeriodo = p => periodosProyecto().indexOf(String(p)) + 1;
+
+/* La meta que corresponde a ese mes. Si el periodo cae fuera del proyecto
+   —una corrección tardía, una prórroga— se usa la meta final: exigir la de un
+   mes que no existe sería inventar. */
+function metaPeriodo(p, params){
+  const B = params || BONO;
+  const total = periodosProyecto().length;
+  const i = indicePeriodo(p);
+  const punto = (lista, fin) => {
+    const c = Array.isArray(lista) ? lista : [];
+    if (i < 1) return fin;
+    return Number(c[Math.min(i, c.length) - 1] !== undefined ? c[Math.min(i, c.length) - 1] : fin);
+  };
+  const cur = B.curva || {};
+  return {
+    i, total,
+    reactivacion_pp: punto(cur.reactivacion_pp, B.metas.reactivacion_pp),
+    facturacion_pct: punto(cur.facturacion_pct, B.metas.facturacion_pct),
+    ventas_mes: B.metas.ventas_mes,
+    esUltimo: i === total
+  };
+}
+
+/* Reactivación y facturación se miden por avance ACUMULADO desde el arranque
+   del proyecto, no por lo que pasó dentro del mes. Un comercio recuperado en
+   agosto sigue recuperado en octubre: contarlo solo en agosto haría que el
+   avance bajara solo. */
+const hastaPeriodo = (fecha, p) => {
+  const f = String(fecha || "").slice(0,10), v = ventanaPeriodo(p);
+  return !!f && !!v.fin && f >= PROYECTO.inicio && f <= v.fin;
+};
+
 function periodosProyecto(){
   const l = []; let p = periodoDe(PROYECTO.inicio); const ult = periodoDe(PROYECTO.fin);
   while (p <= ult){ l.push(p); const [a,m] = p.split("-").map(Number);
@@ -6392,29 +6443,47 @@ function cumplimientoDe(correo, p){
   const cart = carteraDe(correo, p);
   const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
 
-  const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
-  const pp       = cart.n ? logrados / cart.n * 100 : 0;
-  const cReact   = B.metas.reactivacion_pp ? pp / B.metas.reactivacion_pp * 100 : 0;
+  /* La meta de un periodo no es la del proyecto. El documento de incentivos
+     trae una ruta mensual —4, 8, 11, 15, 18 p.p. y 3, 6, 9, 12, 15%— y lo que
+     se compara contra ella es el avance ACUMULADO desde el arranque, no lo
+     que pasó dentro del mes. Medir un mes contra la meta de cinco daba
+     cumplimientos de 2% a todo el mundo y hacía el bono inalcanzable de
+     entrada, que es exactamente lo contrario de para lo que existe. */
+  const M = metaPeriodo(p, B);
 
+  const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && hastaPeriodo(c.cerrado_en, p)).length;
+  const enElMes  = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
+  const pp       = cart.n ? logrados / cart.n * 100 : 0;
+  const cReact   = M.reactivacion_pp ? pp / M.reactivacion_pp * 100 : 0;
+
+  /* La facturación ya venía acumulada: crece contra la base congelada del
+     proyecto, no contra el cierre del mes anterior. Lo que cambia es contra
+     qué meta se compara. */
   const crec  = crecimientoFact(correo, p);
   const cFact = crec === null ? null
-              : B.metas.facturacion_pct ? crec / B.metas.facturacion_pct * 100 : 0;
+              : M.facturacion_pct ? crec / M.facturacion_pct * 100 : 0;
 
+  /* La venta sí es mensual, y así está en el documento: 7 por periodo. No se
+     acumula ni se prorratea. */
   const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
                                    && enVentana(c.creado_en, p)).length;
-  const cVenta = B.metas.ventas_mes ? ventas / B.metas.ventas_mes * 100 : 0;
+  const cVenta = M.ventas_mes ? ventas / M.ventas_mes * 100 : 0;
 
+  const mes = M.i >= 1 ? `mes ${M.i} de ${M.total}` : "fuera del proyecto";
   const objetivos = [
     { id:"react", nombre:"Reactivación del portafolio", peso:B.pesos.reactivacion,
-      meta:`+${B.metas.reactivacion_pp} p.p.`, logro:`${pp.toFixed(1)} p.p.`,
-      detalle:`${logrados} de ${cart.n} comercios con objetivo cumplido`, cumpl:cReact },
+      meta:`+${M.reactivacion_pp} p.p.`, metaPie:`acumulado al ${mes}`,
+      logro:`${pp.toFixed(1)} p.p.`,
+      detalle:`${logrados} de ${cart.n} comercios acumulados${
+        enElMes !== logrados ? ` · ${enElMes} en este periodo` : ""}`, cumpl:cReact },
     { id:"fact", nombre:"Facturación", peso:B.pesos.facturacion,
-      meta:`+${B.metas.facturacion_pct}%`,
+      meta:`+${M.facturacion_pct}%`, metaPie:`acumulado al ${mes}`,
       logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
       detalle: crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
       cumpl:cFact },
     { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
-      meta:`${B.metas.ventas_mes} por periodo`, logro:String(ventas),
+      meta:`${M.ventas_mes} por periodo`, metaPie:"solo este periodo",
+      logro:String(ventas),
       detalle: ventas === 1 ? "1 afiliación nueva" : `${ventas} afiliaciones nuevas`, cumpl:cVenta }
   ];
 
@@ -6426,7 +6495,7 @@ function cumplimientoDe(correo, p){
   const total = peso ? medibles.reduce((n,o) => n + o.cumpl * o.peso, 0) / peso : 0;
 
   return { objetivos, total, completo: medibles.length === objetivos.length,
-           pesoMedido:peso, ventas, logrados, pp };
+           pesoMedido:peso, ventas, logrados, enElMes, pp, meta:M };
 }
 
 function montoFact(correo, p){
@@ -6548,7 +6617,8 @@ function tarjetaEjecutivo(u, p){
         <th style="text-align:right">Cumplimiento</th></tr></thead>
       <tbody>${cu.objetivos.map(o => `<tr${o.cumpl === null ? ' class="falta"' : ""}>
         <td><b>${esc(o.nombre)}</b><div class="bn-det">${esc(o.detalle)}</div></td>
-        <td style="text-align:right">${esc(o.meta)}</td>
+        <td style="text-align:right">${esc(o.meta)}${
+          o.metaPie ? `<div class="bn-det">${esc(o.metaPie)}</div>` : ""}</td>
         <td style="text-align:right"><b>${esc(o.logro)}</b></td>
         <td style="text-align:right">${o.peso}%</td>
         <td style="text-align:right">${o.cumpl === null ? "—" : pct1(o.cumpl)}</td>
@@ -6906,6 +6976,42 @@ const CAMPOS_BONO = [
   ["base_incumple_uno",          "Bono base (1 requisito caído)","%"],
   ["pago_mensual",               "Se paga cada mes",            "%"]
 ];
+/* ---- La ruta mensual hacia la meta --------------------------------------
+   El documento de incentivos no reparte la meta en cinco partes iguales: da
+   más aire a los primeros meses, que son los del aprendizaje. Esa curva es
+   contra lo que se mide cada periodo, así que se edita acá como cualquier
+   otro parámetro y viaja con la versión: cambiarla en octubre no reescribe
+   agosto. */
+function cardCurva(val){
+  const periodos = periodosProyecto();
+  const cur = val.curva || {};
+  const fila = (clave, titulo, uni, metaFinal) => {
+    const lista = Array.isArray(cur[clave]) ? cur[clave] : [];
+    return `
+    <div class="bn-curva-fila">
+      <div class="t">${esc(titulo)}<span>meta del proyecto: +${esc(metaFinal)}${esc(uni)}</span></div>
+      <div class="ins">${periodos.map((pp, i) => `
+        <label class="field">
+          <span>${esc(nombreMes(pp).split(" ")[0])}</span>
+          <input class="in-num" type="text" inputmode="decimal"
+                 data-bono="curva.${clave}.${i}"
+                 value="${esc(lista[i] !== undefined ? lista[i] : metaFinal)}">
+        </label>`).join("")}</div>
+    </div>`;
+  };
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Ruta mensual hacia la meta</div>
+    <div class="pie" style="margin:-4px 0 11px">
+      Los valores son <b>acumulados</b>: al segundo periodo se esperan 8 p.p. en total, no 8 más.
+      Contra esto se mide el avance del proyecto en cada periodo, y por eso el último punto tiene
+      que coincidir con la meta del proyecto. La venta no entra acá: se mide mes a mes.
+    </div>
+    ${fila("reactivacion_pp", "Reactivación del portafolio", " p.p.", val.metas.reactivacion_pp)}
+    ${fila("facturacion_pct", "Facturación", "%", val.metas.facturacion_pct)}
+  </div>`;
+}
+
 function leerRuta(obj, ruta){ return ruta.split(".").reduce((o,k) => o[k], obj); }
 function ponerBono(obj, ruta, valor){
   const ks = ruta.split("."); const ult = ks.pop();
@@ -6965,6 +7071,9 @@ function cardParametrosBono(){
       <b>no altera lo liquidado</b>. Para que cambie hay que anular el cierre.</div>` : ""}
 
     ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
+
+    ${cardCurva(val)}
+
     <div class="bn-params">
       ${CAMPOS_BONO.map(([ruta, label, uni]) => `
         <label class="field">
@@ -6997,6 +7106,22 @@ async function guardarParametros(){
   if (malo) return toast("Hay un valor que no es un número: " + malo);
   const suma = nuevo.pesos.reactivacion + nuevo.pesos.facturacion + nuevo.pesos.venta;
   if (Math.round(suma) !== 100) return toast(`Los pesos suman ${suma}%: tienen que sumar 100%`);
+  /* La curva tiene que ser creciente y terminar en la meta del proyecto. Una
+     curva que baja diría que se puede perder avance ya logrado, y una que no
+     llega a la meta haría que cumplir el último mes no fuera cumplir. */
+  const malaCurva = [
+    ["reactivacion_pp", "reactivación", nuevo.metas.reactivacion_pp],
+    ["facturacion_pct", "facturación",  nuevo.metas.facturacion_pct]
+  ].map(([k, nom, fin]) => {
+    const c = (nuevo.curva || {})[k] || [];
+    for (let i = 1; i < c.length; i++)
+      if (c[i] < c[i-1]) return `La ruta de ${nom} baja del mes ${i} al ${i+1}: es un acumulado, no puede retroceder.`;
+    if (c.length && Math.abs(c[c.length-1] - fin) > 0.001)
+      return `La ruta de ${nom} termina en ${c[c.length-1]} y la meta del proyecto es ${fin}: tienen que coincidir.`;
+    return "";
+  }).find(Boolean);
+  if (malaCurva) return toast(malaCurva);
+
   if (nuevo.piso >= 100)  return toast("El piso tiene que ser menor al 100%");
   if (nuevo.sobre <= 100) return toast("El sobrecumplimiento tiene que ser mayor al 100%");
 
