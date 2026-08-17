@@ -8134,8 +8134,44 @@ function validarBloqueReporte(clave, v){
    sueldo base, igual que el CRM. La conversión a soles se hace fuera.
    ========================================================================= */
 
+/* ---- El motor del archivo ------------------------------------------------
+   La librería que usa el resto del CRM arma hojas rápido y bien, pero no
+   escribe estilos: en su edición abierta, los colores, los bordes y los
+   formatos condicionales simplemente no salen. Para un archivo que se abre
+   delante de la persona con la que se conversa su pago, eso no es un detalle
+   cosmético — un muro de celdas grises invita a no leerlo.
+
+   Así que este libro lo escribe ExcelJS, que sí sabe de estilos. Se carga solo
+   al apretar el botón, como los fondos del reporte. Lo que NO sabe hacer es
+   gráficos; a cambio, escribe archivos que Excel abre sin pedir reparaciones,
+   que es exactamente donde nos equivocamos la vez pasada.
+   ========================================================================= */
+const EXCELJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+
+/* La paleta de Stratis, la misma de la presentación y del CRM */
+const LX = {
+  navy:"FF0C1137", azul:"FF3B43FB", gris:"FF3F5073", gris2:"FFA0ABBC",
+  blanco:"FFFFFFFF", fondo:"FFF6F9FF", amarillo:"FFFFF7E6",
+  verdeBg:"FFE6F7F1", verdeTx:"FF0A7D5E", rojoBg:"FFFDEDEA", rojoTx:"FFB3341A",
+  linea:"FFDDE2EC"
+};
+
+let _exceljs = null;
+function cargarExcelJS(){
+  if (_exceljs) return Promise.resolve(_exceljs);
+  if (window.ExcelJS){ _exceljs = window.ExcelJS; return Promise.resolve(_exceljs); }
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = EXCELJS_CDN;
+    s.onload = () => { _exceljs = window.ExcelJS;
+      _exceljs ? ok(_exceljs) : mal(new Error("cargó pero no quedó disponible")); };
+    s.onerror = () => mal(new Error("no se pudo bajar la librería de Excel. Revisa la conexión o si la red bloquea cdnjs."));
+    document.head.appendChild(s);
+  });
+}
+
 /* ---- Utilidades de celda ------------------------------------------------ */
-const L = i => XLSX.utils.encode_col(i);
+const L = i => { let n = i + 1, s = ""; while (n > 0){ const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = (n - r - 1) / 26; } return s; };
 const A1 = (c, f) => L(c) + f;
 /* Excel no entiende una fecha ISO como fecha: hay que darle el serial. La
    época es el 30/12/1899 por el bisiesto de 1900 que Lotus inventó y que
@@ -8146,36 +8182,93 @@ const serial = iso => {
   return Math.round((new Date(f + "T12:00:00Z") - new Date("1899-12-30T12:00:00Z")) / 86400000);
 };
 
-/* Escribe una hoja desde una matriz. Las celdas que empiezan con «=» se
-   guardan como fórmula y no como texto: es toda la diferencia entre un libro
-   que se recalcula y una foto. */
+/* Una hoja no se escribe acá: se describe. Las celdas que empiezan con «=» son
+   fórmulas y no texto, que es toda la diferencia entre un libro que se
+   recalcula y una foto. */
 function hojaLibro(filas, opts){
-  const o = opts || {};
-  const ws = XLSX.utils.aoa_to_sheet(filas.map(f => f.map(c =>
-    (typeof c === "string" && c[0] === "=") ? null : c)));
-  filas.forEach((fila, r) => fila.forEach((c, k) => {
-    if (typeof c === "string" && c[0] === "=")
-      ws[A1(k, r + 1)] = { t:"n", f:c.slice(1) };
-  }));
+  return { filas, opts: opts || {} };
+}
+
+/* ---- El pintor ----------------------------------------------------------
+   Todo el diseño vive acá, en un solo lugar: si mañana cambia la paleta, se
+   cambia una vez y no hoja por hoja. */
+function pintarHoja(ws, d){
+  const o = d.opts, filas = d.filas;
   const ancho = o.anchos || [];
-  ws["!cols"] = (filas[0] || []).map((c, i) =>
-    ({ wch: ancho[i] || Math.min(34, Math.max(11, String(c || "").length + 3)) }));
-  if (o.filtro) ws["!autofilter"] = { ref: XLSX.utils.encode_range(
-    { s:{ r:o.filtro - 1, c:0 }, e:{ r:filas.length - 1, c:(filas[o.filtro - 1] || []).length - 1 } }) };
-  if (o.congelar) ws["!freeze"] = { xSplit:0, ySplit:o.congelar };
-  (o.pct || []).forEach(([col, desde, hasta]) => {
-    for (let f = desde; f <= hasta; f++){
-      const cel = ws[A1(col, f)];
-      if (cel) cel.z = "0.0%";
-    }
+  const nCols = filas.reduce((n, f) => Math.max(n, f.length), 0);
+  ws.columns = Array.from({ length: nCols }, (_, i) => ({
+    width: ancho[i] || Math.min(34, Math.max(11, String((filas[o.cabecera - 1] || [])[i] || "").length + 3)) }));
+
+  filas.forEach((fila, r) => {
+    const f = r + 1;
+    fila.forEach((v, k) => {
+      const cel = ws.getCell(f, k + 1);
+      if (typeof v === "string" && v[0] === "=") cel.value = { formula: v.slice(1) };
+      else if (v !== null && v !== undefined && v !== "") cel.value = v;
+    });
   });
-  (o.fecha || []).forEach(([col, desde, hasta]) => {
-    for (let f = desde; f <= hasta; f++){
-      const cel = ws[A1(col, f)];
-      if (cel && typeof cel.v === "number") cel.z = "dd/mm/yyyy";
-    }
+
+  const pintar = (f, k, estilo) => {
+    const cel = ws.getCell(f, k);
+    if (estilo.fill) cel.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:estilo.fill } };
+    if (estilo.font) cel.font = estilo.font;
+    if (estilo.align) cel.alignment = estilo.align;
+    if (estilo.borde) cel.border = { top:estilo.borde, left:estilo.borde, bottom:estilo.borde, right:estilo.borde };
+    if (estilo.fmt) cel.numFmt = estilo.fmt;
+  };
+
+  if (o.titulo){
+    pintar(o.titulo, 1, { font:{ name:"Calibri", size:16, bold:true, color:{ argb:LX.navy } } });
+    ws.getRow(o.titulo).height = 22;
+  }
+  if (o.sub) pintar(o.sub, 1, { font:{ size:10, italic:true, color:{ argb:LX.gris } } });
+
+  if (o.cabecera){
+    const r = ws.getRow(o.cabecera);
+    r.height = 30;
+    for (let k = 1; k <= nCols; k++)
+      pintar(o.cabecera, k, { fill:LX.navy,
+        font:{ bold:true, size:10, color:{ argb:LX.blanco } },
+        align:{ horizontal:"center", vertical:"middle", wrapText:true } });
+  }
+  /* Cabecera de hoja de datos: se marca sin pintarla, para no estorbar cuando
+     alguien pega encima o filtra. */
+  if (o.cabeceraSimple){
+    ws.getRow(o.cabeceraSimple).font = { bold:true, size:10, color:{ argb:LX.navy } };
+  }
+  (o.secciones || []).forEach(f => {
+    for (let k = 1; k <= nCols; k++)
+      pintar(f, k, { fill:LX.gris, font:{ bold:true, size:10, color:{ argb:LX.blanco } } });
   });
-  return ws;
+  (o.etiquetas || []).forEach(f => pintar(f, 1, { font:{ bold:true, size:10, color:{ argb:LX.navy } } }));
+  (o.notas || []).forEach(([f, k]) => pintar(f, k, { font:{ size:9, color:{ argb:LX.gris } } }));
+  (o.editables || []).forEach(([f, k]) => pintar(f, k, { fill:LX.amarillo,
+    borde:{ style:"thin", color:{ argb:LX.gris2 } } }));
+  (o.destacar || []).forEach(([f, k, color]) => pintar(f, k,
+    { font:{ bold:true, size:13, color:{ argb:color || LX.navy } } }));
+  (o.zebra || []).forEach(f => {
+    for (let k = 1; k <= nCols; k++) pintar(f, k, { fill:LX.fondo });
+  });
+  (o.fmt || []).forEach(([k, desde, hasta, formato]) => {
+    for (let f = desde; f <= hasta; f++) pintar(f, k, { fmt: formato });
+  });
+
+  if (o.congelar) ws.views = [{ state:"frozen", xSplit:o.congelarX || 0, ySplit:o.congelar }];
+  if (o.filtro) ws.autoFilter = { from:{ row:o.filtro, column:1 },
+                                  to:{ row: Math.max(o.filtro + 1, filas.length), column: nCols } };
+
+  /* Semáforos: lo que hay que mirar primero en una reunión es si la llave
+     abrió, y eso tiene que verse sin leer. */
+  (o.semaforo || []).forEach(([rango, verdes, rojos]) => {
+    const reglas = [];
+    (verdes || []).forEach(t => reglas.push({ type:"cellIs", operator:"equal", formulae:[`"${t}"`],
+      style:{ fill:{ type:"pattern", pattern:"solid", fgColor:{ argb:LX.verdeBg } },
+              font:{ bold:true, color:{ argb:LX.verdeTx } } } }));
+    (rojos || []).forEach(t => reglas.push({ type:"cellIs", operator:"equal", formulae:[`"${t}"`],
+      style:{ fill:{ type:"pattern", pattern:"solid", fgColor:{ argb:LX.rojoBg } },
+              font:{ bold:true, color:{ argb:LX.rojoTx } } } }));
+    ws.addConditionalFormatting({ ref:rango, rules:reglas });
+  });
 }
 
 /* ---- Los datos crudos ---------------------------------------------------
@@ -8267,7 +8360,7 @@ function hojaParametros(p, d){
     ["Hasta", serial(v.fin), ""],
     ["Semanas del periodo", Math.round(semanasPeriodo(p) * 100) / 100, "No se redondea: escala el mínimo de visitas"],
     ["", "", ""],
-    ["OBJETIVOS", "META DEL MES", "PESO"],
+    ["OBJETIVOS DEL PERIODO", "META DEL MES", ""],
     ["Reactivación del portafolio", M.reactivacion_pp, "p.p. acumulados desde el arranque"],
     ["Facturación", M.facturacion_pct, "% acumulado sobre la base congelada"],
     ["Venta (afiliación)", M.ventas_mes, "por periodo, no se acumula"],
@@ -8292,8 +8385,21 @@ function hojaParametros(p, d){
     ["FERIADOS", "", "No cuentan como día trabajado. Sábados y domingos tampoco, eso lo sabe el calendario"]
   ];
   fer.forEach(f => filas.push(["", serial(f), ""]));
-  const ws = hojaLibro(filas, { anchos:[34, 16, 60],
-    fecha:[[1, FIL.ini, FIL.fin], [1, FIL.feriados, FIL.feriados + fer.length]] });
+  const editables = [];
+  [FIL.mes, FIL.semanas, FIL.metaReact, FIL.metaFact, FIL.metaVenta,
+   FIL.pesoReact, FIL.pesoFact, FIL.pesoVenta, FIL.cobertura, FIL.visitas, FIL.puntualidad,
+   FIL.piso, FIL.pagoPiso, FIL.pagoMeta, FIL.sobre, FIL.tope, FIL.base1, FIL.mensual
+  ].forEach(f => editables.push([f, 2]));
+  for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + 1 + i, 2]);
+
+  const ws = hojaLibro(filas, {
+    titulo:1, anchos:[38, 16, 62],
+    secciones:[8, 16, 21, 30],
+    etiquetas:filas.map((_, i) => i + 1).filter(f => ![1, 8, 16, 21, 30].includes(f)),
+    notas:filas.map((_, i) => [i + 1, 3]),
+    editables,
+    fmt:[[2, FIL.ini, FIL.fin, "dd/mm/yyyy"],
+         [2, FIL.feriados + 1, FIL.feriados + fer.length, "dd/mm/yyyy"]] });
   return { ws, nFeriados: fer.length };
 }
 const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n}`;
@@ -8318,8 +8424,10 @@ function hojaGestiones(d, nFer){
       g.medio, g.respondio, g.efectiva, g.primera
     ]);
   });
-  return hojaLibro(filas, { filtro:1, congelar:1,
-    fecha:[[7, 2, filas.length], [8, 2, filas.length]],
+  /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
+     la que se filtra, y un encabezado pintado estorba al pegar. */
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"]],
     anchos:[10,6,18,26,14,30,16,15,15,13,9,16,11,13,14] });
 }
 
@@ -8330,7 +8438,8 @@ function hojaCartera(d){
   const filas = [cols];
   d.cartera.forEach(c => filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
     c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre, c.cuenta]));
-  return hojaLibro(filas, { filtro:1, congelar:1, fecha:[[7, 2, filas.length]],
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[8, 2, filas.length, "dd/mm/yyyy"]],
     anchos:[18,26,14,30,16,11,12,15,14,12,20] });
 }
 
@@ -8339,7 +8448,8 @@ function hojaNuevosLibro(d){
   const filas = [cols];
   d.nuevos.forEach(n => filas.push([n.nombre, n.correo, n.ruc, n.comercio,
     n.fecha ? serial(n.fecha) : "", n.periodo, n.mes, n.venta]));
-  return hojaLibro(filas, { filtro:1, congelar:1, fecha:[[4, 2, filas.length]],
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[5, 2, filas.length, "dd/mm/yyyy"]],
     anchos:[18,26,14,30,13,10,6,17] });
 }
 
@@ -8385,9 +8495,13 @@ function hojaResumen(p, d, nG, nC, nN){
                 "Ventas del periodo","Meta del mes","Cumple venta",
                 "Cumplimiento ponderado","Tramo","Incentivo del periodo",
                 "Se paga ahora","Se retiene"];
-  const filas = [cols];
+  const filas = [
+    [`Resumen del equipo · periodo ${nombrePeriodo(p)}`],
+    ["Cada celda es una fórmula sobre las hojas de datos. Solo la facturación se toma del CRM: ese dato no lo genera el sistema."],
+    [],
+    cols];
   d.ejec.forEach((u, i) => {
-    const f = i + 2;
+    const f = i + 5;
     const correoRef = `$B${f}`;
     const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
     const cart = carteraDe(u.correo, p).n;
@@ -8397,14 +8511,14 @@ function hojaResumen(p, d, nG, nC, nN){
       `=${F.gestiones}`,
       `=IF($C${f}=0,0,${F.cubiertos}/$C${f}*100)`,
       `=${P_(FIL.cobertura)}`,
-      `=IF($E${f}>=$F${f},1,0)`,
+      `=IF($E${f}>=$F${f},"Sí","No")`,
       `=${F.efectivas}`,
       `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
-      `=IF($H${f}>=$I${f},1,0)`,
+      `=IF($H${f}>=$I${f},"Sí","No")`,
       `=IF($D${f}=0,0,${F.puntuales}/$D${f}*100)`,
       `=${P_(FIL.puntualidad)}`,
-      `=IF(AND($D${f}>0,$K${f}>=$L${f}),1,0)`,
-      `=$G${f}+$J${f}+$M${f}`,
+      `=IF(AND($D${f}>0,$K${f}>=$L${f}),"Sí","No")`,
+      `=COUNTIF($G${f}:$M${f},"Sí")`,
       `=IF($N${f}=3,"Habilitado",IF($N${f}=2,"Solo bono base","Sin incentivo"))`,
       `=IF($C${f}=0,0,${F.acumulados}/$C${f}*100)`,
       `=${P_(FIL.metaReact)}`,
@@ -8425,7 +8539,18 @@ function hojaResumen(p, d, nG, nC, nN){
       `=$AA${f}*(100-${P_(FIL.mensual)})/100`
     ]);
   });
-  return hojaLibro(filas, { filtro:1, congelar:1,
+  const ult = 4 + d.ejec.length;
+  const pct = ["Cobertura","Puntualidad","Reactivación acumulada (p.p.)","Cumple reactivación",
+               "Facturación acumulada (%)","Cumple facturación","Cumple venta",
+               "Cumplimiento ponderado","Tramo","Incentivo del periodo","Se paga ahora","Se retiene"];
+  return hojaLibro(filas, {
+    titulo:1, sub:2, cabecera:4, congelar:4, congelarX:1, filtro:4,
+    fmt: pct.map(n => [cols.indexOf(n) + 1, 5, ult, "0.0"]),
+    destacar: d.ejec.map((_, i) => [5 + i, cols.indexOf("Incentivo del periodo") + 1, LX.navy]),
+    semaforo: [
+      [`${L(cols.indexOf("Llave"))}5:${L(cols.indexOf("Llave"))}${ult}`, ["Habilitado"], ["Sin incentivo"]],
+      [`${L(cols.indexOf("¿Cobertura?"))}5:${L(cols.indexOf("¿Puntualidad?"))}${ult}`, ["Sí"], ["No"]]
+    ],
     anchos:[18,26,10,12,10,8,10,10,9,9,11,8,11,11,15,14,11,13,14,11,13,10,11,12,13,9,12,11,10] });
 }
 
@@ -8490,8 +8615,27 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
       `=IF(${A1(1,f)}<=${A1(0,f)},0,NETWORKDAYS(${A1(0,f)}+1,${A1(1,f)},${RANGO_FERIADOS(d.nFer)}))`,
       `=IF(${A1(2,f)}<=1,"Sí","No")`, g.comercio]);
   });
-  return hojaLibro(filas, { anchos:[32, 16, 15, 15, 62],
-    fecha:[[0, inicio, filas.length], [1, inicio, filas.length]] });
+  const bandas = [];
+  filas.forEach((fila, i) => {
+    const t = String(fila[0] || "");
+    if (t && t === t.toUpperCase() && t.length > 3 && !/^\d/.test(t)) bandas.push(i + 1);
+  });
+  const fIncentivo = filas.findIndex(x => x[0] === "Incentivo del periodo") + 1;
+  const fCab = filas.findIndex(x => x[0] === "Fecha de gestión") + 1;
+  /* Las etiquetas son solo los rótulos de la parte de arriba. Incluir el
+     encabezado de la tabla pintaba texto azul marino sobre fondo azul marino
+     —invisible— y las filas de fechas salían en negrita sin razón. */
+  const etiquetas = filas.map((x, i) => x[0] && !bandas.includes(i + 1)
+    && i > 1 && (i + 1) < fCab ? i + 1 : 0).filter(Boolean);
+  return hojaLibro(filas, {
+    titulo:1, sub:2, anchos:[34, 16, 16, 14, 60],
+    secciones:bandas,
+    etiquetas,
+    notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
+    destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
+    fmt:[[1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"]],
+    cabecera: fCab,
+    semaforo: [[`D${bandas[0] + 1}:D${bandas[0] + 3}`, ["Sí"], ["No"]]] });
 }
 
 /* ---- Evolución: cómo se movió el proyecto periodo a periodo ------------- */
@@ -8500,7 +8644,11 @@ function hojaEvolucion(d){
                 "Cobertura %","Visitas efectivas","Puntualidad %",
                 "Reactivación acumulada (p.p.)","Meta del mes","Ventas","Meta",
                 "Cumplimiento ponderado","Incentivo del periodo","Se paga","Se retiene"];
-  const filas = [cols];
+  const filas = [
+    ["Evolución del proyecto"],
+    ["Un renglón por ejecutivo y periodo, para ver de dónde viene el número de hoy."],
+    [],
+    cols];
   d.periodos.forEach(pp => {
     const M = metaPeriodo(pp, paramsDe(pp));
     d.ejec.forEach(u => {
@@ -8515,7 +8663,11 @@ function hojaEvolucion(d){
         Math.round(x.mensual * 100) / 100, Math.round(x.retenido * 100) / 100]);
     });
   });
-  return hojaLibro(filas, { filtro:1, congelar:1,
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4, congelar:4, filtro:4,
+    fmt:[[6, 5, filas.length, "0.0"], [8, 5, filas.length, "0.0"],
+         [9, 5, filas.length, "0.00"], [13, 5, filas.length, "0.0"],
+         [14, 5, filas.length, "0.0"], [15, 5, filas.length, "0.0"], [16, 5, filas.length, "0.0"]],
+    semaforo:[[`D5:D${filas.length}`, ["Habilitado"], ["Sin incentivo"]]],
     anchos:[10,6,18,15,11,11,10,12,15,11,9,8,13,13,10,10] });
 }
 
@@ -8549,7 +8701,10 @@ function hojaCruce(d, nG){
   for (let c = 1; c <= medios.length + 4; c++)
     total.push(`=SUM(${A1(c,pri)}:${A1(c,ult)})`);
   filas.push(total);
-  return hojaLibro(filas, { anchos:[22].concat(medios.map(() => 14)).concat([10,11,14,16]) });
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4,
+    zebra:[filas.length],
+    etiquetas:d.ejec.map((_, i) => 5 + i).concat([filas.length]),
+    anchos:[22].concat(medios.map(() => 14)).concat([10,11,14,16]) });
 }
 
 /* ---- El libro ----------------------------------------------------------- */
@@ -8559,17 +8714,41 @@ function armarLibroIncentivos(p){
   d.nFer = par.nFeriados;
   const nG = d.gestiones.length + 1, nC = d.cartera.length + 1, nN = d.nuevos.length + 1;
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, hojaResumen(p, d, nG, nC, nN), "Resumen");
-  XLSX.utils.book_append_sheet(wb, par.ws, "Parámetros");
-  d.ejec.forEach(u => XLSX.utils.book_append_sheet(wb,
-    hojaEjecutivo(u, p, d, nG, nC, nN), nombreHoja(u.nombre)));
-  XLSX.utils.book_append_sheet(wb, hojaEvolucion(d), "Evolución");
-  XLSX.utils.book_append_sheet(wb, hojaCruce(d, nG), "Por medio");
-  XLSX.utils.book_append_sheet(wb, hojaGestiones(d, par.nFeriados), "Gestiones");
-  XLSX.utils.book_append_sheet(wb, hojaCartera(d), "Cartera");
-  XLSX.utils.book_append_sheet(wb, hojaNuevosLibro(d), "Nuevos");
-  return { wb, d, nG, nC, nN };
+  /* El orden importa: lo que se mira en la reunión va primero, los datos
+     crudos al final. Nadie abre un libro por la hoja de 4000 filas. */
+  const hojas = [
+    ["Resumen",    hojaResumen(p, d, nG, nC, nN)],
+    ["Parámetros", par.ws]
+  ];
+  d.ejec.forEach(u => hojas.push([nombreHoja(u.nombre), hojaEjecutivo(u, p, d, nG, nC, nN)]));
+  hojas.push(["Evolución", hojaEvolucion(d)]);
+  hojas.push(["Por medio", hojaCruce(d, nG)]);
+  hojas.push(["Gestiones", hojaGestiones(d, par.nFeriados)]);
+  hojas.push(["Cartera",   hojaCartera(d)]);
+  hojas.push(["Nuevos",    hojaNuevosLibro(d)]);
+  return { hojas, d, nG, nC, nN };
+}
+
+async function escribirLibro(hojas, nombre){
+  const ExcelJS = await cargarExcelJS();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stratis CRM";
+  wb.created = new Date();
+  hojas.forEach(([n, desc]) => {
+    const ws = wb.addWorksheet(n, { views:[{ showGridLines:false }] });
+    pintarHoja(ws, desc);
+  });
+  /* Las hojas de datos sí llevan cuadrícula: ahí se lee fila por fila. */
+  ["Gestiones", "Cartera", "Nuevos"].forEach(n => {
+    const ws = wb.getWorksheet(n);
+    if (ws) ws.views = [{ showGridLines:true, state:"frozen", ySplit:1 }];
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
 /* Excel no acepta ninguno de : \ / ? * [ ] en el nombre de una hoja, ni más
@@ -8589,41 +8768,16 @@ async function descargarLibroIncentivos(btn){
   HOJAS_USADAS.clear();
   try {
     const p = periodoBono();
-    const { wb } = armarLibroIncentivos(p);
-    const nombre = `Incentivos_${p.replace("-", "")}_${hoyISO().replace(/-/g, "")}.xlsx`;
-
-    const bytes = XLSX.write(wb, { bookType:"xlsx", type:"array" });
-    const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = nombre;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    const { hojas } = armarLibroIncentivos(p);
+    await escribirLibro(hojas,
+      `Incentivos_${p.replace("-", "")}_${hoyISO().replace(/-/g, "")}.xlsx`);
     toast(`Libro de ${nombrePeriodo(p)} descargado`);
   } catch (e){
     toast("No se pudo armar el libro: " + (e.message || e));
   } finally {
-    if (btn){ btn.disabled = false; btn.textContent = antes; }
+    if (btn){ btn.disabled = false; btn.textContent = antes || "Descargar el libro del periodo"; }
   }
 }
-
-/* =========================================================================
-   Por qué acá no hay tabla dinámica
-
-   La hubo. Se escribía a mano el XML de la caché y de la tabla, se inyectaba
-   en el .xlsx ya armado y funcionaba: LibreOffice la abría y la recalculaba
-   con los números correctos. Excel de escritorio, no — declaraba el archivo
-   dañado y ofrecía repararlo.
-
-   La lección no es que el XML estuviera mal, es que se probó donde se podía
-   probar y no donde se iba a usar. Un archivo que se abre en una reunión para
-   conversar el pago de alguien no puede empezar con un cuadro de diálogo que
-   dice «dañado»: a esa altura ya da igual si los números están bien.
-
-   Así que el libro sale como Excel plano y el corte por ejecutivo lo hacen
-   las fórmulas, que no dependen de escribir formatos a mano. Para cruzar los
-   datos a gusto, la hoja Gestiones tiene autofiltro y desde ahí se inserta
-   una dinámica nativa en dos clics — hecha por Excel, que sabe hacerlas.
-   ========================================================================= */
 
 /* =========================================================================
    Sincronización — el CRM se actualiza solo
