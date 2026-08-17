@@ -5427,7 +5427,10 @@ async function exportarBBVA(btn){
 function hojaReporte(admin){
   const base = cartera();
   base.forEach(c => RULES.recomputarBase(c.customer_id));
-  const cont = base.filter(c => c._base._efectivos > 0).length;
+  /* Si un comercio quedara sin su base recalculada —un id repetido, una fila
+     a medio migrar— esto reventaba y se llevaba el archivo entero por delante.
+     Once hojas perdidas por una fila rara no es un intercambio razonable. */
+  const cont = base.filter(c => (c._base || {})._efectivos > 0).length;
   const regs = DB.todos();
   const ef = regs.filter(r => esEfectivo(r.Resultado)).length;
   const filas = [["CRM Stratis — Campaña BBVA Adquirencia"], [],
@@ -5472,6 +5475,10 @@ async function exportarExcel(btn){
     try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
   }
 
+  /* Todo lo que sigue va dentro de un try: si algo falla, el botón vuelve a su
+     estado y se dice qué pasó. Un «Generando…» eterno es peor que un error,
+     porque no se sabe si hay que esperar o si el archivo no va a llegar. */
+  try {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hoja(COLS_BASE, filasBase()), "Base");
   XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
@@ -5480,7 +5487,11 @@ async function exportarExcel(btn){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
-    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base");
+    /* Ojo con el nombre: esta hoja y la primera se llamaban «Base» las dos, y
+       Excel no admite dos hojas con el mismo nombre. La librería lanzaba, la
+       excepción se escapaba sin que nadie la atrapara y el botón se quedaba
+       en «Generando…» para siempre. Doce hojas perdidas por una palabra. */
+    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base para BBVA");
     XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
@@ -5491,13 +5502,17 @@ async function exportarExcel(btn){
   const hoy = hoyISO().replace(/-/g,"");
   const quien = admin ? "Completo" : S.user.nombre.replace(/\s+/g,"_");
   XLSX.writeFile(wb, `CRM_BBVA_${quien}_${hoy}.xlsx`);
-
-  if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   toast(admin ? `Excel completo generado · ${wb.SheetNames.length} hojas`
               : "Excel de tu cartera generado · 3 hojas");
+  } catch (e){
+    toast("No se pudo generar el Excel: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt || "Descargar Excel completo"; }
+  }
 }
 
 function exportarCSV(que){
+  try {
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
                  visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
                  bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
@@ -5510,6 +5525,7 @@ function exportarCSV(que){
   a.href = url; a.download = `${nombre}_StratisCRM.csv`; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
   toast(`${nombre} exportado`);
+  } catch (e){ toast("No se pudo generar el CSV: " + (e.message || e)); }
 }
 
 /* =========================================================================
