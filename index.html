@@ -669,6 +669,9 @@ table.tbl tr:last-child td{border-bottom:0}
 .bn-curva-fila .ins .field{margin:0}
 .bn-curva-fila .ins span{display:block;font-size:11px;color:var(--muted);margin-bottom:2px;
   text-transform:capitalize}
+.bn-top{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+.bn-top .fsel{flex:1 1 260px}
+.bn-top .btn{flex:none}
 .bn-fer{display:flex;flex-wrap:wrap;gap:6px}
 .bn-fer span{background:var(--card);border:1px solid var(--line);border-radius:999px;
   padding:3px 10px;font-size:12px;font-weight:640}
@@ -6853,10 +6856,29 @@ function viewBono(){
   </div>` : ""}
 
   <div class="card" style="margin-top:12px">
-    <label class="fsel"><span>Periodo</span>
-      <select id="selPeriodoBono">${periodos.map(x =>
-        `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
-      </select></label>
+    <div class="bn-top">
+      <label class="fsel"><span>Periodo</span>
+        <select id="selPeriodoBono">${periodos.map(x =>
+          `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
+        </select></label>
+      <button class="btn" id="bonoLibro">Descargar el libro del periodo</button>
+    </div>
+    <details class="aj-mas" style="margin-bottom:0">
+      <summary>Qué trae el libro</summary>
+      <div class="cuerpo">
+        <p>Un Excel con el cálculo <b>hecho en fórmulas, no en valores</b>: cada porcentaje del
+        resumen apunta a las filas de gestión que lo producen. Se puede abrir sin el CRM y rehacer
+        la cuenta a mano, que es lo que hace falta cuando el número se conversa con la persona.</p>
+        <p>Trae una hoja <b>por cada ejecutivo</b> con sus tres requisitos, sus objetivos contra la
+        meta del mes y el detalle de sus gestiones con los días de demora calculados; una de
+        <b>Resumen</b> con el equipo completo; una de <b>Evolución</b> con todos los periodos del
+        proyecto; las hojas de datos —gestiones, cartera y clientes nuevos—; una <b>dinámica</b> ya
+        armada, y una de <b>Parámetros</b> donde están las metas, los tramos y los feriados.</p>
+        <p>Cambiar una celda de Parámetros recalcula el libro entero. Sirve para responder «¿y si
+        el feriado hubiera contado?» sin volver al sistema. <b>Ningún sueldo entra al archivo</b>:
+        el cálculo llega hasta el porcentaje, igual que acá.</p>
+      </div>
+    </details>
   </div>
 
   ${ejec.length ? ejec.map(u => tarjetaEjecutivo(u, p)).join("")
@@ -7226,6 +7248,7 @@ async function guardarParametros(){
 
 function bindBono(){
   if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
+  if ($("#bonoLibro")) $("#bonoLibro").onclick = e => descargarLibroIncentivos(e.currentTarget);
   if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
   if ($("#baseGuardar"))    $("#baseGuardar").onclick     = () => guardarBaseFact();
@@ -8060,6 +8083,631 @@ function validarBloqueReporte(clave, v){
     if (l.length > 2) return "En la lámina entran dos lecturas; la tercera se saldría del recuadro.";
   }
   return "";
+}
+
+/* =========================================================================
+   El libro del incentivo — la evidencia del cálculo, no su resumen
+
+   Hasta acá el CRM decía «te corresponde 22%» y había que creerle. Para una
+   reunión donde se conversa el pago de una persona eso no alcanza: hace falta
+   poder abrir el número, ver de qué filas sale y rehacer la cuenta delante de
+   ella. Un PDF con el resultado no sirve; una hoja con los datos pero sin la
+   cuenta, tampoco.
+
+   Por eso este libro no trae valores calculados sino FÓRMULAS. Cada
+   porcentaje del resumen es un SUMAR.SI.CONJUNTO que apunta a la hoja de
+   gestiones, y las metas, los pesos, los tramos y los feriados viven en una
+   hoja de parámetros editable. Si en la reunión alguien pregunta «¿y si el
+   feriado del 6 hubiera contado?», se cambia esa celda y el libro entero se
+   recalcula a la vista.
+
+   Tres consecuencias de esa decisión, y las tres son el punto:
+
+     · El cálculo se puede auditar sin el CRM. El archivo se sostiene solo.
+     · El cálculo se puede discutir. Se ve la cuenta, no solo el resultado.
+     · El cálculo se puede reproducir. Excel llega al mismo número que el CRM
+       o hay un error en alguno de los dos, y eso se descubre acá y no el día
+       del pago.
+
+   Lo que no entra: ningún sueldo. El libro llega hasta el porcentaje del
+   sueldo base, igual que el CRM. La conversión a soles se hace fuera.
+   ========================================================================= */
+
+const JSZIP_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+
+/* ---- Utilidades de celda ------------------------------------------------ */
+const L = i => XLSX.utils.encode_col(i);
+const A1 = (c, f) => L(c) + f;
+/* Excel no entiende una fecha ISO como fecha: hay que darle el serial. La
+   época es el 30/12/1899 por el bisiesto de 1900 que Lotus inventó y que
+   Excel conserva por compatibilidad. */
+const serial = iso => {
+  const f = String(iso || "").slice(0,10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return "";
+  return Math.round((new Date(f + "T12:00:00Z") - new Date("1899-12-30T12:00:00Z")) / 86400000);
+};
+
+/* Escribe una hoja desde una matriz. Las celdas que empiezan con «=» se
+   guardan como fórmula y no como texto: es toda la diferencia entre un libro
+   que se recalcula y una foto. */
+function hojaLibro(filas, opts){
+  const o = opts || {};
+  const ws = XLSX.utils.aoa_to_sheet(filas.map(f => f.map(c =>
+    (typeof c === "string" && c[0] === "=") ? null : c)));
+  filas.forEach((fila, r) => fila.forEach((c, k) => {
+    if (typeof c === "string" && c[0] === "=")
+      ws[A1(k, r + 1)] = { t:"n", f:c.slice(1) };
+  }));
+  const ancho = o.anchos || [];
+  ws["!cols"] = (filas[0] || []).map((c, i) =>
+    ({ wch: ancho[i] || Math.min(34, Math.max(11, String(c || "").length + 3)) }));
+  if (o.filtro) ws["!autofilter"] = { ref: XLSX.utils.encode_range(
+    { s:{ r:o.filtro - 1, c:0 }, e:{ r:filas.length - 1, c:(filas[o.filtro - 1] || []).length - 1 } }) };
+  if (o.congelar) ws["!freeze"] = { xSplit:0, ySplit:o.congelar };
+  (o.pct || []).forEach(([col, desde, hasta]) => {
+    for (let f = desde; f <= hasta; f++){
+      const cel = ws[A1(col, f)];
+      if (cel) cel.z = "0.0%";
+    }
+  });
+  (o.fecha || []).forEach(([col, desde, hasta]) => {
+    for (let f = desde; f <= hasta; f++){
+      const cel = ws[A1(col, f)];
+      if (cel && typeof cel.v === "number") cel.z = "dd/mm/yyyy";
+    }
+  });
+  return ws;
+}
+
+/* ---- Los datos crudos ---------------------------------------------------
+   Todo el proyecto, no solo el periodo elegido: sin la historia no se puede
+   mostrar el acumulado ni la evolución, y con dos hojas de datos distintas
+   los números terminarían discrepando entre sí. */
+function datosLibro(){
+  const periodos = periodosProyecto();
+  const idx = {}; periodos.forEach((p, i) => idx[p] = i + 1);
+  const ejec = ejecutivosDelBono();
+
+  /* Primera gestión de cada comercio dentro de cada periodo: es lo que
+     convierte la lista de gestiones en el conteo de cobertura sin pedirle a
+     Excel un conteo de valores únicos, que no se puede leer de un vistazo. */
+  const vistos = new Set();
+  const gestiones = DB.todos()
+    .slice()
+    .sort((a, b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto)))
+    .map(r => {
+      const p = periodoDe(String(r.Fecha_Contacto).slice(0,10));
+      const clave = p + "|" + r.Correo_Stratis + "|" + r.Customer_id;
+      const primera = vistos.has(clave) ? 0 : 1;
+      vistos.add(clave);
+      const u = ejec.find(x => x.correo === r.Correo_Stratis);
+      return {
+        periodo:p, mes: idx[p] || 0,
+        nombre: u ? u.nombre : (r.Ejecutivo || r.Correo_Stratis),
+        correo: r.Correo_Stratis,
+        cid: String(r.Customer_id),
+        comercio: r.Nombre_Comercio || "",
+        distrito: r.Distrito || "",
+        fecha: String(r.Fecha_Contacto).slice(0,10),
+        registro: String(r.Creado_En || "").slice(0,10),
+        medio: (tipoById(r.Tipo_Contacto) || {}).label || r.Tipo_Contacto || "",
+        respondio: esEfectivo(r.Resultado) ? 1 : 0,
+        efectiva: r.Cumple_Visita === "SI" ? 1 : 0,
+        primera
+      };
+    });
+
+  const cartera = CLIENTES.filter(c => !esClienteNuevo(c)).map(c => {
+    const u = ejec.find(x => x.correo === c.asignado_correo);
+    const pc = c.cerrado_en ? periodoDe(String(c.cerrado_en).slice(0,10)) : "";
+    return {
+      nombre: u ? u.nombre : (c.asignado || ""), correo: c.asignado_correo || "",
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      distrito: c.distrito || "", estado: c.estado || "",
+      resultado: c.resultado_gestion || "PENDIENTE",
+      cierre: c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "",
+      periodoCierre: pc, mesCierre: idx[pc] || 0,
+      cuenta: (esRetencion(c) || esRecuperado(c)) ? 1 : 0
+    };
+  });
+
+  const nuevos = CLIENTES.filter(esClienteNuevo).map(c => {
+    const u = ejec.find(x => x.correo === c.asignado_correo);
+    const f = String(c.cerrado_en || c.creado_en || "").slice(0,10);
+    const pc = f ? periodoDe(f) : "";
+    return { nombre: u ? u.nombre : (c.asignado || ""), correo: c.asignado_correo || "",
+             ruc: c.ruc || "", comercio: c.nombre_comercio || "", fecha: f,
+             periodo: pc, mes: idx[pc] || 0,
+             venta: esVentaNueva(c) ? 1 : 0 };
+  });
+
+  return { periodos, idx, ejec, gestiones, cartera, nuevos };
+}
+
+/* ---- La hoja de parámetros ---------------------------------------------
+   El corazón editable del libro. Todo lo demás la mira. */
+const P_ = r => `'Parámetros'!$B$${r}`;
+const FIL = {                 // fila de cada parámetro en la hoja
+  periodo:2, mes:3, ini:4, fin:5, semanas:6,
+  metaReact:9, metaFact:10, metaVenta:11,
+  pesoReact:12, pesoFact:13, pesoVenta:14,
+  cobertura:17, visitas:18, puntualidad:19,
+  piso:22, pagoPiso:23, pagoMeta:24, sobre:25, tope:26, base1:27, mensual:28,
+  feriados:31
+};
+function hojaParametros(p, d){
+  const B = paramsDe(p);
+  const M = metaPeriodo(p, B);
+  const v = ventanaPeriodo(p);
+  const fer = Array.isArray(B.feriados) ? B.feriados : FERIADOS_DEF;
+  const filas = [
+    ["Parámetros del periodo", "", "Cambia cualquier celda azul y el libro entero se recalcula"],
+    ["Periodo", p, "El mes en que cierra y se paga"],
+    ["Mes del proyecto", M.i, `de ${M.total}`],
+    ["Desde", serial(v.ini), "La ventana del bono corre del 19 al 18"],
+    ["Hasta", serial(v.fin), ""],
+    ["Semanas del periodo", Math.round(semanasPeriodo(p) * 100) / 100, "No se redondea: escala el mínimo de visitas"],
+    ["", "", ""],
+    ["OBJETIVOS", "META DEL MES", "PESO"],
+    ["Reactivación del portafolio", M.reactivacion_pp, "p.p. acumulados desde el arranque"],
+    ["Facturación", M.facturacion_pct, "% acumulado sobre la base congelada"],
+    ["Venta (afiliación)", M.ventas_mes, "por periodo, no se acumula"],
+    ["Peso de reactivación", B.pesos.reactivacion, "%"],
+    ["Peso de facturación", B.pesos.facturacion, "%"],
+    ["Peso de venta", B.pesos.venta, "%"],
+    ["", "", ""],
+    ["LLAVE DE ACCESO", "MÍNIMO", ""],
+    ["Cobertura de cartera", B.requisitos.cobertura_pct, "% de la cartera con al menos una gestión"],
+    ["Visitas efectivas por semana", B.requisitos.visitas_semana, "presenciales o virtuales con respuesta"],
+    ["Puntualidad del registro", B.requisitos.puntualidad_pct, "% registrado a tiempo"],
+    ["", "", ""],
+    ["TRAMOS DEL INCENTIVO", "VALOR", ""],
+    ["Piso", B.piso, "% de cumplimiento bajo el cual no hay incentivo"],
+    ["Paga en el piso", B.pago_en_piso, "% del sueldo base"],
+    ["Paga al 100%", B.pago_en_meta, "% del sueldo base"],
+    ["Sobrecumplimiento hasta", B.sobre, "%"],
+    ["Tope de pago", B.tope, "% del sueldo base"],
+    ["Bono base con un requisito caído", B.base_incumple_uno, "% del sueldo base"],
+    ["Se paga cada mes", B.pago_mensual, "% del incentivo; el resto se retiene al cierre"],
+    ["", "", ""],
+    ["FERIADOS", "", "No cuentan como día trabajado. Sábados y domingos tampoco, eso lo sabe el calendario"]
+  ];
+  fer.forEach(f => filas.push(["", serial(f), ""]));
+  const ws = hojaLibro(filas, { anchos:[34, 16, 60],
+    fecha:[[1, FIL.ini, FIL.fin], [1, FIL.feriados, FIL.feriados + fer.length]] });
+  return { ws, nFeriados: fer.length };
+}
+const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n}`;
+
+/* ---- Gestiones: la evidencia del tiempo de registro ---------------------
+   Las dos columnas que importan son fórmulas, no valores: DIAS.LAB entre la
+   gestión y el registro, saltando fines de semana y los feriados de la hoja
+   de parámetros. Quien quiera discutir un «fuera de plazo» puede ver la
+   cuenta en la celda. */
+function hojaGestiones(d, nFer){
+  const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
+                "Fecha de gestión","Fecha de registro","Días trabajados de demora","A tiempo",
+                "Medio","Respondió","Visita efectiva","Primera del comercio en el periodo"];
+  const filas = [cols];
+  d.gestiones.forEach((g, i) => {
+    const f = i + 2;
+    filas.push([
+      g.periodo, g.mes, g.nombre, g.correo, g.cid, g.comercio, g.distrito,
+      serial(g.fecha), serial(g.registro),
+      `=IF(${A1(8,f)}<=${A1(7,f)},0,NETWORKDAYS(${A1(7,f)}+1,${A1(8,f)},${RANGO_FERIADOS(nFer)}))`,
+      `=IF(${A1(9,f)}<=1,1,0)`,
+      g.medio, g.respondio, g.efectiva, g.primera
+    ]);
+  });
+  return hojaLibro(filas, { filtro:1, congelar:1,
+    fecha:[[7, 2, filas.length], [8, 2, filas.length]],
+    anchos:[10,6,18,26,14,30,16,15,15,13,9,16,11,13,14] });
+}
+
+function hojaCartera(d){
+  const cols = ["Ejecutivo","Correo","Customer ID","Comercio","Distrito","Estado",
+                "Resultado","Fecha de cierre","Periodo del cierre","Mes del cierre",
+                "Cuenta para reactivación"];
+  const filas = [cols];
+  d.cartera.forEach(c => filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
+    c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre, c.cuenta]));
+  return hojaLibro(filas, { filtro:1, congelar:1, fecha:[[7, 2, filas.length]],
+    anchos:[18,26,14,30,16,11,12,15,14,12,20] });
+}
+
+function hojaNuevosLibro(d){
+  const cols = ["Ejecutivo","Correo","RUC","Razón social","Fecha","Periodo","Mes","Cuenta como venta"];
+  const filas = [cols];
+  d.nuevos.forEach(n => filas.push([n.nombre, n.correo, n.ruc, n.comercio,
+    n.fecha ? serial(n.fecha) : "", n.periodo, n.mes, n.venta]));
+  return hojaLibro(filas, { filtro:1, congelar:1, fecha:[[4, 2, filas.length]],
+    anchos:[18,26,14,30,13,10,6,17] });
+}
+
+/* ---- Las fórmulas del cálculo ------------------------------------------
+   Se arman una sola vez y se usan igual en el resumen y en cada hoja
+   individual, para que no haya dos versiones de la misma cuenta. */
+function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const C = n => `Cartera!$${n}$2:$${n}$${nC}`;
+  const N = n => `Nuevos!$${n}$2:$${n}$${nN}`;
+  /* El par «rango, criterio» que se repite en todas: ejecutivo y mes. */
+  const eG = `${G("D")},${correoRef}`, mG = `${G("B")},${mesRef}`;
+
+  const gestiones  = `COUNTIFS(${eG},${mG})`;
+  const cubiertos  = `SUMIFS(${G("O")},${eG},${mG})`;
+  const efectivas  = `SUMIFS(${G("N")},${eG},${mG})`;
+  const puntuales  = `SUMIFS(${G("K")},${eG},${mG})`;
+  const respuestas = `SUMIFS(${G("M")},${eG},${mG})`;
+  const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
+  const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
+  const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
+  return { gestiones, cubiertos, efectivas, puntuales, respuestas, acumulados, delMes, ventas };
+}
+
+/* El tramo, tal cual está en el documento de incentivos: bajo el piso no
+   paga, del piso a la meta sube parejo, de la meta al sobrecumplimiento
+   sigue subiendo hasta el tope, y de ahí no pasa. */
+const FORMULA_TRAMO = c =>
+  `IF(${c}<${P_(FIL.piso)},0,` +
+  `IF(${c}<=100,${P_(FIL.pagoPiso)}+(${c}-${P_(FIL.piso)})/(100-${P_(FIL.piso)})*(${P_(FIL.pagoMeta)}-${P_(FIL.pagoPiso)}),` +
+  `IF(${c}<=${P_(FIL.sobre)},${P_(FIL.pagoMeta)}+(${c}-100)/(${P_(FIL.sobre)}-100)*(${P_(FIL.tope)}-${P_(FIL.pagoMeta)}),` +
+  `${P_(FIL.tope)})))`;
+
+/* ---- Resumen: una fila por ejecutivo, todo fórmula ---------------------- */
+function hojaResumen(p, d, nG, nC, nN){
+  const cols = ["Ejecutivo","Correo","Cartera asignada","Gestiones del periodo",
+                "Cobertura","Mínimo","¿Cobertura?",
+                "Visitas efectivas","Se piden","¿Visitas?",
+                "Puntualidad","Mínimo","¿Puntualidad?",
+                "Requisitos cumplidos","Llave",
+                "Reactivación acumulada (p.p.)","Meta del mes","Cumple reactivación",
+                "Facturación acumulada (%)","Meta del mes","Cumple facturación",
+                "Ventas del periodo","Meta del mes","Cumple venta",
+                "Cumplimiento ponderado","Tramo","Incentivo del periodo",
+                "Se paga ahora","Se retiene"];
+  const filas = [cols];
+  d.ejec.forEach((u, i) => {
+    const f = i + 2;
+    const correoRef = `$B${f}`;
+    const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
+    const cart = carteraDe(u.correo, p).n;
+    const crec = crecimientoFact(u.correo, p);
+    filas.push([
+      u.nombre, u.correo, cart,
+      `=${F.gestiones}`,
+      `=IF($C${f}=0,0,${F.cubiertos}/$C${f}*100)`,
+      `=${P_(FIL.cobertura)}`,
+      `=IF($E${f}>=$F${f},1,0)`,
+      `=${F.efectivas}`,
+      `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
+      `=IF($H${f}>=$I${f},1,0)`,
+      `=IF($D${f}=0,0,${F.puntuales}/$D${f}*100)`,
+      `=${P_(FIL.puntualidad)}`,
+      `=IF(AND($D${f}>0,$K${f}>=$L${f}),1,0)`,
+      `=$G${f}+$J${f}+$M${f}`,
+      `=IF($N${f}=3,"Habilitado",IF($N${f}=2,"Solo bono base","Sin incentivo"))`,
+      `=IF($C${f}=0,0,${F.acumulados}/$C${f}*100)`,
+      `=${P_(FIL.metaReact)}`,
+      `=IF($Q${f}=0,0,$P${f}/$Q${f}*100)`,
+      crec === null ? "" : Math.round(crec * 100) / 100,
+      `=${P_(FIL.metaFact)}`,
+      crec === null ? "" : `=IF($T${f}=0,0,$S${f}/$T${f}*100)`,
+      `=${F.ventas}`,
+      `=${P_(FIL.metaVenta)}`,
+      `=IF($W${f}=0,0,$V${f}/$W${f}*100)`,
+      /* El ponderado reparte solo entre lo medible: sin facturación cargada,
+         su 50% sale del reparto en vez de contar como cero. */
+      `=IF(ISBLANK($S${f}),($R${f}*${P_(FIL.pesoReact)}+$X${f}*${P_(FIL.pesoVenta)})/(${P_(FIL.pesoReact)}+${P_(FIL.pesoVenta)}),` +
+        `($R${f}*${P_(FIL.pesoReact)}+$U${f}*${P_(FIL.pesoFact)}+$X${f}*${P_(FIL.pesoVenta)})/100)`,
+      `=${FORMULA_TRAMO(`$Y${f}`)}`,
+      `=IF($N${f}=3,$Z${f},IF($N${f}=2,IF($Z${f}>0,MIN($Z${f},${P_(FIL.base1)}),0),0))`,
+      `=$AA${f}*${P_(FIL.mensual)}/100`,
+      `=$AA${f}*(100-${P_(FIL.mensual)})/100`
+    ]);
+  });
+  return hojaLibro(filas, { filtro:1, congelar:1,
+    anchos:[18,26,10,12,10,8,10,10,9,9,11,8,11,11,15,14,11,13,14,11,13,10,11,12,13,9,12,11,10] });
+}
+
+/* ---- Una hoja por ejecutivo --------------------------------------------
+   La misma cuenta, en vertical y con el nombre arriba, porque la reunión es
+   con una persona y no con la tabla del equipo. Debajo, sus gestiones fuera
+   de plazo: es la pregunta que siempre aparece. */
+function hojaEjecutivo(u, p, d, nG, nC, nN){
+  const correoRef = `$B$3`;
+  const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
+  const cart = carteraDe(u.correo, p).n;
+  const crec = crecimientoFact(u.correo, p);
+  const suyas = d.gestiones.filter(g => g.correo === u.correo && g.periodo === p);
+
+  const filas = [
+    [u.nombre, "", "", "", ""],
+    [`Periodo ${nombrePeriodo(p)} · ${textoPeriodo(p)}`, "", "", "", ""],
+    ["Correo", u.correo, "", "", ""],
+    ["Cartera asignada", cart, "", "", ""],
+    ["", "", "", "", ""],
+    ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE"],
+    ["Cobertura de cartera", `=IF($B$4=0,0,${F.cubiertos}/$B$4*100)`, `=${P_(FIL.cobertura)}`,
+     `=IF($B$7>=$C$7,"Sí","No")`, "Comercios de su cartera con al menos una gestión en el periodo"],
+    ["Visitas efectivas", `=${F.efectivas}`, `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
+     `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar"],
+    ["Puntualidad del registro", `=IF($B$12=0,0,${F.puntuales}/$B$12*100)`, `=${P_(FIL.puntualidad)}`,
+     `=IF(AND($B$12>0,$B$9>=$C$9),"Sí","No")`, "Registradas el mismo día trabajado o el siguiente"],
+    ["Requisitos cumplidos", `=COUNTIF($D$7:$D$9,"Sí")`, 3, "", "Los tres habilitan el cálculo, dos dejan solo el bono base"],
+    ["Estado de la llave", `=IF($B$10=3,"Habilitado",IF($B$10=2,"Solo bono base","Sin incentivo"))`, "", "", ""],
+    ["Gestiones del periodo", `=${F.gestiones}`, "", "", "Todas las registradas en la ventana del bono"],
+    ["Gestiones a tiempo", `=${F.puntuales}`, "", "", "Con demora de cero o un día trabajado"],
+    ["Comercios con respuesta", `=${F.respuestas}`, "", "", "El cliente contestó"],
+    ["", "", "", "", ""],
+    ["OBJETIVOS", "VA EN", "META DEL MES", "CUMPLIMIENTO", "PESO"],
+    ["Reactivación del portafolio", `=IF($B$4=0,0,${F.acumulados}/$B$4*100)`, `=${P_(FIL.metaReact)}`,
+     `=IF($C$17=0,0,$B$17/$C$17*100)`, `=${P_(FIL.pesoReact)}`],
+    ["Facturación", crec === null ? "" : Math.round(crec * 100) / 100, `=${P_(FIL.metaFact)}`,
+     crec === null ? "" : `=IF($C$18=0,0,$B$18/$C$18*100)`, `=${P_(FIL.pesoFact)}`],
+    ["Venta (afiliación)", `=${F.ventas}`, `=${P_(FIL.metaVenta)}`,
+     `=IF($C$19=0,0,$B$19/$C$19*100)`, `=${P_(FIL.pesoVenta)}`],
+    ["Comercios logrados en el periodo", `=${F.delMes}`, "", "",
+     "Los acumulados son los del proyecto entero; estos son los de este mes"],
+    ["", "", "", "", ""],
+    ["RESULTADO", "", "", "", ""],
+    ["Cumplimiento ponderado",
+     `=IF(ISBLANK($B$18),($D$17*$E$17+$D$19*$E$19)/($E$17+$E$19),($D$17*$E$17+$D$18*$E$18+$D$19*$E$19)/100)`,
+     "", "", crec === null ? "Sin la facturación cargada, su peso sale del reparto" : ""],
+    ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23")}`, "", "", "% del sueldo base según el tramo"],
+    ["Incentivo del periodo",
+     `=IF($B$10=3,$B$24,IF($B$10=2,IF($B$24>0,MIN($B$24,${P_(FIL.base1)}),0),0))`,
+     "", "", "Sin la llave no hay incentivo, aunque el cumplimiento sea alto"],
+    ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
+    ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
+    ["", "", "", "", ""],
+    ["SUS GESTIONES DEL PERIODO", "", "", "", ""],
+    ["Fecha de gestión","Fecha de registro","Días trabajados","A tiempo","Comercio"]
+  ];
+  const inicio = filas.length + 1;
+  suyas.forEach((g, i) => {
+    const f = inicio + i;
+    filas.push([serial(g.fecha), serial(g.registro),
+      `=IF(${A1(1,f)}<=${A1(0,f)},0,NETWORKDAYS(${A1(0,f)}+1,${A1(1,f)},${RANGO_FERIADOS(d.nFer)}))`,
+      `=IF(${A1(2,f)}<=1,"Sí","No")`, g.comercio]);
+  });
+  return hojaLibro(filas, { anchos:[32, 16, 15, 15, 62],
+    fecha:[[0, inicio, filas.length], [1, inicio, filas.length]] });
+}
+
+/* ---- Evolución: cómo se movió el proyecto periodo a periodo ------------- */
+function hojaEvolucion(d){
+  const cols = ["Periodo","Mes","Ejecutivo","Llave","Requisitos cumplidos",
+                "Cobertura %","Visitas efectivas","Puntualidad %",
+                "Reactivación acumulada (p.p.)","Meta del mes","Ventas","Meta",
+                "Cumplimiento ponderado","Incentivo del periodo","Se paga","Se retiene"];
+  const filas = [cols];
+  d.periodos.forEach(pp => {
+    const M = metaPeriodo(pp, paramsDe(pp));
+    d.ejec.forEach(u => {
+      const x = incentivoDe(u.correo, pp);
+      const ll = x.llave, cu = x.cumpl;
+      filas.push([pp, M.i, u.nombre, TEXTO_LLAVE[ll.estado], ll.cumplidos,
+        Math.round(ll.cobertura.valor * 10) / 10, ll.efectivas,
+        Math.round(ll.puntualidad.valor * 10) / 10,
+        Math.round(cu.pp * 100) / 100, M.reactivacion_pp,
+        cu.ventas, M.ventas_mes,
+        Math.round(cu.total * 10) / 10, Math.round(x.pago * 100) / 100,
+        Math.round(x.mensual * 100) / 100, Math.round(x.retenido * 100) / 100]);
+    });
+  });
+  return hojaLibro(filas, { filtro:1, congelar:1,
+    anchos:[10,6,18,15,11,11,10,12,15,11,9,8,13,13,10,10] });
+}
+
+/* ---- El libro ----------------------------------------------------------- */
+function armarLibroIncentivos(p){
+  const d = datosLibro();
+  const par = hojaParametros(p, d);
+  d.nFer = par.nFeriados;
+  const nG = d.gestiones.length + 1, nC = d.cartera.length + 1, nN = d.nuevos.length + 1;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hojaResumen(p, d, nG, nC, nN), "Resumen");
+  XLSX.utils.book_append_sheet(wb, par.ws, "Parámetros");
+  d.ejec.forEach(u => XLSX.utils.book_append_sheet(wb,
+    hojaEjecutivo(u, p, d, nG, nC, nN), nombreHoja(u.nombre)));
+  XLSX.utils.book_append_sheet(wb, hojaEvolucion(d), "Evolución");
+  /* La hoja donde vive la dinámica se crea acá, vacía salvo el título: así la
+     librería le asigna su archivo y sus relaciones, y la inyección solo tiene
+     que agregar la tabla. */
+  XLSX.utils.book_append_sheet(wb, hojaLibro([
+    ["Gestiones por ejecutivo"],
+    ["Se recalcula al abrir el archivo. Arrastra cualquier campo de la lista para cambiar el corte."],
+    []], { anchos:[26, 16, 16] }), "Dinámica");
+  XLSX.utils.book_append_sheet(wb, hojaGestiones(d, par.nFeriados), "Gestiones");
+  XLSX.utils.book_append_sheet(wb, hojaCartera(d), "Cartera");
+  XLSX.utils.book_append_sheet(wb, hojaNuevosLibro(d), "Nuevos");
+  return { wb, d, nG, nC, nN };
+}
+
+/* Excel no acepta ninguno de : \ / ? * [ ] en el nombre de una hoja, ni más
+   de 31 caracteres, y no deja dos hojas con el mismo nombre. */
+const HOJAS_USADAS = new Set();
+function nombreHoja(n){
+  let base = String(n || "Ejecutivo").replace(/[:\\/?*\[\]]/g, " ").trim().slice(0, 28) || "Ejecutivo";
+  let x = base, i = 2;
+  while (HOJAS_USADAS.has(x.toLowerCase())){ x = `${base} ${i++}`; }
+  HOJAS_USADAS.add(x.toLowerCase());
+  return x;
+}
+
+async function descargarLibroIncentivos(btn){
+  const antes = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
+  HOJAS_USADAS.clear();
+  try {
+    const p = periodoBono();
+    const { wb, d, nG } = armarLibroIncentivos(p);
+    const nombre = `Incentivos_${p.replace("-", "")}_${hoyISO().replace(/-/g, "")}.xlsx`;
+
+    /* La tabla dinámica no la sabe escribir la librería de hojas: se inyecta
+       en el archivo ya armado. Si eso falla —red caída, CDN bloqueado— el
+       libro se descarga igual sin ella, porque el cálculo no depende de la
+       dinámica. */
+    let bytes = XLSX.write(wb, { bookType:"xlsx", type:"array", cellStyles:true });
+    try { bytes = await inyectarDinamica(bytes, nG); }
+    catch (e){ toast("El libro salió sin la tabla dinámica: " + (e.message || e)); }
+
+    const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`Libro de ${nombrePeriodo(p)} descargado`);
+  } catch (e){
+    toast("No se pudo armar el libro: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = antes; }
+  }
+}
+
+/* =========================================================================
+   La tabla dinámica
+
+   La librería que arma las hojas no sabe escribir tablas dinámicas: son
+   cuatro piezas XML dentro del archivo —la caché, sus registros, la
+   definición de la tabla y las relaciones entre ellas— y ninguna se parece a
+   una celda. Así que el libro se arma completo primero y la dinámica se
+   inyecta después, abriendo el .xlsx como lo que es: un zip.
+
+   La caché va con refreshOnLoad, que le pide a Excel rehacerla al abrir el
+   archivo. Eso evita el problema de fondo de escribir una dinámica a mano:
+   si los índices de la caché no coinciden exactamente con los datos, Excel
+   declara el archivo dañado. Pidiéndole que la recalcule, los datos mandan.
+
+   Si algo de esto falla, el libro se descarga igual sin la dinámica. El
+   cálculo del incentivo vive en las fórmulas, no acá.
+   ========================================================================= */
+let _jszip = null;
+function cargarZip(){
+  if (_jszip) return Promise.resolve(_jszip);
+  if (window.JSZip){ _jszip = window.JSZip; return Promise.resolve(_jszip); }
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = JSZIP_CDN;
+    s.onload = () => { _jszip = window.JSZip; _jszip ? ok(_jszip) : mal(new Error("cargó pero no quedó disponible")); };
+    s.onerror = () => mal(new Error("no se pudo bajar la librería de zip"));
+    document.head.appendChild(s);
+  });
+}
+
+const COLS_DINAMICA = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
+  "Fecha de gestión","Fecha de registro","Días trabajados de demora","A tiempo",
+  "Medio","Respondió","Visita efectiva","Primera del comercio en el periodo"];
+
+async function inyectarDinamica(bytes, nG){
+  const JSZip = await cargarZip();
+  const zip = await JSZip.loadAsync(bytes);
+
+  const leer = async n => zip.file(n) ? await zip.file(n).async("string") : null;
+  const libro = await leer("xl/workbook.xml");
+  const tipos = await leer("[Content_Types].xml");
+  const relsLibro = await leer("xl/_rels/workbook.xml.rels");
+  if (!libro || !tipos || !relsLibro) throw new Error("el archivo no tiene la forma esperada");
+
+  /* Qué hoja es «Dinámica» y en qué archivo vive */
+  const hojas = [...libro.matchAll(/<sheet[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"/g)]
+    .map(m => ({ nombre:m[1], rid:m[2] }));
+  const dina = hojas.find(h => h.nombre === "Dinámica");
+  if (!dina) throw new Error("falta la hoja Dinámica");
+  const relDina = new RegExp(`<Relationship[^>]*Id="${dina.rid}"[^>]*Target="([^"]*)"`).exec(relsLibro);
+  if (!relDina) throw new Error("no se encontró el archivo de la hoja Dinámica");
+  const archivoHoja = "xl/" + relDina[1].replace(/^\/?xl\//, "");
+  const nHoja = archivoHoja.replace(/^.*\/([^/]+)\.xml$/, "$1");
+
+  const campos = COLS_DINAMICA;
+  const ref = `A1:${L(campos.length - 1)}${nG}`;
+
+  /* 1 · La caché: qué columnas hay y de dónde salen */
+  const cacheDef =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
+    ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
+    ` r:id="rId1" refreshOnLoad="1" refreshedBy="Stratis CRM" createdVersion="3" refreshedVersion="3"` +
+    ` minRefreshableVersion="3" recordCount="0">` +
+    `<cacheSource type="worksheet"><worksheetSource ref="${ref}" sheet="Gestiones"/></cacheSource>` +
+    `<cacheFields count="${campos.length}">` +
+    campos.map(c => `<cacheField name="${esc(c)}" numFmtId="0"><sharedItems/></cacheField>`).join("") +
+    `</cacheFields></pivotCacheDefinition>`;
+
+  const cacheRec =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>`;
+
+  /* 2 · La tabla: ejecutivo en filas, y dos medidas que son las que se
+     discuten en la reunión — cuántas gestiones y cuántas a tiempo. */
+  const iEjec = campos.indexOf("Ejecutivo");
+  const iTiempo = campos.indexOf("A tiempo");
+  const iCid = campos.indexOf("Customer ID");
+  const pivotTable =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
+    ` name="Gestiones por ejecutivo" cacheId="1" applyNumberFormats="0" applyBorderFormats="0"` +
+    ` applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1"` +
+    ` dataCaption="Valores" updatedVersion="3" createdVersion="3" minRefreshableVersion="3"` +
+    ` itemPrintTitles="1" useAutoFormatting="1" indent="0" outline="1" outlineData="1" multipleFieldFilters="0">` +
+    `<location ref="A3:C20" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>` +
+    `<pivotFields count="${campos.length}">` +
+    campos.map((c, i) => {
+      if (i === iEjec) return `<pivotField axis="axisRow" compact="0" outline="0" showAll="0"><items count="1"><item t="default"/></items></pivotField>`;
+      if (i === iTiempo || i === iCid) return `<pivotField dataField="1" compact="0" outline="0" showAll="0"/>`;
+      return `<pivotField compact="0" outline="0" showAll="0"/>`;
+    }).join("") +
+    `</pivotFields>` +
+    `<rowFields count="1"><field x="${iEjec}"/></rowFields>` +
+    `<rowItems count="1"><i><x/></i></rowItems>` +
+    `<colItems count="1"><i/></colItems>` +
+    `<dataFields count="2">` +
+    `<dataField name="Gestiones" fld="${iCid}" subtotal="count" baseField="0" baseItem="0"/>` +
+    `<dataField name="A tiempo" fld="${iTiempo}" baseField="0" baseItem="0"/>` +
+    `</dataFields>` +
+    `<pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1"` +
+    ` showRowStripes="0" showColStripes="0" showLastColumn="1"/>` +
+    `</pivotTableDefinition>`;
+
+  zip.file("xl/pivotCache/pivotCacheDefinition1.xml", cacheDef);
+  zip.file("xl/pivotCache/pivotCacheRecords1.xml", cacheRec);
+  zip.file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords"` +
+    ` Target="pivotCacheRecords1.xml"/></Relationships>`);
+  zip.file("xl/pivotTables/pivotTable1.xml", pivotTable);
+  zip.file("xl/pivotTables/_rels/pivotTable1.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition"` +
+    ` Target="../pivotCache/pivotCacheDefinition1.xml"/></Relationships>`);
+
+  /* 3 · Las relaciones: el libro apunta a la caché, la hoja a la tabla */
+  const relsHoja = `xl/worksheets/_rels/${nHoja}.xml.rels`;
+  const previo = await leer(relsHoja);
+  zip.file(relsHoja, previo
+    ? previo.replace("</Relationships>",
+        `<Relationship Id="rIdPivot1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>`)
+    : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rIdPivot1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>`);
+
+  zip.file("xl/_rels/workbook.xml.rels", relsLibro.replace("</Relationships>",
+    `<Relationship Id="rIdCache1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/></Relationships>`));
+
+  zip.file("xl/workbook.xml", libro.replace("</sheets>",
+    `</sheets><pivotCaches><pivotCache cacheId="1" r:id="rIdCache1"/></pivotCaches>`));
+
+  zip.file("[Content_Types].xml", tipos.replace("</Types>",
+    `<Override PartName="/xl/pivotCache/pivotCacheDefinition1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>` +
+    `<Override PartName="/xl/pivotCache/pivotCacheRecords1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml"/>` +
+    `<Override PartName="/xl/pivotTables/pivotTable1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>` +
+    `</Types>`));
+
+  return await zip.generateAsync({ type:"uint8array", compression:"DEFLATE" });
 }
 
 /* =========================================================================
