@@ -259,6 +259,21 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .chip.no{background:var(--plane);color:var(--muted);border:1px solid var(--grid)}
 .chip.warn{background:var(--warn-bg);color:var(--warn-ink)}
 .chip.crit{background:var(--crit-bg);color:var(--crit-ink)}
+/* El comercio en negociación no es bueno ni malo: es un caso vivo, y necesita
+   un color propio para no confundirse con un cierre ni con una alerta. */
+.chip.neg{background:#EEF0FF;color:#3B43FB;border:1px solid #D8DCFF}
+/* La coordinación con el banco, en la misma línea de tiempo pero distinguible
+   de un vistazo: mismo hilo, otro interlocutor. */
+.tl-bbva>.card{border-left:3px solid var(--brand-2)}
+.lote-lista{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:11px}
+.lote-item{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;cursor:pointer;
+  border-bottom:1px solid var(--line)}
+.lote-item:last-child{border-bottom:0}
+.lote-item.on{background:var(--surface-2)}
+.lote-item input{margin-top:2px;flex:none}
+.lote-item>span{display:flex;flex-direction:column;min-width:0}
+.lote-item b{font-size:13.5px;font-weight:640}
+.lote-item>span>span{font-size:11.5px;color:var(--muted)}
 .chip.serious{background:var(--serious-bg);color:var(--serious-ink)}
 .chip.info{background:var(--info-bg);color:var(--brand-2)}
 .toolbar{display:flex;gap:8px;margin-bottom:11px;align-items:center;flex-wrap:wrap}
@@ -887,8 +902,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";  // 
 
 const CONFIG = {
   dominio: "mystratis.com",
-  cumpleVisitaHistorico: true
+  cumpleVisitaHistorico: true,
+  /* El flujo nuevo —la coordinación con BBVA como interacción con fecha, y los
+     estados calculados— no se enciende publicando la app: se enciende cuando
+     llega esta fecha, que vive en la base. Así el cambio entra a una hora
+     elegida y no en el momento en que alguien recarga la página, y si algo no
+     cuadra se corre la fecha desde Ajustes sin volver a publicar nada. */
+  flujoBbvaDesde: ""
 };
+const flujoBbva = () => !!CONFIG.flujoBbvaDesde && new Date() >= new Date(CONFIG.flujoBbvaDesde);
 
 let sb = null;
 
@@ -1000,6 +1022,66 @@ const CONTACTO_BBVA = [
 ];
 const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
 
+/* ---- La coordinación con el ejecutivo de BBVA, ahora como interacción ----
+   Hasta acá el banco vivía en un sello: un campo con un valor, puesto al crear
+   la ficha y nunca más. Servía para decir por dónde se coordinó, pero no
+   cuándo, ni si el ejecutivo contestó, ni qué se coordinó. Y en esta campaña
+   —donde el comercio ya tenía el servicio y sus datos los entrega el banco—
+   ahí es justamente donde se está yendo el volumen: 841 asignados, 601 con
+   respuesta, 82 contactados.
+
+   La decisión de forma: las coordinaciones con BBVA viven en la MISMA tabla
+   que las gestiones con el cliente, para que cada comercio tenga una sola
+   línea de tiempo del registro al cierre. Y para que ninguna cuenta de la
+   campaña se mueva sola, usan un vocabulario propio en las mismas columnas:
+   medios que empiezan con «bbva_» y resultados que ningún cálculo existente
+   reconoce. Así el trigger que decide si una gestión cumple visita nunca las
+   ve como visita, el que exige respaldo para cerrar nunca las cuenta como
+   contacto logrado, y la tasa de respuesta al cliente sigue midiendo clientes.
+   Nada de eso hubo que tocarlo: simplemente no coinciden. */
+const MEDIOS_BBVA = [
+  { id:"bbva_correo",     label:"Correo enviado",     desc:"Se le escribió al ejecutivo de BBVA" },
+  { id:"bbva_chat",       label:"Chat BBVA",          desc:"Se coordinó por el chat interno del banco", exigeCorreo:true },
+  { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono" },
+  { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp" },
+  { id:"bbva_presencial", label:"Visita presencial",  desc:"Se fue a las oficinas de BBVA" }
+];
+const esMedioBBVA  = id => String(id || "").startsWith("bbva_");
+const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
+/* El chat no deja rastro consultable, así que la campaña exige mandar después
+   un correo de respaldo. El CRM no se limita a permitirlo: lo reclama. */
+const exigeRespaldo = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).exigeCorreo;
+
+const RESULTADOS_BBVA = [
+  { id:"bbva_respondio",     label:"Respondió",     desc:"El ejecutivo de BBVA contestó y confirmó los datos del comercio", ok:true },
+  { id:"bbva_sin_respuesta", label:"Sin respuesta", desc:"Todavía no ha contestado", ok:false }
+];
+const respondioBBVA = r => r === "bbva_respondio";
+const nomResultadoBBVA = id => (RESULTADOS_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* Para qué fue la interacción. Sin esto, «2do contacto» significa dos cosas
+   opuestas —que el banco no contestó y hubo que insistir, o que el ejecutivo
+   cumplió con el correo de respaldo del chat— y sumadas en una sola columna no
+   dicen nada. */
+const PROPOSITOS_BBVA = [
+  { id:"primer_contacto", label:"Primer contacto",    desc:"La primera vez que se le escribe por este comercio" },
+  { id:"respaldo_chat",   label:"Respaldo del chat",  desc:"El correo que deja constancia de lo coordinado por chat" },
+  { id:"insistencia",     label:"Insistencia",        desc:"Se vuelve a escribir porque no ha respondido" },
+  { id:"negociacion",     label:"Negociación",        desc:"Consulta al banco por tasa, POS, equipos o comisión" }
+];
+const nomProposito = id => (PROPOSITOS_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* Por qué se está negociando. Lista cerrada, como los motivos de pérdida: un
+   campo libre se llena de textos que después no se pueden agrupar. */
+const MOTIVOS_NEGOCIACION = [
+  { id:"TASA",     label:"Tasa",             desc:"El comercio pide una tasa menor" },
+  { id:"POS",      label:"POS adicional",    desc:"Pide más terminales" },
+  { id:"EQUIPO",   label:"Cambio de equipo", desc:"Pide reemplazo o actualización del terminal" },
+  { id:"COMISION", label:"Comisión",         desc:"Discusión por comisiones o cobros" },
+  { id:"OTRO",     label:"Otro",             desc:"Otra condición en discusión" }
+];
+const nomMotivoNeg = id => (MOTIVOS_NEGOCIACION.find(x => x.id === id) || {}).label || id || "";
+
 /* Próximas acciones. El catálogo vive en la base y lo mantiene el Analista
    desde Ajustes: acá solo se guarda lo que llegó, para no clavar en el código
    una lista que la campaña va a cambiar. */
@@ -1032,6 +1114,67 @@ const RESULTADOS_GESTION = [
   { id:"PERDIDO",   label:"Perdido",   desc:"Se fue a la competencia o cerró", bbva:"NO" }
 ];
 const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
+
+/* ---- El estado del comercio, calculado y no tecleado -------------------
+   Nadie guarda «34 años» en una ficha: se guarda la fecha de nacimiento y la
+   edad se calcula, porque una edad guardada miente en el próximo cumpleaños y
+   nadie se entera. Con el estado del comercio pasaba exactamente eso: era un
+   campo que alguien escribía y que se quedaba escrito hasta que alguien más lo
+   cambiara. Un comercio que empezó a negociar el martes seguía figurando como
+   pendiente, y por lo tanto no aparecía en ninguna alarma —justo el caso que
+   se enfría.
+
+   Los tres estados intermedios son hechos que ya están en la línea de tiempo,
+   así que se deducen de ella:
+
+     · sin respuesta de BBVA           → POR VALIDAR   (insistir con el banco)
+     · con respuesta, sin conversación → POR CONTACTAR (salir a la calle)
+     · hubo conversación, sin cierre   → EN NEGOCIACIÓN
+
+   Los cierres siguen siendo un campo, porque son una decisión de una persona y
+   no se deducen de nada. Y el estado se puede fijar a mano, con motivo escrito
+   y marcado como excepción, para el caso raro que siempre existe.
+
+   Ojo con el umbral de la negociación: empieza cuando se HABLÓ con el titular,
+   no cuando se intentó. Si empezara con el intento, el comercio al que se llamó
+   tres veces sin respuesta entraría al mismo balde que aquel donde se está
+   discutiendo una tasa, y se perdería justo lo que hace útil al estado:
+   distinguir el caso vivo del caso mudo. */
+const ESTADOS_DERIVADOS = [
+  { id:"POR_VALIDAR",   label:"Por validar",    corto:"Por validar",
+    desc:"Falta que el ejecutivo de BBVA entregue o confirme los datos",
+    hacer:"Insistir con el banco", chip:"warn" },
+  { id:"POR_CONTACTAR", label:"Por contactar",  corto:"Por contactar",
+    desc:"BBVA respondió y todavía nadie habló con el titular",
+    hacer:"Salir a contactar al comercio", chip:"info" },
+  { id:"EN_NEGOCIACION",label:"En negociación", corto:"Negociando",
+    desc:"Se conversó con el titular y el caso sigue abierto",
+    hacer:"Seguir el caso hasta cerrarlo", chip:"neg" },
+  { id:"RETENIDO",      label:"Retenido",       corto:"Retenido",   desc:"Ya operaba y se quedó",        hacer:"", chip:"ok" },
+  { id:"RECUPERADO",    label:"Recuperado",     corto:"Recuperado", desc:"Estaba de baja y volvió",      hacer:"", chip:"ok" },
+  { id:"VENTA",         label:"Venta nueva",    corto:"Venta",      desc:"RUC que trajo Stratis",        hacer:"", chip:"ok" },
+  { id:"PERDIDO",       label:"Perdido",        corto:"Perdido",    desc:"Se fue o cerró",               hacer:"", chip:"crit" }
+];
+const estadoDerivadoById = id => ESTADOS_DERIVADOS.find(e => e.id === id) || null;
+
+function estadoDerivado(c){
+  if (!c) return "POR_VALIDAR";
+  /* El cierre manda sobre todo lo demás: es lo único que decidió una persona. */
+  if (esRetencion(c))   return "RETENIDO";
+  if (esRecuperado(c))  return "RECUPERADO";
+  if (esVentaNueva(c))  return "VENTA";
+  if (c.resultado_gestion === "PERDIDO") return "PERDIDO";
+  /* La excepción de supervisión, con su motivo escrito. */
+  if (c.estado_fijado && estadoDerivadoById(c.estado_fijado)) return c.estado_fijado;
+
+  /* Una venta nueva no pasa por el banco: el RUC lo trajo Stratis. */
+  if (esClienteNuevo(c)) return "EN_NEGOCIACION";
+
+  const conv = DB.delCliente(c.customer_id).some(r => esEfectivo(r.Resultado));
+  if (conv) return "EN_NEGOCIACION";
+  return bbvaDe(c.customer_id).respondio ? "POR_CONTACTAR" : "POR_VALIDAR";
+}
+const estadoFijadoAMano = c => !!(c && c.estado_fijado);
 
 /* Los cuatro cierres que de verdad se miran, cada uno con su nombre propio.
    «Venta» en la base cubre dos cosas distintas —un comercio de cartera que
@@ -1502,17 +1645,68 @@ const rubroLabel = c => {
   return r ? r.nombre : (c.rubro || "");
 };
 
+/* Acá está la defensa entera del cambio, y conviene entender por qué está acá
+   y no repartida por veinte pantallas.
+
+   Todo lo que la campaña cuenta —gestiones, cobertura, puntualidad, visitas
+   efectivas, tasa de respuesta, el ritmo semanal, la llave del bono— sale de
+   `DB.todos()`. Si las coordinaciones con BBVA entraran por ahí, cada uno de
+   esos números subiría solo de un día para otro y nadie sabría por qué.
+
+   Por eso `todos()` sigue significando exactamente lo que significaba: las
+   gestiones con el cliente. Las coordinaciones con el banco entran por
+   `bbva()`, que es una puerta nueva. Ninguna pantalla vieja cambió de sentido;
+   las nuevas piden lo que necesitan. */
 const DB = {
   visitas: [],
+  crudo: [],
   todos(){ return this.visitas; },
+  bbva(){ return this.crudo.filter(r => r.Con === "BBVA"); },
   delCliente(cid){
     return this.todos().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
   },
-  buscar(id){ return this.todos().find(r => r._id === id) || null; },
+  /* Las coordinaciones de un comercio, de la más vieja a la más nueva: acá el
+     orden importa al revés que en las gestiones, porque «primer contacto» y
+     «segundo contacto» son posiciones en el tiempo. */
+  bbvaDe(cid){
+    return this.bbva().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(a) - ts(b));
+  },
+  /* La ficha del comercio muestra una sola historia, con las dos clases
+     mezcladas en orden y distinguidas en pantalla. */
+  historiaDe(cid){
+    return this.crudo.filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
+  },
+  buscar(id){ return this.crudo.find(r => r._id === id) || null; },
   cargar(filas){
-    this.visitas = filas.map(deDB);
+    this.crudo   = filas.map(deDB);
+    this.visitas = this.crudo.filter(r => r.Con !== "BBVA");
   }
 };
+
+/* ---- Lo que se deriva de la coordinación con BBVA -----------------------
+   Nada de esto se teclea: sale de la línea de tiempo. Si mañana alguien
+   registra una insistencia, estos números cambian solos. */
+function bbvaDe(cid){
+  const co = DB.bbvaDe(cid);
+  const resp = co.find(r => respondioBBVA(r.Resultado)) || null;
+  const chat = co.find(r => exigeRespaldo(r.Tipo_Contacto));
+  return {
+    n: co.length,
+    contactos: co,
+    primero: co[0] || null,
+    segundo: co[1] || null,
+    respondio: !!resp,
+    respuesta: resp,
+    fechaRespuesta: resp ? resp.Fecha_Contacto : "",
+    /* Cuántos intentos hicieron falta hasta que el banco contestó. Es el
+       número que dice si el problema es de Stratis o del banco. */
+    intentosHasta: resp ? co.indexOf(resp) + 1 : co.length,
+    /* Chat sin correo de respaldo: la constancia que la campaña exige y que
+       hoy no se estaba pidiendo en ninguna parte. */
+    faltaRespaldo: !!chat && !co.some(r => r.Tipo_Contacto === "bbva_correo" && ts(r) >= ts(chat)),
+    ultima: co.length ? co[co.length - 1] : null
+  };
+}
 
 /* ---- Conversión entre la fila de Postgres y el objeto de la interfaz ---- */
 function deDB(f){
@@ -1523,6 +1717,11 @@ function deDB(f){
     Ejecutivo: f.ejecutivo, Correo_Stratis: f.correo_stratis,
     Customer_id: f.customer_id,
     Nombre_Comercio: c.nombre_comercio || "", Rubro: rubroLabel(c), Distrito: c.distrito || "",
+    Con: f.con === "BBVA" ? "BBVA" : "CLIENTE",
+    Proposito: f.proposito || "",
+    /* Las coordinaciones que el CRM dedujo del histórico al migrar, no las que
+       alguien registró. Se marcan para que nunca se lean como declaradas. */
+    Inferida: f.inferida === true,
     Tipo_Contacto: f.tipo_contacto,
     Resultado: f.resultado || "efectivo",
     Visita_Presencial: f.visita_presencial, Visita_virtual: f.visita_virtual,
@@ -1674,6 +1873,8 @@ const S = {
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
   repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
+  formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
+  loteBbva:null, /* borrador de la coordinación para varios comercios */
   filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
   fCierre:"todos",              /* retenidos, recuperados, ventas nuevas, perdidos */
   limite:40, cargando:false
@@ -1981,6 +2182,10 @@ async function cargarDatos(){
     if (clave === "cumple_visita_historico") CONFIG.cumpleVisitaHistorico = valor === "true";
     if (clave === "dominio_permitido")     CONFIG.dominio = valor;
     if (clave === "edicion_libre_hasta")   EDICION_HASTA = valor;
+    /* El interruptor del flujo BBVA. Vive en la base a propósito: así la hora
+       del cambio se decide sin volver a publicar la app, y si algo no cuadra
+       se corre la fecha en vez de tener que revertir una publicación. */
+    if (clave === "flujo_bbva_desde")      CONFIG.flujoBbvaDesde = valor;
   });
 
   DB.cargar(inter.data || []);
@@ -2198,6 +2403,17 @@ function verCarteraLista(tipo, ejecutivo, esperado){
         (dif ? ` · en el Panel dice ${esperado} porque allá se cuenta solo el rango elegido` : ""));
 }
 
+/* Del Panel a la cartera, por el punto en que está parado el comercio */
+function verCarteraEstado(id){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = "est:" + id; S.fEjecutivo = "todos";
+  S.filtrosAbiertos = false; S.limite = 40;
+  go("cartera");
+  const e = estadoDerivadoById(id);
+  const n = cartera().filter(c => !esClienteNuevo(c) && estadoDerivado(c) === id).length;
+  if (e) toast(`${e.label}: ${n} ${n === 1 ? "comercio" : "comercios"}${e.hacer ? " · " + e.hacer.toLowerCase() : ""}`);
+}
+
 /* Del Panel a la cartera, por situación del comercio */
 function verCarteraPor(filtro){
   S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
@@ -2208,6 +2424,10 @@ function verCarteraPor(filtro){
 function go(tab, cid){
   S.tab = tab; S.cid = cid || null;
   S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
+  /* Los formularios de BBVA se sueltan al salir, como los demás: un borrador a
+     medias que reaparece en otro comercio es peor que no tener borrador. */
+  if (tab !== "form_bbva")      S.formBbva = null;
+  if (tab !== "form_bbva_lote") S.loteBbva = null;
   window.scrollTo(0,0);
   render();
   /* Si mientras se llenaba un formulario llegaron registros de otro, se
@@ -2240,6 +2460,8 @@ function render(){
      El masonry dejaba huecos largos y hacía zigzaguear la lectura. */
   v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-ajustes" : "");
   if (S.tab === "form_cliente")           return renderFormCliente();
+  if (S.tab === "form_bbva")              return renderFormBBVA();
+  if (S.tab === "form_bbva_lote")         return renderLoteBBVA();
   if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
   else if (S.tab === "form_visita")       return renderFormulario();
   else if (S.tab === "cartera")           v.innerHTML = viewCartera();
@@ -2276,6 +2498,11 @@ function bindComunes(){
     e.stopPropagation();
     verCarteraLista(el.dataset.verlista, el.dataset.verejec || "", el.dataset.vercuantos);
   });
+  document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCarteraEstado(el.dataset.verest);
+  });
+  const lote = document.querySelector("#loteBbva");
+  if (lote) lote.onclick = () => abrirLoteBBVA();
   if (typeof bindExtras === "function") bindExtras();
 }
 
@@ -2343,6 +2570,9 @@ function viewCartera(){
        la lista no cuadrara con el número que se acaba de tocar. */
     if (S.fContacto === "registrado") return !esClienteNuevo(c);
     if (S.fContacto === "gestionado") return !esClienteNuevo(c) && b._intentos > 0;
+    /* Los estados calculados también filtran, que es para lo que sirven: cada
+       uno responde «qué hago hoy con este comercio». */
+    if (S.fContacto.startsWith("est:")) return estadoDerivado(c) === S.fContacto.slice(4);
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -2384,7 +2614,11 @@ function viewCartera(){
       <h2>${S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña"}</h2>
       <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
     </div>
-    ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${(flujoBbva() && esDeCampo()) ? `<button class="btn ghost" id="loteBbva"
+        title="Un correo con varios Customer ID se escribe una vez">✉ Coordinar con BBVA en lote</button>` : ""}
+      ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
+    </div>
   </div>
 
   ${avisoVentana()}
@@ -2500,7 +2734,10 @@ function cardCliente(c){
 function viewFicha(c){
   if (!c) return `<div class="empty">Comercio no encontrado.</div>`;
   const b = RULES.recomputarBase(c.customer_id);
-  const regs = DB.delCliente(c.customer_id);
+  /* Con el flujo nuevo la ficha muestra UNA historia: la coordinación con el
+     banco y las gestiones con el cliente en el mismo orden en que ocurrieron.
+     Antes del corte sigue mostrando solo las gestiones, igual que siempre. */
+  const regs = flujoBbva() ? DB.historiaDe(c.customer_id) : DB.delCliente(c.customer_id);
   const mio = esMiCliente(c);
 
   return `
@@ -2513,6 +2750,9 @@ function viewFicha(c){
         <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esClienteNuevo(c) ? "RUC " + esc(c.ruc) + " · cliente nuevo" : "Customer ID " + esc(c.customer_id)}</div>
         <div class="cl-meta" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:9px">
           <span class="chip info">${esc(rubroLabel(c))}</span>
+          ${flujoBbva() ? (() => { const e = estadoDerivadoById(estadoDerivado(c));
+            return `<span class="chip ${e.chip}" title="${esc(e.desc)}">${e.label}${
+              estadoFijadoAMano(c) ? " ·  fijado" : ""}</span>`; })() : ""}
           <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
           ${c.estado ? `<span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>` : ""}
           ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span>` : ""}
@@ -2559,7 +2799,7 @@ function viewFicha(c){
             esc(fmtFecha(sg.fecha_objetivo))}${est==="vencida"?` · venció hace ${esc(textoDias(Math.abs(d)))}`:""}</span>
           ${sg.comentario ? `<div style="font-size:12.5px;color:var(--muted);margin-top:3px">${esc(sg.comentario)}</div>` : ""}
         </dd></div>` ; })()}
-      ${!esClienteNuevo(c) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
+      ${(!esClienteNuevo(c) && !flujoBbva()) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
         c.contacto_bbva
           ? esc(nomContactoBBVA(c.contacto_bbva))
           : `<span class="chip warn">Sin indicar</span><div style="font-size:12px;color:var(--muted);margin-top:3px">Se registró antes de que el dato fuera obligatorio</div>`
@@ -2588,6 +2828,7 @@ function viewFicha(c){
         <button class="btn ghost sm block" data-editcli="${c.customer_id}" style="margin-top:9px">Marcar el cierre</button>
       </div>
     </div>` : ""}
+    ${(flujoBbva() && !esClienteNuevo(c)) ? cardCoordinacionBBVA(c, mio) : ""}
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -2608,7 +2849,70 @@ function viewFicha(c){
   </div>` : ""}`;
 }
 
+/* El escalón que faltaba, dicho en una tarjeta.
+
+   En esta campaña el comercio ya tenía el servicio y sus datos de contacto los
+   entrega el ejecutivo de BBVA: no se puede llamar a alguien cuyo número no se
+   tiene. Por eso este paso no es burocracia, es la puerta. Y hasta ahora vivía
+   en un campo de texto sin fecha. */
+function cardCoordinacionBBVA(c, mio){
+  const k = bbvaDe(c.customer_id);
+  const linea = (rot, r) => `<div class="kv"><dt>${rot}</dt><dd>${
+    r ? `${esc(nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto)}
+         <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtFecha(r.Fecha_Contacto)}${
+           r.Proposito ? " · " + esc(nomProposito(r.Proposito)) : ""}${
+           r.Inferida ? " · deducido del histórico" : ""}</div>`
+      : `<span style="color:var(--muted)">—</span>`}</dd></div>`;
+
+  return `
+  <div class="card">
+    <h3>Coordinación con el ejecutivo de BBVA</h3>
+    ${linea("1er contacto", k.primero)}
+    ${linea("2do contacto", k.segundo)}
+    <div class="kv"><dt>¿Respondió?</dt><dd>
+      ${k.respondio
+        ? `<span class="chip ok">Sí</span>
+           <div style="font-size:12px;color:var(--muted);margin-top:3px">${fmtFecha(k.fechaRespuesta)} · ${
+             k.intentosHasta === 1 ? "al primer contacto" : "tras " + k.intentosHasta + " contactos"}</div>`
+        : k.n
+          ? `<span class="chip warn">Todavía no</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">${k.n} contacto${k.n===1?"":"s"} sin respuesta</div>`
+          : `<span class="chip warn">Sin coordinar</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">Este comercio todavía no se le ha pedido a BBVA</div>`}
+    </dd></div>
+    ${k.faltaRespaldo ? `<div class="note warn" style="margin-top:10px">
+      <b>Falta el correo de respaldo.</b> Se coordinó por chat, que no deja constancia consultable.
+      La campaña pide enviar después un correo con lo acordado y registrarlo acá.</div>` : ""}
+    ${(mio && esDeCampo()) ? `<button class="btn ghost sm block" style="margin-top:11px"
+      data-go="form_bbva|${c.customer_id}">＋ Registrar coordinación con BBVA</button>` : ""}
+  </div>`;
+}
+
+/* La coordinación con el banco se ve distinta en la línea de tiempo, y a
+   propósito: es la misma historia del comercio pero con otro interlocutor.
+   Mezclarlas sin distinguirlas sería tan confuso como tenerlas separadas. */
+function itemTimelineBBVA(r){
+  const resp = respondioBBVA(r.Resultado);
+  return `
+  <div class="tl-item tl-bbva">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">Ejecutivo BBVA · ${esc(nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto)}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
+        </div>
+        <span class="chip ${resp ? "ok" : "warn"}">${resp ? "Respondió" : "Sin respuesta"}</span>
+      </div>
+      ${r.Proposito ? `<div style="margin-top:7px"><span class="chip info">${esc(nomProposito(r.Proposito))}</span></div>` : ""}
+      ${r.Inferida ? `<div class="pie" style="margin-top:6px">Deducida del histórico al migrar la base — nadie la registró en su momento</div>` : ""}
+      ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Qué se coordinó</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
+      ${r.Comentario_Cliente ? `<div class="quote"><b>Qué respondió BBVA</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
 function itemTimeline(r){
+  if (r.Con === "BBVA") return itemTimelineBBVA(r);
   const t = tipoById(r.Tipo_Contacto);
   const res = resultadoById(r.Resultado);
   const editable = puedeEditar(r);
@@ -3264,6 +3568,444 @@ function modalCorregirId(cid){
       msg.innerHTML = `<div class="err">${esc(String(e.message).replace(/^.*?:\s*/, ""))}</div>`;
     }
   };
+}
+
+/* =========================================================================
+   Registrar una coordinación con el ejecutivo de BBVA
+
+   Por qué existe esta pantalla y no bastaba el campo que ya había:
+
+   La campaña es de reactivación. El comercio YA tenía el servicio, y sus datos
+   de contacto —celular, correo, persona a quien buscar— los tiene el banco, no
+   Stratis. Así que antes de poder llamar a nadie hay que pedírselos al
+   ejecutivo de BBVA y esperar que conteste. Ese paso no es un trámite: es la
+   puerta, y es donde se está quedando el volumen de la campaña.
+
+   Hasta ahora el CRM lo guardaba como un sello: un campo con un valor, puesto
+   al crear la ficha y nunca más. Sin fecha, sin lugar para un segundo intento,
+   sin decir si el ejecutivo contestó, y sin una línea de lo que se coordinó.
+   Un sello no puede responder «¿cuántas veces tuvimos que insistir?».
+
+   Dos cosas que esta pantalla hace y conviene no perder de vista:
+
+   · **La respuesta y los datos llegan juntos.** Cuando el ejecutivo contesta,
+     lo que llega es el celular y el correo del titular. No hay un paso aparte
+     donde alguien declare «los datos están correctos»: los datos están porque
+     BBVA los entregó, o no están. Un dato que el sistema puede comprobar no se
+     le pregunta a la persona.
+
+   · **El chat obliga a un correo.** El chat interno del banco no deja
+     constancia consultable, así que la campaña pide mandar después un correo
+     con lo acordado. El CRM no se limita a permitirlo: lo reclama en la ficha
+     hasta que aparezca.
+   ========================================================================= */
+
+const FB_VACIO = () => ({
+  Fecha: hoyISO(),
+  Hora: new Date().toTimeString().slice(0,5),
+  Medio: "",
+  Proposito: "",
+  Respondio: "",
+  Comentario: "",
+  Respuesta: ""
+});
+
+/* El propósito se propone solo: la primera vez es el primer contacto; si quedó
+   un chat sin su correo, lo que toca es el respaldo; y de ahí en adelante,
+   insistencia. Proponerlo bien es lo que hace que el dato se llene de verdad. */
+function fbNuevo(cid){
+  const k = bbvaDe(cid);
+  return Object.assign(FB_VACIO(), {
+    Proposito: k.n === 0 ? "primer_contacto" : (k.faltaRespaldo ? "respaldo_chat" : "insistencia")
+  });
+}
+
+function abrirFormBBVA(cid){
+  S.cid = String(cid);
+  S.formBbva = fbNuevo(S.cid);
+  S.tab = "form_bbva";
+  window.scrollTo(0,0);
+  render();
+}
+
+function renderFormBBVA(){
+  const c = byId[S.cid];
+  const v = $("#view");
+  if (!c){ v.innerHTML = `<div class="empty">Comercio no encontrado.</div>`; return; }
+  const f = S.formBbva || (S.formBbva = fbNuevo(c.customer_id));
+  const k = bbvaDe(c.customer_id);
+
+  v.innerHTML = `
+  <button class="back" data-go="cartera|${c.customer_id}">‹ Volver a la ficha</button>
+
+  <div class="page-head"><div>
+    <h2>Coordinación con BBVA</h2>
+    <div class="sub">${esc(titulo(nombreCliente(c)))} · ${esc(c.customer_id)}</div>
+  </div></div>
+
+  <div id="errBox"></div>
+
+  ${k.n ? `<div class="card"><div class="note" style="margin:0">
+    Este comercio ya tiene <b>${k.n} coordinación${k.n===1?"":"es"}</b> registrada${k.n===1?"":"s"}.
+    ${k.respondio
+      ? `El ejecutivo de BBVA <b>ya respondió</b> el ${fmtFecha(k.fechaRespuesta)}.`
+      : `Todavía <b>no ha respondido</b>.`}
+  </div></div>` : ""}
+
+  <div class="card">
+    <h3>¿Cuándo fue?</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label>
+        <input type="date" data-b="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+      <div class="field"><label>Hora</label>
+        <input type="time" data-b="Hora" value="${esc(f.Hora)}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Por dónde se coordinó? <span class="req">*</span></h3>
+    <div class="opts">
+      ${MEDIOS_BBVA.map(m => `
+        <div class="opt ${f.Medio===m.id?"on":""}" data-bmedio="${m.id}">
+          <span class="rd"></span><span><b>${m.label}</b><span>${m.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    ${exigeRespaldo(f.Medio) ? `<div class="note warn" style="margin-top:11px">
+      El chat no deja constancia consultable. Después de esta coordinación
+      <b>envía un correo con lo acordado</b> y regístralo acá como segundo contacto:
+      la ficha va a pedirlo hasta que aparezca.</div>` : ""}
+  </div>
+
+  <div class="card">
+    <h3>¿Para qué fue este contacto? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      No es lo mismo insistir porque no contestan que mandar el correo de respaldo del chat.
+      Contarlos juntos haría que «2 contactos» no signifique nada.
+    </div>
+    <div class="opts">
+      ${PROPOSITOS_BBVA.map(p => `
+        <div class="opt ${f.Proposito===p.id?"on":""}" data-bprop="${p.id}">
+          <span class="rd"></span><span><b>${p.label}</b><span>${p.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Respondió el ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="opts">
+      ${RESULTADOS_BBVA.map(r => `
+        <div class="opt ${f.Respondio===r.id?"on":""}" data-bresp="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Qué se coordinó <span class="req">*</span></h3>
+    <div class="field">
+      <textarea data-b="Comentario" rows="3"
+        placeholder="Qué se le pidió al ejecutivo de BBVA">${esc(f.Comentario)}</textarea>
+      <div class="hint">Obligatorio. Dentro de tres meses nadie va a acordarse de qué se pidió acá.</div>
+    </div>
+    ${respondioBBVA(f.Respondio) ? `<div class="field">
+      <label>Qué respondió <span class="req">*</span></label>
+      <textarea data-b="Respuesta" rows="3"
+        placeholder="Qué contestó el ejecutivo: datos entregados, observaciones, condiciones">${esc(f.Respuesta)}</textarea>
+      <div class="hint">Si dices que respondió, tiene que haber algo que citar.</div>
+    </div>` : ""}
+  </div>
+
+  <div class="sticky-actions">
+    <button class="btn ghost" data-go="cartera|${c.customer_id}">Cancelar</button>
+    <button class="btn" id="guardarBbva">Registrar coordinación</button>
+  </div>`;
+
+  bindFormBBVA();
+}
+
+function bindFormBBVA(){
+  const f = S.formBbva;
+  document.querySelectorAll("[data-b]").forEach(el => {
+    el.oninput = () => { f[el.dataset.b] = el.value; };
+  });
+  const pick = (attr, campo, repinta) => document.querySelectorAll(`[data-${attr}]`).forEach(el => {
+    el.onclick = () => {
+      f[campo] = el.dataset[attr];
+      if (repinta) renderFormBBVA();
+      else document.querySelectorAll(`[data-${attr}]`).forEach(x =>
+        x.classList.toggle("on", x.dataset[attr] === f[campo]));
+    };
+  });
+  pick("bmedio", "Medio",     true);
+  pick("bprop",  "Proposito", false);
+  pick("bresp",  "Respondio", true);
+  const g = $("#guardarBbva");
+  if (g) g.onclick = guardarBBVA;
+}
+
+async function guardarBBVA(){
+  const f = S.formBbva, c = byId[S.cid];
+  const errores = [];
+  if (!f.Fecha) errores.push("Indica la fecha de la coordinación.");
+  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura: no se puede registrar algo que todavía no pasó.");
+  if (!f.Medio) errores.push("Indica por dónde se coordinó con el ejecutivo de BBVA.");
+  if (!f.Proposito) errores.push("Indica para qué fue este contacto.");
+  if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
+  if (!String(f.Comentario).trim()) errores.push("Escribe qué se coordinó.");
+  /* La misma regla que ya rige para el cliente: afirmar que alguien respondió
+     obliga a transcribir qué dijo. Si no hay nada que citar, no hubo respuesta. */
+  if (respondioBBVA(f.Respondio) && !String(f.Respuesta).trim())
+    errores.push("Escribe qué respondió el ejecutivo de BBVA. Si todavía no contesta, cambia el resultado a «Sin respuesta».");
+
+  const box = $("#errBox");
+  if (errores.length){
+    box.innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${
+      errores.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarBbva");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    const fila = {
+      customer_id: String(c.customer_id),
+      correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+      fecha_contacto: f.Fecha, hora_contacto: f.Hora || "00:00",
+      con: "BBVA",
+      tipo_contacto: f.Medio,
+      resultado: f.Respondio,
+      proposito: f.Proposito,
+      comentario_ejecutivo: String(f.Comentario).trim(),
+      comentario_cliente: String(f.Respuesta || "").trim() || null
+    };
+    const { error } = await sb.from("interacciones").insert(fila);
+    if (error) throw new Error(error.message);
+    await sincronizar();
+    S.formBbva = null;
+    toast("Coordinación con BBVA registrada");
+    go("cartera", c.customer_id);
+  } catch (e){
+    box.innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(e.message)}</div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = "Registrar coordinación"; }
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Registro en lote
+
+   Lo normal es un solo correo al ejecutivo de BBVA con veinte customer_id
+   adjuntos, y una sola respuesta con los veinte datos. En la base tiene que
+   quedar una fila por comercio —la respuesta es sobre cada uno, no sobre el
+   correo—, pero pedirle al ejecutivo que teclee veinte veces lo mismo es la
+   forma más segura de que deje de registrar.
+
+   Entonces: el dato queda como debe, el trabajo se hace una vez.
+   ------------------------------------------------------------------------- */
+function abrirLoteBBVA(){
+  S.loteBbva = Object.assign(FB_VACIO(), { Proposito:"primer_contacto", sel:{}, q:"" });
+  S.tab = "form_bbva_lote";
+  window.scrollTo(0,0);
+  render();
+}
+
+function candidatosLote(){
+  const q = String((S.loteBbva || {}).q || "").trim().toLowerCase();
+  return cartera()
+    .filter(c => !esClienteNuevo(c))
+    .filter(c => esDeCampo() ? esMiCliente(c) : true)
+    .filter(c => !q ||
+      String(c.customer_id).toLowerCase().includes(q) ||
+      String(c.nombre_comercio || "").toLowerCase().includes(q) ||
+      String(c.distrito || "").toLowerCase().includes(q))
+    .sort((a,b) => String(a.nombre_comercio||"").localeCompare(String(b.nombre_comercio||"")));
+}
+
+function renderLoteBBVA(){
+  const f = S.loteBbva || (S.loteBbva = Object.assign(FB_VACIO(), { Proposito:"primer_contacto", sel:{}, q:"" }));
+  const lista = candidatosLote();
+  const n = Object.values(f.sel).filter(Boolean).length;
+
+  $("#view").innerHTML = `
+  <button class="back" data-go="cartera">‹ Volver a la cartera</button>
+
+  <div class="page-head"><div>
+    <h2>Coordinación con BBVA para varios comercios</h2>
+    <div class="sub">Un correo con varios Customer ID se escribe una vez y queda registrado en cada ficha</div>
+  </div></div>
+
+  <div id="errBox"></div>
+
+  <div class="card"><div class="note" style="margin:0">
+    En la base va a quedar <b>una coordinación por comercio</b>, no una sola compartida:
+    la respuesta del banco es sobre cada Customer ID. Acá solo se escribe una vez.
+  </div></div>
+
+  <div class="card">
+    <h3>Cuándo, por dónde y para qué</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label>
+        <input type="date" data-l="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+      <div class="field"><label>Hora</label>
+        <input type="time" data-l="Hora" value="${esc(f.Hora)}"></div>
+    </div>
+    <div class="opts" style="margin-top:11px">
+      ${MEDIOS_BBVA.map(m => `
+        <div class="opt ${f.Medio===m.id?"on":""}" data-lmedio="${m.id}">
+          <span class="rd"></span><span><b>${m.label}</b><span>${m.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    <div class="opts" style="margin-top:11px">
+      ${PROPOSITOS_BBVA.map(p => `
+        <div class="opt ${f.Proposito===p.id?"on":""}" data-lprop="${p.id}">
+          <span class="rd"></span><span><b>${p.label}</b><span>${p.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Respondió el ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Se aplica a todos los comercios marcados. Si respondió por unos y por otros no,
+      regístralos en dos tandas.
+    </div>
+    <div class="opts">
+      ${RESULTADOS_BBVA.map(r => `
+        <div class="opt ${f.Respondio===r.id?"on":""}" data-lresp="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Qué se coordinó <span class="req">*</span></h3>
+    <div class="field">
+      <textarea data-l="Comentario" rows="3"
+        placeholder="Qué se le pidió al ejecutivo de BBVA">${esc(f.Comentario)}</textarea>
+    </div>
+    ${respondioBBVA(f.Respondio) ? `<div class="field">
+      <label>Qué respondió <span class="req">*</span></label>
+      <textarea data-l="Respuesta" rows="3">${esc(f.Respuesta)}</textarea>
+    </div>` : ""}
+  </div>
+
+  <div class="card">
+    <div class="ctrl-h">
+      <h3>Comercios · ${n} marcado${n===1?"":"s"}</h3>
+      <button class="btn ghost sm" id="loteTodos">${
+        n === lista.length && lista.length ? "Desmarcar todos" : `Marcar los ${lista.length}`}</button>
+    </div>
+    <div class="search" style="margin-bottom:10px"><span class="mag">⌕</span>
+      <input type="search" id="loteQ" placeholder="Buscar por Customer ID, nombre o distrito…" value="${esc(f.q)}"></div>
+    <div class="lote-lista">
+      ${lista.length ? lista.map(c => `
+        <label class="lote-item ${f.sel[c.customer_id] ? "on" : ""}">
+          <input type="checkbox" data-lsel="${esc(c.customer_id)}" ${f.sel[c.customer_id] ? "checked" : ""}>
+          <span>
+            <b>${esc(titulo(nombreCliente(c)))}</b>
+            <span>${esc(c.customer_id)}${c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
+              bbvaDe(c.customer_id).respondio ? " · BBVA ya respondió" : ""}</span>
+          </span>
+        </label>`).join("")
+      : `<div class="vacio">No hay comercios que coincidan.</div>`}
+    </div>
+  </div>
+
+  <div class="sticky-actions">
+    <button class="btn ghost" data-go="cartera">Cancelar</button>
+    <button class="btn" id="guardarLote">Registrar en ${n} comercio${n===1?"":"s"}</button>
+  </div>`;
+
+  bindLoteBBVA();
+}
+
+function bindLoteBBVA(){
+  const f = S.loteBbva;
+  document.querySelectorAll("[data-l]").forEach(el => { el.oninput = () => { f[el.dataset.l] = el.value; }; });
+  const pick = (attr, campo, repinta) => document.querySelectorAll(`[data-${attr}]`).forEach(el => {
+    el.onclick = () => {
+      f[campo] = el.dataset[attr];
+      if (repinta) renderLoteBBVA();
+      else document.querySelectorAll(`[data-${attr}]`).forEach(x =>
+        x.classList.toggle("on", x.dataset[attr] === f[campo]));
+    };
+  });
+  pick("lmedio", "Medio",     true);
+  pick("lprop",  "Proposito", false);
+  pick("lresp",  "Respondio", true);
+
+  document.querySelectorAll("[data-lsel]").forEach(el => {
+    el.onchange = () => {
+      f.sel[el.dataset.lsel] = el.checked;
+      renderLoteBBVA();
+    };
+  });
+  const q = $("#loteQ");
+  if (q) q.oninput = () => { f.q = q.value; const p = q.selectionStart; renderLoteBBVA();
+    const n2 = $("#loteQ"); if (n2){ n2.focus(); n2.setSelectionRange(p, p); } };
+
+  const todos = $("#loteTodos");
+  if (todos) todos.onclick = () => {
+    const lista = candidatosLote();
+    const marcar = !(Object.values(f.sel).filter(Boolean).length === lista.length && lista.length);
+    f.sel = {};
+    if (marcar) lista.forEach(c => { f.sel[c.customer_id] = true; });
+    renderLoteBBVA();
+  };
+  const g = $("#guardarLote");
+  if (g) g.onclick = guardarLoteBBVA;
+}
+
+async function guardarLoteBBVA(){
+  const f = S.loteBbva;
+  const ids = Object.keys(f.sel).filter(k => f.sel[k]);
+  const errores = [];
+  if (!ids.length) errores.push("Marca al menos un comercio.");
+  if (!f.Fecha) errores.push("Indica la fecha.");
+  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura.");
+  if (!f.Medio) errores.push("Indica por dónde se coordinó.");
+  if (!f.Proposito) errores.push("Indica para qué fue el contacto.");
+  if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
+  if (!String(f.Comentario).trim()) errores.push("Escribe qué se coordinó.");
+  if (respondioBBVA(f.Respondio) && !String(f.Respuesta).trim())
+    errores.push("Escribe qué respondió el ejecutivo de BBVA.");
+
+  const box = $("#errBox");
+  if (errores.length){
+    box.innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${
+      errores.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarLote");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    const filas = ids.map(cid => ({
+      customer_id: String(cid),
+      correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+      fecha_contacto: f.Fecha, hora_contacto: f.Hora || "00:00",
+      con: "BBVA",
+      tipo_contacto: f.Medio,
+      resultado: f.Respondio,
+      proposito: f.Proposito,
+      comentario_ejecutivo: String(f.Comentario).trim(),
+      comentario_cliente: String(f.Respuesta || "").trim() || null
+    }));
+    const { error } = await sb.from("interacciones").insert(filas);
+    if (error) throw new Error(error.message);
+    await sincronizar();
+    S.loteBbva = null;
+    toast(`Coordinación registrada en ${filas.length} comercio${filas.length===1?"":"s"}`);
+    go("cartera");
+  } catch (e){
+    box.innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(e.message)}</div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = `Registrar en ${ids.length} comercio${ids.length===1?"":"s"}`; }
+  }
 }
 
 /* =========================================================================
@@ -4628,6 +5370,53 @@ const COLS_PANEL = [
     val:f => f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}` : "sin gestiones" }
 ];
 
+/* ---- Dónde está parada la cartera, comercio por comercio ----------------
+   Hasta acá «Pendiente» tapaba dos cosas que no se parecen en nada: el
+   comercio que todavía espera que BBVA entregue los datos, y el que ya los
+   tiene y a nadie ha llamado. Son dos tareas distintas, de dos personas
+   distintas, en dos días distintos —y entre las dos es donde se está yendo el
+   volumen de la campaña—. Ahora cada una tiene su cifra y su lista.
+
+   Ninguno de estos números se teclea: salen de la línea de tiempo. */
+function cardPipeline(){
+  const base = cartera().filter(c => !esClienteNuevo(c));
+  const n = id => base.filter(c => estadoDerivado(c) === id).length;
+  const abiertos = ["POR_VALIDAR","POR_CONTACTAR","EN_NEGOCIACION"];
+  const total = base.length;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">◆</span>
+    <div><b>En qué punto está cada comercio</b>
+      <span>Calculado de lo registrado — nadie mueve estos estados a mano</span></div>
+  </div>
+  <div class="card">
+    <div class="stat-row" style="margin-bottom:0">
+      ${abiertos.map(id => { const e = estadoDerivadoById(id), v = n(id);
+        return `<button class="stat stat-link" data-verest="${id}">
+          <div class="lbl">${e.label}</div><div class="val">${v}</div>
+          <div class="sub">${e.hacer} · ${total ? Math.round(v/total*100) : 0}% de la cartera — <b>ver cuáles</b></div>
+        </button>`; }).join("")}
+    </div>
+    <details class="explica"><summary>Por qué estos estados no se marcan a mano</summary>
+      <div class="cuerpo">
+        <p>Nadie guarda «34 años» en una ficha: se guarda la fecha de nacimiento y la edad se
+        calcula, porque una edad guardada miente en el próximo cumpleaños y nadie se entera.</p>
+        <p>Con el estado del comercio pasaba lo mismo. Era un campo que alguien escribía y que se
+        quedaba escrito hasta que alguien más lo cambiara: un comercio que empezó a negociar el
+        martes seguía figurando como pendiente, y por eso <b>no aparecía en ninguna alarma</b> —justo
+        el caso que se enfría.</p>
+        <p><b>Por validar</b> es que el ejecutivo de BBVA todavía no entrega los datos. <b>Por
+        contactar</b> es que ya los entregó y nadie ha llamado. <b>En negociación</b> empieza cuando
+        se <i>habló</i> con el titular, no cuando se intentó: si empezara con el intento, el comercio
+        al que se llamó tres veces sin respuesta entraría al mismo balde que aquel donde se discute
+        una tasa.</p>
+        <p>Los cierres —retenido, recuperado, venta, perdido— siguen marcándose a mano, porque son
+        una decisión de una persona y no se deducen de nada.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
 function bloqueEquipo(r){
   const filas = ejecutivosPanel().map(u => filaEjecutivo(u, r));
   const todo  = !!S.verTodo;
@@ -4648,6 +5437,7 @@ function bloqueEquipo(r){
   };
 
   return `
+  ${flujoBbva() ? cardPipeline() : ""}
   <div class="pnl-h"><span class="pnl-n">3</span>
     <div><b>Cada ejecutivo</b><span>${esc(r.detalle)} — toca cualquier cifra subrayada para ver de qué comercios se trata</span></div>
   </div>
@@ -4999,7 +5789,14 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
   "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
   "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
-  "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion"];
+  "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion",
+  /* El escalón que faltaba. Estas ocho columnas son lo que hoy se seguía a
+     mano en una hoja aparte: para cuántos comercios respondió el banco, en
+     cuántos intentos, y en qué punto quedó parado cada caso. Ninguna se
+     teclea — todas salen de la línea de tiempo del comercio. */
+  "Punto_del_Caso","Coordinaciones_BBVA","BBVA_1er_Contacto","BBVA_1er_Medio",
+  "BBVA_2do_Contacto","BBVA_2do_Medio","BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Falta_Correo_De_Respaldo"];
 
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
@@ -5040,8 +5837,24 @@ function filasBase(){
         b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
-        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""]);
+        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""])
+      .concat(colsBBVA(c));
   });
+}
+
+/* Lo que el CRM deduce de la coordinación con el banco. Se escribe siempre,
+   haya o no llegado el corte: el Excel es el que se manda a la reunión, y una
+   columna que aparece y desaparece según la hora es peor que una vacía. */
+function colsBBVA(c){
+  if (esClienteNuevo(c))
+    return ["Venta nueva", 0, "", "No aplica", "", "No aplica", "No aplica", "", "", "No"];
+  const k = bbvaDe(c.customer_id);
+  const e = estadoDerivadoById(estadoDerivado(c)) || {};
+  const m = r => r ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : "";
+  const f = r => r ? String(r.Fecha_Contacto || "").slice(0,10) : "";
+  return [e.label || "", k.n, f(k.primero), m(k.primero), f(k.segundo), m(k.segundo),
+    k.respondio ? "SI" : "NO", k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
+    k.respondio ? k.intentosHasta : "", k.faltaRespaldo ? "SI" : "NO"];
 }
 
 function filasVisitas(){
