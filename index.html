@@ -1176,8 +1176,19 @@ function estadoDerivado(c){
   /* Una venta nueva no pasa por el banco: el RUC lo trajo Stratis. */
   if (esClienteNuevo(c)) return "EN_NEGOCIACION";
 
-  const conv = DB.delCliente(c.customer_id).some(r => esEfectivo(r.Resultado));
-  if (conv) return "EN_NEGOCIACION";
+  const gestiones = DB.delCliente(c.customer_id);
+  if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
+
+  /* Si alguien ya intentó contactar al comercio, el banco entregó los datos:
+     no se puede marcar un número que no se tiene. Se deduce acá, al leer, y
+     no se escribe en la base — así vale para todo lo que se registre desde
+     ahora y no depende de que un barrido haya pasado por ahí.
+
+     Esta es la diferencia entre un estado guardado y uno calculado, y es la
+     razón de haberlo hecho calculado: un barrido toma una foto y todo lo que
+     llega después se queda fuera. Esto no toma ninguna foto. */
+  if (gestiones.length > 0) return "POR_CONTACTAR";
+
   return bbvaDe(c.customer_id).respondio ? "POR_CONTACTAR" : "POR_VALIDAR";
 }
 const estadoFijadoAMano = c => !!(c && c.estado_fijado);
