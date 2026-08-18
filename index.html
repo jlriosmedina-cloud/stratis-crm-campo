@@ -1065,6 +1065,12 @@ const nomResultadoBBVA = id => (RESULTADOS_BBVA.find(x => x.id === id) || {}).la
    dicen nada. */
 const PROPOSITOS_BBVA = [
   { id:"primer_contacto", label:"Primer contacto",    desc:"La primera vez que se le escribe por este comercio" },
+  /* El propio Jose lo describió así: «al registrar un customer id se marca el
+     medio de contacto con el ejecutivo BBVA; luego, la 2da interacción debería
+     ser si el ejecutivo respondió». La respuesta es un hecho aparte, con su
+     propia fecha —contactar no es que te contesten—, así que se registra como
+     una interacción y no como una casilla del primer contacto. */
+  { id:"respuesta",       label:"Respuesta del banco", desc:"El ejecutivo contestó un contacto anterior y entregó los datos" },
   { id:"respaldo_chat",   label:"Respaldo del chat",  desc:"El correo que deja constancia de lo coordinado por chat" },
   { id:"insistencia",     label:"Insistencia",        desc:"Se vuelve a escribir porque no ha respondido" },
   { id:"negociacion",     label:"Negociación",        desc:"Consulta al banco por tasa, POS, equipos o comisión" }
@@ -3610,13 +3616,26 @@ const FB_VACIO = () => ({
   Respuesta: ""
 });
 
-/* El propósito se propone solo: la primera vez es el primer contacto; si quedó
-   un chat sin su correo, lo que toca es el respaldo; y de ahí en adelante,
-   insistencia. Proponerlo bien es lo que hace que el dato se llene de verdad. */
+/* El propósito se propone solo, según dónde esté parado el comercio:
+
+     sin ningún contacto        → primer contacto
+     un chat sin su correo      → respaldo del chat
+     contactos sin respuesta    → respuesta del banco (lo más probable que venga)
+     ya respondió               → insistencia
+
+   Proponerlo bien es lo que hace que el dato se llene de verdad: si el valor
+   que aparece es casi siempre el correcto, nadie lo deja en cualquier cosa. */
 function fbNuevo(cid){
   const k = bbvaDe(cid);
+  const p = k.n === 0        ? "primer_contacto"
+          : k.faltaRespaldo  ? "respaldo_chat"
+          : !k.respondio     ? "respuesta"
+                             : "insistencia";
   return Object.assign(FB_VACIO(), {
-    Proposito: k.n === 0 ? "primer_contacto" : (k.faltaRespaldo ? "respaldo_chat" : "insistencia")
+    Proposito: p,
+    /* Si lo que viene es la respuesta del banco, el resultado ya se propone:
+       nadie registra «respuesta» para decir que no le contestaron. */
+    Respondio: p === "respuesta" ? "bbva_respondio" : ""
   });
 }
 
