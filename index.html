@@ -1357,7 +1357,12 @@ const BONO_DEF = {
      que coincidir con la meta del proyecto. */
   curva:      { reactivacion_pp:[4, 8, 11, 15, 18], facturacion_pct:[3, 6, 9, 12, 15] },
   pesos:      { reactivacion:30, facturacion:50, venta:20 },
-  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95 },
+  /* cobertura_base decide qué cuenta como cartera cubierta: «registro» son
+     los Customer ID cargados en el CRM y «gestion» los comercios con al menos
+     una gestión. El primer mes va por registro —el mes se fue en coordinar
+     con BBVA, y sin la respuesta del banco no había a quién llamar—, y se
+     cambia por periodo desde Ajustes sin tocar el código. */
+  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95, cobertura_base:"registro" },
   /* Los días que no son de trabajo, además de sábados y domingos. Se editan
      en Ajustes y viajan con la versión de parámetros. */
   feriados:   FERIADOS_DEF,
@@ -7393,9 +7398,24 @@ function llaveDe(correo, p){
   /* Los requisitos son los que regían en ese periodo, no los de hoy. */
   const req   = paramsDe(p).requisitos;
 
+  /* ---- Qué cuenta como cartera cubierta ------------------------------
+     El primer mes de la campaña se fue en coordinar con los ejecutivos de
+     BBVA: sin la respuesta del banco no hay teléfono al que llamar, así que
+     exigir una gestión por comercio medía algo que todavía no dependía del
+     ejecutivo de Stratis. Para ese periodo la cobertura se mide por el
+     registro del Customer ID en el CRM, que sí es trabajo suyo.
+
+     Va como parámetro del periodo y no como regla fija: los parámetros del
+     bono ya se versionan mes a mes y se editan desde Ajustes, así que el mes
+     que viene esto se cambia sin tocar el código. Y —esto importa— cambiarlo
+     no reescribe la historia: cada periodo se sigue midiendo con la regla que
+     regía cuando se trabajó. */
+  const porRegistro = (req.cobertura_base || "gestion") === "registro";
   const tocados = new Set(gest.map(r => String(r.Customer_id)));
   const mios    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
-  const cubiertos = mios.filter(c => tocados.has(String(c.customer_id))).length;
+  const cubiertos = porRegistro
+    ? mios.length
+    : mios.filter(c => tocados.has(String(c.customer_id))).length;
   const cobertura = cart.n ? cubiertos / cart.n * 100 : 0;
 
   const efectivas = gest.filter(r => r.Cumple_Visita === "SI").length;
@@ -7407,7 +7427,7 @@ function llaveDe(correo, p){
   const puntualidad = gest.length ? puntuales / gest.length * 100 : 0;
 
   const r1 = { valor:cobertura,   meta:req.cobertura_pct,    ok: cobertura   >= req.cobertura_pct,
-               detalle:`${cubiertos} de ${cart.n} comercios` };
+               detalle:`${cubiertos} de ${cart.n} comercios`, base: porRegistro ? "registro" : "gestion" };
   const r2 = { valor:porSemana,   meta:req.visitas_semana,   ok: efectivas   >= pide,
                detalle:`${efectivas} efectivas, se piden ${pide}` };
   const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
@@ -7593,7 +7613,9 @@ function tarjetaEjecutivo(u, p){
     <div class="bn-sec">Llave de acceso · ${ll.cumplidos} de 3 requisitos</div>
     <div class="bn-reqs">
       ${filaRequisito("Cobertura de cartera", ll.cobertura, comoPct,
-        "Comercios asignados con al menos una gestión en el periodo")}
+        ll.cobertura.base === "registro"
+          ? "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar"
+          : "Comercios asignados con al menos una gestión en el periodo")}
       ${filaRequisito("Visitas efectivas", ll.visitas, porSemana1,
         `Presenciales o virtuales en las que se logró hablar. El periodo tiene ${
           ll.semanas.toFixed(1).replace(".", ",")} semanas: se piden ${ll.pide}`)}
@@ -8027,6 +8049,37 @@ function cardCurva(val){
    año a otro, y una empresa puede tener además sus propios días libres. Se
    escriben acá, viajan con la versión y por eso corregir el calendario en
    noviembre no reescribe la puntualidad de agosto. */
+/* ---- Cómo se mide la cobertura -----------------------------------------
+   Es el único requisito de la llave cuya definición cambia entre periodos, y
+   por eso no va como un número más sino con su propia explicación al lado:
+   quien lo mueva tiene que saber qué está moviendo.
+
+   El primer mes de campo se fue en coordinar con los ejecutivos de BBVA. Sin
+   la respuesta del banco no hay teléfono al que llamar, así que exigir una
+   gestión por comercio medía algo que todavía no dependía del ejecutivo de
+   Stratis. Lo que sí dependía de él era cargar el Customer ID. */
+function cardCoberturaBase(val){
+  const actual = (val.requisitos || {}).cobertura_base || "gestion";
+  const op = (id, tit, txt) => `
+    <div class="opt ${actual === id ? "on" : ""}" data-cobbase="${id}">
+      <span class="rd"></span><span><b>${tit}</b><span>${txt}</span></span>
+    </div>`;
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Qué cuenta como cartera cubierta</div>
+    <div class="pie" style="margin:-4px 0 10px">
+      Se guarda con la versión del periodo, así que cambiarlo no reescribe los meses
+      ya medidos: cada uno se sigue liquidando con la regla que regía cuando se trabajó.
+    </div>
+    <div class="opts">
+      ${op("registro", "El registro del Customer ID en el CRM",
+           "Cuenta la ficha cargada, se haya trabajado o no. Es la regla del primer mes, cuando el cuello estaba en la respuesta de BBVA")}
+      ${op("gestion", "Al menos una gestión en el periodo",
+           "Cuenta el comercio que recibió contacto o intento de contacto. Es la regla de régimen")}
+    </div>
+  </div>`;
+}
+
 function cardFeriados(val){
   const lista = Array.isArray(val.feriados) ? val.feriados : FERIADOS_DEF;
   const delProyecto = lista.filter(f => f >= PROYECTO.inicio && f <= PROYECTO.fin);
@@ -8115,6 +8168,7 @@ function cardParametrosBono(){
     ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
 
     ${cardCurva(val)}
+    ${cardCoberturaBase(val)}
     ${cardFeriados(val)}
 
     <div class="bn-params">
@@ -8147,6 +8201,11 @@ async function guardarParametros(){
     else ponerBono(nuevo, el.dataset.bono, n);
   });
   if (malo) return toast("Hay un valor que no es un número: " + malo);
+
+  /* El selector de cobertura no es un número, así que va aparte de los
+     campos numéricos: se lee del botón marcado. */
+  const opBase = document.querySelector("[data-cobbase].on");
+  if (opBase) nuevo.requisitos.cobertura_base = opBase.dataset.cobbase;
 
   const campoFer = $("#feriadosParam");
   if (campoFer){
@@ -8200,9 +8259,15 @@ function bindBono(){
     if (e.target.value){ S.pParam = e.target.value; render();
       toast(`Versión nueva desde ${nombreMes(S.pParam)} — ajusta los valores y guarda`); }
   };
+  document.querySelectorAll("[data-cobbase]").forEach(el => el.onclick = () => {
+    document.querySelectorAll("[data-cobbase]").forEach(x =>
+      x.classList.toggle("on", x === el));
+  });
   if ($("#bonoReset")) $("#bonoReset").onclick = () => {
     document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRuta(BONO_DEF, el.dataset.bono));
     if ($("#feriadosParam")) $("#feriadosParam").value = FERIADOS_DEF.join(", ");
+    document.querySelectorAll("[data-cobbase]").forEach(x =>
+      x.classList.toggle("on", x.dataset.cobbase === BONO_DEF.requisitos.cobertura_base));
     toast("Valores del documento cargados — falta guardar");
   };
 }
@@ -9262,9 +9327,9 @@ const FIL = {                 // fila de cada parámetro en la hoja
   periodo:2, mes:3, ini:4, fin:5, semanas:6,
   metaReact:9, metaFact:10, metaVenta:11,
   pesoReact:12, pesoFact:13, pesoVenta:14,
-  cobertura:17, visitas:18, puntualidad:19,
-  piso:22, pagoPiso:23, pagoMeta:24, sobre:25, tope:26, base1:27, mensual:28,
-  feriados:31
+  cobertura:17, visitas:18, puntualidad:19, coberturaBase:20,
+  piso:23, pagoPiso:24, pagoMeta:25, sobre:26, tope:27, base1:28, mensual:29,
+  feriados:32
 };
 function hojaParametros(p, d){
   const B = paramsDe(p);
@@ -9291,6 +9356,12 @@ function hojaParametros(p, d){
     ["Cobertura de cartera", B.requisitos.cobertura_pct, "% de la cartera con al menos una gestión"],
     ["Visitas efectivas por semana", B.requisitos.visitas_semana, "presenciales o virtuales con respuesta"],
     ["Puntualidad del registro", B.requisitos.puntualidad_pct, "% registrado a tiempo"],
+    /* Escribe «registro» o «gestion» y el libro entero recalcula la cobertura.
+       El primer mes se fue en coordinar con los ejecutivos de BBVA: sin la
+       respuesta del banco no había teléfono al que llamar, así que exigir una
+       gestión por comercio medía algo que no dependía del ejecutivo. */
+    ["Cómo se mide la cobertura", (B.requisitos.cobertura_base || "gestion"),
+     "«registro» = Customer ID cargados en el CRM · «gestion» = comercios con al menos una gestión"],
     ["", "", ""],
     ["TRAMOS DEL INCENTIVO", "VALOR", ""],
     ["Piso", B.piso, "% de cumplimiento bajo el cual no hay incentivo"],
@@ -9307,14 +9378,14 @@ function hojaParametros(p, d){
   const editables = [];
   [FIL.mes, FIL.semanas, FIL.metaReact, FIL.metaFact, FIL.metaVenta,
    FIL.pesoReact, FIL.pesoFact, FIL.pesoVenta, FIL.cobertura, FIL.visitas, FIL.puntualidad,
-   FIL.piso, FIL.pagoPiso, FIL.pagoMeta, FIL.sobre, FIL.tope, FIL.base1, FIL.mensual
+   FIL.coberturaBase, FIL.piso, FIL.pagoPiso, FIL.pagoMeta, FIL.sobre, FIL.tope, FIL.base1, FIL.mensual
   ].forEach(f => editables.push([f, 2]));
   for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + 1 + i, 2]);
 
   const ws = hojaLibro(filas, {
     titulo:1, anchos:[38, 16, 62],
-    secciones:[8, 16, 21, 30],
-    etiquetas:filas.map((_, i) => i + 1).filter(f => ![1, 8, 16, 21, 30].includes(f)),
+    secciones:[8, 16, 22, 31],
+    etiquetas:filas.map((_, i) => i + 1).filter(f => ![1, 8, 16, 22, 31].includes(f)),
     notas:filas.map((_, i) => [i + 1, 3]),
     editables,
     fmt:[[2, FIL.ini, FIL.fin, "dd/mm/yyyy"],
@@ -9384,13 +9455,19 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
 
   const gestiones  = `COUNTIFS(${eG},${mG})`;
   const cubiertos  = `SUMIFS(${G("O")},${eG},${mG})`;
+  /* Los Customer ID que ese ejecutivo tiene cargados en el CRM. Es la otra
+     forma de medir cobertura, la que rige el primer mes. */
+  const registrados = `COUNTIFS(${C("B")},${correoRef})`;
+  /* Cuál de las dos manda lo decide la hoja de Parámetros, no esta fórmula:
+     así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
+  const cubre = `IF(${P_(FIL.coberturaBase)}="registro",${registrados},${cubiertos})`;
   const efectivas  = `SUMIFS(${G("N")},${eG},${mG})`;
   const puntuales  = `SUMIFS(${G("K")},${eG},${mG})`;
   const respuestas = `SUMIFS(${G("M")},${eG},${mG})`;
   const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
   const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
   const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
-  return { gestiones, cubiertos, efectivas, puntuales, respuestas, acumulados, delMes, ventas };
+  return { gestiones, cubiertos, registrados, cubre, efectivas, puntuales, respuestas, acumulados, delMes, ventas };
 }
 
 /* El tramo, tal cual está en el documento de incentivos: bajo el piso no
@@ -9428,7 +9505,7 @@ function hojaResumen(p, d, nG, nC, nN){
     filas.push([
       u.nombre, u.correo, cart,
       `=${F.gestiones}`,
-      `=IF($C${f}=0,0,${F.cubiertos}/$C${f}*100)`,
+      `=IF($C${f}=0,0,${F.cubre}/$C${f}*100)`,
       `=${P_(FIL.cobertura)}`,
       `=IF($E${f}>=$F${f},"Sí","No")`,
       `=${F.efectivas}`,
@@ -9491,7 +9568,7 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Cartera asignada", cart, "", "", ""],
     ["", "", "", "", ""],
     ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE"],
-    ["Cobertura de cartera", `=IF($B$4=0,0,${F.cubiertos}/$B$4*100)`, `=${P_(FIL.cobertura)}`,
+    ["Cobertura de cartera", `=IF($B$4=0,0,${F.cubre}/$B$4*100)`, `=${P_(FIL.cobertura)}`,
      `=IF($B$7>=$C$7,"Sí","No")`, "Comercios de su cartera con al menos una gestión en el periodo"],
     ["Visitas efectivas", `=${F.efectivas}`, `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
      `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar"],
