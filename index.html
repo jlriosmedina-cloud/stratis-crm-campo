@@ -2170,6 +2170,34 @@ function verGestiones(filtro, ejecutivo){
   S.fPeriodoReg = "todo";
   go("registros");
 }
+/* Del Panel a la cartera, desde las columnas «Registrados» y «Gestionados».
+   Las dos cifras se podían leer pero no abrir, que es donde empieza el trabajo:
+   saber que 27 comercios están gestionados no sirve si no se puede ver cuáles
+   son los otros 117.
+
+   Ojo con el reloj: el Panel cuenta «Gestionados» dentro del rango que se esté
+   mirando, y la Cartera no tiene rango —muestra el estado de hoy—. Un comercio
+   trabajado en julio y no en agosto sale acá y no allá. En vez de dejar que el
+   número baile sin explicación, el aviso dice los dos y por qué difieren. */
+function verCarteraLista(tipo, ejecutivo, esperado){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = tipo; S.fEjecutivo = ejecutivo || "todos";
+  S.filtrosAbiertos = false; S.limite = 40;
+  go("cartera");
+
+  const n = cartera().filter(c => {
+    if (esClienteNuevo(c)) return false;
+    if (ejecutivo && c.asignado !== ejecutivo) return false;
+    if (tipo === "registrado") return true;
+    return (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0;
+  }).length;
+
+  const que = tipo === "registrado" ? "registrados en el CRM" : "gestionados";
+  const dif = esperado != null && Number(esperado) !== n;
+  toast(`${n} ${n === 1 ? "comercio" : "comercios"} ${que}${ejecutivo ? " de " + ejecutivo : ""}` +
+        (dif ? ` · en el Panel dice ${esperado} porque allá se cuenta solo el rango elegido` : ""));
+}
+
 /* Del Panel a la cartera, por situación del comercio */
 function verCarteraPor(filtro){
   S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
@@ -2244,6 +2272,10 @@ function bindComunes(){
   document.querySelectorAll("[data-vercartera]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verCarteraPor(el.dataset.vercartera);
   });
+  document.querySelectorAll("[data-verlista]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    verCarteraLista(el.dataset.verlista, el.dataset.verejec || "", el.dataset.vercuantos);
+  });
   if (typeof bindExtras === "function") bindExtras();
 }
 
@@ -2305,6 +2337,12 @@ function viewCartera(){
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
     if (S.fContacto === "sin_bbva") return !esClienteNuevo(c) && !c.contacto_bbva;
+    /* Los dos que llegan desde el Panel. Dejan fuera las ventas nuevas a
+       propósito: las columnas «Registrados» y «Gestionados» se miden sobre la
+       cartera que entregó BBVA, y meter acá los RUC que trajo Stratis haría que
+       la lista no cuadrara con el número que se acaba de tocar. */
+    if (S.fContacto === "registrado") return !esClienteNuevo(c);
+    if (S.fContacto === "gestionado") return !esClienteNuevo(c) && b._intentos > 0;
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -2368,10 +2406,19 @@ function viewCartera(){
     <div class="search"><span class="mag">⌕</span>
       <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
 
+    <!-- «Gestionados» faltaba y era la pregunta más obvia: cuáles ya recibieron
+         trabajo, sin importar si contestaron. Se podía preguntar por los que no
+         se tocaron y por los que respondieron, pero no por el conjunto. -->
     <div class="seg" role="group" aria-label="Situación del comercio">
-      ${[["todos","Todos"],["sin","Sin intentar"],["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
-        .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}">${l}</button>`).join("")}
+      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],
+         ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
+        .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
+          k === "gestionado" ? ` title="Comercios con al menos un contacto o intento de contacto con el cliente"` : ""
+        }>${l}</button>`).join("")}
     </div>
+    ${S.fContacto === "registrado" ? `<div class="note" style="margin:0">
+      Mostrando los <b>registrados en el CRM</b>: fichas de la cartera de BBVA que alguien
+      ya cargó, se hayan trabajado o no. Las ventas nuevas no entran acá.</div>` : ""}
 
     <!-- Los cuatro desplegables ocupaban más alto que la lista que filtran.
          Ahora se piden: quedan plegados, y el botón dice cuántos hay puestos
@@ -4555,8 +4602,12 @@ const COLS_PANEL = [
      lo que BBVA asignó, lo que alguien cargó al CRM, y lo que de verdad
      recibió una gestión. Entre la segunda y la tercera está el hueco que no
      se veía en ninguna pantalla: fichas creadas y nunca trabajadas. */
-  { k:"registrados", th:"Registrados",      ttl:"Customer ID cargados en el CRM, se hayan trabajado o no", val:f => f.registrados || "—" },
-  { k:"trabajados",  th:"Gestionados",      ttl:"Comercios con al menos una gestión en el periodo", val:f => f.trabajados || "—" },
+  { k:"registrados", th:"Registrados", lista:"registrado",
+    ttl:"Customer ID cargados en el CRM, se hayan trabajado o no. Cargar la ficha exige indicar cómo se coordinó con el ejecutivo de BBVA",
+    val:f => f.registrados || "—" },
+  { k:"trabajados",  th:"Gestionados", lista:"gestionado",
+    ttl:"Comercios con al menos un contacto o intento de contacto CON EL CLIENTE en el periodo. Nada que ver con BBVA",
+    val:f => f.trabajados || "—" },
   { k:"cargadosSinGestion", th:"Cargados sin gestión", extra:true,
     ttl:"Registrados en el CRM que no tienen ni una gestión: ficha creada y nunca trabajada",
     val:f => f.cargadosSinGestion || "—" },
@@ -4587,12 +4638,18 @@ function bloqueEquipo(r){
     if (c.cierre) return f[c.k]
       ? `<button class="cifra-link" data-vercierre="${c.cierre}" data-verejec="${esc(f.nombre)}" title="Ver los comercios">${f[c.k]}</button>`
       : "—";
+    /* Registrados y Gestionados también abren su lista. Eran los dos números
+       más mirados de la tabla y los únicos sin salida. */
+    if (c.lista) return f[c.k]
+      ? `<button class="cifra-link" data-verlista="${c.lista}" data-verejec="${esc(f.nombre)}"
+                 data-vercuantos="${f[c.k]}" title="Ver los comercios">${f[c.k]}</button>`
+      : "—";
     return c.val(f);
   };
 
   return `
   <div class="pnl-h"><span class="pnl-n">3</span>
-    <div><b>Cada ejecutivo</b><span>${esc(r.detalle)} — toca cualquier cifra de cierre para ver de qué comercios se trata</span></div>
+    <div><b>Cada ejecutivo</b><span>${esc(r.detalle)} — toca cualquier cifra subrayada para ver de qué comercios se trata</span></div>
   </div>
 
   <div class="card ctrl">
@@ -4626,6 +4683,25 @@ function bloqueEquipo(r){
       </tr></tfoot>` : ""}
     </table>
     </div>` : `<div class="vacio">Todavía no hay ejecutivos activos en la campaña.</div>`}
+    <details class="explica"><summary>Asignados, Registrados y Gestionados: en qué se diferencian</summary>
+      <div class="cuerpo">
+        <p>Los tres cuentan comercios y ninguno cuenta lo mismo.</p>
+        <p><b>Asignados</b> es la cartera que entregó BBVA. Es un número parado: no crece con el
+        trabajo del mes.</p>
+        <p><b>Registrados</b> son los que alguien ya cargó en el CRM, se hayan trabajado o no.
+        Cargar una ficha obliga a indicar <b>cómo se coordinó con el ejecutivo de BBVA</b> —correo,
+        llamada, WhatsApp, visita o chat—, que es lo que sostiene que el caso viene de una gestión
+        real y no de una lista suelta. Por eso un comercio registrado sí implica contacto con el
+        banco. La diferencia con <i>Asignados</i> es cartera que todavía no entró al CRM.</p>
+        <p><b>Gestionados</b> es otra cosa y no tiene nada que ver con BBVA: son los comercios que
+        recibieron al menos <b>un contacto o intento de contacto con el cliente</b> en el rango
+        —visita, llamada, WhatsApp, correo—, haya contestado o no. La diferencia con
+        <i>Registrados</i> son fichas creadas y nunca trabajadas.</p>
+        <p>Las dos cifras se pueden tocar: llevan a la Cartera con esos comercios en pantalla. La
+        Cartera no tiene rango de fechas —muestra el estado de hoy—, así que si el número no
+        coincide con el del Panel, el aviso lo dice.</p>
+      </div>
+    </details>
     <details class="explica"><summary>Qué cuenta como retenido, qué como recuperado y qué como venta nueva</summary>
       <div class="cuerpo">
         <p><b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban
