@@ -7661,8 +7661,8 @@ function cumplimientoDe(correo, p){
       detalle: crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
       cumpl:cFact },
     { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
-      meta:`${M.ventas_mes} por periodo`, metaPie:"solo este periodo",
-      logro:String(ventas),
+      meta:`${M.ventas_mes} ${M.ventas_mes === 1 ? "venta" : "ventas"}`, metaPie:"por periodo, no se acumula",
+      logro:`${ventas} ${ventas === 1 ? "venta" : "ventas"}`,
       detalle: ventas === 1 ? "1 afiliación nueva" : `${ventas} afiliaciones nuevas`, cumpl:cVenta }
   ];
 
@@ -7775,7 +7775,11 @@ function tarjetaEjecutivo(u, p){
           fuente === "crm" ? " (contada en el CRM, sin meta cargada)"
           : fuente === "heredada" ? ` (heredada de ${esc(nombreMes(ll.cartera.de))})` : ""}</div>
       </div>
-      <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
+        <button class="btn ghost sm" data-pdfejec="${esc(u.correo)}"
+          title="El acta de este periodo en PDF, para firmar en la reunión">Acta en PDF</button>
+      </div>
     </div>
 
     <div class="bn-sec">Llave de acceso · ${ll.cumplidos} de 3 requisitos</div>
@@ -7992,6 +7996,8 @@ function viewBono(){
           `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
         </select></label>
       <button class="btn" id="bonoLibro">Descargar el libro del periodo</button>
+      <button class="btn ghost" id="pdfTodos"
+        title="Un PDF con el acta de cada ejecutivo, una por página">Actas en PDF</button>
     </div>
     <details class="aj-mas" style="margin-bottom:0">
       <summary>Qué trae el libro</summary>
@@ -8416,6 +8422,7 @@ async function guardarParametros(){
 function bindBono(){
   if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#bonoLibro")) $("#bonoLibro").onclick = e => descargarLibroIncentivos(e.currentTarget);
+  if (typeof bindPdfIncentivo === "function") bindPdfIncentivo();
   if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
   if ($("#baseGuardar"))    $("#baseGuardar").onclick     = () => guardarBaseFact();
@@ -9404,6 +9411,13 @@ function pintarHoja(ws, d){
   (o.fmt || []).forEach(([k, desde, hasta, formato]) => {
     for (let f = desde; f <= hasta; f++) pintar(f, k, { fmt: formato });
   });
+  /* Los números al centro de su columna. Una cifra alineada a la izquierda,
+     pegada al rótulo, se lee como si fuera parte del texto; centrada se ve que
+     es un dato. Jose lo hacía a mano en cada descarga. */
+  (o.centrar || []).forEach(([k, desde, hasta]) => {
+    for (let f = desde; f <= hasta; f++)
+      pintar(f, k, { align:{ horizontal:"center", vertical:"middle" } });
+  });
 
   if (o.congelar) ws.views = [{ state:"frozen", xSplit:o.congelarX || 0, ySplit:o.congelar }];
   if (o.filtro) ws.autoFilter = { from:{ row:o.filtro, column:1 },
@@ -9548,7 +9562,9 @@ function hojaParametros(p, d){
    FIL.pesoReact, FIL.pesoFact, FIL.pesoVenta, FIL.cobertura, FIL.visitas, FIL.puntualidad,
    FIL.coberturaBase, FIL.piso, FIL.pagoPiso, FIL.pagoMeta, FIL.sobre, FIL.tope, FIL.base1, FIL.mensual
   ].forEach(f => editables.push([f, 2]));
-  for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + 1 + i, 2]);
+  /* El primer feriado vive en FIL.feriados; el encabezado está una fila arriba.
+     Estaba corrido en uno y el primero salía como número crudo. */
+  for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + i, 2]);
 
   const ws = hojaLibro(filas, {
     titulo:1, anchos:[38, 16, 62],
@@ -9556,11 +9572,23 @@ function hojaParametros(p, d){
     etiquetas:filas.map((_, i) => i + 1).filter(f => ![1, 8, 16, 22, 31].includes(f)),
     notas:filas.map((_, i) => [i + 1, 3]),
     editables,
+    /* Cada meta y cada mínimo se muestran con su unidad. La celda sigue siendo
+       un número editable: el formato pinta el «%» o el «p.p.», no lo escribe
+       dentro del valor, así que quien la cambie sigue tecleando 8 y no «8 p.p.». */
     fmt:[[2, FIL.ini, FIL.fin, "dd/mm/yyyy"],
-         [2, FIL.feriados + 1, FIL.feriados + fer.length, "dd/mm/yyyy"]] });
+         [2, FIL.semanas,   FIL.semanas,   U.semanas],
+         [2, FIL.metaReact, FIL.metaReact, U.ppEntero],
+         [2, FIL.metaFact,  FIL.metaFact,  U.pctEntero],
+         [2, FIL.metaVenta, FIL.metaVenta, U.ventas],
+         [2, FIL.pesoReact, FIL.pesoVenta, U.pctEntero],
+         [2, FIL.cobertura, FIL.cobertura, U.pctEntero],
+         [2, FIL.visitas,   FIL.visitas,   U.visitas],
+         [2, FIL.puntualidad, FIL.puntualidad, U.pctEntero],
+         [2, FIL.piso,      FIL.mensual,   U.pctEntero],
+         [2, FIL.feriados, FIL.feriados + fer.length - 1, "dd/mm/yyyy"]] });
   return { ws, nFeriados: fer.length };
 }
-const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n}`;
+const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n - 1}`;
 
 /* ---- Gestiones: la evidencia del tiempo de registro ---------------------
    Las dos columnas que importan son fórmulas, no valores: DIAS.LAB entre la
@@ -9704,12 +9732,25 @@ function hojaResumen(p, d, nG, nC, nN){
     ]);
   });
   const ult = 4 + d.ejec.length;
-  const pct = ["Cobertura","Puntualidad","Reactivación acumulada (p.p.)","Cumple reactivación",
-               "Facturación acumulada (%)","Cumple facturación","Cumple venta",
-               "Cumplimiento ponderado","Tramo","Incentivo del periodo","Se paga ahora","Se retiene"];
+  /* Cada columna con SU unidad, no todas con «0.0». Tres columnas seguidas
+     que dicen 18 / 18 / 18 y significan puntos porcentuales, porcentaje de
+     cumplimiento y ventas son tres cosas distintas leídas como una. */
+  const conUnidad = [
+    [["Cobertura","Puntualidad","Facturación acumulada (%)",
+      "Cumple reactivación","Cumple facturación","Cumple venta",
+      "Cumplimiento ponderado","Tramo","Incentivo del periodo",
+      "Se paga ahora","Se retiene"], U.pct],
+    [["Reactivación acumulada (p.p.)"], U.pp],
+    [["Meta del mes (p.p.)"], U.ppEntero],
+    [["Ventas","Meta de ventas"], U.ventas],
+    [["Visitas efectivas","Mínimo de visitas"], U.visitas],
+    [["Cartera asignada"], U.comercios]
+  ];
   return hojaLibro(filas, {
     titulo:1, sub:2, cabecera:4, congelar:4, congelarX:1, filtro:4,
-    fmt: pct.map(n => [cols.indexOf(n) + 1, 5, ult, "0.0"]),
+    fmt: conUnidad.flatMap(([nombres, f]) =>
+      nombres.map(n => cols.indexOf(n)).filter(i => i >= 0).map(i => [i + 1, 5, ult, f])),
+    centrar: cols.map((_, i) => [i + 1, 5, ult]).slice(1),
     destacar: d.ejec.map((_, i) => [5 + i, cols.indexOf("Incentivo del periodo") + 1, LX.navy]),
     semaforo: [
       [`${L(cols.indexOf("Llave"))}5:${L(cols.indexOf("Llave"))}${ult}`, ["Habilitado"], ["Sin incentivo"]],
@@ -9722,6 +9763,27 @@ function hojaResumen(p, d, nG, nC, nN){
    La misma cuenta, en vertical y con el nombre arriba, porque la reunión es
    con una persona y no con la tabla del equipo. Debajo, sus gestiones fuera
    de plazo: es la pregunta que siempre aparece. */
+/* ---- Las unidades, dichas en la celda ----------------------------------
+   Un 18 suelto no dice nada: puede ser 18 puntos porcentuales de
+   reactivación, 18% de cobertura o 18 ventas. Excel deja escribir la unidad
+   dentro del formato, así que la celda sigue siendo un número —se puede
+   sumar, promediar y dinamizar— pero se lee con su unidad.
+
+   Ojo con el formato: es 0.0"%" y no 0.0%. El segundo multiplica por cien, y
+   nuestros valores ya vienen en escala 0-100; usarlo convertiría un 45,3% en
+   un 4530%. */
+const U = {
+  pct:   '0.0"%"',      // un porcentaje calculado
+  pctEntero: '0"%"',    // el mínimo o la meta, que siempre es redonda
+  pp:    '0.0" p.p."',  // puntos porcentuales de reactivación
+  ppEntero: '0" p.p."',
+  ventas:'0" ventas"',
+  visitas:'0" visitas"',
+  comercios:'0" comercios"',
+  gestiones:'0" gestiones"',
+  semanas:'0.00" semanas"'
+};
+
 function hojaEjecutivo(u, p, d, nG, nC, nN){
   const correoRef = `$B$3`;
   const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
@@ -9797,7 +9859,33 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     etiquetas,
     notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
     destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
-    fmt:[[1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"]],
+    fmt:[
+      [1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"],
+      /* La llave */
+      [2, 4, 4, U.comercios],                        // cartera asignada
+      [2, 7, 7, U.pct],  [3, 7, 7, U.pctEntero],     // cobertura
+      [2, 8, 8, U.visitas], [3, 8, 8, U.visitas],    // visitas efectivas
+      [2, 9, 9, U.pct],  [3, 9, 9, U.pctEntero],     // puntualidad
+      [2, 12, 12, U.gestiones], [2, 13, 13, U.gestiones],
+      [2, 14, 14, U.comercios],
+      /* Los objetivos: cada uno con SU unidad, que es justo lo que se
+         confundía al leer tres filas seguidas de números pelados. */
+      [2, 17, 17, U.pp],   [3, 17, 17, U.ppEntero],  // reactivación
+      [2, 18, 18, U.pct],  [3, 18, 18, U.pctEntero], // facturación
+      [2, 19, 19, U.ventas], [3, 19, 19, U.ventas],  // venta
+      [4, 17, 19, U.pct],                            // cumplimiento
+      [5, 17, 19, U.pctEntero],                      // peso
+      [2, 20, 20, U.comercios],
+      /* El resultado, todo en % del sueldo base */
+      [2, 23, 27, U.pct],
+      [3, inicio, filas.length, "0"]
+    ],
+    /* Valor, mínimo y cumple, centrados en toda la hoja. El peso solo en el
+       bloque de objetivos: en la llave esa columna es texto explicativo y
+       centrarlo lo vuelve ilegible. Y la fecha de gestión, para que la tabla
+       de abajo no quede con la primera columna suelta a la izquierda. */
+    centrar:[[2, 4, filas.length], [3, 4, filas.length], [4, 4, filas.length],
+             [5, 16, 19], [1, fCab, filas.length]],
     cabecera: fCab,
     semaforo: [[`D${bandas[0] + 1}:D${bandas[0] + 3}`, ["Sí"], ["No"]]] });
 }
@@ -9941,6 +10029,274 @@ async function descargarLibroIncentivos(btn){
   } finally {
     if (btn){ btn.disabled = false; btn.textContent = antes || "Descargar el libro del periodo"; }
   }
+}
+
+/* =========================================================================
+   El acta del incentivo, en PDF y por ejecutivo
+
+   Por qué existe: la reunión de incentivos es con una persona, y lo que queda
+   de esa reunión es una hoja. El libro de Excel sirve para auditar el cálculo
+   —tiene las fórmulas y los datos crudos— pero no es lo que se le entrega a
+   alguien para que confirme que está de acuerdo: son once hojas y trescientas
+   filas. Esto es una página.
+
+   Y es una página que se puede firmar. Ahí está la diferencia entre un
+   reporte y una evidencia: el pie lleva la fecha, la hora, quién lo generó y
+   dos líneas para las firmas. Un PDF sin eso es una impresión; con eso es un
+   documento de la conversación que ocurrió.
+
+   Se dibuja a mano con jsPDF en vez de convertir la hoja de Excel. Convertir
+   una hoja de cálculo a PDF produce exactamente eso —una hoja de cálculo
+   impresa, con sus columnas y su cuadrícula— y aquí hace falta un documento.
+
+   Lo que NO lleva, y es deliberado: ninguna cifra de sueldo. El cálculo llega
+   hasta «% del sueldo base» y ahí se detiene, igual que en el resto del CRM.
+   El monto lo pone Recursos Humanos con el dato que solo ellos tienen.
+   ========================================================================= */
+
+const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+
+/* La paleta del CRM, en la escala 0-255 que pide jsPDF. */
+const PX = {
+  navy:[12, 17, 55], azul:[59, 67, 251], gris:[63, 80, 115], gris2:[140, 152, 172],
+  linea:[221, 226, 236], fondo:[246, 249, 255],
+  ok:[10, 125, 94], okBg:[230, 247, 241], mal:[179, 52, 26], malBg:[253, 237, 234],
+  warn:[179, 101, 26], warnBg:[255, 244, 227], blanco:[255, 255, 255]
+};
+
+function cargarJsPDF(){
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = JSPDF_CDN;
+    s.onload = () => ok();
+    s.onerror = () => mal(new Error("No se pudo cargar el generador de PDF. Revisa la conexión."));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---- Lo que dice cada número, con su unidad -----------------------------
+   El mismo criterio que en el Excel: un 18 suelto puede ser 18 puntos
+   porcentuales, 18% o 18 ventas, y en una hoja que alguien va a firmar eso no
+   puede quedar a interpretación. */
+const pdfPct = v => (v === null || v === undefined || v === "") ? "—"
+  : (Math.round(Number(v) * 10) / 10).toString().replace(".", ",") + "%";
+const pdfPP  = v => (Math.round(Number(v) * 10) / 10).toString().replace(".", ",") + " p.p.";
+const pdfNum = (v, u) => `${Math.round(Number(v))}${u ? (u === "%" ? "%" : " " + u) : ""}`;
+
+function actaIncentivo(doc, u, p, x){
+  const B  = paramsDe(p);
+  const ll = x.llave, cu = x.cumpl;
+  const M  = metaPeriodo(p, B);
+  const W  = 210, m = 16;                       // A4 en mm
+  let y = 0;
+
+  /* La fuente que trae jsPDF es latin-1: lo que no está en esa tabla no sale
+     como el carácter, sale como basura. Una flecha «→» en medio del monto de
+     facturación se veía como «!'», y en una hoja que alguien va a firmar eso
+     no es un detalle estético.
+
+     De paso se unifica el separador decimal: el CRM formatea algunos números
+     con toFixed —que siempre usa punto— y otros con coma. Dentro de un mismo
+     documento tienen que verse iguales. */
+  const sanear = s => String(s)
+    .replace(/[→⇒➜]/g, "a").replace(/[—–]/g, "-")
+    .replace(/[«»""]/g, '"').replace(/['']/g, "'")
+    .replace(/…/g, "...").replace(/[⁄∕]/g, "/")
+    .replace(/(\d),(\d{3}\b)/g, "$1 $2")     // miles: 5,000,000 -> 5 000 000
+    .replace(/(\d)\.(\d)/g, "$1,$2")         // decimal: 1.3 -> 1,3
+    /* Lo que quede fuera de latin-1 se cae antes de llegar al PDF. */
+    .replace(/[^\x00-\xFF]/g, "");
+
+  const txt = (s, x0, y0, o) => {
+    o = o || {};
+    doc.setFont("helvetica", o.bold ? "bold" : (o.italic ? "italic" : "normal"));
+    doc.setFontSize(o.size || 9);
+    doc.setTextColor(...(o.color || PX.gris));
+    doc.text(sanear(s), x0, y0, { align: o.align || "left" });
+  };
+  const caja = (x0, y0, an, al, color) => {
+    doc.setFillColor(...color); doc.rect(x0, y0, an, al, "F");
+  };
+  const linea = y0 => {
+    doc.setDrawColor(...PX.linea); doc.setLineWidth(0.2); doc.line(m, y0, W - m, y0);
+  };
+
+  /* ---- Cabecera ------------------------------------------------------- */
+  caja(0, 0, W, 34, PX.navy);
+  txt("STRATIS LATAM", m, 12, { size:8, bold:true, color:[142, 150, 200] });
+  txt(u.nombre, m, 22, { size:19, bold:true, color:PX.blanco });
+  txt(u.correo, m, 28.5, { size:8.5, color:[168, 178, 216] });
+  txt("ACTA DE INCENTIVO", W - m, 12, { size:8, bold:true, color:[142, 150, 200], align:"right" });
+  txt(nombrePeriodo(p), W - m, 21, { size:13, bold:true, color:PX.blanco, align:"right" });
+  txt(textoPeriodo(p), W - m, 28.5, { size:8.5, color:[168, 178, 216], align:"right" });
+  y = 44;
+
+  /* ---- El estado, que es lo primero que se busca ----------------------- */
+  const est = ll.estado === "activo" ? { t:"HABILITADO", c:PX.ok,  bg:PX.okBg }
+            : ll.estado === "base"   ? { t:"SOLO BONO BASE", c:PX.warn, bg:PX.warnBg }
+                                     : { t:"SIN INCENTIVO", c:PX.mal, bg:PX.malBg };
+  caja(m, y - 6, W - 2*m, 16, est.bg);
+  txt(est.t, m + 5, y + 1.5, { size:12, bold:true, color:est.c });
+  txt(`${ll.cumplidos} de 3 requisitos de gestión`, m + 5, y + 6, { size:8, color:PX.gris });
+  txt("Cartera asignada", W - m - 5, y - 1, { size:8, color:PX.gris, align:"right" });
+  txt(pdfNum(ll.cartera.n, "comercios"), W - m - 5, y + 5, { size:11, bold:true, color:PX.navy, align:"right" });
+  y += 20;
+
+  /* ---- La llave -------------------------------------------------------- */
+  const seccion = t => {
+    txt(t, m, y, { size:9, bold:true, color:PX.navy });
+    y += 2; linea(y); y += 5;
+  };
+  const fila = (rot, valor, meta, ok, pie) => {
+    txt(rot, m, y, { size:9, bold:true, color:PX.navy });
+    txt(valor, 118, y, { size:9, color:PX.gris, align:"right" });
+    txt(meta,  152, y, { size:9, color:PX.gris2, align:"right" });
+    if (ok !== null){
+      const c = ok ? PX.ok : PX.mal;
+      caja(W - m - 16, y - 3.4, 16, 5, ok ? PX.okBg : PX.malBg);
+      txt(ok ? "Cumple" : "No cumple", W - m - 8, y, { size:7.5, bold:true, color:c, align:"center" });
+    }
+    if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    y += 7;
+  };
+
+  seccion("LLAVE DE ACCESO");
+  txt("VALOR", 118, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("MÍNIMO", 152, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  fila("Cobertura de cartera", pdfPct(ll.cobertura.valor), pdfPct(ll.cobertura.meta),
+       ll.cobertura.ok, ll.cobertura.detalle);
+  fila("Visitas efectivas", pdfNum(ll.efectivas, "visitas"), pdfNum(ll.pide, "visitas"),
+       ll.visitas.ok, `El periodo tiene ${ll.semanas.toFixed(1).replace(".", ",")} semanas`);
+  fila("Puntualidad del registro", pdfPct(ll.puntualidad.valor), pdfPct(ll.puntualidad.meta),
+       ll.puntualidad.ok, ll.puntualidad.detalle);
+  y += 2;
+
+  /* ---- Los objetivos --------------------------------------------------- */
+  seccion("CUMPLIMIENTO DE OBJETIVOS");
+  txt("LOGRO", 100, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("META DEL MES", 136, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("CUMPLE", 164, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("PESO", W - m, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  cu.objetivos.forEach(o => {
+    txt(o.nombre, m, y, { size:9, bold:true, color:PX.navy });
+    txt(o.logro, 100, y, { size:9, color:PX.gris, align:"right" });
+    txt(o.meta,  136, y, { size:9, color:PX.gris2, align:"right" });
+    txt(o.cumpl === null ? "pendiente" : pdfPct(o.cumpl), 164, y,
+        { size:9, bold:true, color: o.cumpl === null ? PX.gris2 : PX.navy, align:"right" });
+    txt(pdfNum(o.peso, "%"), W - m, y, { size:9, color:PX.gris2, align:"right" });
+    y += 4;
+    txt(`${o.detalle}${o.metaPie ? " · " + o.metaPie : ""}`, m, y, { size:7.5, color:PX.gris2 });
+    y += 7;
+  });
+  if (cu.objetivos.some(o => o.cumpl === null)){
+    txt("La facturación todavía no está cargada: su peso sale del reparto y el ponderado está incompleto.",
+        m, y, { size:7.5, italic:true, color:PX.warn });
+    y += 6;
+  }
+  y += 2;
+
+  /* ---- El resultado ---------------------------------------------------- */
+  seccion("RESULTADO DEL PERIODO");
+  const res = (rot, valor, pie, fuerte) => {
+    txt(rot, m, y, { size: fuerte ? 10 : 9, bold:true, color:PX.navy });
+    txt(valor, W - m, y, { size: fuerte ? 13 : 9.5, bold:true,
+        color: fuerte ? PX.azul : PX.gris, align:"right" });
+    if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    y += fuerte ? 8 : 7;
+  };
+  res("Cumplimiento ponderado", pdfPct(cu.total),
+      cu.completo ? "" : "Calculado solo sobre los objetivos que ya se pueden medir");
+  res("Tramo que le corresponde", pdfPct(x.bruto), `Del ${B.piso}% al ${B.sobre}% de cumplimiento`);
+  res("Incentivo del periodo", pdfPct(x.pago), x.nota || "", true);
+  res("Se paga con la remuneración", pdfPct(x.mensual), `${B.pago_mensual}% del incentivo`);
+  res("Se retiene hasta el cierre", pdfPct(x.retenido), "Se liquida al cerrar el proyecto");
+
+  caja(m, y - 3, W - 2*m, 9, PX.fondo);
+  txt("Todos los porcentajes son sobre el sueldo base. El monto lo calcula Recursos Humanos.",
+      m + 4, y + 2.5, { size:7.5, italic:true, color:PX.gris });
+  y += 16;
+
+  /* ---- Las firmas ------------------------------------------------------
+     Es lo que convierte la hoja en evidencia. Sin esto es una impresión. */
+  const firma = (x0, an, rot, nombre) => {
+    doc.setDrawColor(...PX.gris2); doc.setLineWidth(0.3);
+    doc.line(x0, y, x0 + an, y);
+    txt(rot, x0, y + 4, { size:7.5, bold:true, color:PX.navy });
+    if (nombre) txt(nombre, x0, y + 8, { size:7.5, color:PX.gris2 });
+  };
+  const an = (W - 2*m - 12) / 2;
+  firma(m, an, "Recibí conforme", u.nombre);
+  firma(m + an + 12, an, "Por Stratis", S.user.nombreCompleto || S.user.nombre);
+  y += 16;
+
+  /* ---- El pie: de dónde salió y cuándo -------------------------------- */
+  linea(y); y += 4;
+  const ahora = new Date();
+  const sello = x.sellado
+    ? `Periodo sellado el ${fmtFecha(String(x.selladoEn).slice(0,10))} — los números no cambian`
+    : "Periodo abierto: los números pueden moverse hasta el cierre";
+  txt(sello, m, y, { size:7.5, color: x.sellado ? PX.ok : PX.warn });
+  txt(`Generado el ${fmtFecha(hoyISO())} a las ${String(ahora.getHours()).padStart(2,"0")}:${
+      String(ahora.getMinutes()).padStart(2,"0")} por ${S.user.nombreCompleto || S.user.nombre}`,
+      W - m, y, { size:7.5, color:PX.gris2, align:"right" });
+  y += 4;
+  txt(`Parámetros vigentes: ${(versionDe(p) || {}).vigente_desde
+        ? "versión de " + nombreMes(versionDe(p).vigente_desde) : "los del documento"}`,
+      m, y, { size:7.5, color:PX.gris2 });
+}
+
+async function pdfIncentivo(u, p, btn){
+  const txtOrig = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Generando…"; }
+  try {
+    await cargarJsPDF();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    actaIncentivo(doc, u, p, incentivoDe(u.correo, p));
+    const limpio = String(u.nombre).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
+    doc.save(`Incentivo_${limpio}_${p}.pdf`);
+    toast(`Acta de ${u.nombre} generada`);
+  } catch (e){
+    toast("No se pudo generar el PDF: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = txtOrig; }
+  }
+}
+
+/* Todas las actas en un solo archivo, una por página: es lo que se archiva
+   cuando el periodo se cierra. */
+async function pdfIncentivoTodos(btn){
+  const txtOrig = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Generando…"; }
+  try {
+    await cargarJsPDF();
+    const { jsPDF } = window.jspdf;
+    const p = periodoBono();
+    const ejec = ejecutivosDelBono();
+    if (!ejec.length) return toast("No hay ejecutivos activos en la campaña");
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    ejec.forEach((u, i) => {
+      if (i) doc.addPage();
+      actaIncentivo(doc, u, p, incentivoDe(u.correo, p));
+    });
+    doc.save(`Actas_de_incentivo_${p}.pdf`);
+    toast(`${ejec.length} actas generadas`);
+  } catch (e){
+    toast("No se pudo generar el PDF: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = txtOrig; }
+  }
+}
+
+function bindPdfIncentivo(){
+  document.querySelectorAll("[data-pdfejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const u = ejecutivosDelBono().find(x => x.correo === el.dataset.pdfejec);
+    if (u) pdfIncentivo(u, periodoBono(), el);
+  });
+  const todos = document.querySelector("#pdfTodos");
+  if (todos) todos.onclick = () => pdfIncentivoTodos(todos);
 }
 
 /* =========================================================================
