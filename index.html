@@ -9901,12 +9901,24 @@ function hojaEvolucion(d){
     ["Un renglón por ejecutivo y periodo, para ver de dónde viene el número de hoy."],
     [],
     cols];
-  d.periodos.forEach(pp => {
+  /* Solo los periodos que ya arrancaron.
+     Antes se listaban los cinco del proyecto, y los meses que todavía no
+     empiezan salían con números: cobertura 100% —porque se mide por el
+     Customer ID ya cargado, que no depende de la ventana—, reactivación
+     acumulada igual a la de hoy, y un ponderado que baja mes a mes porque la
+     meta sube mientras el acumulado se queda quieto. Nada de eso está mal
+     calculado; el problema es que se lee como un pronóstico, y lo que dice
+     ese pronóstico es «vas a fallar». Un periodo que no ha empezado no tiene
+     resultado: no va en la tabla. */
+  const hoy = hoyISO();
+  const corridos = d.periodos.filter(pp => (ventanaPeriodo(pp).ini || "9999") <= hoy);
+  const enCurso  = periodoHoy();
+  corridos.forEach(pp => {
     const M = metaPeriodo(pp, paramsDe(pp));
     d.ejec.forEach(u => {
       const x = incentivoDe(u.correo, pp);
       const ll = x.llave, cu = x.cumpl;
-      filas.push([pp, M.i, u.nombre, TEXTO_LLAVE[ll.estado], ll.cumplidos,
+      filas.push([pp + (pp === enCurso ? " (en curso)" : ""), M.i, u.nombre, TEXTO_LLAVE[ll.estado], ll.cumplidos,
         Math.round(ll.cobertura.valor * 10) / 10, ll.efectivas,
         Math.round(ll.puntualidad.valor * 10) / 10,
         Math.round(cu.pp * 100) / 100, M.reactivacion_pp,
@@ -9916,9 +9928,20 @@ function hojaEvolucion(d){
     });
   });
   return hojaLibro(filas, { titulo:1, sub:2, cabecera:4, congelar:4, filtro:4,
-    fmt:[[6, 5, filas.length, "0.0"], [8, 5, filas.length, "0.0"],
-         [9, 5, filas.length, "0.00"], [13, 5, filas.length, "0.0"],
-         [14, 5, filas.length, "0.0"], [15, 5, filas.length, "0.0"], [16, 5, filas.length, "0.0"]],
+    /* Las mismas unidades que en la hoja de cada ejecutivo: esta tabla se lee
+       en horizontal y sin ellas tres columnas seguidas de «100,0» no dicen si
+       son porcentajes, puntos o visitas. */
+    fmt:[[6, 5, filas.length, U.pct], [7, 5, filas.length, U.visitas],
+         [8, 5, filas.length, U.pct], [9, 5, filas.length, '0.00" p.p."'],
+         [10, 5, filas.length, U.ppEntero],
+         [11, 5, filas.length, U.ventas], [12, 5, filas.length, U.ventas],
+         [13, 5, filas.length, U.pct],
+         [14, 5, filas.length, U.pct], [15, 5, filas.length, U.pct], [16, 5, filas.length, U.pct]],
+    centrar:[[2, 5, filas.length], [5, 5, filas.length], [6, 5, filas.length],
+             [7, 5, filas.length], [8, 5, filas.length], [9, 5, filas.length],
+             [10, 5, filas.length], [11, 5, filas.length], [12, 5, filas.length],
+             [13, 5, filas.length], [14, 5, filas.length], [15, 5, filas.length],
+             [16, 5, filas.length]],
     semaforo:[[`D5:D${filas.length}`, ["Habilitado"], ["Sin incentivo"]]],
     anchos:[10,6,18,15,11,11,10,12,15,11,9,8,13,13,10,10] });
 }
