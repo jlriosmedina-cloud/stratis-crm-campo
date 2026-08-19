@@ -5831,7 +5831,8 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
      teclea — todas salen de la línea de tiempo del comercio. */
   "Punto_del_Caso","Coordinaciones_BBVA","BBVA_1er_Contacto","BBVA_1er_Medio",
   "BBVA_2do_Contacto","BBVA_2do_Medio","BBVA_Respondio","BBVA_Fecha_Respuesta",
-  "BBVA_Intentos_Hasta_Respuesta","BBVA_Falta_Correo_De_Respaldo"];
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Falta_Correo_De_Respaldo"];
 
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
@@ -5882,14 +5883,20 @@ function filasBase(){
    columna que aparece y desaparece según la hora es peor que una vacía. */
 function colsBBVA(c){
   if (esClienteNuevo(c))
-    return ["Venta nueva", 0, "", "No aplica", "", "No aplica", "No aplica", "", "", "No"];
+    return ["Venta nueva", 0, "", "No aplica", "", "No aplica", "No aplica", "", "", "", "No"];
   const k = bbvaDe(c.customer_id);
   const e = estadoDerivadoById(estadoDerivado(c)) || {};
   const m = r => r ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : "";
   const f = r => r ? String(r.Fecha_Contacto || "").slice(0,10) : "";
+  /* Cuanto tardo el banco en contestar. Es el numero que dice si el atasco
+     esta de nuestro lado o del suyo. */
+  const demora = (k.respondio && k.primero && k.fechaRespuesta)
+    ? Math.round((new Date(String(k.fechaRespuesta).slice(0,10))
+                - new Date(String(k.primero.Fecha_Contacto).slice(0,10))) / 86400000)
+    : "";
   return [e.label || "", k.n, f(k.primero), m(k.primero), f(k.segundo), m(k.segundo),
     k.respondio ? "SI" : "NO", k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
-    k.respondio ? k.intentosHasta : "", k.faltaRespaldo ? "SI" : "NO"];
+    k.respondio ? k.intentosHasta : "", demora, k.faltaRespaldo ? "SI" : "NO"];
 }
 
 /* ---- La coordinación con BBVA, una fila por contacto --------------------
@@ -6200,7 +6207,20 @@ const COLS_DETALLE = [
   "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
   "Visitas_Validas","Visita_Presencial","Visita_Virtual",
   "Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
-  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta","Alertas"];
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta","Alertas",
+  /* ---- La coordinacion con el ejecutivo de BBVA -------------------------
+     Van en el bloque de detalle, que es material interno de Stratis: el
+     pegado al banco son las 16 primeras columnas y no las toca. Viven aca
+     porque este es el archivo que se usa para analizar, y sin ellas el
+     analisis se queda ciego justo donde la campana se esta atorando.
+
+     Una fila por comercio, o sea el resumen. La linea de tiempo completa
+     —una fila por cada contacto, que es lo que se dinamiza— esta en la hoja
+     «Coordinacion BBVA» del archivo de la campana completa. */
+  "Punto_del_Caso","Coordinaciones_BBVA","BBVA_1er_Contacto","BBVA_1er_Medio",
+  "BBVA_2do_Contacto","BBVA_2do_Medio","BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Falta_Correo_De_Respaldo"];
 
 const COLS_BASE_BBVA = COLS_ENTREGA.concat(COLS_DETALLE);
 
@@ -6279,7 +6299,7 @@ function filasBBVA(soloEntrega){
       ultimo("Comentario_Ejecutivo"),
       String(c.creado_en || "").slice(0,10),
       alertasDe(c, regs, efectivos, suma)
-    ]);
+    ].concat(colsBBVA(c)));
   });
 }
 
@@ -6603,12 +6623,18 @@ function viewAyuda(){
       <summary>Qué trae cada archivo y cómo se pega</summary>
       <div class="cuerpo">
         <p><b>Base para BBVA</b> trae dos hojas. La hoja <b>Base</b> tiene una fila por comercio
-        de la cartera: primero las <b>16 columnas que se entregan al banco</b>, y a continuación
+        de la cartera: primero las <b>17 columnas que se entregan al banco</b>, y a continuación
         el resto de la gestión completa, para el análisis de Stratis. Es un solo pegado.</p>
-        <p>Las 16 de entrega son: customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas,
-        Fecha_Ultimo_Contacto, Direccion_Actual, Contactado (Si/No), Cumple_Visita, Fecha_Visita,
-        Intentos_Totales, Tipo_Cierre, Estado_Comercio, Fecha_Cierre, Motivo_No_Retencion y
-        Ejecutivo_Asignado. De la 17 en adelante es material interno y no se pega en el banco.</p>
+        <p>Las 17 de entrega son: customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas,
+        Fecha_Ultima_Gestion, Fecha_Ultima_Respuesta, Direccion_Actual, Contactado (Si/No),
+        Cumple_Visita, Fecha_Visita, Intentos_Totales, Tipo_Cierre, Estado_Comercio, Fecha_Cierre,
+        Motivo_No_Retencion y Ejecutivo_Asignado. <b>De la 18 en adelante es material interno</b> y
+        no se pega en el banco.</p>
+        <p>Ahí, al final del detalle, están las <b>columnas de la coordinación con BBVA</b>: en qué
+        punto está el caso, cuántos contactos hubo con el ejecutivo del banco, cuál fue el 1.º y el
+        2.º con su medio, si respondió, en qué fecha, cuántos intentos y cuántos días tardó, y si
+        quedó un chat sin su correo de respaldo. Es una fila por comercio. Si necesitas dinamizar
+        contacto por contacto, esa está en la hoja <b>Coordinación BBVA</b> del archivo completo.</p>
         <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
         pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
         o virtual y además el cliente respondió. <b>Volumen_Comercio</b> no sale: esa columna la
