@@ -5892,6 +5892,66 @@ function colsBBVA(c){
     k.respondio ? k.intentosHasta : "", k.faltaRespaldo ? "SI" : "NO"];
 }
 
+/* ---- La coordinación con BBVA, una fila por contacto --------------------
+   La hoja «Base» trae el resumen por comercio —1er contacto, 2do, si
+   respondió—, que sirve para mirar, no para dinamizar. Una tabla dinámica
+   necesita el hecho suelto: cada contacto con su fecha, su medio, su motivo y
+   su resultado, en su propia fila.
+
+   Con esto se puede preguntar cosas que hasta ahora no tenían dónde: cuántos
+   contactos hicieron falta por comercio, qué medio obtiene más respuesta,
+   cuánto demora el banco en contestar, cuántos chats quedaron sin su correo
+   de respaldo.
+
+   Va SOLO en el archivo interno. La coordinación con el banco es cómo trabaja
+   Stratis por dentro —incluido cuántas veces tuvimos que insistirle a su
+   ejecutivo—, y eso no es parte de lo que se le entrega a BBVA. */
+const COLS_COORD = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis",
+  "Customer_id","Nombre_Comercio","Distrito","Ejecutivo_Asignado",
+  "Medio","Proposito","Respondio_BBVA","Numero_de_Contacto",
+  "Dias_Desde_El_Primer_Contacto","Que_Se_Coordino","Que_Respondio_BBVA",
+  "Fecha_Registro","Dias_Trabajados_De_Demora","Registrada_A_Tiempo",
+  "Origen_Del_Dato","Punto_del_Caso","ID_Registro"];
+
+function filasCoordinaciones(){
+  /* Se agrupa por comercio para poder numerar los contactos y medir cuántos
+     días pasaron desde el primero: eso no se puede saber mirando una fila
+     sola, y es justo lo que se quiere dinamizar. */
+  const porComercio = {};
+  DB.bbva().forEach(r => {
+    const k = String(r.Customer_id);
+    (porComercio[k] = porComercio[k] || []).push(r);
+  });
+  Object.values(porComercio).forEach(l => l.sort((a,b) => ts(a) - ts(b)));
+
+  const dias = (a, b) => {
+    const x = String(a || "").slice(0,10), y = String(b || "").slice(0,10);
+    if (!x || !y) return "";
+    return Math.round((new Date(y) - new Date(x)) / 86400000);
+  };
+
+  return DB.bbva().sort((a,b) => ts(a) - ts(b)).map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const lista = porComercio[String(r.Customer_id)] || [];
+    const i = lista.indexOf(r);
+    const e = estadoDerivadoById(estadoDerivado(c)) || {};
+    return [
+      r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis,
+      r.Customer_id, c.nombre_comercio || "", c.distrito || "", c.asignado || "",
+      nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto,
+      nomProposito(r.Proposito) || "",
+      respondioBBVA(r.Resultado) ? "SI" : "NO",
+      i + 1,
+      i === 0 ? 0 : dias(lista[0].Fecha_Contacto, r.Fecha_Contacto),
+      r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
+      String(r.Creado_En || "").slice(0,10), demoraHabil(r), aTiempo(r) ? "SI" : "NO",
+      r.Inferida ? "Deducido del histórico" : "Registrado por el ejecutivo",
+      e.label || "",
+      r._id
+    ];
+  });
+}
+
 function filasVisitas(){
   return DB.todos().sort((a,b) => ts(a) - ts(b)).map(r => [
     r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis, r.Customer_id,
@@ -6406,6 +6466,7 @@ async function exportarExcel(btn){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hoja(COLS_BASE, filasBase()), "Base");
   XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_COORD, filasCoordinaciones()), "Coordinación BBVA");
 
   if (admin){
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
@@ -6439,6 +6500,7 @@ function exportarCSV(que){
   try {
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
                  visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
+                 coord:[COLS_COORD, filasCoordinaciones(), "Coordinacion_BBVA"],
                  bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
                  nuevos:[COLS_NUEVOS, filasNuevos(), "Clientes_nuevos"] };
   const [cols, filas, nombre] = mapa[que];
@@ -6533,9 +6595,9 @@ function viewAyuda(){
 
     ${ajFilaDescarga(
       "La campaña completa",
-      "12 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
+      "13 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
       "expXlsx", "Descargar Excel completo",
-      [["base","Base en CSV"],["visitas","Visitas en CSV"]])}
+      [["base","Base en CSV"],["visitas","Visitas en CSV"],["coord","Coordinación BBVA en CSV"]])}
 
     <details class="aj-mas">
       <summary>Qué trae cada archivo y cómo se pega</summary>
@@ -6556,6 +6618,12 @@ function viewAyuda(){
         pendiente, sobre cero es que el cliente no responde. <b>Tipo_Cierre</b> separa el comercio
         activo que se quedó (Retenido) del que estaba de baja y volvió (Recuperado), que para el
         banco no valen lo mismo.</p>
+        <p><b>Coordinación BBVA</b> es la hoja nueva, y va <b>solo en el archivo interno</b>: una
+        fila por cada contacto con el ejecutivo del banco, con su medio, su motivo, si respondió y
+        en qué número de contacto llegó la respuesta. Es la que se dinamiza para preguntar cuántos
+        intentos hicieron falta, qué medio obtiene más respuesta o cuántos chats quedaron sin su
+        correo de respaldo. No se pega en el banco: cuántas veces le insistimos a su ejecutivo es
+        cómo trabaja Stratis por dentro, no parte de lo que se entrega.</p>
         <p><b>Clientes nuevos</b> son las ventas que trae Stratis. Como el banco todavía no las
         tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
         la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
