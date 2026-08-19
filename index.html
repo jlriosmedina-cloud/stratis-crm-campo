@@ -5819,6 +5819,18 @@ function viewPanel(){
 /* =========================================================================
    Exportación a Excel — estructura v3 (cartera en campo, sin datos sensibles)
    ========================================================================= */
+/* Las once columnas que resumen la coordinación con el banco. Se declaran una
+   sola vez porque viven en dos archivos —la Base interna y el detalle del
+   archivo de análisis— y dos listas iguales mantenidas a mano es la forma más
+   segura de que un día dejen de serlo. */
+const COLS_BBVA_RESUMEN = [
+  "Punto_del_Caso","Coordinaciones_BBVA",
+  "BBVA_1er_Contacto","BBVA_1er_Medio","BBVA_2do_Contacto","BBVA_2do_Medio",
+  "BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Contactos_En_Negociacion","BBVA_Ultimo_Contacto",
+  "BBVA_Falta_Correo_De_Respaldo"];
+
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
   "Estado_Gestion","Contacto_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
@@ -5829,10 +5841,7 @@ const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio"
      mano en una hoja aparte: para cuántos comercios respondió el banco, en
      cuántos intentos, y en qué punto quedó parado cada caso. Ninguna se
      teclea — todas salen de la línea de tiempo del comercio. */
-  "Punto_del_Caso","Coordinaciones_BBVA","BBVA_1er_Contacto","BBVA_1er_Medio",
-  "BBVA_2do_Contacto","BBVA_2do_Medio","BBVA_Respondio","BBVA_Fecha_Respuesta",
-  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
-  "BBVA_Falta_Correo_De_Respaldo"];
+  ...COLS_BBVA_RESUMEN];
 
 const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
@@ -5874,29 +5883,56 @@ function filasBase(){
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
         b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""])
-      .concat(colsBBVA(c));
+      .concat(COLS_BBVA_RESUMEN.map(k => coordBBVA(c)[k]));
   });
 }
 
 /* Lo que el CRM deduce de la coordinación con el banco. Se escribe siempre,
    haya o no llegado el corte: el Excel es el que se manda a la reunión, y una
    columna que aparece y desaparece según la hora es peor que una vacía. */
-function colsBBVA(c){
-  if (esClienteNuevo(c))
-    return ["Venta nueva", 0, "", "No aplica", "", "No aplica", "No aplica", "", "", "", "No"];
+/* ---- Lo que el CRM deduce de la coordinación con el banco ---------------
+   Una sola función para las dos hojas que lo necesitan —la Base del archivo
+   interno y el detalle del archivo de análisis—, y devuelve un objeto con
+   nombres en vez de una lista posicional: así el orden de las columnas se
+   decide en un solo sitio y estas no se pueden correr. */
+function coordBBVA(c){
+  if (esClienteNuevo(c)) return {
+    Punto_del_Caso:"Venta nueva", Coordinaciones_BBVA:0,
+    BBVA_1er_Contacto:"", BBVA_1er_Medio:"No aplica",
+    BBVA_2do_Contacto:"", BBVA_2do_Medio:"No aplica",
+    BBVA_Respondio:"No aplica", BBVA_Fecha_Respuesta:"",
+    BBVA_Intentos_Hasta_Respuesta:"", BBVA_Dias_Hasta_Respuesta:"",
+    BBVA_Contactos_En_Negociacion:0, BBVA_Ultimo_Contacto:"",
+    BBVA_Falta_Correo_De_Respaldo:"No"
+  };
   const k = bbvaDe(c.customer_id);
   const e = estadoDerivadoById(estadoDerivado(c)) || {};
   const m = r => r ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : "";
   const f = r => r ? String(r.Fecha_Contacto || "").slice(0,10) : "";
-  /* Cuanto tardo el banco en contestar. Es el numero que dice si el atasco
-     esta de nuestro lado o del suyo. */
+  /* Cuánto tardó el banco en contestar: el número que dice si el atasco está
+     de nuestro lado o del suyo. */
   const demora = (k.respondio && k.primero && k.fechaRespuesta)
     ? Math.round((new Date(String(k.fechaRespuesta).slice(0,10))
                 - new Date(String(k.primero.Fecha_Contacto).slice(0,10))) / 86400000)
     : "";
-  return [e.label || "", k.n, f(k.primero), m(k.primero), f(k.segundo), m(k.segundo),
-    k.respondio ? "SI" : "NO", k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
-    k.respondio ? k.intentosHasta : "", demora, k.faltaRespaldo ? "SI" : "NO"];
+  /* El ida y vuelta con el banco DURANTE la negociación —una tasa, un POS
+     adicional, un cambio de equipo—. No pasa en todos los casos, y por eso se
+     cuenta acá en vez de abrirle un bloque de columnas que quedaría vacío en
+     la mayoría de las filas. */
+  const enNegociacion = k.contactos.filter(r => r.Proposito === "negociacion").length;
+  return {
+    Punto_del_Caso: e.label || "",
+    Coordinaciones_BBVA: k.n,
+    BBVA_1er_Contacto: f(k.primero), BBVA_1er_Medio: m(k.primero),
+    BBVA_2do_Contacto: f(k.segundo), BBVA_2do_Medio: m(k.segundo),
+    BBVA_Respondio: k.respondio ? "SI" : "NO",
+    BBVA_Fecha_Respuesta: k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
+    BBVA_Intentos_Hasta_Respuesta: k.respondio ? k.intentosHasta : "",
+    BBVA_Dias_Hasta_Respuesta: demora,
+    BBVA_Contactos_En_Negociacion: enNegociacion,
+    BBVA_Ultimo_Contacto: f(k.ultima),
+    BBVA_Falta_Correo_De_Respaldo: k.faltaRespaldo ? "SI" : "NO"
+  };
 }
 
 /* ---- La coordinación con BBVA, una fila por contacto --------------------
@@ -6201,26 +6237,45 @@ const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas"
 /* El resto de la gestión, completo. No se entrega al banco: es lo que sostiene
    el análisis y las tablas dinámicas del lado de Stratis. Van en la misma hoja
    para que el pegado sea uno solo. */
+/* ---- El detalle, en el orden en que ocurren las cosas -------------------
+   Antes las columnas estaban agrupadas por parecido —todos los conteos
+   juntos, todos los medios juntos— y para leer un comercio había que saltar
+   de un lado a otro de la hoja. Ahora se leen de izquierda a derecha como se
+   lee el caso: quién es el comercio, qué pasó con el banco, qué pasó con el
+   cliente, en qué quedó.
+
+   Ojo con lo que NO se movió: las 17 primeras columnas son el pegado a la
+   plataforma del banco y su orden es el que el banco espera. Reordenarlas
+   rompería el pegado de todo el mundo. Esto empieza en la 18.
+
+   El paso de negociación no tiene bloque propio a propósito: no todos los
+   casos negocian, y los que lo hacen pueden volver al banco por una tasa o un
+   POS. Por eso ese ida y vuelta se cuenta en «BBVA_Contactos_En_Negociacion»,
+   dentro del bloque del banco, y no en una sección que quedaría vacía en la
+   mayoría de las filas. */
 const COLS_DETALLE = [
-  "Nombre_Comercio","Rubro","Distrito","Contacto_BBVA",
+  /* --- Quién es el comercio y en qué punto está ------------------------- */
+  "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
+
+  /* --- Paso 1 · La coordinación con el ejecutivo de BBVA ---------------- */
+  "Contacto_BBVA","Coordinaciones_BBVA",
+  "BBVA_1er_Contacto","BBVA_1er_Medio","BBVA_2do_Contacto","BBVA_2do_Medio",
+  "BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Contactos_En_Negociacion","BBVA_Ultimo_Contacto",
+  "BBVA_Falta_Correo_De_Respaldo",
+
+  /* --- Paso 2 · El contacto con el cliente ------------------------------ */
   "Estado_Contacto","Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta",
   "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
   "Visitas_Validas","Visita_Presencial","Visita_Virtual",
   "Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
-  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo","Fecha_Alta","Alertas",
-  /* ---- La coordinacion con el ejecutivo de BBVA -------------------------
-     Van en el bloque de detalle, que es material interno de Stratis: el
-     pegado al banco son las 16 primeras columnas y no las toca. Viven aca
-     porque este es el archivo que se usa para analizar, y sin ellas el
-     analisis se queda ciego justo donde la campana se esta atorando.
 
-     Una fila por comercio, o sea el resumen. La linea de tiempo completa
-     —una fila por cada contacto, que es lo que se dinamiza— esta en la hoja
-     «Coordinacion BBVA» del archivo de la campana completa. */
-  "Punto_del_Caso","Coordinaciones_BBVA","BBVA_1er_Contacto","BBVA_1er_Medio",
-  "BBVA_2do_Contacto","BBVA_2do_Medio","BBVA_Respondio","BBVA_Fecha_Respuesta",
-  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
-  "BBVA_Falta_Correo_De_Respaldo"];
+  /* --- Paso 3 · En qué quedó ------------------------------------------- */
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo",
+
+  /* --- Y lo que hay que revisar de esta fila ---------------------------- */
+  "Alertas"];
 
 const COLS_BASE_BBVA = COLS_ENTREGA.concat(COLS_DETALLE);
 
@@ -6273,33 +6328,44 @@ function filasBBVA(soloEntrega){
     ];
     if (soloEntrega) return entrega;
 
-    /* El resto de la gestión, para el análisis de Stratis */
-    return entrega.concat([
-      titulo(c.nombre_comercio || ""),
-      rubroLabel(c),
-      titulo(c.distrito || ""),
-      nomContactoBBVA(c.contacto_bbva) || "Sin indicar",
-      estadoContacto(regs.length, efectivos.length),
-      efectivos.length,
-      regs.length - efectivos.length,
-      regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
-      nVirtual,
-      nWhatsapp,
-      nCorreo,
-      suma,
-      suma === regs.length ? "SI" : "REVISAR",
-      cumplidas.length,
-      nPresencial > 0 ? "SI" : "NO",
-      nVirtual    > 0 ? "SI" : "NO",
-      efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
-      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
-      regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
-      g ? g.label : "",
-      ultimo("Calificacion") || "Sin calificar",
-      ultimo("Comentario_Ejecutivo"),
-      String(c.creado_en || "").slice(0,10),
-      alertasDe(c, regs, efectivos, suma)
-    ].concat(colsBBVA(c)));
+    /* El resto de la gestión, para el análisis de Stratis.
+
+       Se arma por NOMBRE y no por posición. Antes era una lista de valores
+       que tenía que coincidir, uno a uno y en el mismo orden, con la lista de
+       encabezados: bastaba mover una columna para que toda la hoja quedara
+       corrida y con los datos en la columna equivocada —sin que nada fallara,
+       que es lo peor—. Ahora el orden lo manda COLS_DETALLE y los valores se
+       buscan por su nombre. Reordenar es mover una línea. */
+    const det = {
+      Nombre_Comercio: titulo(c.nombre_comercio || ""),
+      Rubro:           rubroLabel(c),
+      Distrito:        titulo(c.distrito || ""),
+      Fecha_Alta:      String(c.creado_en || "").slice(0,10),
+      Contacto_BBVA:   nomContactoBBVA(c.contacto_bbva) || "Sin indicar",
+
+      Estado_Contacto:      estadoContacto(regs.length, efectivos.length),
+      Respuestas_del_Cliente: efectivos.length,
+      Sin_Respuesta:        regs.length - efectivos.length,
+      Tasa_Respuesta:       regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
+      Reuniones_Virtuales:  nVirtual,
+      WhatsApp:             nWhatsapp,
+      Correos:              nCorreo,
+      Suma_por_Medio:       suma,
+      Cuadra:               suma === regs.length ? "SI" : "REVISAR",
+      Visitas_Validas:      cumplidas.length,
+      Visita_Presencial:    nPresencial > 0 ? "SI" : "NO",
+      Visita_Virtual:       nVirtual    > 0 ? "SI" : "NO",
+      Medio_con_Respuesta:  efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
+      Medio_Cumple_Visita:  cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
+      Ultimo_Resultado:     regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
+
+      Resultado_Gestion:    g ? g.label : "",
+      Calificacion:         ultimo("Calificacion") || "Sin calificar",
+      Comentario_Ejecutivo: ultimo("Comentario_Ejecutivo"),
+      Alertas:              alertasDe(c, regs, efectivos, suma)
+    };
+    Object.assign(det, coordBBVA(c));
+    return entrega.concat(COLS_DETALLE.map(k => det[k] === undefined ? "" : det[k]));
   });
 }
 
@@ -6630,11 +6696,19 @@ function viewAyuda(){
         Cumple_Visita, Fecha_Visita, Intentos_Totales, Tipo_Cierre, Estado_Comercio, Fecha_Cierre,
         Motivo_No_Retencion y Ejecutivo_Asignado. <b>De la 18 en adelante es material interno</b> y
         no se pega en el banco.</p>
-        <p>Ahí, al final del detalle, están las <b>columnas de la coordinación con BBVA</b>: en qué
-        punto está el caso, cuántos contactos hubo con el ejecutivo del banco, cuál fue el 1.º y el
-        2.º con su medio, si respondió, en qué fecha, cuántos intentos y cuántos días tardó, y si
-        quedó un chat sin su correo de respaldo. Es una fila por comercio. Si necesitas dinamizar
-        contacto por contacto, esa está en la hoja <b>Coordinación BBVA</b> del archivo completo.</p>
+        <p>De la 18 en adelante las columnas siguen <b>el orden en que ocurren las cosas</b>, para
+        que la fila se lea de izquierda a derecha como se lee el caso:</p>
+        <p><b>1)</b> quién es el comercio y en qué punto está · <b>2)</b> la coordinación con el
+        ejecutivo de BBVA —cuántos contactos, el 1.º y el 2.º con su medio, si respondió, en qué
+        fecha, cuántos intentos y cuántos días tardó, y si quedó un chat sin su correo de respaldo—
+        · <b>3)</b> el contacto con el cliente · <b>4)</b> en qué quedó · y al final, las alertas
+        de la fila.</p>
+        <p>La negociación no tiene bloque propio a propósito: no todos los casos negocian, y los que
+        lo hacen pueden volver al banco por una tasa o un POS. Ese ida y vuelta se cuenta en
+        <b>BBVA_Contactos_En_Negociacion</b>, dentro del bloque del banco, en vez de abrir columnas
+        que quedarían vacías en la mayoría de las filas.</p>
+        <p>Todo eso es una fila por comercio. Si necesitas dinamizar <b>contacto por contacto</b>,
+        esa está en la hoja <b>Coordinación BBVA</b> del archivo completo.</p>
         <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
         pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
         o virtual y además el cliente respondió. <b>Volumen_Comercio</b> no sale: esa columna la
