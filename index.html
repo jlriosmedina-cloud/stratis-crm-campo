@@ -1367,7 +1367,19 @@ const BONO_DEF = {
      en Ajustes y viajan con la versión de parámetros. */
   feriados:   FERIADOS_DEF,
   piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
-  sobre:110, tope:30, pago_mensual:80
+  sobre:110, tope:30, pago_mensual:80,
+  /* La escala del incentivo gradual, como TABLA y no como fórmula: pares
+     [cumplimiento, % del sueldo base]. Entre dos puntos se interpola en
+     línea recta; bajo el primero no hay gradual, sobre el último se paga el
+     último valor.
+
+     Los dos puntos del acuerdo —80% paga 15%, 110% paga 30%— reproducen
+     exactamente los números que el CRM venía calculando con los cuatro
+     parámetros de arriba: la pendiente era 0,5 puntos de sueldo por punto de
+     cumplimiento en los dos tramos, así que la recta única pasa por el mismo
+     25% al 100%. Migrar a tabla no movió a nadie de su número; lo que gana es
+     que mañana la curva puede dejar de ser recta sin tocar el código. */
+  escala: [[80, 15], [110, 30]]
 };
 /* Los parámetros no son uno solo: son una lista de versiones, cada una
    vigente desde un periodo del bono. Un periodo se calcula con la versión que
@@ -1610,17 +1622,36 @@ function crecimientoFact(correo, p){
 /* Tramos: bajo el piso no hay incentivo; del piso a la meta sube parejo, y de
    la meta al sobrecumplimiento sigue subiendo hasta el tope. Pasado el tope
    no paga más: 200% de cumplimiento paga lo mismo que 110%. */
-function tramoIncentivo(pct, params){
+/* La escala vigente, siempre como tabla de puntos. Una versión de parámetros
+   vieja —de antes de que la escala fuera tabla— no se queda sin escala: se le
+   arma la equivalente con sus cuatro números. Así un periodo ya liquidado
+   sigue dando el mismo resultado que dio el día que se liquidó, que es la
+   única razón por la que los parámetros se versionan. */
+function escalaDe(params){
   const b = params || BONO;
-  if (!(pct >= b.piso)) return 0;
-  if (pct <= 100) return b.pago_en_piso + (pct - b.piso) / (100 - b.piso) * (b.pago_en_meta - b.pago_en_piso);
-  if (pct <= b.sobre) return b.pago_en_meta + (pct - 100) / (b.sobre - 100) * (b.tope - b.pago_en_meta);
-  return b.tope;
+  const e = Array.isArray(b.escala) ? b.escala.filter(x => Array.isArray(x) && x.length === 2) : [];
+  if (e.length >= 2) return e.slice().sort((x, y) => x[0] - y[0]);
+  return [[b.piso, b.pago_en_piso], [100, b.pago_en_meta], [b.sobre, b.tope]];
 }
-const nombreTramo = (pct, params) => { const b = params || BONO;
-  return !(pct >= b.piso) ? "Sin incentivo"
+
+/* El tramo gradual. Bajo el primer punto no hay gradual —lo que se pague ahí
+   lo decide la llave, no la escala—; sobre el último se paga el último valor,
+   que es lo que hace del tope un tope. */
+function tramoIncentivo(pct, params){
+  const e = escalaDe(params);
+  if (!(pct >= e[0][0])) return 0;
+  for (let i = 1; i < e.length; i++){
+    if (pct <= e[i][0]){
+      const [x0, y0] = e[i-1], [x1, y1] = e[i];
+      return x1 === x0 ? y1 : y0 + (pct - x0) / (x1 - x0) * (y1 - y0);
+    }
+  }
+  return e[e.length - 1][1];
+}
+const nombreTramo = (pct, params) => { const e = escalaDe(params), b = params || BONO;
+  return !(pct >= e[0][0]) ? "Sin incentivo"
     : pct < 100    ? "Progresión"
-    : pct <= b.sobre ? "Sobrecumplimiento" : "Tope"; };
+    : pct < e[e.length - 1][0] ? "Sobrecumplimiento" : "Tope"; };
 
 /* =========================================================================
    El reporte de avance — el relato vive en la base, los números se calculan
@@ -7533,9 +7564,14 @@ function bindAcciones(){
    Incentivos: la llave de acceso y el cumplimiento
 
    Dos capas que no se mezclan. La llave son tres mínimos de gestión —
-   cobertura, visitas efectivas y puntualidad del registro— que habilitan el
-   cálculo pero no aportan un sol al monto. El cumplimiento son los tres
-   objetivos del proyecto, que sí deciden cuánto.
+   cobertura, visitas efectivas y puntualidad del registro— que dependen
+   enteramente del ejecutivo. El cumplimiento son los tres objetivos del
+   proyecto, que dependen además del banco y del mercado.
+
+   La llave paga por sí sola: cumplirla ya vale el bono base, aunque los
+   objetivos no despeguen. Lo que los objetivos deciden es cuánto MÁS, desde
+   el bono base hasta el tope. Quien gestionó como se le pidió no termina en
+   cero por una meta de proyecto que no controla.
 
    Todo se mide en la ventana del bono, del 19 al 18, no en el mes del
    calendario. Y todo sale del CRM salvo la facturación, que vive en la
@@ -7696,21 +7732,62 @@ function textoFaltaFact(correo, p){
 /* Lo que se cobraría, en porcentaje del sueldo. El CRM no guarda sueldos:
    ese dato no tiene por qué vivir acá. */
 /* El cálculo vivo, con los datos de hoy y los parámetros de ese periodo. */
+/* ---- La matriz de escenarios, sola y sin datos alrededor -----------------
+
+   Vive aparte a propósito. Es la regla que decide cuánto cobra una persona, y
+   una regla así tiene que poder leerse de un vistazo y probarse caso por caso
+   sin montar una cartera de prueba.
+
+   El incentivo tiene dos niveles y son independientes. La llave son tres
+   mínimos de gestión —cobertura, visitas efectivas, puntualidad del registro—
+   que dependen enteramente del ejecutivo. Los objetivos son del proyecto y
+   dependen además del banco, del cliente y del mercado. Un ejecutivo que
+   gestionó como se le pidió no puede terminar en cero porque la reactivación
+   del portafolio no despegó: eso convierte el incentivo en una lotería y deja
+   de premiar lo único que sí controla.
+
+     · 0 o 1 requisito  → 0%. No hay llave, no hay nada.
+     · 2 de 3           → el bono base, fijo, sin mirar los objetivos.
+     · 3 de 3           → el bono base como PISO, y desde el primer punto de
+                          la escala, el gradual hasta el tope.
+
+   Antes los dos últimos casos devolvían 0% cuando el cumplimiento no llegaba
+   al piso, que es exactamente el escenario del primer mes de campo: cuatro
+   personas que gestionaron su cartera y a las que el sistema les decía cero. */
+function pagoDelPeriodo(estado, total, B){
+  const esc   = escalaDe(B);
+  const piso  = esc[0][1];                     // lo que paga el primer punto
+  const bruto = tramoIncentivo(total, B);
+  if (estado === "sin")
+    return { bruto, pago:0, concepto:"ninguno",
+             nota:"No cumplió dos o más requisitos de gestión" };
+  if (estado === "base")
+    return { bruto, pago:B.base_incumple_uno, concepto:"base",
+             nota:"Incumplió un requisito: se paga solo el bono base" };
+  if (bruto > piso)
+    return { bruto, pago:bruto, concepto:"gradual", nota:"" };
+  return { bruto, pago:piso, concepto:"llave",
+           nota:`El cumplimiento no llega al ${esc[0][0]}%: se paga la llave` };
+}
+
+/* Cómo se llama lo que se está pagando. El acta dice «Incentivo del periodo:
+   15%» y quien la firma tiene derecho a saber si ese 15% es el bono base por
+   haber cumplido la gestión o el gradual por haber alcanzado los objetivos.
+   Son dos cosas distintas y se conversan distinto. */
+const CONCEPTO_PAGO = {
+  ninguno: "Sin incentivo",
+  base:    "Bono base por la llave de gestión",
+  llave:   "Bono base por la llave de gestión",
+  gradual: "Incentivo gradual por cumplimiento"
+};
+
 function incentivoVivo(correo, p){
   const B  = paramsDe(p);
   const ll = llaveDe(correo, p);
   const cu = cumplimientoDe(correo, p);
-  const bruto = tramoIncentivo(cu.total, B);
-  let pago = 0, nota = "";
-  if (ll.estado === "sin"){ pago = 0; nota = "No cumplió dos o más requisitos de gestión"; }
-  else if (ll.estado === "base"){
-    pago = bruto > 0 ? Math.min(bruto, B.base_incumple_uno) : 0;
-    nota = "Incumplió un requisito: solo bono base";
-  } else {
-    pago = bruto;
-    nota = bruto > 0 ? "" : `El cumplimiento no llega al ${B.piso}%`;
-  }
-  return { llave:ll, cumpl:cu, bruto, pago, nota, sellado:false,
+  const d = pagoDelPeriodo(ll.estado, cu.total, B);
+  const { bruto, pago, nota, concepto } = d;
+  return { llave:ll, cumpl:cu, bruto, pago, nota, concepto, sellado:false,
            mensual: pago * B.pago_mensual / 100,
            retenido: pago * (100 - B.pago_mensual) / 100 };
 }
@@ -7818,7 +7895,7 @@ function tarjetaEjecutivo(u, p){
           : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
       </div>
       <div class="bn-num">
-        <span class="k">Incentivo del periodo</span>
+        <span class="k">${esc(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo")}</span>
         <b class="${x.pago > 0 ? "si" : "cero"}">${pct1(x.pago)}</b>
         <span class="s">del sueldo base${x.nota ? " · " + esc(x.nota) : ""}</span>
       </div>
@@ -9557,6 +9634,25 @@ function hojaParametros(p, d){
     ["FERIADOS", "", "No cuentan como día trabajado. Sábados y domingos tampoco, eso lo sabe el calendario"]
   ];
   fer.forEach(f => filas.push(["", serial(f), ""]));
+
+  /* ---- La escala del incentivo, como tabla ----------------------------
+     Estaba escrita como fórmula con cuatro números sueltos —piso, pago en el
+     piso, pago en la meta, tope—, que solo sabe describir dos rectas. Como
+     tabla de puntos puede describir cualquier curva, y sobre todo se puede
+     discutir en la reunión: se ve dónde empieza a pagar, cuánto sube por cada
+     punto de cumplimiento y dónde deja de subir.
+
+     Va al final de la hoja, después de los feriados, para no correr ninguna
+     de las filas que el resto del libro referencia por número. */
+  const esc = escalaDe(B);
+  filas.push(["", "", ""]);
+  const filaEscTit = filas.length + 1;
+  filas.push(["CUMPLIMIENTO", "% DEL SUELDO", "Entre dos puntos se interpola en línea recta"]);
+  const filaEsc = filas.length + 1;
+  esc.forEach(([x, y], i) => filas.push([x, y,
+    i === 0 ? "Bajo este punto no hay incentivo gradual: lo que se pague ahí lo decide la llave"
+    : i === esc.length - 1 ? "De acá no pasa, por más que el cumplimiento siga subiendo" : ""]));
+
   const editables = [];
   [FIL.mes, FIL.semanas, FIL.metaReact, FIL.metaFact, FIL.metaVenta,
    FIL.pesoReact, FIL.pesoFact, FIL.pesoVenta, FIL.cobertura, FIL.visitas, FIL.puntualidad,
@@ -9565,11 +9661,15 @@ function hojaParametros(p, d){
   /* El primer feriado vive en FIL.feriados; el encabezado está una fila arriba.
      Estaba corrido en uno y el primero salía como número crudo. */
   for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + i, 2]);
+  for (let i = 0; i < esc.length; i++){ editables.push([filaEsc + i, 1]); editables.push([filaEsc + i, 2]); }
 
   const ws = hojaLibro(filas, {
     titulo:1, anchos:[38, 16, 62],
-    secciones:[8, 16, 22, 31],
-    etiquetas:filas.map((_, i) => i + 1).filter(f => ![1, 8, 16, 22, 31].includes(f)),
+    secciones:[8, 16, 22, 31, filaEscTit],
+    /* Las etiquetas son los rótulos de la columna A. Las filas de la escala no
+       llevan rótulo sino un número, así que quedan fuera. */
+    etiquetas:filas.map((_, i) => i + 1)
+      .filter(f => ![1, 8, 16, 22, 31, filaEscTit].includes(f) && f < filaEsc),
     notas:filas.map((_, i) => [i + 1, 3]),
     editables,
     /* Cada meta y cada mínimo se muestran con su unidad. La celda sigue siendo
@@ -9585,8 +9685,12 @@ function hojaParametros(p, d){
          [2, FIL.visitas,   FIL.visitas,   U.visitas],
          [2, FIL.puntualidad, FIL.puntualidad, U.pctEntero],
          [2, FIL.piso,      FIL.mensual,   U.pctEntero],
-         [2, FIL.feriados, FIL.feriados + fer.length - 1, "dd/mm/yyyy"]] });
-  return { ws, nFeriados: fer.length };
+         [2, FIL.feriados, FIL.feriados + fer.length - 1, "dd/mm/yyyy"],
+         [1, filaEsc, filaEsc + esc.length - 1, U.pctEntero],
+         [2, filaEsc, filaEsc + esc.length - 1, U.pctEntero]],
+    centrar:[[1, filaEsc, filaEsc + esc.length - 1],
+             [2, filaEsc, filaEsc + esc.length - 1]] });
+  return { ws, nFeriados: fer.length, filaEscala: filaEsc, nEscala: esc.length };
 }
 const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n - 1}`;
 
@@ -9666,14 +9770,28 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
   return { gestiones, cubiertos, registrados, cubre, efectivas, puntuales, respuestas, acumulados, delMes, ventas };
 }
 
-/* El tramo, tal cual está en el documento de incentivos: bajo el piso no
-   paga, del piso a la meta sube parejo, de la meta al sobrecumplimiento
-   sigue subiendo hasta el tope, y de ahí no pasa. */
-const FORMULA_TRAMO = c =>
-  `IF(${c}<${P_(FIL.piso)},0,` +
-  `IF(${c}<=100,${P_(FIL.pagoPiso)}+(${c}-${P_(FIL.piso)})/(100-${P_(FIL.piso)})*(${P_(FIL.pagoMeta)}-${P_(FIL.pagoPiso)}),` +
-  `IF(${c}<=${P_(FIL.sobre)},${P_(FIL.pagoMeta)}+(${c}-100)/(${P_(FIL.sobre)}-100)*(${P_(FIL.tope)}-${P_(FIL.pagoMeta)}),` +
-  `${P_(FIL.tope)})))`;
+/* El tramo gradual, leído de la TABLA de la hoja de Parámetros y no de una
+   fórmula clavada acá. Se arma una cadena de IF que interpola en línea recta
+   entre cada par de puntos: bajo el primero no paga —lo que se pague ahí lo
+   decide la llave, no la escala—, sobre el último paga el último valor.
+
+   Que la cadena se genere a partir de las filas significa que si mañana la
+   escala tiene cinco puntos en vez de dos, el libro la sigue sin que nadie
+   toque este archivo. */
+const X_ = f => `'Parámetros'!$A$${f}`;      // cumplimiento del punto
+const Y_ = f => `'Parámetros'!$B$${f}`;      // % del sueldo del punto
+function FORMULA_TRAMO(c, filaEsc, n){
+  let out = "", cierra = 0;
+  out += `IF(${c}<${X_(filaEsc)},0,`; cierra++;
+  for (let i = 1; i < n; i++){
+    const a = filaEsc + i - 1, b = filaEsc + i;
+    out += `IF(${c}<=${X_(b)},${Y_(a)}+(${c}-${X_(a)})/(${X_(b)}-${X_(a)})*(${Y_(b)}-${Y_(a)}),`;
+    cierra++;
+  }
+  return out + Y_(filaEsc + n - 1) + ")".repeat(cierra);
+}
+/* Lo que la llave garantiza por sí sola es el primer punto de la escala. */
+const CELDA_PISO = filaEsc => Y_(filaEsc);
 
 /* ---- Resumen: una fila por ejecutivo, todo fórmula ---------------------- */
 function hojaResumen(p, d, nG, nC, nN){
@@ -9725,8 +9843,11 @@ function hojaResumen(p, d, nG, nC, nN){
          su 50% sale del reparto en vez de contar como cero. */
       `=IF(ISBLANK($S${f}),($R${f}*${P_(FIL.pesoReact)}+$X${f}*${P_(FIL.pesoVenta)})/(${P_(FIL.pesoReact)}+${P_(FIL.pesoVenta)}),` +
         `($R${f}*${P_(FIL.pesoReact)}+$U${f}*${P_(FIL.pesoFact)}+$X${f}*${P_(FIL.pesoVenta)})/100)`,
-      `=${FORMULA_TRAMO(`$Y${f}`)}`,
-      `=IF($N${f}=3,$Z${f},IF($N${f}=2,IF($Z${f}>0,MIN($Z${f},${P_(FIL.base1)}),0),0))`,
+      `=${FORMULA_TRAMO(`$Y${f}`, d.esc.fila, d.esc.n)}`,
+      /* Tres requisitos: la escala, pero nunca menos que el primer punto —la
+         llave paga por sí sola—. Dos: el bono base, fijo, sin mirar los
+         objetivos. Menos de dos: nada. */
+      `=IF($N${f}=3,MAX($Z${f},${CELDA_PISO(d.esc.fila)}),IF($N${f}=2,${P_(FIL.base1)},0))`,
       `=$AA${f}*${P_(FIL.mensual)}/100`,
       `=$AA${f}*(100-${P_(FIL.mensual)})/100`
     ]);
@@ -9824,10 +9945,11 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Cumplimiento ponderado",
      `=IF(ISBLANK($B$18),($D$17*$E$17+$D$19*$E$19)/($E$17+$E$19),($D$17*$E$17+$D$18*$E$18+$D$19*$E$19)/100)`,
      "", "", crec === null ? "Sin la facturación cargada, su peso sale del reparto" : ""],
-    ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23")}`, "", "", "% del sueldo base según el tramo"],
+    ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23", d.esc.fila, d.esc.n)}`,
+     "", "", "% del sueldo base según la escala de cumplimiento"],
     ["Incentivo del periodo",
-     `=IF($B$10=3,$B$24,IF($B$10=2,IF($B$24>0,MIN($B$24,${P_(FIL.base1)}),0),0))`,
-     "", "", "Sin la llave no hay incentivo, aunque el cumplimiento sea alto"],
+     `=IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0))`,
+     "", "", "La llave paga por sí sola; los objetivos deciden cuánto más"],
     ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
     ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
     ["", "", "", "", ""],
@@ -9987,6 +10109,7 @@ function armarLibroIncentivos(p){
   const d = datosLibro();
   const par = hojaParametros(p, d);
   d.nFer = par.nFeriados;
+  d.esc  = { fila: par.filaEscala, n: par.nEscala };
   const nG = d.gestiones.length + 1, nC = d.cartera.length + 1, nN = d.nuevos.length + 1;
 
   /* El orden importa: lo que se mira en la reunión va primero, los datos
@@ -10228,10 +10351,16 @@ function actaIncentivo(doc, u, p, x){
     if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
     y += fuerte ? 8 : 7;
   };
+  const esc = escalaDe(B);
   res("Cumplimiento ponderado", pdfPct(cu.total),
       cu.completo ? "" : "Calculado solo sobre los objetivos que ya se pueden medir");
-  res("Tramo que le corresponde", pdfPct(x.bruto), `Del ${B.piso}% al ${B.sobre}% de cumplimiento`);
-  res("Incentivo del periodo", pdfPct(x.pago), x.nota || "", true);
+  res("Tramo que le corresponde", pdfPct(x.bruto),
+      `Del ${esc[0][0]}% al ${esc[esc.length-1][0]}% de cumplimiento`);
+  /* El rótulo dice el CONCEPTO, no solo el número. «Incentivo del periodo:
+     15%» deja abierto de dónde sale ese 15%; «Bono base por la llave de
+     gestión: 15%» lo cierra. En una hoja que alguien firma, esa diferencia es
+     la conversación entera. */
+  res(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo", pdfPct(x.pago), x.nota || "", true);
   res("Se paga con la remuneración", pdfPct(x.mensual), `${B.pago_mensual}% del incentivo`);
   res("Se retiene hasta el cierre", pdfPct(x.retenido), "Se liquida al cerrar el proyecto");
 
