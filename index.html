@@ -402,6 +402,13 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .bn-req-h b{font-size:13px}
 .bn-req-d{font-size:12px;color:var(--ink)}
 .bn-req-n{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.35}
+/* El aviso de lo que falta para llegar al mínimo. Va pegado al requisito que
+   no se cumple, no en un resumen aparte: el número sirve mientras haya días
+   para hacer algo con él. */
+.bn-req-aviso{font-size:11.5px;line-height:1.4;margin:6px 0 12px;padding:7px 10px;
+  border-radius:8px;background:var(--warn-bg,#FFF7E6);color:var(--warn-tx,#8A5A00);
+  border:1px solid rgba(248,111,53,.25)}
+.bn-req-aviso b{color:inherit}
 .bn-obj .falta{opacity:.62}
 .bn-det{font-size:11.5px;color:var(--muted);font-weight:400}
 .bn-cierre{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;
@@ -1357,12 +1364,17 @@ const BONO_DEF = {
      que coincidir con la meta del proyecto. */
   curva:      { reactivacion_pp:[4, 8, 11, 15, 18], facturacion_pct:[3, 6, 9, 12, 15] },
   pesos:      { reactivacion:30, facturacion:50, venta:20 },
-  /* cobertura_base decide qué cuenta como cartera cubierta: «registro» son
-     los Customer ID cargados en el CRM y «gestion» los comercios con al menos
-     una gestión. El primer mes va por registro —el mes se fue en coordinar
-     con BBVA, y sin la respuesta del banco no había a quién llamar—, y se
-     cambia por periodo desde Ajustes sin tocar el código. */
-  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95, cobertura_base:"registro" },
+  /* cobertura_base decide qué cuenta como cartera cubierta:
+       · «registro» — la ficha cargada, sobre la cartera asignada.
+       · «gestion»  — el comercio con contacto o intento, sobre la asignada.
+       · «contacto» — el comercio con un contacto LOGRADO —correo al ejecutivo
+                      de BBVA o gestión efectiva con el cliente—, sobre los
+                      Customer ID registrados, y con la carga de la cartera
+                      completa como segunda condición.
+     El primer mes fue por registro: el cuello estaba en la respuesta del
+     banco. De ahí en adelante rige «contacto». Se cambia por periodo desde
+     Ajustes, y cambiarlo no reescribe los meses ya medidos. */
+  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95, cobertura_base:"contacto" },
   /* Los días que no son de trabajo, además de sábados y domingos. Se editan
      en Ajustes y viajan con la versión de parámetros. */
   feriados:   FERIADOS_DEF,
@@ -7603,24 +7615,67 @@ function llaveDe(correo, p){
   const req   = paramsDe(p).requisitos;
 
   /* ---- Qué cuenta como cartera cubierta ------------------------------
-     El primer mes de la campaña se fue en coordinar con los ejecutivos de
-     BBVA: sin la respuesta del banco no hay teléfono al que llamar, así que
-     exigir una gestión por comercio medía algo que todavía no dependía del
-     ejecutivo de Stratis. Para ese periodo la cobertura se mide por el
-     registro del Customer ID en el CRM, que sí es trabajo suyo.
+     Tres reglas, y la que rige viaja con la versión de parámetros del periodo.
+     Cambiarla no reescribe los meses ya medidos: cada uno se sigue liquidando
+     con la que estaba puesta cuando se trabajó.
 
-     Va como parámetro del periodo y no como regla fija: los parámetros del
-     bono ya se versionan mes a mes y se editan desde Ajustes, así que el mes
-     que viene esto se cambia sin tocar el código. Y —esto importa— cambiarlo
-     no reescribe la historia: cada periodo se sigue midiendo con la regla que
-     regía cuando se trabajó. */
-  const porRegistro = (req.cobertura_base || "gestion") === "registro";
-  const tocados = new Set(gest.map(r => String(r.Customer_id)));
-  const mios    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
-  const cubiertos = porRegistro
-    ? mios.length
-    : mios.filter(c => tocados.has(String(c.customer_id))).length;
-  const cobertura = cart.n ? cubiertos / cart.n * 100 : 0;
+       · «registro»  — cuenta la ficha cargada, se haya trabajado o no, sobre
+                       la cartera que asignó BBVA. Fue la regla del primer mes:
+                       el cuello estaba en la respuesta del banco, así que
+                       exigir gestión medía algo que no dependía del ejecutivo.
+
+       · «gestion»   — cuenta el comercio que recibió contacto o intento de
+                       contacto, sobre la cartera asignada.
+
+       · «contacto»  — la regla de régimen. Cuenta el comercio donde hubo un
+                       contacto LOGRADO, que es una de dos cosas: un correo al
+                       ejecutivo de BBVA —el medio que deja constancia
+                       consultable, y por eso es el único que cuenta de ese
+                       lado— o una gestión efectiva con el cliente, no un
+                       intento. Va sobre los Customer ID registrados, no sobre
+                       la cartera asignada, porque mide qué proporción de lo
+                       que el ejecutivo cargó llegó a tener contacto.
+
+     Y en las tres, un comercio cuenta UNA vez. Cinco gestiones sobre la misma
+     bodega son un comercio gestionado, no cinco.
+
+     El riesgo de medir sobre lo registrado es evidente: cargar menos fichas
+     sube el porcentaje. Por eso «contacto» trae además una segunda condición
+     —tener cargada toda la cartera asignada— y las dos tienen que cumplirse
+     para que el requisito quede verde. Subir la cobertura dejando comercios
+     sin cargar deja de ser posible. */
+  const base = req.cobertura_base || "gestion";
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const registrados = mios.length;
+
+  let cubiertos;
+  if (base === "registro"){
+    cubiertos = registrados;
+  } else if (base === "contacto"){
+    /* Los comercios con un contacto logrado dentro del periodo, de los dos
+       lados del flujo. Es un Set: el comercio entra una vez por más veces que
+       se le haya escrito. */
+    const logrados = new Set();
+    gest.filter(r => esEfectivo(r.Resultado))
+        .forEach(r => logrados.add(String(r.Customer_id)));
+    DB.bbva()
+      .filter(r => r.Correo_Stratis === correo
+                && r.Tipo_Contacto === "bbva_correo"
+                && enVentana(r.Fecha_Contacto, p))
+      .forEach(r => logrados.add(String(r.Customer_id)));
+    cubiertos = mios.filter(c => logrados.has(String(c.customer_id))).length;
+  } else {
+    const tocados = new Set(gest.map(r => String(r.Customer_id)));
+    cubiertos = mios.filter(c => tocados.has(String(c.customer_id))).length;
+  }
+
+  /* El denominador es parte de la regla, no un detalle aparte: «registro» y
+     «gestion» miden contra lo que BBVA asignó, «contacto» contra lo cargado. */
+  const sobreRegistrados = base === "contacto";
+  const denom = sobreRegistrados ? registrados : cart.n;
+  const cobertura = denom ? cubiertos / denom * 100 : 0;
+  const cargaCompleta = !sobreRegistrados || registrados >= cart.n;
+  const faltanPorCargar = Math.max(0, cart.n - registrados);
 
   const efectivas = gest.filter(r => r.Cumple_Visita === "SI").length;
   const semanas   = semanasPeriodo(p);
@@ -7630,8 +7685,15 @@ function llaveDe(correo, p){
   const puntuales = gest.filter(aTiempo).length;
   const puntualidad = gest.length ? puntuales / gest.length * 100 : 0;
 
-  const r1 = { valor:cobertura,   meta:req.cobertura_pct,    ok: cobertura   >= req.cobertura_pct,
-               detalle:`${cubiertos} de ${cart.n} comercios`, base: porRegistro ? "registro" : "gestion" };
+  const r1 = { valor:cobertura, meta:req.cobertura_pct,
+               ok: cobertura >= req.cobertura_pct && cargaCompleta,
+               detalle: `${cubiertos} de ${denom} comercios${
+                 cargaCompleta ? "" : ` · faltan ${faltanPorCargar} por cargar`}`,
+               base, cubiertos, denom, registrados, cargaCompleta, faltanPorCargar,
+               /* Cuántos comercios más hacen falta para llegar al mínimo. Es el
+                  número que el ejecutivo necesita para reaccionar antes del 18,
+                  y no lo tenía en ninguna pantalla. */
+               faltan: Math.max(0, Math.ceil(denom * req.cobertura_pct / 100) - cubiertos) };
   const r2 = { valor:porSemana,   meta:req.visitas_semana,   ok: efectivas   >= pide,
                detalle:`${efectivas} efectivas, se piden ${pide}` };
   const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
@@ -7639,7 +7701,7 @@ function llaveDe(correo, p){
 
   const cumplidos = [r1,r2,r3].filter(x => x.ok).length;
   return { cobertura:r1, visitas:r2, puntualidad:r3, cumplidos, gestiones:gest.length,
-           cartera:cart, efectivas, semanas, pide,
+           cartera:cart, registrados, efectivas, semanas, pide,
            estado: cumplidos === 3 ? "activo" : cumplidos === 2 ? "base" : "sin" };
 }
 
@@ -7835,6 +7897,36 @@ function filaRequisito(nombre, r, fmt, comoSeMide){
   </div>`;
 }
 const comoPct    = v => pct1(v);
+
+/* Cómo se está midiendo la cobertura, dicho donde se lee el número. Sin esta
+   línea el mismo «90%» significa tres cosas distintas según el periodo. */
+const TEXTO_COBERTURA = {
+  registro: "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar",
+  gestion:  "Comercios asignados con al menos una gestión o intento de gestión en el periodo",
+  contacto: "Comercios registrados con un contacto logrado en el periodo: correo al ejecutivo de BBVA o gestión efectiva con el cliente. Un comercio cuenta una vez, por muchas gestiones que tenga"
+};
+
+/* Lo que falta para llegar al mínimo, y cuántos días quedan.
+
+   La regla de cobertura cambió con el periodo empezado, y eso solo es legítimo
+   si quien tiene que cumplirla puede verla moverse y reaccionar. Un requisito
+   que se descubre el día 18 no es un requisito: es una sanción. */
+function avisoCobertura(ll, p){
+  const c = ll.cobertura;
+  if (c.ok) return "";
+  const v = ventanaPeriodo(p);
+  const dias = Math.max(0, Math.round((new Date(v.fin) - new Date(hoyISO())) / 86400000));
+  const partes = [];
+  if (!c.cargaCompleta)
+    partes.push(`faltan <b>${c.faltanPorCargar}</b> Customer ID por cargar`);
+  if (c.faltan > 0)
+    partes.push(`<b>${c.faltan}</b> ${c.faltan === 1 ? "comercio más" : "comercios más"} con contacto logrado`);
+  if (!partes.length) return "";
+  return `<div class="bn-req-aviso">Para llegar al mínimo: ${partes.join(" y ")}${
+    dias > 0 ? ` · quedan ${dias} ${dias === 1 ? "día" : "días"} de periodo` : " · el periodo ya cerró"}</div>`;
+}
+
+
 const porSemana1 = v => (Math.round(v * 10) / 10).toString().replace(".", ",") + " por semana";
 
 function tarjetaEjecutivo(u, p){
@@ -7861,10 +7953,9 @@ function tarjetaEjecutivo(u, p){
 
     <div class="bn-sec">Llave de acceso · ${ll.cumplidos} de 3 requisitos</div>
     <div class="bn-reqs">
-      ${filaRequisito("Cobertura de cartera", ll.cobertura, comoPct,
-        ll.cobertura.base === "registro"
-          ? "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar"
-          : "Comercios asignados con al menos una gestión en el periodo")}
+      ${filaRequisito("Cobertura de cartera", ll.cobertura, comoPct, TEXTO_COBERTURA[ll.cobertura.base]
+        || TEXTO_COBERTURA.gestion)}
+      ${avisoCobertura(ll, p)}
       ${filaRequisito("Visitas efectivas", ll.visitas, porSemana1,
         `Presenciales o virtuales en las que se logró hablar. El periodo tiene ${
           ll.semanas.toFixed(1).replace(".", ",")} semanas: se piden ${ll.pide}`)}
@@ -7902,7 +7993,8 @@ function tarjetaEjecutivo(u, p){
       <div class="bn-num">
         <span class="k">Se paga ahora / se retiene</span>
         <b>${pct1(x.mensual)} <span class="sep">/</span> ${pct1(x.retenido)}</b>
-        <span class="s">${B.pago_mensual}% con la remuneración, el resto al cierre</span>
+        <span class="s">${B.pago_mensual}% de ${pct1(x.pago)} con la remuneración, ${
+          100 - B.pago_mensual}% retenido hasta el cierre del proyecto</span>
       </div>
     </div>
   </div>`;
@@ -7952,15 +8044,62 @@ function cardSello(p, sello, ver, abierto){
         </div>
         <button class="btn sm" id="cerrarPeriodo">Cerrar y sellar el periodo</button>
       </div>
+      ${paramsConfirmados(p) ? "" : `<div class="note warn" style="margin:11px 0 0">
+        <b>Los parámetros de ${esc(nombrePeriodo(p))} todavía no están confirmados.</b>
+        Se está heredando la versión${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : " del documento"},
+        y eso incluye las metas y el mínimo de visitas semanales, que quedó en revisión.
+        Confírmalos —o edítalos en Ajustes— antes de sellar.
+        <div style="margin-top:8px"><button class="btn ghost sm" id="confirmarParams"
+          >Confirmar los parámetros de ${esc(nombrePeriodo(p))}</button></div></div>`}
       ${faltan ? `<div class="note warn" style="margin:11px 0 0">
         Faltan <b>${faltan}</b> ${faltan === 1 ? "ejecutivo" : "ejecutivos"} con la facturación del
         periodo. Si sellas ahora, el cumplimiento queda firme sin ese peso.</div>` : ""}
     </div>`;
 }
 
+/* Confirmar es guardar, para este periodo, exactamente los valores que ya se
+   están heredando. La base estampa quién y cuándo, y la bitácora lo registra
+   como cualquier otro cambio de parámetros. Si los valores tienen que cambiar,
+   se editan en Ajustes: acá solo se hace explícito lo que ya regía. */
+async function confirmarParametros(){
+  const p = periodoBono();
+  if (paramsConfirmados(p)) return toast("Ya están confirmados");
+  const ver = versionDe(p);
+  const valor = JSON.parse(JSON.stringify(paramsDe(p)));
+  modal(`<h3>Confirmar los parámetros de ${esc(nombrePeriodo(p))}</h3>
+    <p>Se guarda una versión propia de este periodo con los valores que ya se están
+    heredando${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : ""}. No cambia ningún número:
+    deja constancia de que alguien los revisó para este mes.</p>
+    <p class="pie">Mínimo de visitas: <b>${valor.requisitos.visitas_semana} por semana</b> ·
+    cobertura <b>${valor.requisitos.cobertura_pct}%</b> ·
+    puntualidad <b>${valor.requisitos.puntualidad_pct}%</b>.
+    Si alguno tiene que cambiar, edítalo en Ajustes en vez de confirmar.</p>
+    <div class="field"><label>Nota <span class="hint">(opcional)</span></label>
+      <input type="text" id="notaConfirmar" placeholder="Ej.: revisado con Gabriel, sin cambios"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="okConfirmar">Confirmar</button>
+    </div>`);
+  $("#okConfirmar").onclick = async () => {
+    const b = $("#okConfirmar"); b.disabled = true; b.textContent = "Guardando…";
+    const nota = ($("#notaConfirmar").value || "").trim()
+              || `Confirmados para ${nombrePeriodo(p)} sin cambios`;
+    const { error } = await sb.from("bono_parametros")
+      .upsert({ vigente_desde:p, valor, nota }, { onConflict:"vigente_desde" });
+    b.disabled = false; b.textContent = "Confirmar";
+    if (error) return toast("No se pudo confirmar: " + error.message);
+    cerrarModal(); await cargarFacturacion(); render();
+    toast(`Parámetros de ${nombrePeriodo(p)} confirmados`);
+  };
+}
+
 async function cerrarPeriodo(){
   const p = periodoBono();
   if (selloDe(p)) return toast("Este periodo ya está sellado");
+  /* Sellar es decir «estos son los números». No se puede decir eso sobre
+     parámetros que nadie confirmó para este periodo. */
+  if (!paramsConfirmados(p))
+    return toast(`Antes de sellar, confirma los parámetros de ${nombrePeriodo(p)}`);
   const foto = fotoPeriodo(p);
   const faltan = ejecutivosDelBono().filter(u => crecimientoFact(u.correo, p) === null).length;
 
@@ -8321,12 +8460,16 @@ function cardCoberturaBase(val){
     <div class="pie" style="margin:-4px 0 10px">
       Se guarda con la versión del periodo, así que cambiarlo no reescribe los meses
       ya medidos: cada uno se sigue liquidando con la regla que regía cuando se trabajó.
+      En las tres, un comercio cuenta una vez: cinco gestiones sobre la misma bodega
+      son un comercio gestionado, no cinco.
     </div>
     <div class="opts">
+      ${op("contacto", "Un contacto logrado en el periodo",
+           "La regla de régimen. Cuenta el comercio con un correo al ejecutivo de BBVA —el medio que deja constancia— o con una gestión efectiva con el cliente, no un intento. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
+      ${op("gestion", "Al menos un intento de gestión",
+           "Cuenta el comercio que recibió contacto o intento de contacto, sobre la cartera asignada")}
       ${op("registro", "El registro del Customer ID en el CRM",
-           "Cuenta la ficha cargada, se haya trabajado o no. Es la regla del primer mes, cuando el cuello estaba en la respuesta de BBVA")}
-      ${op("gestion", "Al menos una gestión en el periodo",
-           "Cuenta el comercio que recibió contacto o intento de contacto. Es la regla de régimen")}
+           "Cuenta la ficha cargada, se haya trabajado o no, sobre la cartera asignada. Es la regla del primer mes, cuando el cuello estaba en la respuesta de BBVA")}
     </div>
   </div>`;
 }
@@ -8366,6 +8509,18 @@ function ponerBono(obj, ruta, valor){
 /* Qué versión se está editando. Por defecto la que rige hoy; se puede elegir
    otra para corregir una que se cargó mal, o crear una nueva desde el periodo
    en que empieza a regir. */
+/* ---- La confirmación mensual de los parámetros -------------------------
+   Hasta acá una versión de parámetros regía hacia adelante en silencio: si
+   nadie tocaba nada, octubre se liquidaba con la versión de agosto y en ningún
+   lado quedaba que alguien hubiera mirado si eso seguía siendo lo acordado.
+
+   Para las visitas semanales eso importa especialmente —el número está en
+   revisión con BBVA por la geografía de las carteras— pero vale para todos los
+   parámetros: cada periodo tiene que tener una versión propia, confirmada por
+   alguien con nombre y fecha, aunque los valores sean idénticos a los del mes
+   anterior. Confirmar no es tocar: es hacerse cargo. */
+const paramsConfirmados = p => PARAMS.some(x => String(x.vigente_desde) === String(p));
+
 const periodoParam = () => S.pParam || (versionDe(periodoHoy()) || {}).vigente_desde || periodoHoy();
 
 function cardParametrosBono(){
@@ -8499,6 +8654,7 @@ async function guardarParametros(){
 function bindBono(){
   if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#bonoLibro")) $("#bonoLibro").onclick = e => descargarLibroIncentivos(e.currentTarget);
+  if ($("#confirmarParams")) $("#confirmarParams").onclick = () => confirmarParametros();
   if (typeof bindPdfIncentivo === "function") bindPdfIncentivo();
   if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
   if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
@@ -9576,7 +9732,21 @@ function datosLibro(){
              venta: esVentaNueva(c) ? 1 : 0 };
   });
 
-  return { periodos, idx, ejec, gestiones, cartera, nuevos };
+  /* Las coordinaciones con el ejecutivo de BBVA. Entran al libro desde que la
+     cobertura de régimen las cuenta: un comercio se puede cubrir por un correo
+     al banco tanto como por una gestión efectiva con el cliente, y un libro que
+     no trae la mitad de la evidencia no se puede auditar. */
+  const coord = DB.bbva().map(r => ({
+    periodo: periodoDe(r.Fecha_Contacto),
+    mes: idx[periodoDe(r.Fecha_Contacto)] || 0,
+    nombre: r.Ejecutivo, correo: r.Correo_Stratis, cid: String(r.Customer_id),
+    comercio: (byId[String(r.Customer_id)] || {}).nombre_comercio || "",
+    fecha: r.Fecha_Contacto, medio: nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto,
+    /* La columna que decide: solo el correo deja constancia consultable. */
+    dejaConstancia: r.Tipo_Contacto === "bbva_correo" ? 1 : 0
+  }));
+
+  return { periodos, idx, ejec, gestiones, cartera, nuevos, coord };
 }
 
 /* ---- La hoja de parámetros ---------------------------------------------
@@ -9721,16 +9891,42 @@ function hojaGestiones(d, nFer){
     anchos:[10,6,18,26,14,30,16,15,15,13,9,16,11,13,14] });
 }
 
-function hojaCartera(d){
+/* ---- Coordinación con BBVA: la otra mitad de la cobertura --------------
+   Una fila por contacto con el ejecutivo del banco. La columna que importa es
+   la última: de todos los medios, solo el correo deja una constancia que se
+   puede volver a leer, y por eso es el único que cuenta como comercio cubierto
+   por este lado. */
+function hojaCoordBBVA(d){
+  const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio",
+                "Fecha del contacto","Medio","Deja constancia"];
+  const filas = [cols];
+  d.coord.forEach(c => filas.push([c.periodo, c.mes, c.nombre, c.correo, c.cid,
+    c.comercio, serial(c.fecha), c.medio, c.dejaConstancia]));
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[7, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[10,6,18,26,14,30,16,18,14] });
+}
+
+function hojaCartera(d, nG, nCo){
   const cols = ["Ejecutivo","Correo","Customer ID","Comercio","Distrito","Estado",
                 "Resultado","Fecha de cierre","Periodo del cierre","Mes del cierre",
-                "Cuenta para reactivación"];
+                "Cuenta para reactivación","Contacto logrado en el periodo"];
   const filas = [cols];
-  d.cartera.forEach(c => filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
-    c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre, c.cuenta]));
+  d.cartera.forEach((c, i) => {
+    const f = i + 2;
+    /* La regla de régimen, resuelta comercio por comercio y a la vista: cuenta
+       si hubo una gestión EFECTIVA con el cliente o un correo al ejecutivo de
+       BBVA, dentro del periodo que manda la hoja de Parámetros. Un comercio
+       con cinco gestiones sigue siendo un comercio: esta celda es 1 o 0. */
+    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$M$2:$M$${nG},1)`;
+    const correo   = `COUNTIFS('Coordinación BBVA'!$E$2:$E$${nCo},${A1(2,f)},'Coordinación BBVA'!$B$2:$B$${nCo},${P_(FIL.mes)},'Coordinación BBVA'!$I$2:$I$${nCo},1)`;
+    filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
+      c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre,
+      c.cuenta, `=IF(${efectiva}+${correo}>0,1,0)`]);
+  });
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
     fmt:[[8, 2, filas.length, "dd/mm/yyyy"]],
-    anchos:[18,26,14,30,16,11,12,15,14,12,20] });
+    anchos:[18,26,14,30,16,11,12,15,14,12,20,24] });
 }
 
 function hojaNuevosLibro(d){
@@ -9760,14 +9956,30 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
   const registrados = `COUNTIFS(${C("B")},${correoRef})`;
   /* Cuál de las dos manda lo decide la hoja de Parámetros, no esta fórmula:
      así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
-  const cubre = `IF(${P_(FIL.coberturaBase)}="registro",${registrados},${cubiertos})`;
+  /* Los comercios con un contacto logrado: la columna que la hoja de Cartera
+     resuelve comercio por comercio, sumada para este ejecutivo. */
+  const contactados = `SUMIFS(Cartera!$L$2:$L$${nC},${C("B")},${correoRef})`;
+  /* Cuál de las tres manda lo decide la hoja de Parámetros, no esta fórmula:
+     así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
+  const cubre = `IF(${P_(FIL.coberturaBase)}="registro",${registrados},`
+              + `IF(${P_(FIL.coberturaBase)}="contacto",${contactados},${cubiertos}))`;
+  /* El denominador es parte de la regla: «contacto» mide sobre lo registrado,
+     las otras dos sobre lo que asignó BBVA. */
+  const coberturaPct = cel =>
+    `IF(${P_(FIL.coberturaBase)}="contacto",IF(${registrados}=0,0,${contactados}/${registrados}*100),`
+  + `IF(${cel}=0,0,${cubre}/${cel}*100))`;
+  /* Y la segunda condición de la regla de régimen: tener cargada toda la
+     cartera asignada, para que nadie suba su porcentaje cargando menos. */
+  const cumpleCobertura = (valor, minimo, cartera) =>
+    `IF(AND(${valor}>=${minimo},OR(${P_(FIL.coberturaBase)}<>"contacto",${registrados}>=${cartera})),"Sí","No")`;
   const efectivas  = `SUMIFS(${G("N")},${eG},${mG})`;
   const puntuales  = `SUMIFS(${G("K")},${eG},${mG})`;
   const respuestas = `SUMIFS(${G("M")},${eG},${mG})`;
   const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
   const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
   const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
-  return { gestiones, cubiertos, registrados, cubre, efectivas, puntuales, respuestas, acumulados, delMes, ventas };
+  return { gestiones, cubiertos, registrados, contactados, cubre, coberturaPct, cumpleCobertura,
+           efectivas, puntuales, respuestas, acumulados, delMes, ventas };
 }
 
 /* El tramo gradual, leído de la TABLA de la hoja de Parámetros y no de una
@@ -9819,9 +10031,9 @@ function hojaResumen(p, d, nG, nC, nN){
     filas.push([
       u.nombre, u.correo, cart,
       `=${F.gestiones}`,
-      `=IF($C${f}=0,0,${F.cubre}/$C${f}*100)`,
+      `=${F.coberturaPct(`$C${f}`)}`,
       `=${P_(FIL.cobertura)}`,
-      `=IF($E${f}>=$F${f},"Sí","No")`,
+      `=${F.cumpleCobertura(`$E${f}`, `$F${f}`, `$C${f}`)}`,
       `=${F.efectivas}`,
       `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
       `=IF($H${f}>=$I${f},"Sí","No")`,
@@ -9919,8 +10131,9 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Cartera asignada", cart, "", "", ""],
     ["", "", "", "", ""],
     ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE"],
-    ["Cobertura de cartera", `=IF($B$4=0,0,${F.cubre}/$B$4*100)`, `=${P_(FIL.cobertura)}`,
-     `=IF($B$7>=$C$7,"Sí","No")`, "Comercios de su cartera con al menos una gestión en el periodo"],
+    ["Cobertura de cartera", `=${F.coberturaPct("$B$4")}`, `=${P_(FIL.cobertura)}`,
+     `=${F.cumpleCobertura("$B$7", "$C$7", "$B$4")}`,
+     "Según la regla del periodo: la ficha cargada, el comercio con algún intento, o el comercio con contacto logrado sobre lo registrado"],
     ["Visitas efectivas", `=${F.efectivas}`, `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
      `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar"],
     ["Puntualidad del registro", `=IF($B$12=0,0,${F.puntuales}/$B$12*100)`, `=${P_(FIL.puntualidad)}`,
@@ -10111,6 +10324,7 @@ function armarLibroIncentivos(p){
   d.nFer = par.nFeriados;
   d.esc  = { fila: par.filaEscala, n: par.nEscala };
   const nG = d.gestiones.length + 1, nC = d.cartera.length + 1, nN = d.nuevos.length + 1;
+  const nCo = d.coord.length + 1;
 
   /* El orden importa: lo que se mira en la reunión va primero, los datos
      crudos al final. Nadie abre un libro por la hoja de 4000 filas. */
@@ -10122,7 +10336,8 @@ function armarLibroIncentivos(p){
   hojas.push(["Evolución", hojaEvolucion(d)]);
   hojas.push(["Por medio", hojaCruce(d, nG)]);
   hojas.push(["Gestiones", hojaGestiones(d, par.nFeriados)]);
-  hojas.push(["Cartera",   hojaCartera(d)]);
+  hojas.push(["Coordinación BBVA", hojaCoordBBVA(d)]);
+  hojas.push(["Cartera",   hojaCartera(d, nG, nCo)]);
   hojas.push(["Nuevos",    hojaNuevosLibro(d)]);
   return { hojas, d, nG, nC, nN };
 }
@@ -10361,8 +10576,12 @@ function actaIncentivo(doc, u, p, x){
      gestión: 15%» lo cierra. En una hoja que alguien firma, esa diferencia es
      la conversación entera. */
   res(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo", pdfPct(x.pago), x.nota || "", true);
-  res("Se paga con la remuneración", pdfPct(x.mensual), `${B.pago_mensual}% del incentivo`);
-  res("Se retiene hasta el cierre", pdfPct(x.retenido), "Se liquida al cerrar el proyecto");
+  /* El equivalente, dicho con los dos números a la vista: «80% de 15%» explica
+     el 12% sin que nadie tenga que hacer la cuenta en la reunión. */
+  res("Se paga con la remuneración", pdfPct(x.mensual),
+      `${B.pago_mensual}% de ${pdfPct(x.pago)}`);
+  res("Se retiene hasta el cierre", pdfPct(x.retenido),
+      `${100 - B.pago_mensual}% de ${pdfPct(x.pago)} · se liquida al cerrar el proyecto`);
 
   caja(m, y - 3, W - 2*m, 9, PX.fondo);
   txt("Todos los porcentajes son sobre el sueldo base. El monto lo calcula Recursos Humanos.",
