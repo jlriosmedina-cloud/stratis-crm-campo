@@ -6356,7 +6356,7 @@ const COLS_DETALLE = [
      identificador de 11 dígitos es un RUC y por lo tanto una venta que trae
      Stratis; que esté cerrada o todavía en trabajo lo dice su cierre. Nadie
      puede marcarla mal, y no se puede desincronizar del resultado. */
-  "Tipo_Registro","Origen_Marcado",
+  "Tipo_Registro","En_Cartera_BBVA","Origen_Marcado",
 
   /* --- Quién es el comercio y en qué punto está ------------------------- */
   "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
@@ -6398,11 +6398,20 @@ const estadoContacto = (intentos, respuestas) =>
 /* Los tres grupos que conviven en la Base, en una sola columna.
 
    Antes vivían en dos hojas y cruzarlos pedía copiar y pegar a mano. Ahora es
-   una hoja y un filtro: «Cartera BBVA» es lo que entregó el banco, «Lead» un
-   RUC que se está trabajando, «Venta nueva» un RUC que ya cerró. */
+   una hoja y un filtro.
+
+   Los nombres dicen a qué se juega en cada caso, y no de dónde salió la ficha.
+   «Cartera BBVA» y «Lead» se leían como cosas de distinta naturaleza cuando en
+   realidad las dos son leads: lo que cambia es el objetivo. Y una venta cerrada
+   se separa de las dos porque el comercio nunca estuvo en la cartera del banco,
+   que es justo lo que hay que poder ver sin cruzar columnas.
+
+     · Lead de retención       comercio que BBVA ya tiene; se trabaja para que se quede
+     · Lead de venta           RUC que trae Stratis, todavía en negociación
+     · Venta fuera de cartera  RUC que cerró; nunca estuvo en la base del banco */
 function tipoRegistro(c){
-  if (!esClienteNuevo(c)) return "Cartera BBVA";
-  return c.resultado_gestion === "VENTA" ? "Venta nueva" : "Lead";
+  if (!esClienteNuevo(c)) return "Lead de retención";
+  return c.resultado_gestion === "VENTA" ? "Venta fuera de cartera" : "Lead de venta";
 }
 
 /* Lo que el ejecutivo eligió al dar de alta el comercio, tal cual quedó
@@ -6420,6 +6429,10 @@ function tipoRegistro(c){
    registró antes. */
 const origenMarcado = c =>
   c && c.tipo_registro === "NUEVO" ? "Cliente nuevo" : "Cartera de BBVA";
+/* Y en una columna aparte, sin ambigüedad, si el comercio estuvo alguna vez en
+   la base que entregó el banco. Es la pregunta que se hace primero al armar
+   cualquier dinámica. */
+const enCarteraBBVA = c => esClienteNuevo(c) ? "No" : "Si";
 
 /* ¿Lo que se marcó contradice al identificador? */
 const origenNoCuadra = c =>
@@ -6490,6 +6503,7 @@ function filaComercio(c, soloEntrega){
        buscan por su nombre. Reordenar es mover una línea. */
     const det = {
       Tipo_Registro:   tipoRegistro(c),
+      En_Cartera_BBVA: enCarteraBBVA(c),
       Origen_Marcado:  origenMarcado(c),
       Nombre_Comercio: titulo(c.nombre_comercio || ""),
       Rubro:           rubroLabel(c),
