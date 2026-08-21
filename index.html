@@ -2557,7 +2557,27 @@ const cerrarModal = () => $("#overlay").innerHTML = "";
 /* =========================================================================
    Render principal
    ========================================================================= */
+/* Pintar la pantalla, y si algo revienta al pintarla, DECIRLO.
+
+   Una excepción acá dejaba `#view` vacío: la barra de arriba se veía y debajo
+   no había nada. Una pantalla en blanco no da ninguna pista —ni al que la
+   sufre ni al que la tiene que arreglar— y es la peor forma de fallar que
+   tiene una aplicación. Ahora se ve qué pasó y hay un botón para recargar. */
 function render(){
+  try { renderInterno(); }
+  catch (e){
+    const v = $("#view");
+    if (v) v.innerHTML = `<div class="card">
+      <div class="err"><b>No se pudo dibujar esta pantalla.</b><br>${esc(String(e && e.message || e))}</div>
+      <div class="note" style="margin-top:10px">Suele arreglarse recargando. Si vuelve a pasar,
+      pásale este mensaje a quien administra el CRM.</div>
+      <button class="btn block" style="margin-top:12px" onclick="location.reload(true)">Recargar</button>
+    </div>`;
+    throw e;                      // que quede en la consola, además de en pantalla
+  }
+}
+
+function renderInterno(){
   if (!S.user) return renderLogin();
   $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
   renderNav();
