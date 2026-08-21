@@ -3016,6 +3016,7 @@ function viewFicha(c){
     </div>
     <div class="card">
       <h3>Línea de tiempo</h3>
+      ${avisoComentario(c, regs)}
       ${regs.length ? `<div class="tl">${regs.map(itemTimeline).join("")}</div>`
         : `<div class="empty" style="padding:26px 10px"><div class="big">◷</div>Aún no hay contactos registrados para este comercio.</div>`}
     </div>
@@ -3074,6 +3075,26 @@ function cardCoordinacionBBVA(c, mio){
 /* La coordinación con el banco se ve distinta en la línea de tiempo, y a
    propósito: es la misma historia del comercio pero con otro interlocutor.
    Mezclarlas sin distinguirlas sería tan confuso como tenerlas separadas. */
+/* BBVA pide que ningún comercio llegue sin comentario. Cuando nadie anotó
+   nada, el archivo del banco no sale en blanco: lleva una frase que el CRM
+   deduce de la línea de tiempo. Esto muestra esa frase acá, tal cual la va a
+   leer el banco, por dos razones: que el ejecutivo sepa qué se está diciendo
+   de su comercio, y que tenga la ocasión de reemplazarla por lo que de verdad
+   pasó —que siempre vale más que una deducción—. */
+function avisoComentario(c, regs){
+  const hayCliente  = regs.some(r => String(r.Comentario_Cliente  || "").trim());
+  const hayEjecutivo= regs.some(r => String(r.Comentario_Ejecutivo|| "").trim());
+  if (hayCliente && hayEjecutivo) return "";
+  const efectivos = regs.filter(r => esEfectivo(r.Resultado));
+  return `<div class="note" style="margin-bottom:12px">
+    <b>Sin comentario escrito.</b> BBVA exige que la celda no llegue vacía, así que en el
+    archivo del banco va esto, marcado como deducido por el CRM:
+    <div style="margin-top:7px;font-style:italic">«${esc(relatoCliente(c, regs, efectivos))}»</div>
+    <div style="margin-top:7px;font-size:11.5px;color:var(--muted)">
+      Si registras el comentario en una gestión, el tuyo reemplaza a este y esta nota desaparece.
+    </div></div>`;
+}
+
 function itemTimelineBBVA(r){
   const resp = respondioBBVA(r.Resultado);
   return `
@@ -6118,7 +6139,11 @@ function filasBase(){
         b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
-        b.Comentario_Ejecutivo, b.Comentario_Cliente, c.observacion || ""])
+        /* Misma regla que en la hoja que va al banco: ninguna de las dos
+           celdas llega vacía, y la marca deja ver cuál la escribió alguien. */
+        b.Comentario_Ejecutivo || (MARCA_DEDUCIDO + relatoCaso(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado)))),
+        b.Comentario_Cliente   || (MARCA_DEDUCIDO + relatoCliente(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado)))),
+        c.observacion || ""])
       .concat(COLS_BBVA_RESUMEN.map(k => coordBBVA(c)[k]));
   });
 }
@@ -6587,6 +6612,77 @@ function filasBBVA(soloEntrega){
   return cs.map(c => filaComercio(c, soloEntrega));
 }
 
+/* ---- La celda de comentario nunca llega vacía --------------------------
+
+   BBVA pide que cada comercio traiga un comentario. Hasta hoy, si nadie
+   escribió nada en ninguna gestión, la celda salía en blanco y el banco leía
+   una fila muda: no sabía si el caso está trabado, si el cliente no contesta
+   o si simplemente nadie anotó.
+
+   Lo que NO se hace: escribir este texto en la base. El comentario del
+   ejecutivo es su palabra —lo que él vio y decidió contar— y un texto que el
+   CRM guarde en ese campo queda indistinguible del suyo. Al mes siguiente
+   nadie podría decir cuál frase escribió una persona y cuál compuso el
+   sistema, y esa es justo la diferencia que sostiene el informe.
+
+   Lo que sí se hace: componerlo AL EXPORTAR, con hechos que ya están en la
+   línea de tiempo —cuántos intentos, por qué medio, si el cliente contestó,
+   si el ejecutivo del banco contestó— y decir en la propia celda que se
+   dedujo. El banco recibe una explicación; nadie recibe una frase inventada
+   con firma ajena.
+
+   Si mañana el ejecutivo escribe su comentario, el suyo manda y esto
+   desaparece solo: no hay nada que limpiar. */
+const MARCA_DEDUCIDO = "Sin comentario del ejecutivo · ";
+
+/* Lo que le pasó al comercio con el CLIENTE, en una frase. */
+function relatoCliente(c, regs, efectivos){
+  if (!regs.length) return "Todavía no se registra ningún contacto con el comercio.";
+  const ult = regs[0];                       // regs viene del más reciente al más antiguo
+  const cuando = fmtFecha(ult.Fecha_Contacto);
+  const medio = nomTipo(ult.Tipo_Contacto).toLowerCase();
+  const n = regs.length;
+  const veces = n === 1 ? "1 intento" : `${n} intentos`;
+
+  if (!efectivos.length)
+    return `El cliente no responde: ${veces}, el último por ${medio} el ${cuando}.`;
+
+  const resp = efectivos[0];
+  return `El cliente respondió el ${fmtFecha(resp.Fecha_Contacto)} por `
+       + `${nomTipo(resp.Tipo_Contacto).toLowerCase()} (${veces} en total).`;
+}
+
+/* El estado del caso completo: el cliente, el banco y en qué quedó. */
+function relatoCaso(c, regs, efectivos){
+  const partes = [];
+  const cierre = c.resultado_gestion || "PENDIENTE";
+  const fechaCierre = c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "";
+
+  if (cierre === "VENTA")
+    partes.push(`Venta cerrada${fechaCierre ? " el " + fechaCierre : ""} tras ${regs.length} contacto${regs.length===1?"":"s"}.`);
+  else if (cierre === "RETENIDO")
+    partes.push(`Comercio retenido${fechaCierre ? " el " + fechaCierre : ""} tras ${regs.length} contacto${regs.length===1?"":"s"}.`);
+  else if (cierre === "PERDIDO")
+    partes.push(`No se retuvo${c.motivo_no_retencion ? ": " + nomMotivo(c.motivo_no_retencion).toLowerCase() : ""}. ${relatoCliente(c, regs, efectivos)}`);
+  else
+    partes.push(relatoCliente(c, regs, efectivos));
+
+  /* La otra mitad de la historia: muchas veces el caso no avanza porque el
+     ejecutivo del banco no ha contestado, y sin esto el informe lo lee como
+     si el atasco fuera de Stratis. */
+  const k = bbvaDe(c.customer_id);
+  if (k.n && !k.respondio){
+    const ultima = k.ultima ? fmtFecha(k.ultima.Fecha_Contacto) : "";
+    /* «coordinaciones», sin tilde: el plural la pierde. */
+    partes.push(`El ejecutivo de BBVA no ha respondido: ${k.n === 1 ? "1 coordinación" : k.n + " coordinaciones"}`
+              + `${ultima ? ", la última el " + ultima : ""}.`);
+  }
+  if (!k.n && !regs.length)
+    return "Sin gestiones ni coordinación con el banco registradas.";
+
+  return partes.join(" ");
+}
+
 /* La fila de un comercio, sea de la cartera de BBVA o un RUC que trajo Stratis.
 
    Antes había dos armadores distintos: este y uno propio para los clientes
@@ -6615,7 +6711,10 @@ function filaComercio(c, soloEntrega){
          no está afiliado y por eso no tiene uno. */
       esNuevo ? rucDe(c) : c.customer_id,
       gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
-      ultimo("Comentario_Cliente"),
+      /* La columna que lee BBVA. Si nadie anotó nada en ninguna gestión, en
+         vez de una celda muda va lo que sí sabemos del comercio, marcado como
+         deducido. Lo que escribió el ejecutivo siempre manda sobre esto. */
+      ultimo("Comentario_Cliente") || (MARCA_DEDUCIDO + relatoCliente(c, regs, efectivos)),
       nPresencial,
       nLlamada,
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
@@ -6669,7 +6768,10 @@ function filaComercio(c, soloEntrega){
 
       Resultado_Gestion:    g ? g.label : "",
       Calificacion:         ultimo("Calificacion") || "Sin calificar",
-      Comentario_Ejecutivo: ultimo("Comentario_Ejecutivo"),
+      /* Misma regla del lado de Stratis: la celda no queda muda, pero se ve
+         a simple vista cuál frase escribió una persona y cuál dedujo el CRM
+         —filtrando por «Sin comentario del ejecutivo» sale quién no anota—. */
+      Comentario_Ejecutivo: ultimo("Comentario_Ejecutivo") || (MARCA_DEDUCIDO + relatoCaso(c, regs, efectivos)),
       Alertas:              alertasDe(c, regs, efectivos, suma)
     };
     Object.assign(det, coordBBVA(c));
