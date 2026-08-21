@@ -2014,8 +2014,26 @@ function configurado(){ return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
 
 async function iniciarSupabase(){
   if (!configurado()) return false;
+  /* Las lecturas van SIEMPRE a la red, nunca al caché del navegador.
+
+     Sin esto, una pestaña abierta desde ayer sigue mostrando los datos de
+     ayer: el navegador responde el mismo GET desde disco y la aplicación no
+     se entera. Se veía feo de una manera muy concreta —la supervisión abría
+     la ficha de un comercio y contaba dos gestiones donde el ejecutivo veía
+     cuatro— y no había forma de distinguirlo de un problema de permisos.
+
+     Un CRM que enseña el trabajo del equipo no puede servir una foto vieja:
+     esa es exactamente la función que viene a cumplir. */
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
+    global: {
+      fetch: (entrada, opciones) =>
+        fetch(entrada, Object.assign({}, opciones, {
+          cache: "no-store",
+          headers: Object.assign({}, (opciones && opciones.headers) || {},
+            { "Cache-Control": "no-cache" })
+        }))
+    }
   });
   return true;
 }
@@ -2882,8 +2900,13 @@ function viewFicha(c){
         <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
         <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
         <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>`}
+      ${/* «Para BBVA · Gestión = SI» es la columna que el banco lee del archivo
+            de LA CARTERA. En una venta nueva no significa nada —el comercio no
+            está en la base del banco— y encima se leía como si registrar el
+            RUC ya contara como venta cerrada. Fuera en ese caso; en la cartera
+            se queda, porque ahí sí es literal. */ ""}
       <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
-             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>
+             ${!esClienteNuevo(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>` : ""}
              ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}
              ${esVentaNueva(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div>` : ""}</dd></div>
       ${(() => {
@@ -2941,8 +2964,13 @@ function viewFicha(c){
    </div>
   </div>
 
-  ${mio ? `<div class="sticky-actions">
-    ${esDeCampo() ? `<button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>` : ""}
+  ${/* Registrar un contacto: el ejecutivo sobre lo suyo, y la supervisión
+        sobre cualquier ficha. La gestión queda a nombre de quien la registra
+        —en la línea de tiempo aparece con su nombre— así que nunca se confunde
+        con trabajo de campo del ejecutivo, y como el Analista y el Manager no
+        entran en el bono, tampoco mueve ningún cumplimiento. */ ""}
+  ${(mio || !esDeCampo()) ? `<div class="sticky-actions">
+    <button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>
   </div>` : ""}`;
 }
 
@@ -3380,14 +3408,19 @@ const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual"
 
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
-  /* Lo que un RUC nuevo no tiene todavía: nombre comercial y estado los pone
-     BBVA al afiliarlo, la ubicación se captura en la gestión, y la
-     coordinación con el banco se registra desde la ficha y no al crear. El
-     cierre de la gestión sí se muestra en los dos casos: es el ciclo. */
+  /* El alta es el mismo paso para los dos orígenes: se identifica el comercio
+     y se dice cómo se coordinó con el ejecutivo de BBVA. Nada más.
+
+     El resultado de la gestión NO se pide acá, y esa es la corrección: un
+     desplegable de cierre en el formulario de alta hace pensar que registrar
+     el comercio es registrar la venta. El cierre es el final del ciclo, no el
+     principio, y vive en la gestión donde se cerró.
+
+     Lo que un RUC no tiene todavía —nombre comercial, estado, ubicación— lo
+     pone BBVA al afiliarlo o se captura en la primera visita. */
   [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
-   ["#cardContactoBBVA", nuevo], ["#cardCierre", true]]
+   ["#cardContactoBBVA", false], ["#cardCierre", true], ["#cardGestion", !S.editCli]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
-  const cg = $("#cardGestion"); if (cg) cg.style.display = "";
 
   if (nuevo){
     /* Antes el RUC nacía vendido: se registraba y en el mismo acto quedaba
@@ -3481,12 +3514,15 @@ async function guardarCliente(){
   if (nuevo){
     if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
   } else {
-    if (!f.contacto_bbva)
-      errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
     if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
     if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
     if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
   }
+  /* La coordinación con el ejecutivo de BBVA se pide en los dos casos: en la
+     cartera porque sin el banco no hay datos del titular, y en un RUC porque
+     sin el banco no hay afiliación. Es el mismo paso del mismo flujo. */
+  if (!editando && !f.contacto_bbva)
+    errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
   if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
   if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
 
@@ -3544,6 +3580,11 @@ async function guardarCliente(){
         p_observacion:  fila.observacion
       });
       if (error) throw error;
+      /* El medio con el que se coordinó con BBVA, igual que en la cartera. */
+      if (f.contacto_bbva){
+        await sb.from("clientes").update({ contacto_bbva: f.contacto_bbva })
+                .eq("customer_id", "NUEVO-" + ruc);
+      }
     } else {
       fila.asignado = S.user.nombre;
       fila.asignado_correo = S.user.correo;
@@ -4379,10 +4420,10 @@ function pintarSeguimiento(){
 function renderFormulario(){
   const c = byId[S.cid];
   if (!c) return go("cartera");
-  if (!esDeCampo() && !S.editId){
-    S.tab = "cartera";
-    return toast("Las gestiones las registran los ejecutivos en campo");
-  }
+  /* La supervisión también puede registrar. Antes solo corregía lo ya escrito,
+     y eso dejaba un hueco: un comercio sin ninguna gestión no se podía tocar
+     desde oficina, ni para dejar constancia de una llamada al titular. La
+     gestión queda a su nombre, no al del ejecutivo. */
   if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId)) : nuevoForm();
   const f = S.form;
 
