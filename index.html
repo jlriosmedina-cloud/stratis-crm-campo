@@ -2846,9 +2846,22 @@ function viewFicha(c){
         </div>
       </div>
     </div>
-    ${(mio || (!esDeCampo() && !esClienteNuevo(c))) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-      ${mio ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
-      <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+    ${/* Quién puede tocar esta ficha.
+
+          Antes la barra entera desaparecía para la supervisión cuando el
+          comercio era una venta nueva —el `!esClienteNuevo` del final—, y con
+          eso el Analista se quedaba mirando un RUC mal cargado sin una sola
+          acción disponible. Ahora:
+
+            · el dueño de la ficha la edita y la elimina, como siempre;
+            · la supervisión edita cualquiera, sea de quien sea y del origen
+              que sea, porque es quien responde por el dato ante el banco;
+            · eliminar sigue siendo solo del dueño. Borrar una ficha se lleva
+              sus gestiones por delante, y esa no es una corrección: es una
+              pérdida. Para lo demás está Editar. */ ""}
+    ${(mio || !esDeCampo()) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${(mio || mandoTotal()) ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>` : ""}
+      ${mio ? `<button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
       ${(!esDeCampo() || (edicionLibre() && esMiCliente(c)))
         ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir ${esClienteNuevo(c) ? "RUC" : "Customer ID"}</button>` : ""}
     </div>` : ""}
@@ -3070,7 +3083,11 @@ function formDeCliente(c){
 function editarCliente(cid){
   const c = byId[String(cid)];
   if (!c) return;
-  if (!esMiCliente(c)) return toast("Solo puedes editar los comercios que tú registraste");
+  /* El ejecutivo edita lo suyo; la supervisión edita cualquiera, porque es
+     quien responde por el dato frente al banco y no debería depender de que
+     el ejecutivo esté disponible para arreglar un dedazo. */
+  if (esDeCampo() && !esMiCliente(c))
+    return toast("Solo puedes editar los comercios que tú registraste");
   S.editCli = String(cid);
   S.formCli = formDeCliente(c);
   S.tab = "form_cliente";
