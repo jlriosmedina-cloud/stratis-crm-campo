@@ -4975,10 +4975,17 @@ async function guardar(c){
       }
 
       const fila = aDB(f, c);
-      const { error } = S.editId
-        ? await sb.from("interacciones").update(fila).eq("id", S.editId)
-        : await sb.from("interacciones").insert(fila);
+      /* Igual que en el borrado: una edición que los permisos rechazan vuelve
+         sin error y sin filas. Se pide de vuelta lo escrito para poder
+         distinguir «se guardó» de «no se guardó y nadie avisó». */
+      const { data: escrito, error } = S.editId
+        ? await sb.from("interacciones").update(fila).eq("id", S.editId).select("id")
+        : await sb.from("interacciones").insert(fila).select("id");
       if (error) throw new Error(error.message);
+      if (!(escrito || []).length)
+        throw new Error(S.editId
+          ? "La base no dejó guardar el cambio. Esta gestión es de otro ejecutivo y tu usuario no tiene permiso para corregirla."
+          : "La base no dejó registrar la gestión. Revisa que el comercio esté asignado a tu usuario.");
 
       /* La próxima acción se guarda después de la gestión: la base cierra sola
          la que estuviera abierta cuando entra una gestión nueva, así que esta
@@ -5048,8 +5055,17 @@ function confirmarEliminar(id){
   $("#okDel").onclick = async () => {
     const cid = r.Customer_id;
     {
-      const { error } = await sb.from("interacciones").delete().eq("id", id);
+      /* El `.select()` no es un adorno: sin él, un borrado que los permisos
+         rechazan vuelve SIN error y con cero filas, y esto anunciaba
+         «Registro eliminado» sobre una gestión que seguía ahí. Un permiso
+         que falla en silencio es peor que uno que falla: nadie lo reporta
+         porque la pantalla dice que funcionó. Ahora se cuenta lo borrado. */
+      const { data, error } = await sb.from("interacciones").delete().eq("id", id).select("id");
       if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
+      if (!(data || []).length){
+        cerrarModal();
+        return toast("La base no dejó eliminar este registro. Es de otro ejecutivo y tu usuario no tiene permiso para borrarlo.");
+      }
       await refrescar(); await cargarAuditoria();
     }
     cerrarModal(); toast("Registro eliminado"); render();
