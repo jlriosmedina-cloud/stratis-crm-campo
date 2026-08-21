@@ -2253,16 +2253,50 @@ async function salir(){
 }
 
 /* ---- Carga de datos ----------------------------------------------------- */
+
+/* Traer una tabla ENTERA, por tramos.
+ *
+ * PostgREST recorta toda respuesta a un tope de filas fijado en el servidor.
+ * El `.limit(20000)` del cliente no lo levanta: pedir veinte mil y que el
+ * servidor devuelva mil no es un error, es una respuesta corta —y sin
+ * `Content-Range` a la vista, indistinguible de «no hay más».
+ *
+ * Un ejecutivo nunca lo notó porque RLS le devuelve solo sus filas, que no
+ * llegan al tope. Al Analista, que las ve todas, le llegaban las primeras y
+ * el resto no existía para el CRM: por eso su pantalla se quedaba en el 18/08
+ * mientras la base ya tenía gestiones del 21, y por eso un comercio con
+ * cuatro intentos se le veía con dos.
+ *
+ * Se pide por tramos hasta que el servidor devuelve menos de lo pedido. El
+ * orden por llave primaria no es decorativo: sin un orden estable, dos tramos
+ * consecutivos pueden repetir una fila y saltarse otra.
+ */
+async function traerTodo(tabla, llave){
+  const TRAMO = 1000;
+  const TECHO = 200000;              // fusible, por si algo sale mal
+  const filas = [];
+  for (let desde = 0; desde < TECHO; desde += TRAMO){
+    const { data, error } = await sb.from(tabla).select("*")
+      .order(llave, { ascending: true })
+      .range(desde, desde + TRAMO - 1);
+    if (error) return { data: null, error };
+    const lote = data || [];
+    filas.push(...lote);
+    if (lote.length < TRAMO) break;
+  }
+  return { data: filas, error: null };
+}
+
 async function cargarDatos(){
   pantallaCarga("Cargando tu cartera…");
   const [cli, inter, usr, cfg, rub, acc, seg] = await Promise.all([
-    sb.from("clientes").select("*").limit(5000),
-    sb.from("interacciones").select("*").limit(20000),
+    traerTodo("clientes", "customer_id"),
+    traerTodo("interacciones", "id"),
     sb.from("usuarios").select("*").order("rol"),
     sb.from("config").select("*"),
     sb.from("rubros").select("*").order("orden"),
     sb.from("acciones_seguimiento").select("*").order("orden"),
-    sb.from("seguimientos").select("*").order("fecha_objetivo")
+    traerTodo("seguimientos", "id")
   ]);
   const fallo = [cli, inter, usr].find(r => r.error);
   if (fallo) throw new Error(fallo.error.message);
@@ -2317,7 +2351,7 @@ async function cargarSeguimientos(){
   try {
     const [acc, seg] = await Promise.all([
       sb.from("acciones_seguimiento").select("*").order("orden"),
-      sb.from("seguimientos").select("*").order("fecha_objetivo")
+      traerTodo("seguimientos", "id")
     ]);
     if (!acc.error) ACCIONES = acc.data || [];
     if (!seg.error) SEGUIMIENTOS = seg.data || [];
@@ -2384,8 +2418,11 @@ async function cargarMetas(){
 async function cargarAuditoria(){
   AUDITORIA = [];
   if (!S.user || S.user.rol === "Ejecutivo" || S.demo) return;
+  /* La bitácora se lee de lo más nuevo a lo más viejo y el servidor recorta
+     a mil filas: pedir dos mil no traía dos mil, traía mil sin avisar. Se
+     pide lo que de verdad llega, que para una bitácora es lo que se mira. */
   const { data, error } = await sb.from("auditoria").select("*")
-    .order("creado_en", { ascending:false }).limit(2000);
+    .order("creado_en", { ascending:false }).limit(1000);
   if (!error) AUDITORIA = data || [];
 }
 
@@ -2396,7 +2433,7 @@ async function cargarAuditoria(){
    pedido de enlaces firmados, que era lo que las traía a la pantalla. */
 
 async function refrescar(){
-  const { data, error } = await sb.from("interacciones").select("*").limit(20000);
+  const { data, error } = await traerTodo("interacciones", "id");
   if (error) return toast("No se pudo actualizar: " + error.message);
   DB.cargar(data || []);
   CLIENTES.forEach(c => c._base = null);
@@ -2405,7 +2442,7 @@ async function refrescar(){
 
 /* Recarga la cartera tras un alta, edición o borrado */
 async function recargarCartera(){
-  const cli = await sb.from("clientes").select("*").limit(5000);
+  const cli = await traerTodo("clientes", "customer_id");
   if (cli.error) throw new Error(cli.error.message);
   CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
   byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
@@ -3560,7 +3597,12 @@ async function guardarCliente(){
     tipo_registro: f.tipo_registro,
     rubro: f.rubro,
     rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
-    resultado_gestion: nuevo ? "VENTA" : (f.resultado_gestion || "PENDIENTE"),
+    /* Último resto de «un RUC nace vendido»: acá decía `nuevo ? "VENTA" : …`,
+       y como esta fila también es la que se usa al EDITAR, cualquier arreglo
+       sobre una venta nueva —corregir el rubro, la razón social— la devolvía a
+       VENTA y borraba el ciclo que se acababa de registrar. El cierre lo
+       decide la gestión donde se cerró, no el formulario del comercio. */
+    resultado_gestion: f.resultado_gestion || "PENDIENTE",
     motivo_no_retencion: (!nuevo && f.resultado_gestion === "PERDIDO") ? (f.motivo_no_retencion || null) : null
   };
   if (nuevo){
@@ -3570,6 +3612,9 @@ async function guardarCliente(){
     fila.nombre_comercio = String(f.razon_social).trim();
     fila.distrito = null; fila.direccion = null; fila.estado = null;
     fila.observacion     = String(f.observacion || "").trim() || null;
+    /* El medio con el que se coordinó con BBVA se guarda igual que en cartera:
+       es el mismo paso del mismo flujo, y al editar tiene que poder corregirse. */
+    fila.contacto_bbva   = f.contacto_bbva || null;
     /* La llave sigue siendo el RUC; el customer_id es su forma dentro de la
        tabla, para que las gestiones cuelguen del mismo sitio que en cartera.
        Es la misma convención que ya usaba «crear_venta_nueva». */
