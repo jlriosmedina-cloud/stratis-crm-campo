@@ -3654,9 +3654,10 @@ function modalCorregirId(cid){
     try {
       /* Para un RUC hay dos cosas que mover —la llave y la columna `ruc`— y
          tienen que ir juntas o el comercio queda diciendo dos números
-         distintos. Por eso su propia función, que envuelve a la de siempre. */
+         distintos. La base ya trae `corregir_ruc` para eso: mueve la ficha,
+         sus gestiones y la columna en una sola transacción. */
       const { error } = nuevoCli
-        ? await sb.rpc("corregir_ruc", { p_actual: String(c.customer_id), p_nuevo_ruc: nuevo })
+        ? await sb.rpc("corregir_ruc", { p_customer_id: String(c.customer_id), p_ruc: nuevo })
         : await sb.rpc("corregir_customer_id", { p_actual: String(c.customer_id), p_nuevo: destino });
       if (error) throw new Error(error.message);
       await recargarCartera(); await cargarAuditoria();
