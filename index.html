@@ -1290,7 +1290,32 @@ const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO",
  "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO"];
 
 /* ---- Datos en memoria --------------------------------------------------- */
-let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
+/* CLIENTES es la POBLACIÓN: sobre esta lista se cuenta todo —cobertura,
+   visitas, ventas, incentivo, el Excel del banco—. Los comercios de prueba
+   NO están acá, y por eso ningún cálculo puede contarlos aunque se olvide de
+   excluirlos: no existen para él.
+
+   PRUEBAS es el apartado, y byId es el índice: contiene a los dos, porque
+   abrir una ficha, ver su línea de tiempo y registrarle una gestión tiene que
+   funcionar igual en el apartado que en la cartera de verdad. Es la misma
+   distinción de siempre: buscar uno es una cosa, contar todos es otra. */
+let CLIENTES = [], PRUEBAS = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
+
+/* ---- El apartado de pruebas --------------------------------------------
+   Un comercio es de prueba si su llave empieza en 0000. La marca es la llave
+   misma y no una bandera aparte: no hay nada que alguien pueda olvidar de
+   marcar ni desmarcar por accidente, y se reconoce a simple vista en la
+   pantalla, en el Excel y en cualquier consulta a la base.
+
+   Cuatro ceros y no uno: en la cartera de BBVA hay nueve comercios que
+   empiezan con cero —00458376 y 00407607 son los más extremos— y ninguno
+   llega a tres. Con cuatro no hay choque posible.
+
+   Un RUC de prueba entra como NUEVO-00000000001, así que se le quita ese
+   prefijo antes de mirar. */
+const llaveDesnuda = v => String(v || "").replace(/^NUEVO-/, "");
+const esDePrueba = c => !!c && /^0000/.test(llaveDesnuda(c.customer_id));
+const esLlaveDePrueba = v => /^0000/.test(llaveDesnuda(v));
 
 /* ---- Metas: la cartera que BBVA asignó a cada quien, mes a mes ----------
    Es el denominador del alcance. Sin él, once comercios trabajados se ven
@@ -1745,29 +1770,49 @@ const rubroLabel = c => {
    `bbva()`, que es una puerta nueva. Ninguna pantalla vieja cambió de sentido;
    las nuevas piden lo que necesitan. */
 const DB = {
+  /* La misma distinción que en CLIENTES, y por la misma razón.
+
+     `visitas` y `crudo` son la POBLACIÓN —lo que cuentan el Panel, el bono,
+     el reporte y el Excel— y no contienen ni una gestión del apartado de
+     pruebas. `todo` las tiene todas, y de ahí leen las consultas por
+     comercio, que necesitan ver la línea de tiempo completa de la ficha que
+     se está mirando, sea de la cartera o del apartado. */
   visitas: [],
   crudo: [],
+  todo: [],
   todos(){ return this.visitas; },
   bbva(){ return this.crudo.filter(r => r.Con === "BBVA"); },
   delCliente(cid){
-    return this.todos().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
+    return this.todo.filter(r => r.Con !== "BBVA" && String(r.Customer_id) === String(cid))
+                    .sort((a,b) => ts(b) - ts(a));
   },
   /* Las coordinaciones de un comercio, de la más vieja a la más nueva: acá el
      orden importa al revés que en las gestiones, porque «primer contacto» y
      «segundo contacto» son posiciones en el tiempo. */
   bbvaDe(cid){
-    return this.bbva().filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(a) - ts(b));
+    return this.todo.filter(r => r.Con === "BBVA" && String(r.Customer_id) === String(cid))
+                    .sort((a,b) => ts(a) - ts(b));
   },
   /* La ficha del comercio muestra una sola historia, con las dos clases
      mezcladas en orden y distinguidas en pantalla. */
   historiaDe(cid){
-    return this.crudo.filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
+    return this.todo.filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
   },
-  buscar(id){ return this.crudo.find(r => r._id === id) || null; },
-  cargar(filas){
-    this.crudo   = filas.map(deDB);
+  buscar(id){ return this.todo.find(r => r._id === id) || null; },
+  /* `todo` manda: `crudo` y `visitas` se derivan de él, siempre por acá.
+
+     Tres arreglos que tienen que concordar son una fábrica de errores —basta
+     que alguien asigne uno solo y las consultas por comercio dejan de
+     encontrar nada, sin ruido—. Por eso no se asignan por separado en ningún
+     sitio: se siembra la lista completa y las otras dos salen de ella. */
+  sembrar(filas){
+    this.todo = filas;
+    /* Acá es donde el apartado de pruebas deja de existir para el resto del
+       CRM. Una sola línea, en el único sitio por donde pasan las gestiones. */
+    this.crudo   = this.todo.filter(r => !esLlaveDePrueba(r.Customer_id));
     this.visitas = this.crudo.filter(r => r.Con !== "BBVA");
-  }
+  },
+  cargar(filas){ this.sembrar(filas.map(deDB)); }
 };
 
 /* ---- Lo que se deriva de la coordinación con BBVA -----------------------
@@ -1959,6 +2004,7 @@ const S = {
   pParam:"",     /* qué versión de los parámetros se está editando */
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
+  verPruebas:false, /* el apartado de pruebas: comercios con llave 0000 */
   repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
   formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
   loteBbva:null, /* borrador de la coordinación para varios comercios */
@@ -1986,6 +2032,10 @@ const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio 
 
 function cartera(){
   if (!S.user) return [];
+  /* Con el apartado abierto se ve el apartado y NADA más. No se mezclan: una
+     lista con comercios de verdad y de mentira juntos es exactamente cómo se
+     cuela uno de mentira en un informe. */
+  if (S.verPruebas) return PRUEBAS;
   if (S.user.rol === "Ejecutivo") return CLIENTES;      // la base ya filtró por RLS
   if (S.fEjecutivo !== "todos")   return CLIENTES.filter(c => c.asignado === S.fEjecutivo);
   return CLIENTES;
@@ -2245,14 +2295,33 @@ function pantallaCarga(msg){
 async function salir(){
   detenerSync();
   if (sb) await sb.auth.signOut();
-  S.user = null; S.entrando = false;
-  CLIENTES = []; byId = {}; DB.visitas = [];
+  S.user = null; S.entrando = false; S.verPruebas = false;
+  CLIENTES = []; PRUEBAS = []; byId = {}; DB.visitas = []; DB.crudo = []; DB.todo = [];
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
   renderLogin();
 }
 
 /* ---- Carga de datos ----------------------------------------------------- */
+
+/* El único sitio donde el apartado de pruebas se separa de la cartera.
+ *
+ * Los comercios de prueba salen de CLIENTES —la lista sobre la que se cuenta
+ * todo— y se van a PRUEBAS. Ningún cálculo del CRM los puede contar, ni por
+ * descuido ni por una condición que alguien olvidó escribir: sencillamente no
+ * están en la lista que mira. El índice byId sí los tiene, para que su ficha
+ * y su línea de tiempo funcionen igual que las demás.
+ *
+ * Se hace acá, al cargar, y no en cada cálculo, porque los sitios que cuentan
+ * comercios son más de una docena y basta olvidar uno para que una gestión de
+ * juguete termine en el archivo que se le entrega al banco. */
+function repartirComercios(filas){
+  const todos = filas.map((c,i) => Object.assign({ _i:i }, c));
+  CLIENTES = todos.filter(c => !esDePrueba(c));
+  PRUEBAS  = todos.filter(esDePrueba);
+  byId = {}; todos.forEach(c => byId[String(c.customer_id)] = c);
+}
+
 
 /* Traer una tabla ENTERA, por tramos.
  *
@@ -2314,8 +2383,7 @@ async function cargarDatos(){
   RUBROS = rub.data || [];
   ACCIONES = acc.data || [];
   SEGUIMIENTOS = seg.data || [];
-  CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
-  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
+  repartirComercios(cli.data || []);
   USUARIOS = (usr.data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
     nombreCompleto: u.nombre, correo:u.correo, rol:u.rol, activo:u.activo }));
   (cfg.data || []).forEach(({clave, valor}) => {
@@ -2329,7 +2397,7 @@ async function cargarDatos(){
   });
 
   DB.cargar(inter.data || []);
-  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  CLIENTES.concat(PRUEBAS).forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
   await cargarMetas();
   /* Los parámetros del bono se cargaban recién con la primera sincronización.
@@ -2436,17 +2504,17 @@ async function refrescar(){
   const { data, error } = await traerTodo("interacciones", "id");
   if (error) return toast("No se pudo actualizar: " + error.message);
   DB.cargar(data || []);
-  CLIENTES.forEach(c => c._base = null);
-  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  const todos = CLIENTES.concat(PRUEBAS);
+  todos.forEach(c => c._base = null);
+  todos.forEach(c => RULES.recomputarBase(c.customer_id));
 }
 
 /* Recarga la cartera tras un alta, edición o borrado */
 async function recargarCartera(){
   const cli = await traerTodo("clientes", "customer_id");
   if (cli.error) throw new Error(cli.error.message);
-  CLIENTES = (cli.data || []).map((c,i) => Object.assign({ _i:i }, c));
-  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
-  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  repartirComercios(cli.data || []);
+  CLIENTES.concat(PRUEBAS).forEach(c => RULES.recomputarBase(c.customer_id));
 }
 
 /* ---- Modo demostración (sin Supabase) ---------------------------------- */
@@ -2664,6 +2732,18 @@ function bindComunes(){
   document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verCarteraEstado(el.dataset.verest);
   });
+  const tog = document.querySelector("#togglePruebas");
+  if (tog) tog.onclick = () => {
+    S.verPruebas = !S.verPruebas;
+    /* Los filtros no cruzan la puerta: los de la cartera no significan nada en
+       el apartado, y al volver conviene ver la cartera entera otra vez. */
+    S.cid = null; S.q = ""; S.limite = 40;
+    S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = S.fEjecutivo = S.fCierre = "todos";
+    render();
+    toast(S.verPruebas
+      ? "Apartado de pruebas · nada de lo que registres acá cuenta para ningún indicador"
+      : "De vuelta en la cartera de la campaña");
+  };
   const lote = document.querySelector("#loteBbva");
   if (lote) lote.onclick = () => abrirLoteBBVA();
   if (typeof bindExtras === "function") bindExtras();
@@ -2772,15 +2852,19 @@ function viewCartera(){
     items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
 
   return `
+  ${bannerPruebas()}
   <div class="page-head">
     <div>
-      <h2>${S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña"}</h2>
+      <h2>${S.verPruebas ? "Apartado de pruebas"
+            : (S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña")}</h2>
       <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       ${(flujoBbva() && esDeCampo()) ? `<button class="btn ghost" id="loteBbva"
         title="Un correo con varios Customer ID se escribe una vez">✉ Coordinar con BBVA en lote</button>` : ""}
-      ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
+      ${mandoTotal() ? `<button class="btn ghost" id="togglePruebas">${S.verPruebas
+          ? "‹ Volver a la cartera de verdad" : "⚗ Apartado de pruebas"}</button>` : ""}
+      ${puedeDarDeAlta() ? `<button class="btn" data-go="form_cliente">＋ Registrar ${S.verPruebas ? "comercio de prueba" : "nuevo comercio"}</button>` : ""}
     </div>
   </div>
 
@@ -3075,6 +3159,30 @@ function cardCoordinacionBBVA(c, mio){
 /* La coordinación con el banco se ve distinta en la línea de tiempo, y a
    propósito: es la misma historia del comercio pero con otro interlocutor.
    Mezclarlas sin distinguirlas sería tan confuso como tenerlas separadas. */
+/* El apartado de pruebas, anunciado sin sutileza.
+
+   Un banco de pruebas que no se distingue de la cartera de verdad es peor que
+   no tener banco de pruebas: en algún momento alguien registra en el sitio
+   equivocado. Por eso la franja es del color de las advertencias, ocupa el
+   ancho entero y dice las dos cosas que importan: dónde está parado y qué
+   consecuencia tiene. */
+function bannerPruebas(){
+  if (!S.verPruebas) return "";
+  return `<div class="err" style="margin-bottom:14px">
+    <b>⚗ Estás en el apartado de pruebas.</b> Todo lo que registres acá lleva una llave que
+    empieza en <b>0000</b> y queda fuera de absolutamente todo: cobertura, visitas, ventas,
+    calidad del registro, incentivos, el Panel, el Reporte y el Excel que se le entrega a BBVA.
+    Sirve para probar el ciclo completo sin ensuciar un solo número.
+  </div>`;
+}
+
+/* Quién puede dar de alta. El ejecutivo, su cartera. La supervisión, solo en
+   el apartado de pruebas —el alta de verdad es trabajo de campo, y la base
+   rechaza cualquier otra cosa que intente registrar desde el escritorio—. */
+function puedeDarDeAlta(){
+  return esDeCampo() || (mandoTotal() && S.verPruebas);
+}
+
 /* BBVA pide que ningún comercio llegue sin comentario. Cuando nadie anotó
    nada, el archivo del banco no sale en blanco: lleva una frase que el CRM
    deduce de la línea de tiempo. Esto muestra esa frase acá, tal cual la va a
@@ -3205,7 +3313,10 @@ function editarCliente(cid){
 }
 
 function renderFormCliente(){
-  if (!esDeCampo() && !S.editCli){
+  /* El alta de verdad es trabajo de campo. La supervisión entra acá solo para
+     el apartado de pruebas, y la base rechaza cualquier otra cosa que intente
+     registrar: acá no se está confiando en la pantalla. */
+  if (!esDeCampo() && !S.editCli && !(mandoTotal() && S.verPruebas)){
     S.tab = "cartera";
     return toast("El alta de comercios la hacen los ejecutivos en campo");
   }
@@ -3604,6 +3715,16 @@ async function guardarCliente(){
      sin el banco no hay afiliación. Es el mismo paso del mismo flujo. */
   if (!editando && !f.contacto_bbva)
     errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
+  /* La supervisión solo da de alta en el apartado. Se avisa acá con todas las
+     letras en vez de dejar que la base responda con un error de permisos que
+     no le dice a nadie qué hacer. */
+  if (!editando && !esDeCampo()){
+    const llave = nuevo ? ruc : cid;
+    if (!esLlaveDePrueba(llave))
+      errores.push(nuevo
+        ? "Desde supervisión solo se registran comercios de prueba: el RUC tiene que empezar en 0000 (por ejemplo 00000000001)."
+        : "Desde supervisión solo se registran comercios de prueba: el Customer ID tiene que empezar en 0000 (por ejemplo 00000000).");
+  }
   if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
   if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
 
