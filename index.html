@@ -2027,12 +2027,13 @@ async function iniciarSupabase(){
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
     global: {
+      /* Solo se toca `cache`. Las cabeceras se dejan EXACTAMENTE como vienen:
+         supabase-js las manda como objeto Headers, y copiarlas con
+         Object.assign devuelve {} —se pierden apikey y Authorization— así que
+         toda consulta salía sin credenciales y el CRM respondía que la cuenta
+         no figuraba entre sus usuarios. */
       fetch: (entrada, opciones) =>
-        fetch(entrada, Object.assign({}, opciones, {
-          cache: "no-store",
-          headers: Object.assign({}, (opciones && opciones.headers) || {},
-            { "Cache-Control": "no-cache" })
-        }))
+        fetch(entrada, Object.assign({}, opciones, { cache: "no-store" }))
     }
   });
   return true;
