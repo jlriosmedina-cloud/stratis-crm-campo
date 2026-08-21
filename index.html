@@ -3082,9 +3082,11 @@ function cardCoordinacionBBVA(c, mio){
    de su comercio, y que tenga la ocasión de reemplazarla por lo que de verdad
    pasó —que siempre vale más que una deducción—. */
 function avisoComentario(c, regs){
-  const hayCliente  = regs.some(r => String(r.Comentario_Cliente  || "").trim());
-  const hayEjecutivo= regs.some(r => String(r.Comentario_Ejecutivo|| "").trim());
-  if (hayCliente && hayEjecutivo) return "";
+  /* Solo avisa cuando NO hay nada escrito por nadie. Si el ejecutivo anotó lo
+     suyo aunque el cliente no haya dicho nada, eso ya viaja al banco con su
+     nombre y no hay nada que reclamarle. */
+  if (regs.some(r => String(r.Comentario_Cliente || "").trim()
+                  || String(r.Comentario_Ejecutivo || "").trim())) return "";
   const efectivos = regs.filter(r => esEfectivo(r.Resultado));
   return `<div class="note" style="margin-bottom:12px">
     <b>Sin comentario escrito.</b> BBVA exige que la celda no llegue vacía, así que en el
@@ -6142,7 +6144,7 @@ function filasBase(){
         /* Misma regla que en la hoja que va al banco: ninguna de las dos
            celdas llega vacía, y la marca deja ver cuál la escribió alguien. */
         b.Comentario_Ejecutivo || (MARCA_DEDUCIDO + relatoCaso(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado)))),
-        b.Comentario_Cliente   || (MARCA_DEDUCIDO + relatoCliente(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado)))),
+        comentarioParaBanco(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado))),
         c.observacion || ""])
       .concat(COLS_BBVA_RESUMEN.map(k => coordBBVA(c)[k]));
   });
@@ -6635,6 +6637,32 @@ function filasBBVA(soloEntrega){
    desaparece solo: no hay nada que limpiar. */
 const MARCA_DEDUCIDO = "Sin comentario del ejecutivo · ";
 
+/* Lo que va en la columna que lee el banco, por orden de quién lo dijo.
+ *
+ * La primera versión de esto saltaba de «no hay comentario del cliente» a la
+ * frase deducida, y tapaba con texto de máquina 467 comercios donde el
+ * ejecutivo SÍ había escrito algo —«Aviso de visita y solicitud de reunión»—
+ * solo porque lo había escrito en la otra columna. Casi todos eran de Juan y
+ * de Vanessa, que anotan lo que hicieron ellos y dejan vacío lo que dijo el
+ * cliente, que es razonable cuando el cliente no dijo nada.
+ *
+ * El orden es por autoría, de la más cercana al hecho a la más lejana:
+ *   1. lo que dijo el cliente;
+ *   2. si no, lo que escribió el ejecutivo —rotulado, porque en esa columna
+ *      sin rótulo se leería como palabra del cliente—;
+ *   3. si no hay ninguno, lo que el CRM deduce, marcado como deducido.
+ *
+ * Una frase escrita por una persona siempre vale más que una compuesta por
+ * el sistema, aunque esté en la casilla de al lado. */
+function comentarioParaBanco(c, regs, efectivos){
+  const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+  const delCliente = ultimo("Comentario_Cliente");
+  if (delCliente) return delCliente;
+  const delEjecutivo = ultimo("Comentario_Ejecutivo");
+  if (delEjecutivo) return "Del ejecutivo: " + delEjecutivo;
+  return MARCA_DEDUCIDO + relatoCliente(c, regs, efectivos);
+}
+
 /* Lo que le pasó al comercio con el CLIENTE, en una frase. */
 function relatoCliente(c, regs, efectivos){
   if (!regs.length) return "Todavía no se registra ningún contacto con el comercio.";
@@ -6711,10 +6739,9 @@ function filaComercio(c, soloEntrega){
          no está afiliado y por eso no tiene uno. */
       esNuevo ? rucDe(c) : c.customer_id,
       gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
-      /* La columna que lee BBVA. Si nadie anotó nada en ninguna gestión, en
-         vez de una celda muda va lo que sí sabemos del comercio, marcado como
-         deducido. Lo que escribió el ejecutivo siempre manda sobre esto. */
-      ultimo("Comentario_Cliente") || (MARCA_DEDUCIDO + relatoCliente(c, regs, efectivos)),
+      /* La columna que lee BBVA: lo dicho por el cliente, si no lo escrito
+         por el ejecutivo, si no lo deducido. Nunca vacía, nunca sin autor. */
+      comentarioParaBanco(c, regs, efectivos),
       nPresencial,
       nLlamada,
       regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
