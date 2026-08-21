@@ -1128,6 +1128,13 @@ const RESULTADOS_GESTION = [
 ];
 const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
 
+/* Los cierres que puede tener un comercio dependen de su origen. Un RUC que
+   Stratis trae de cero no puede ser «retenido»: no había nada que retener, no
+   era cliente del banco. Sus dos salidas son la venta o el no. */
+const resultadosPara = c =>
+  esClienteNuevo(c) ? RESULTADOS_GESTION.filter(g => g.id !== "RETENIDO")
+                    : RESULTADOS_GESTION;
+
 /* ---- El estado del comercio, calculado y no tecleado -------------------
    Nadie guarda «34 años» en una ficha: se guarda la fecha de nacimiento y la
    edad se calcula, porque una edad guardada miente en el próximo cumpleaños y
@@ -1180,9 +1187,6 @@ function estadoDerivado(c){
   /* La excepción de supervisión, con su motivo escrito. */
   if (c.estado_fijado && estadoDerivadoById(c.estado_fijado)) return c.estado_fijado;
 
-  /* Una venta nueva no pasa por el banco: el RUC lo trajo Stratis. */
-  if (esClienteNuevo(c)) return "EN_NEGOCIACION";
-
   const gestiones = DB.delCliente(c.customer_id);
   if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
 
@@ -1195,6 +1199,12 @@ function estadoDerivado(c){
      razón de haberlo hecho calculado: un barrido toma una foto y todo lo que
      llega después se queda fuera. Esto no toma ninguna foto. */
   if (gestiones.length > 0) return "POR_CONTACTAR";
+
+  /* Un RUC que trajo Stratis no espera nada del banco: no hay validación que
+     aguardar, así que mientras no tenga gestiones el siguiente paso es salir a
+     contactarlo. Antes esto devolvía «en negociación» siempre, porque la venta
+     nacía cerrada y el estado no tenía de dónde salir. */
+  if (esClienteNuevo(c)) return "POR_CONTACTAR";
 
   return bbvaDe(c.customer_id).respondio ? "POR_CONTACTAR" : "POR_VALIDAR";
 }
@@ -1255,7 +1265,19 @@ function tipoCierre(c){
 
 /* Dos orígenes posibles: la cartera que entrega BBVA, o una venta nueva que
    trae Stratis y que el banco todavía no tiene afiliada. */
-const esClienteNuevo = c => c && c.tipo_registro === "NUEVO";
+/* Cómo se reconoce un comercio que trajo Stratis.
+
+   Lo dice su tipo_registro… o su identificador. Un Customer ID de BBVA tiene 8
+   dígitos —los 801 de la cartera, salvo uno de 9— y un RUC tiene exactamente
+   11: no se pisan. Mirar el número además del tipo recoge los RUC que se
+   registraron por el panel de Customer ID antes de que el formulario supiera
+   distinguirlos, y que hasta ahora viajaban dentro del archivo de la cartera
+   como si fueran comercios afiliados. */
+const RUC_RE = /^\d{11}$/;
+const esRucValido = v => RUC_RE.test(String(v || "").replace(/[^0-9]/g, ""));
+const esClienteNuevo = c => !!c && (c.tipo_registro === "NUEVO" || esRucValido(c.customer_id));
+/* El RUC, venga de su columna o del identificador con el que se registró. */
+const rucDe = c => !c ? "" : (c.ruc || (esRucValido(c.customer_id) ? String(c.customer_id) : ""));
 const claveCliente   = c => esClienteNuevo(c) ? ("RUC " + (c.ruc || "")) : ("ID " + (c ? c.customer_id : ""));
 
 /* Sugerencias de distrito — el campo acepta cualquier texto */
@@ -2742,7 +2764,7 @@ function viewCartera(){
         <label class="fsel"><span>Estado</span>
           <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
             ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
-              .concat([["NUEVO", `Clientes nuevos · ${nuevos.length}`]]))}</select></label>
+              .concat([["NUEVO", `Ventas nuevas · ${nuevos.length}`]]))}</select></label>
         <label class="fsel"><span>Rubro</span>
           <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`,
             rubrosUsados.map(r => [r.codigo, `${r.nombre} · ${cuenta(base, c => c.rubro === r.codigo)}`]))}</select></label>
@@ -2827,8 +2849,8 @@ function viewFicha(c){
     ${(mio || (!esDeCampo() && !esClienteNuevo(c))) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       ${mio ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>
       <button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
-      ${((!esDeCampo() || (edicionLibre() && esMiCliente(c))) && !esClienteNuevo(c))
-        ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir Customer ID</button>` : ""}
+      ${(!esDeCampo() || (edicionLibre() && esMiCliente(c)))
+        ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir ${esClienteNuevo(c) ? "RUC" : "Customer ID"}</button>` : ""}
     </div>` : ""}
   </div>
 
@@ -2847,13 +2869,10 @@ function viewFicha(c){
         <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
         <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
         <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>`}
-      ${esClienteNuevo(c)
-        ? `<div class="kv"><dt>Estado</dt><dd><span class="chip ok">Derivado a BBVA</span>
-             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Cuenta como venta · Para BBVA · Gestión = SI</div>
-             <div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div></dd></div>`
-        : `<div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
+      <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
              <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>
-             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}</dd></div>`}
+             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}
+             ${esVentaNueva(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div>` : ""}</dd></div>
       ${(() => {
         const sg = seguimientoDe(c.customer_id);
         if (!sg) return "";
@@ -2881,19 +2900,19 @@ function viewFicha(c){
    <div>
     <div class="card nota-ficha">
       <div class="note">${esClienteNuevo(c)
-        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro, y la derivación ya cuenta como venta. El onboarding completo lo hace BBVA por su canal. Va en la hoja <b>Clientes nuevos</b> del resumen, no en el archivo de la cartera.`
+        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro. Se trabaja con el mismo ciclo que un comercio de cartera —gestiones, coordinación con BBVA y cierre— solo que la llave es el RUC. Va en la hoja <b>Ventas nuevas</b> del resumen, no en el archivo de la cartera.`
         : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
     </div>
-    ${(!esClienteNuevo(c) && b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio && esDeCampo()) ? `
+    ${(b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio && esDeCampo()) ? `
     <div class="card">
       <div class="note warn" style="margin:0">
         <b>Esta gestión sigue abierta.</b> Ya hablaste con el titular, así que puedes cerrarla como
-        ${c.estado === "ACTIVO" ? "retención" : "venta"} o como perdida. Mientras siga pendiente, a
+        ${esClienteNuevo(c) ? "venta" : (c.estado === "ACTIVO" ? "retención" : "venta")} o como perdida. Mientras siga pendiente, a
         BBVA le llega <b>Gestión = NO</b>.
         <button class="btn ghost sm block" data-editcli="${c.customer_id}" style="margin-top:9px">Marcar el cierre</button>
       </div>
     </div>` : ""}
-    ${(flujoBbva() && !esClienteNuevo(c)) ? cardCoordinacionBBVA(c, mio) : ""}
+    ${flujoBbva() ? cardCoordinacionBBVA(c, mio) : ""}
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -3073,24 +3092,9 @@ function renderFormCliente(){
   <div class="card">
     <h3 style="margin-bottom:4px">${editando ? "Editar comercio" : "Registrar nuevo comercio"}</h3>
     <div style="font-size:13px;color:var(--muted)">
-      ${editando ? "El Customer ID y el ejecutivo asignado no se pueden cambiar."
-                 : "El comercio queda a tu nombre. Un mismo Customer ID solo puede estar registrado una vez en toda la campaña."}
+      ${editando ? "El identificador y el ejecutivo asignado no se cambian desde acá: para eso está «Corregir identificador» en la ficha."
+                 : "El comercio queda a tu nombre. Escribe el Customer ID si ya está afiliado, o el RUC si lo estás trayendo tú: el formulario reconoce cuál es. Un mismo identificador solo puede estar registrado una vez en toda la campaña."}
     </div>
-  </div>
-
-  <div class="card">
-    <h3>¿De dónde sale este comercio?</h3>
-    <div class="opts">
-      <div class="opt ${f.tipo_registro==="CARTERA"?"on":""}" data-tipo-reg="CARTERA">
-        <span class="rd"></span><span><b>Cartera de BBVA</b>
-        <span>Ya está afiliado. Lo identificas por su Customer ID</span></span>
-      </div>
-      <div class="opt ${f.tipo_registro==="NUEVO"?"on":""}" data-tipo-reg="NUEVO">
-        <span class="rd"></span><span><b>Cliente nuevo — venta</b>
-        <span>Todavía no está en BBVA. Lo identificas por su RUC</span></span>
-      </div>
-    </div>
-    ${editando ? `<div class="note" style="margin-top:11px">Esto no se puede cambiar después del alta.</div>` : ""}
   </div>
 
   <div class="card">
@@ -3206,13 +3210,6 @@ function renderFormCliente(){
     $("#view").querySelectorAll("[data-estado]").forEach(x => x.classList.toggle("on", x.dataset.estado === f.estado));
     pintarGestion();   // el estado decide si el cierre puede ser retención o venta
   });
-  $("#view").querySelectorAll("[data-tipo-reg]").forEach(el => el.onclick = () => {
-    if (editando) return;                       // el origen no cambia después del alta
-    f.tipo_registro = el.dataset.tipoReg;
-    $("#view").querySelectorAll("[data-tipo-reg]").forEach(x =>
-      x.classList.toggle("on", x.dataset.tipoReg === f.tipo_registro));
-    pintarIdentificacion();
-  });
   $("#guardarCli").onclick = guardarCliente;
   pintarRubroOtro(); pintarIdentificacion();
 }
@@ -3233,11 +3230,12 @@ function hayContactoLogrado(cid){
 function gestionesPosibles(){
   const f = S.formCli;
   const logrado = hayContactoLogrado(S.editCli);
+  const nuevo = f.tipo_registro === "NUEVO";
   return RESULTADOS_GESTION.filter(g => {
     if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
     if (!logrado) return false;
-    if (g.id === "RETENIDO") return f.estado === "ACTIVO";
-    if (g.id === "VENTA")    return f.estado === "DE BAJA";
+    if (g.id === "RETENIDO") return !nuevo && f.estado === "ACTIVO";
+    if (g.id === "VENTA")    return nuevo || f.estado === "DE BAJA";
     return true;
   });
 }
@@ -3280,21 +3278,38 @@ function pintarGestion(){
   });
 }
 
-/* La identificación cambia según el origen: Customer ID, o RUC y razón social
-   para una venta nueva que BBVA todavía no tiene afiliada. */
+/* El origen ya no se elige en una pantalla aparte: lo dice el número.
+
+   Un Customer ID de BBVA tiene 8 dígitos —los 801 de la cartera, salvo uno de
+   9— y un RUC tiene exactamente 11. No se pisan, así que preguntar «¿de dónde
+   sale este comercio?» antes de dejar escribir era un paso de más: el
+   ejecutivo ya tiene el número en la mano y el formulario puede deducirlo.
+
+   Lo que sí hace falta es DECIRLO en voz alta. Un formulario que cambia solo
+   sin explicar por qué desconcierta, y acá el cambio no es cosmético: decide
+   si el registro cuenta como venta nueva. Por eso la detección se muestra. */
 function pintarIdentificacion(){
   const f = S.formCli, box = $("#boxIdent"), editando = !!S.editCli;
   if (!box) return;
-  if (f.tipo_registro === "NUEVO"){
-    box.innerHTML = `
-      <div class="field">
-        <label>RUC <span class="req">*</span> <span class="hint">— 11 dígitos</span></label>
-        <input type="text" data-c="ruc" value="${esc(f.ruc)}" ${editando ? "disabled" : ""}
-               inputmode="numeric" maxlength="11" placeholder="20123456789">
-        <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
-          Como todavía no está afiliado no tiene Customer ID: el RUC es la llave.
-        </div>
-      </div>
+  const nuevo = f.tipo_registro === "NUEVO";
+  /* Al editar, la llave ya está decidida y no se toca desde acá: para eso
+     está «Corregir identificador» en la ficha, que mueve las gestiones. */
+  const valor = editando ? (nuevo ? f.ruc : f.customer_id) : (f._ident || "");
+
+  /* Un solo generador para el cartel, así el nodo que se repinta al teclear es
+     siempre el mismo y el swap encuentra a quién reemplazar. */
+  const detectado = detectadoHTML(valor);
+
+  box.innerHTML = `
+    <div class="field">
+      <label>Customer ID o RUC <span class="req">*</span>
+        <span class="hint">— el código del comercio en BBVA, o el RUC si todavía no está afiliado</span></label>
+      <input type="text" data-ident value="${esc(valor)}" ${editando ? "disabled" : ""}
+             inputmode="numeric" autocapitalize="characters" maxlength="11"
+             placeholder="Ej.: 40218755  ·  20123456789">
+      ${detectado}
+    </div>
+    ${nuevo ? `
       <div class="field">
         <label>Razón social <span class="req">*</span></label>
         <input type="text" data-c="razon_social" value="${esc(f.razon_social)}"
@@ -3302,22 +3317,41 @@ function pintarIdentificacion(){
         <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
           Con este nombre aparecerá el comercio en tu cartera.
         </div>
-      </div>`;
-  } else {
-    box.innerHTML = `
-      <div class="field">
-        <label>Customer ID <span class="req">*</span> <span class="hint">— el código del comercio en BBVA</span></label>
-        <input type="text" data-c="customer_id" value="${esc(f.customer_id)}" ${editando ? "disabled" : ""}
-               inputmode="numeric" autocapitalize="characters" placeholder="Ej.: 40218755">
-        <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
-          Es el único dato que conecta este registro con la base de BBVA.
-        </div>
-      </div>`;
-  }
+      </div>` : ""}`;
+
+  const inp = box.querySelector("[data-ident]");
+  if (inp && !editando) inp.oninput = () => {
+    const v = inp.value;
+    f._ident = v;
+    const soloNum = String(v).replace(/[^0-9]/g, "");
+    const antes = f.tipo_registro;
+    f.tipo_registro = esRucValido(v) ? "NUEVO" : "CARTERA";
+    if (f.tipo_registro === "NUEVO"){ f.ruc = soloNum; f.customer_id = ""; }
+    else { f.customer_id = String(v).trim().toUpperCase(); f.ruc = ""; }
+    /* Repintar entero solo cuando el veredicto cambia; si no, el cursor se
+       pierde en cada tecla. */
+    if (antes !== f.tipo_registro){ pintarIdentificacion(); box.querySelector("[data-ident]").focus(); }
+    else { const n = box.querySelector(".note"); if (n) n.outerHTML = detectadoHTML(v); }
+  };
   box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
   camposSegunOrigen();
   pintarNotas();
   pintarNotaDatos();
+}
+
+/* El mismo cartel de la detección, para refrescarlo sin repintar el campo y
+   perder el cursor. */
+function detectadoHTML(valor){
+  if (esRucValido(valor))
+    return `<div class="note" style="margin:7px 0 0;padding:8px 11px">
+              <b>Detectado: RUC</b> — 11 dígitos. Se registrará como <b>venta nueva</b>,
+              y la venta se cierra después desde una gestión.</div>`;
+  if (String(valor).trim().length >= 3)
+    return `<div class="note" style="margin:7px 0 0;padding:8px 11px">
+              <b>Detectado: Customer ID</b> — comercio de la cartera de BBVA.</div>`;
+  return `<div class="note" style="margin:7px 0 0;padding:8px 11px;background:transparent;border:0;color:var(--muted);font-size:11.5px">
+            8 dígitos es un Customer ID de la cartera; 11 es un RUC, y entonces
+            el registro cuenta como venta nueva.</div>`;
 }
 
 /* Una venta nueva se registra con lo mínimo: RUC, razón social y rubro. La
@@ -3329,20 +3363,23 @@ const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual"
 
 function camposSegunOrigen(){
   const nuevo = S.formCli.tipo_registro === "NUEVO";
-  const ocultarSiCartera = ["#cardCierre"];
+  /* Lo que un RUC nuevo no tiene todavía: nombre comercial y estado los pone
+     BBVA al afiliarlo, la ubicación se captura en la gestión, y la
+     coordinación con el banco se registra desde la ficha y no al crear. El
+     cierre de la gestión sí se muestra en los dos casos: es el ciclo. */
   [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
-   ["#cardGestion", nuevo], ["#cardContactoBBVA", nuevo]]
+   ["#cardContactoBBVA", nuevo], ["#cardCierre", true]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
-  ocultarSiCartera.forEach(sel => { const el = $(sel); if (el) el.style.display = nuevo ? "" : "none"; });
+  const cg = $("#cardGestion"); if (cg) cg.style.display = "";
 
   if (nuevo){
-    // Una venta nueva es una derivación: el resultado lo confirma BBVA en el
-    // siguiente corte. Para el ejecutivo la derivación ya cuenta.
-    S.formCli.resultado_gestion = "VENTA";
-    // La gestión que cierra la venta se arma en el mismo formulario.
-    if (!S.form) S.form = nuevoForm();
-    S.form.Resultado = "efectivo";
-    pintarMediosVenta();
+    /* Antes el RUC nacía vendido: se registraba y en el mismo acto quedaba
+       como VENTA. Eso producía una venta sin ciclo detrás, que es justo lo
+       que BBVA reclama. Ahora entra como prospecto —igual que un comercio de
+       cartera entra pendiente— y la venta se cierra desde una gestión, con
+       su fecha, su medio y su evidencia. */
+    if (!S.formCli.resultado_gestion) S.formCli.resultado_gestion = "PENDIENTE";
+    pintarGestion();
   } else {
     ["#derivado","#boxGps"].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ""; });
     pintarGestion();
@@ -3364,40 +3401,22 @@ function pintarMediosVenta(){
   pintarDerivado(); pintarGps();
 }
 
-/* La cartera de BBVA usa una nota interna; el cliente nuevo usa los dos
-   comentarios de siempre, los mismos que se piden en cada gestión. */
+/* Los dos orígenes usan la misma nota interna. Antes el RUC pedía acá los
+   comentarios de la gestión que lo cerraba, porque la venta se registraba de
+   un golpe; ahora esa gestión se registra aparte y pide sus comentarios
+   donde corresponde. */
 function pintarNotas(){
   const f = S.formCli, box = $("#boxNotas"), tit = $("#tituloNotas");
   if (!box) return;
-  if (f.tipo_registro === "NUEVO"){
-    const g = S.form || (S.form = nuevoForm());
-    if (tit) tit.textContent = "Comentarios de la gestión";
-    box.innerHTML = `
-      <div class="field">
-        <label>Calificación del cliente</label>
-        <select data-f="Calificacion">
-          <option value="">Seleccionar…</option>
-          ${CALIFICACIONES.map(k => `<option value="${k.id}" ${g.Calificacion===k.id?"selected":""}>${k.label}</option>`).join("")}
-        </select>
-      </div>
-      <div class="field">
-        <label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— tu lectura</span></label>
-        <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Comercio sin afiliar, aceptó la propuesta. Se envían los datos para el onboarding.">${esc(g.Comentario_Ejecutivo)}</textarea>
-      </div>
-      <div class="field" style="margin-bottom:0">
-        <label>Comentario del cliente <span class="hint">— en sus palabras</span></label>
-        <textarea data-f="Comentario_Cliente" placeholder="Ej.: Mis clientes me piden pagar con tarjeta y pierdo ventas.">${esc(g.Comentario_Cliente)}</textarea>
-      </div>`;
-    box.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => g[el.dataset.f] = el.value);
-    return;
-  } else {
-    if (tit) tit.textContent = "Observación";
-    box.innerHTML = `
-      <div class="field" style="margin-bottom:0">
-        <label>Nota interna <span class="hint">— opcional</span></label>
-        <textarea data-c="observacion" placeholder="Ej.: El local abre solo por las tardes; conviene ir después de las 3.">${esc(f.observacion)}</textarea>
-      </div>`;
-  }
+  const nuevo = f.tipo_registro === "NUEVO";
+  if (tit) tit.textContent = "Observación";
+  box.innerHTML = `
+    <div class="field" style="margin-bottom:0">
+      <label>Nota interna <span class="hint">— opcional</span></label>
+      <textarea data-c="observacion" placeholder="${nuevo
+        ? "Ej.: Bodega de la esquina, sin POS. El dueño atiende de mañana."
+        : "Ej.: El local abre solo por las tardes; conviene ir después de las 3."}">${esc(f.observacion)}</textarea>
+    </div>`;
   box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
 }
 
@@ -3405,10 +3424,10 @@ function pintarNotaDatos(){
   const f = S.formCli, box = $("#notaDatos");
   if (!box) return;
   box.innerHTML = f.tipo_registro === "NUEVO"
-    ? `<div class="note warn">De un <b>cliente nuevo</b> solo se guardan RUC, razón social y rubro.
+    ? `<div class="note">De un <b>cliente nuevo</b> solo se guardan RUC, razón social y rubro.
        El resto del onboarding —representante legal, DNI, cuenta y POS— lo hace BBVA por su canal.
-       <br><br>No se pide resultado de la gestión: la <b>derivación ya cuenta como venta</b>, y si BBVA
-       llega a afiliarlo lo verás en la cartera del siguiente corte.</div>`
+       <br><br>El RUC entra <b>en negociación</b>, no vendido. La venta se cierra desde una gestión,
+       igual que en la cartera: con su fecha, su medio y su evidencia.</div>`
     : `<div class="note">Esta base <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>
        de la cartera de BBVA. Si los necesitas, están en la base del banco y se cruzan por Customer ID.</div>`;
 }
@@ -3444,13 +3463,6 @@ async function guardarCliente(){
     errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
   if (nuevo){
     if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
-    if (!editando){
-      const g = S.form || {};
-      if (!g.Tipo_Contacto) errores.push("Indica cómo se cerró la venta: visita al local o reunión.");
-      if (RULES.requiereUbicacion(g.Tipo_Contacto) && !g.Ubicacion_Verificada && !g._sinUbicacion)
-        errores.push("Captura la ubicación con el botón. Si el GPS no responde, usa “Registrar sin ubicación verificada”.");
-      if (!String(g.Comentario_Ejecutivo || "").trim()) errores.push("Escribe el comentario del ejecutivo.");
-    }
   } else {
     if (!f.contacto_bbva)
       errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
@@ -3482,7 +3494,12 @@ async function guardarCliente(){
     fila.ruc             = ruc;
     fila.razon_social    = String(f.razon_social).trim();
     fila.nombre_comercio = String(f.razon_social).trim();
-    fila.distrito = null; fila.direccion = null; fila.estado = null; fila.observacion = null;
+    fila.distrito = null; fila.direccion = null; fila.estado = null;
+    fila.observacion     = String(f.observacion || "").trim() || null;
+    /* La llave sigue siendo el RUC; el customer_id es su forma dentro de la
+       tabla, para que las gestiones cuelguen del mismo sitio que en cartera.
+       Es la misma convención que ya usaba «crear_venta_nueva». */
+    if (!editando) fila.customer_id = "NUEVO-" + ruc;
   } else {
     fila.nombre_comercio = String(f.nombre_comercio).trim();
     fila.distrito        = String(f.distrito).trim().toUpperCase();
@@ -3498,26 +3515,16 @@ async function guardarCliente(){
       const { error } = await sb.from("clientes").update(fila).eq("customer_id", S.editCli);
       if (error) throw error;
     } else if (nuevo){
-      // El comercio y la gestión que lo cerró entran juntos o no entra ninguno.
-      const g = S.form;
-      const { error } = await sb.rpc("crear_venta_nueva", {
-        p_ruc: ruc,
+      /* Un RUC entra solo, sin gestión pegada. La atomicidad que daba
+         «crear_venta_nueva» ya no hace falta: no hay dos cosas que guardar. */
+      fila.asignado = S.user.nombre;
+      fila.asignado_correo = S.user.correo;
+      const { error } = await sb.rpc("crear_prospecto", {
+        p_ruc:          ruc,
         p_razon_social: fila.razon_social,
-        p_rubro: fila.rubro,
-        p_rubro_otro: fila.rubro_otro,
-        p_tipo_contacto: g.Tipo_Contacto,
-        p_fecha: g.Fecha_Contacto,
-        p_hora: g.Hora_Contacto,
-        p_evidencia_path: "",          // la foto se retiró del flujo
-        p_comentario_ejecutivo: String(g.Comentario_Ejecutivo || "").trim(),
-        p_comentario_cliente: String(g.Comentario_Cliente || "").trim() || null,
-        p_calificacion: g.Calificacion || null,
-        p_ubicacion: g.Ubicacion || null,
-        p_ubicacion_verificada: !!g.Ubicacion_Verificada,
-        // Los viáticos se retiraron de la campaña; la función de la base
-        // conserva los parámetros, así que van vacíos.
-        p_gasto_total: null,
-        p_gastos_paths: []
+        p_rubro:        fila.rubro,
+        p_rubro_otro:   fila.rubro_otro,
+        p_observacion:  fila.observacion
       });
       if (error) throw error;
     } else {
@@ -3528,7 +3535,7 @@ async function guardarCliente(){
     }
     const destino = editando ? S.editCli : (nuevo ? "NUEVO-" + ruc : cid);
     await recargarCartera(); await refrescar(); await cargarAuditoria();
-    toast(editando ? "Comercio actualizado" : (nuevo ? "Venta nueva registrada con su gestión" : "Comercio registrado"));
+    toast(editando ? "Comercio actualizado" : (nuevo ? "RUC registrado · ahora trabájalo con gestiones" : "Comercio registrado"));
     S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = destino;
     window.scrollTo(0,0);
     render();
@@ -3580,19 +3587,35 @@ function confirmarEliminarCliente(cid){
 function modalCorregirId(cid){
   const c = byId[String(cid)];
   if (!c) return;
-  if (esDeCampo()) return toast("La corrección del Customer ID la hacen el Analista o el Manager");
-  if (esClienteNuevo(c)) return toast("Una venta nueva se identifica por RUC, no por Customer ID");
+  /* Antes esto lo hacían solo el Analista y el Manager, con el argumento de
+     que quien comete el error no debería revisarse a sí mismo. En la práctica
+     el dedazo lo descubre el ejecutivo en la calle, y hacerlo esperar a que
+     alguien de oficina lo corrija dejaba el comercio sin poder gestionarse.
+     Se abre al dueño de la ficha; la bitácora sigue registrando quién lo hizo. */
+  const nuevoCli = esClienteNuevo(c);
+  const ROT = nuevoCli ? "RUC" : "Customer ID";
+  const actual = nuevoCli ? (c.ruc || "") : c.customer_id;
+  if (esDeCampo()){
+    if (!esMiCliente(c))
+      return toast(`Solo puedes corregir el ${ROT} de los comercios que registraste`);
+    /* Se respeta la misma ventana de edición que gobierna el resto de sus
+       cambios: una regla, no dos. Cerrada la ventana queda el camino de
+       siempre, que es pedírselo al Analista o al Manager. */
+    if (!edicionLibre())
+      return toast(`La ventana de edición del periodo ya cerró: pídele al Analista que corrija el ${ROT}`);
+  }
   const n = DB.delCliente(cid).length;
 
   modal(`
-    <h3>Corregir el Customer ID</h3>
+    <h3>Corregir el ${ROT}</h3>
     <p><b>${esc(titulo(nombreCliente(c)))}</b> — registrado por ${esc(c.asignado)}.</p>
-    <div class="kv" style="border:0;padding:0 0 12px"><dt>Customer ID actual</dt>
-      <dd class="mono">${esc(c.customer_id)}</dd></div>
+    <div class="kv" style="border:0;padding:0 0 12px"><dt>${ROT} actual</dt>
+      <dd class="mono">${esc(actual)}</dd></div>
     <div class="field">
-      <label for="fixNuevo">Customer ID correcto <span class="req">*</span></label>
+      <label for="fixNuevo">${ROT} correcto <span class="req">*</span></label>
       <input type="text" id="fixNuevo" inputmode="numeric" autocomplete="off"
-             placeholder="${esc(c.customer_id)}" value="">
+             ${nuevoCli ? 'maxlength="11"' : ""}
+             placeholder="${esc(actual)}" value="">
     </div>
     <div class="note" style="margin-bottom:12px">
       ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} se mueven con él; no se pierde nada. `
@@ -3612,22 +3635,33 @@ function modalCorregirId(cid){
   $("#fixOk").onclick = async () => {
     const nuevo = caja.value.trim();
     const msg = $("#fixMsg");
-    if (!nuevo) return msg.innerHTML = `<div class="err">Escribe el Customer ID correcto.</div>`;
-    if (nuevo === String(c.customer_id))
+    if (!nuevo) return msg.innerHTML = `<div class="err">Escribe el ${esc(ROT)} correcto.</div>`;
+    if (nuevo === String(actual))
       return msg.innerHTML = `<div class="err">Ese es el mismo que ya tiene.</div>`;
-    if (!/^[A-Za-z0-9._-]{3,30}$/.test(nuevo))
+    if (nuevoCli && !esRucValido(nuevo))
+      return msg.innerHTML = `<div class="err">El RUC debe tener 11 dígitos.</div>`;
+    if (!nuevoCli && !/^[A-Za-z0-9._-]{3,30}$/.test(nuevo))
       return msg.innerHTML = `<div class="err">Entre 3 y 30 caracteres, sin espacios ni símbolos raros.</div>`;
-    if (byId[nuevo])
-      return msg.innerHTML = `<div class="err">El ${esc(nuevo)} ya lo tiene <b>${esc(titulo(nombreCliente(byId[nuevo])))}</b>.</div>`;
+    /* La llave dentro de la tabla es el customer_id en los dos casos; para un
+       RUC es su forma «NUEVO-…», la misma convención con la que se creó. */
+    const destino = nuevoCli ? "NUEVO-" + nuevo : nuevo;
+    if (nuevoCli && CLIENTES.some(o => o.ruc === nuevo && o.customer_id !== c.customer_id))
+      return msg.innerHTML = `<div class="err">El RUC ${esc(nuevo)} ya está registrado en la campaña.</div>`;
+    if (byId[destino])
+      return msg.innerHTML = `<div class="err">El ${esc(nuevo)} ya lo tiene <b>${esc(titulo(nombreCliente(byId[destino])))}</b>.</div>`;
 
     const b = $("#fixOk"); b.disabled = true; b.textContent = "Corrigiendo…";
     try {
-      const { error } = await sb.rpc("corregir_customer_id",
-        { p_actual: String(c.customer_id), p_nuevo: nuevo });
+      /* Para un RUC hay dos cosas que mover —la llave y la columna `ruc`— y
+         tienen que ir juntas o el comercio queda diciendo dos números
+         distintos. Por eso su propia función, que envuelve a la de siempre. */
+      const { error } = nuevoCli
+        ? await sb.rpc("corregir_ruc", { p_actual: String(c.customer_id), p_nuevo_ruc: nuevo })
+        : await sb.rpc("corregir_customer_id", { p_actual: String(c.customer_id), p_nuevo: destino });
       if (error) throw new Error(error.message);
       await recargarCartera(); await cargarAuditoria();
-      cerrarModal(); toast("Customer ID corregido");
-      S.cid = nuevo; render();
+      cerrarModal(); toast(`${ROT} corregido`);
+      S.cid = destino; render();
     } catch (e) {
       b.disabled = false; b.textContent = "Corregir";
       msg.innerHTML = `<div class="err">${esc(String(e.message).replace(/^.*?:\s*/, ""))}</div>`;
@@ -4181,11 +4215,27 @@ async function anularUbicacion(id){
   toast("Ubicación anulada");
 }
 
+/* Quién puede corregir una gestión, y hasta cuándo.
+
+   Hasta ahora el ejecutivo tenía un día desde que la registró, y pasado ese
+   plazo dependía de que la supervisión le abriera la ventana. En la práctica
+   el error se descubre después —al revisar la cartera, al preparar el cierre—
+   y el ejecutivo quedaba mirando su propio dato equivocado sin poder tocarlo.
+
+   El límite pasa a ser el que de verdad importa: **el sello del periodo**. Una
+   gestión se puede corregir mientras su periodo no esté liquidado; una vez
+   sellado, nadie la reescribe, porque sobre esos números ya se pagó. Es una
+   regla sola, se explica en una frase y no depende de que alguien de oficina
+   esté disponible.
+
+   Lo que NO cambia: la ubicación sigue sin reescribirse nunca —solo se anula—,
+   y una gestión no puede volverse presencial después del hecho. Esas dos son
+   las que sostienen la visita ante BBVA. */
 function corregible(f){
   if (!f || !S.user) return false;
+  if (periodoSellado(periodoDe(f.Fecha_Contacto))) return mandoTotal();
   if (S.user.rol !== "Ejecutivo") return true;
-  if (f.Correo_Stratis && f.Correo_Stratis !== S.user.correo) return false;
-  return edicionLibre() || diasDesdeRegistro(f) <= DIAS_CORRECCION;
+  return !f.Correo_Stratis || f.Correo_Stratis === S.user.correo;
 }
 
 function diasDesdeRegistro(f){
@@ -4199,13 +4249,13 @@ function plazoCorreccion(f){
   const c = String(f.Creado_En || "").slice(0,10);
   if (!c) return "";
   const n = diasDesdeRegistro(f);
+  const per = periodoDe(f.Fecha_Contacto);
+  if (periodoSellado(per))
+    return `El periodo ${nombrePeriodo(per)} está sellado: esta gestión ya no se corrige${
+      S.user && S.user.rol !== "Ejecutivo" ? ", salvo desde supervisión" : ""}.`;
   if (S.user && S.user.rol !== "Ejecutivo")
     return `Se registró el ${fmtFecha(c)}; como supervisor no tienes plazo.`;
-  if (edicionLibre())
-    return `Ventana de corrección abierta: puedes arreglar cualquier gestión tuya ${textoVentana().toLowerCase()}.`;
-  if (n === 0) return "Se registró hoy: tienes hasta la medianoche de mañana.";
-  if (n === 1) return "Se registró ayer: tienes hasta esta medianoche.";
-  return `Se registró el ${fmtFecha(c)}.`;
+  return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : " (hoy)"}. Puedes corregirla hasta que se selle el periodo ${nombrePeriodo(per)}.`;
 }
 
 /* Avisos que dependen de lo que acaba de elegir, sin bloquear todavía */
@@ -4515,7 +4565,7 @@ function bindForm(c){
 function pintarCierre(c){
   const f = S.form, box = $("#boxCierre");
   if (!box) return;
-  if (!c || esClienteNuevo(c)){ box.innerHTML = ""; return; }   // la venta nueva ya es venta
+  if (!c){ box.innerHTML = ""; return; }
 
   const actual = c.resultado_gestion || "PENDIENTE";
   if (f.Cierre === null || f.Cierre === undefined) f.Cierre = actual;
@@ -4526,8 +4576,10 @@ function pintarCierre(c){
   const posibles = RESULTADOS_GESTION.filter(g => {
     if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
     if (!logrado) return false;
-    if (g.id === "RETENIDO") return c.estado === "ACTIVO";
-    if (g.id === "VENTA")    return c.estado === "DE BAJA";
+    /* Un RUC que trajo Stratis nunca se «retiene», y su venta no depende del
+       estado que traía en la base de BBVA porque nunca estuvo en ella. */
+    if (g.id === "RETENIDO") return !esClienteNuevo(c) && c.estado === "ACTIVO";
+    if (g.id === "VENTA")    return esClienteNuevo(c) || c.estado === "DE BAJA";
     return true;
   });
   if (!posibles.some(g => g.id === f.Cierre)) f.Cierre = "PENDIENTE";
@@ -4820,7 +4872,7 @@ async function guardar(c){
 
       // El cierre va después de la gestión, nunca antes: la base exige que ya
       // exista el contacto logrado que lo respalda.
-      if (f.Cierre && !esClienteNuevo(c) && f.Cierre !== (c.resultado_gestion || "PENDIENTE")){
+      if (f.Cierre && f.Cierre !== (c.resultado_gestion || "PENDIENTE")){
         const { error: eCierre } = await sb.from("clientes")
           .update({ resultado_gestion: f.Cierre,
                     motivo_no_retencion: f.Cierre === "PERDIDO" ? (f.Motivo || null) : null })
@@ -4836,7 +4888,7 @@ async function guardar(c){
     return;
   }
 
-  const cerro = f.Cierre && !esClienteNuevo(c) && f.Cierre !== "PENDIENTE" && f.Cierre !== (c.resultado_gestion || "PENDIENTE");
+  const cerro = f.Cierre && f.Cierre !== "PENDIENTE" && f.Cierre !== (c.resultado_gestion || "PENDIENTE");
   toast(cerro
     ? `Gestión cerrada como ${(RESULTADOS_GESTION.find(g=>g.id===f.Cierre)||{}).label}`
     : (S.editId ? "Registro actualizado" : "Contacto registrado en el histórico"));
@@ -6297,6 +6349,14 @@ const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas"
    dentro del bloque del banco, y no en una sección que quedaría vacía en la
    mayoría de las filas. */
 const COLS_DETALLE = [
+  /* --- De qué base sale esta fila --------------------------------------
+     La primera columna del bloque de Stratis, y la que separa las tres
+     poblaciones que conviven en la hoja. Se deduce, no se teclea: un
+     identificador de 11 dígitos es un RUC y por lo tanto una venta que trae
+     Stratis; que esté cerrada o todavía en trabajo lo dice su cierre. Nadie
+     puede marcarla mal, y no se puede desincronizar del resultado. */
+  "Tipo_Registro","Origen_Marcado",
+
   /* --- Quién es el comercio y en qué punto está ------------------------- */
   "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
 
@@ -6334,8 +6394,54 @@ const estadoContacto = (intentos, respuestas) =>
   : intentos > 0 ? "Intentado sin respuesta"
   : "Sin intentar";
 
+/* Los tres grupos que conviven en la Base, en una sola columna.
+
+   Antes vivían en dos hojas y cruzarlos pedía copiar y pegar a mano. Ahora es
+   una hoja y un filtro: «Cartera BBVA» es lo que entregó el banco, «Lead» un
+   RUC que se está trabajando, «Venta nueva» un RUC que ya cerró. */
+function tipoRegistro(c){
+  if (!esClienteNuevo(c)) return "Cartera BBVA";
+  return c.resultado_gestion === "VENTA" ? "Venta nueva" : "Lead";
+}
+
+/* Lo que el ejecutivo eligió al dar de alta el comercio, tal cual quedó
+   guardado. Va al lado de Tipo_Registro y no en su lugar, porque son dos
+   hechos distintos: uno es lo que el registro ES —lo dice el identificador,
+   y de ahí no se discute— y el otro es lo que alguien DIJO que era.
+
+   Cuando no coinciden, hay un comercio mal clasificado: un RUC dado de alta
+   por el camino de la cartera viajaba dentro del archivo del banco como si
+   estuviera afiliado. Esa diferencia sale además en Alertas, para que se pueda
+   filtrar sin cruzar dos columnas a mano.
+
+   De aquí en adelante el formulario deduce el origen del propio número y las
+   dos columnas van a coincidir siempre; esta queda para poder leer lo que se
+   registró antes. */
+const origenMarcado = c =>
+  c && c.tipo_registro === "NUEVO" ? "Cliente nuevo" : "Cartera de BBVA";
+
+/* ¿Lo que se marcó contradice al identificador? */
+const origenNoCuadra = c =>
+  !!c && esRucValido(c.customer_id) && c.tipo_registro !== "NUEVO";
+
+/* `soloEntrega` es el pegado a la plataforma del banco, y ahí van únicamente
+   los comercios que BBVA ya tiene: un RUC no le pega a nada en su base. El
+   detalle completo, en cambio, las lleva a todas — para eso está la columna
+   Tipo_Registro. */
 function filasBBVA(soloEntrega){
-  return cartera().filter(c => !esClienteNuevo(c)).map(c => {
+  const cs = soloEntrega ? cartera().filter(c => !esClienteNuevo(c)) : cartera();
+  return cs.map(c => filaComercio(c, soloEntrega));
+}
+
+/* La fila de un comercio, sea de la cartera de BBVA o un RUC que trajo Stratis.
+
+   Antes había dos armadores distintos: este y uno propio para los clientes
+   nuevos, con trece columnas de su invención. La consecuencia era que las dos
+   hojas no se podían cruzar —ni una dinámica ni un apilado— porque no
+   compartían ni un nombre de columna. Ahora el ciclo es el mismo, así que la
+   fila también: cambia la llave, no el esquema. */
+function filaComercio(c, soloEntrega){
+    const esNuevo = esClienteNuevo(c);   // por tipo_registro o por llevar un RUC de llave
     const regs = DB.delCliente(c.customer_id);              // del más reciente al más antiguo
     const efectivos = regs.filter(r => esEfectivo(r.Resultado));
     const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
@@ -6351,7 +6457,9 @@ function filasBBVA(soloEntrega){
 
     /* Lo que se entrega al banco */
     const entrega = [
-      c.customer_id,
+      /* La llave: el Customer ID de BBVA, o el RUC cuando el comercio todavía
+         no está afiliado y por eso no tiene uno. */
+      esNuevo ? rucDe(c) : c.customer_id,
       gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
       ultimo("Comentario_Cliente"),
       nPresencial,
@@ -6380,11 +6488,13 @@ function filasBBVA(soloEntrega){
        que es lo peor—. Ahora el orden lo manda COLS_DETALLE y los valores se
        buscan por su nombre. Reordenar es mover una línea. */
     const det = {
+      Tipo_Registro:   tipoRegistro(c),
+      Origen_Marcado:  origenMarcado(c),
       Nombre_Comercio: titulo(c.nombre_comercio || ""),
       Rubro:           rubroLabel(c),
       Distrito:        titulo(c.distrito || ""),
       Fecha_Alta:      String(c.creado_en || "").slice(0,10),
-      Contacto_BBVA:   nomContactoBBVA(c.contacto_bbva) || "Sin indicar",
+      Contacto_BBVA:   esNuevo ? "" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
 
       Estado_Contacto:      estadoContacto(regs.length, efectivos.length),
       Respuestas_del_Cliente: efectivos.length,
@@ -6409,7 +6519,6 @@ function filasBBVA(soloEntrega){
     };
     Object.assign(det, coordBBVA(c));
     return entrega.concat(COLS_DETALLE.map(k => det[k] === undefined ? "" : det[k]));
-  });
 }
 
 /* Lo que hay que revisar en esta fila, en una sola celda. Filtrando esta columna
@@ -6426,49 +6535,25 @@ function alertasDe(c, regs, efectivos, suma){
   if (efectivos.length && !regs.some(r => String(r.Calificacion || "").trim())) a.push("Respondió sin calificar");
   if (/^\d+$/.test(String(c.nombre_comercio || "").trim())) a.push("El nombre parece un RUC");
   if (!esClienteNuevo(c) && !c.contacto_bbva) a.push("Sin indicar el contacto con BBVA");
+  if (origenNoCuadra(c)) a.push("Se marcó como cartera pero el identificador es un RUC");
   return a.join(" · ");
 }
 
-const COLS_NUEVOS = ["RUC","Razón social","Rubro","Gestión","Fecha de la venta","Medio del cierre",
-  "Visitas","Llamadas","Contactado (Si/No)","Cumple_Visita",
-  "Comentario de Cliente","Comentario del Ejecutivo","Ejecutivo_Stratis"];
+/* La hoja de clientes nuevos usa EL MISMO esquema que la de la cartera, con
+   una sola diferencia: la primera columna es el RUC y no el Customer ID,
+   porque un comercio que todavía no está afiliado no tiene uno.
 
-/* Los clientes nuevos no tienen Customer ID, así que no se pueden pegar en el
-   archivo de la cartera: BBVA primero tiene que afiliarlos. Van en su propia
-   hoja, con lo que el banco necesita para darlos de alta. */
+   Mismo orden, mismos nombres, misma cantidad. Una dinámica armada sobre una
+   hoja funciona sobre la otra, y las dos se pueden apilar renombrando ese
+   único encabezado. La razón social viaja en «Nombre_Comercio», que es donde
+   el alta la guarda. */
+/* La hoja de ventas nuevas se retiró: sus filas viven en la Base, marcadas en
+   Tipo_Registro. Una sola hoja, una sola dinámica, y ningún comercio que se
+   quede fuera por estar en la pestaña equivocada. Lo que sigue existiendo es
+   el CSV filtrado, para quien solo quiera ese subconjunto. */
+const COLS_NUEVOS = COLS_BASE_BBVA;
 function filasNuevos(){
-  return cartera().filter(esClienteNuevo).map(c => {
-    const regs = DB.delCliente(c.customer_id);
-    const efectivos = regs.filter(r => esEfectivo(r.Resultado));
-    const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
-    const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
-    // Los comentarios salen de la gestión que cerró la venta.
-    const comCliente = ultimo("Comentario_Cliente");
-    const comEjec    = ultimo("Comentario_Ejecutivo");
-    return [
-      c.ruc || "", c.razon_social || "", rubroLabel(c),
-      "SI",                                     // la derivación ya cuenta como venta
-      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto)
-        : (regs[0] ? fmtFecha(regs[0].Fecha_Contacto)
-                   : fmtFecha(String(c.creado_en || "").slice(0,10))),
-      // Con qué se cerró: explica por qué una venta puede tener 0 visitas
-      // presenciales y aun así cumplir — fue por reunión virtual.
-      cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto)
-                       : (regs[0] ? nomTipo(regs[0].Tipo_Contacto) : ""),
-      regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length,
-      regs.filter(r => r.Tipo_Contacto === "llamada").length,
-      efectivos.length ? "SI" : "NO",
-      cumplidas.length ? "SI" : "NO",
-      comCliente, comEjec,
-      c.asignado || ""
-    ];
-  });
-}
-
-function hojaNuevos(){
-  const ws = hoja(COLS_NUEVOS, filasNuevos());
-  ws["!cols"] = COLS_NUEVOS.map(c => ({ wch: /Comentario|Razón/.test(c) ? 40 : Math.min(26, Math.max(12, c.length + 3)) }));
-  return ws;
+  return cartera().filter(esClienteNuevo).map(c => filaComercio(c, false));
 }
 
 /* Convierte una columna en fórmula viva. Un porcentaje escrito como número se
@@ -6529,7 +6614,6 @@ async function exportarBBVA(btn){
   /* Dos hojas, nada más. La hoja Base trae primero lo que se entrega al banco
      y a continuación el resto de la gestión, para que sea un solo pegado. */
   XLSX.utils.book_append_sheet(wb, hojaBBVA(),   "Base");
-  XLSX.utils.book_append_sheet(wb, hojaNuevos(), "Clientes nuevos");
   XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   const nCartera = cartera().filter(c => !esClienteNuevo(c)).length;
@@ -6606,7 +6690,6 @@ async function exportarExcel(btn){
        excepción se escapaba sin que nadie la atrapara y el botón se quedaba
        en «Generando…» para siempre. Doce hojas perdidas por una palabra. */
     XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base para BBVA");
-    XLSX.utils.book_append_sheet(wb, hojaNuevos(),        "Clientes nuevos");
     XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
     XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
     XLSX.utils.book_append_sheet(wb, hojaBitacora(),      "Bitácora");
@@ -6631,7 +6714,7 @@ function exportarCSV(que){
                  visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
                  coord:[COLS_COORD, filasCoordinaciones(), "Coordinacion_BBVA"],
                  bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
-                 nuevos:[COLS_NUEVOS, filasNuevos(), "Clientes_nuevos"] };
+                 nuevos:[COLS_NUEVOS, filasNuevos(), "Ventas_nuevas"] };
   const [cols, filas, nombre] = mapa[que];
   const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
   const csv = "\ufeff" + [cols.map(q).join(";")].concat(filas.map(f => f.map(q).join(";"))).join("\r\n");
@@ -6718,9 +6801,9 @@ function viewAyuda(){
   <div class="card">
     ${ajFilaDescarga(
       "Base para BBVA",
-      "Dos hojas: Base —lo que se entrega y el detalle de la gestión— y Clientes nuevos.",
+      "Una sola hoja: la Base, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro.",
       "expBBVA", "Descargar para BBVA",
-      [["bbva","Base para BBVA en CSV"],["nuevos","Clientes nuevos en CSV"]])}
+      [["bbva","Base para BBVA en CSV"],["nuevos","Ventas nuevas en CSV"]])}
 
     ${ajFilaDescarga(
       "La campaña completa",
@@ -6767,12 +6850,12 @@ function viewAyuda(){
         intentos hicieron falta, qué medio obtiene más respuesta o cuántos chats quedaron sin su
         correo de respaldo. No se pega en el banco: cuántas veces le insistimos a su ejecutivo es
         cómo trabaja Stratis por dentro, no parte de lo que se entrega.</p>
-        <p><b>Clientes nuevos</b> son las ventas que trae Stratis. Como el banco todavía no las
+        <p><b>Las ventas nuevas</b> son los comercios que trae Stratis, identificados por RUC. Como el banco todavía no las
         tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
         la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
         CRM no deja registrar una sin la otra.</p>
         <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Cartera asignada,
-        Tasa de respuesta, Base para BBVA, Clientes nuevos, Rubros, Usuarios, Bitácora
+        Tasa de respuesta, Base para BBVA, Rubros, Usuarios, Bitácora
         y Reporte. La hoja <b>Visitas</b> es la que trae una fila por gestión: es la fuente para
         cualquier tabla dinámica por medio, por fecha o por resultado.</p>
       </div>
@@ -7658,9 +7741,17 @@ function llaveDe(correo, p){
     const logrados = new Set();
     gest.filter(r => esEfectivo(r.Resultado))
         .forEach(r => logrados.add(String(r.Customer_id)));
+    /* Solo las coordinaciones DECLARADAS. Las inferidas son las que el CRM
+       dedujo del histórico al migrar: sirven para leer el estado de un
+       comercio, pero no son constancia de que alguien escribió el correo, y
+       la cobertura de régimen se paga precisamente contra esa constancia.
+       Contarlas convertiría el trabajo de la migración en cobertura
+       regalada —hoy hay 800 inferidas contra 14 declaradas—, y eso es
+       exactamente lo que un reclamo bien puesto encontraría primero. */
     DB.bbva()
       .filter(r => r.Correo_Stratis === correo
                 && r.Tipo_Contacto === "bbva_correo"
+                && r.Inferida !== true
                 && enVentana(r.Fecha_Contacto, p))
       .forEach(r => logrados.add(String(r.Customer_id)));
     cubiertos = mios.filter(c => logrados.has(String(c.customer_id))).length;
