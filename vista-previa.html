@@ -217,10 +217,15 @@ details.aj-mas[open] > summary:before{transform:rotate(90deg)}
 details.aj-mas > summary:hover{text-decoration:underline}
 details.aj-mas .cuerpo{font-size:12.8px;color:var(--ink-2);line-height:1.58;padding:9px 0 2px;max-width:840px}
 details.aj-mas .cuerpo p{margin:0 0 9px}
+/* El editor de parámetros vive dentro de un desplegable, pero no es letra
+   chica: son campos que se llenan. Recupera el ancho y el tamaño normales. */
+details.aj-mas .cuerpo.aj-editor{max-width:none;font-size:inherit;color:inherit;line-height:inherit}
 details.aj-mas .cuerpo p:last-child{margin-bottom:0}
 
 /* Reglas: rejilla real, no columnas que dejan huérfanas */
 .aj-reglas{display:grid;grid-template-columns:1fr;gap:0}
+/* Las que nunca se parten en dos, porque ya están dentro de una columna. */
+.aj-reglas.aj-reglas-1{grid-template-columns:1fr !important}
 .aj-reglas .kv{padding:9px 0}
 .aj-pie{font-size:12px;color:var(--muted);text-align:center;padding:14px 4px 4px;line-height:1.6}
 .aj-pie b{color:var(--ink-2);font-weight:650}
@@ -1006,21 +1011,26 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
   .kv-cols{column-count:2;column-gap:26px}
   .kv-cols .kv{break-inside:avoid}
 
-  /* Ajustes: rejilla explícita. Dos tarjetas por fila, misma altura de fila,
-     sin los huecos que dejaba el masonry. La pantalla no se estira de borde a
-     borde —un panel de configuración a 1600px de ancho no se lee mejor, se lee
-     peor: los botones quedan del largo de la mesa y el ojo pierde la columna. */
-  /* Ajustes en dos columnas. Antes era una tira vertical de nueve apartados y
-     llegar al último pedía bajar toda la pantalla, aunque el que se buscaba
-     estuviera a la derecha y a la misma altura. `align-items:start` para que
-     cada apartado mida lo suyo y no se estire al alto del vecino. */
+  /* Ajustes en dos columnas. La pantalla no se estira de borde a borde: un
+     panel de configuración a 1600px no se lee mejor, se lee peor —los botones
+     quedan del largo de la mesa y el ojo pierde la columna—.
+
+     Las columnas son DOS PILAS, no las casillas de una rejilla. Cuando cada
+     apartado era una celda suelta, la altura de cada fila la fijaba su
+     elemento más alto: «Parámetros del incentivo» mide una pantalla entera, y
+     lo que caía debajo en la otra columna —las Descargas, que se usan todos
+     los días— arrancaba recién donde ese bloque terminaba. Había que bajar
+     media pantalla para llegar a un botón de uso diario, y el hueco al costado
+     no lo explicaba nada.
+
+     Con `.aj-col` cada columna fluye sola y ningún apartado espera al vecino.
+     Lo que lleva tabla ancha —la bitácora y las reglas— sigue cruzando las dos
+     columnas, abajo. */
   .view-ajustes{max-width:1320px;margin:0 auto;
     display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
     gap:0 26px;align-items:start}
   .view-ajustes > *{min-width:0}
-  /* Lo que se usa a diario, a la izquierda; lo que se configura una vez, a la
-     derecha. Los dos apartados anchos —la bitácora y las reglas— cruzan las
-     dos columnas porque llevan tabla. */
+  .aj-col{display:flex;flex-direction:column;min-width:0}
   .view-ajustes > .aj-ancho{grid-column:1 / -1}
   .aj-grid{grid-template-columns:repeat(2,1fr);gap:13px;align-items:stretch}
   .aj-grid.una{grid-template-columns:1fr}
@@ -8990,7 +9000,10 @@ function viewAyuda(){
 
   const comoFunciona = `
   <div class="card">
-    <div class="aj-reglas">
+    <!-- Con id propio: desde que los parámetros traen su propio resumen en
+         formato de reglas, «la primera .aj-reglas de la página» ya no es esta,
+         y buscarla así daba con la lista equivocada. -->
+    <div class="aj-reglas" id="reglasCRM">
       ${reglas.map(([k,v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join("")}
     </div>
     <details class="aj-mas">
@@ -9005,20 +9018,72 @@ function viewAyuda(){
     </details>
   </div>`;
 
-  /* ---- La página -------------------------------------------------------- */
+  /* ---- La página ---------------------------------------------------------
+
+     Dos columnas de verdad, no una grilla que va llenando casillas.
+
+     La diferencia importa y es la que hacía falta arreglar. Con una grilla de
+     dos columnas cada FILA mide lo que mide su elemento más alto: como
+     «Parámetros del incentivo» ocupa una pantalla entera, lo que le tocaba
+     debajo en la otra columna —las Descargas— empezaba recién donde terminaba
+     ese bloque, y había que bajar toda la pantalla para llegar a un botón que
+     se usa todos los días. El hueco no era un problema de orden sino de
+     alineación entre columnas.
+
+     Ahora cada columna es una pila independiente. Nada de una columna espera a
+     nada de la otra, así que un apartado largo ya no empuja al vecino.
+
+     El orden se decidió por frecuencia de uso, no por importancia:
+
+       Izquierda — lo de todos los días:
+         Descargas · Facturación del periodo · Próximas acciones
+       Derecha — lo que se mira o se ajusta de tanto en tanto:
+         Tu cuenta · Reporte de avance · Parámetros del incentivo
+       Cruzando las dos, abajo — todo lo que lleva tabla:
+         Cartera asignada · Equipo · Bitácora · Cómo funciona
+
+     Las Descargas arriba del todo, a la izquierda: es lo que más se abre y era
+     lo que estaba más abajo.
+
+     Lo que lleva tabla va a ancho completo y no dentro de una columna. En 648
+     px una tabla de seis columnas se corta y hay que arrastrarla de lado para
+     leer la última: la cartera asignada perdía el «% de alcance» y el equipo,
+     el botón de contraseña. Una tabla que no se puede leer entera no está
+     ordenada por estar arriba.
+
+     «Parámetros del incentivo» va último en su columna a propósito: es el
+     apartado más alto y el que menos se toca. Además ahora se despliega solo
+     cuando se va a editar —lo que rige se lee en cinco líneas sin abrir nada—,
+     con lo que pasó de 1806 px a 447.
+
+     El reparto entre las dos columnas está pesado: las dos pilas miden casi lo
+     mismo, así que ninguna deja un vacío largo al costado de la otra.
+
+     Abajo, cruzando las dos columnas, lo que lleva tabla ancha: la bitácora y
+     las reglas. */
+  const izq = [
+    admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : "",
+    admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : "",
+    admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""
+  ].filter(Boolean);
+
+  const der = [
+    ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta),
+    admin ? ajSeccion("Reporte de avance", "El relato de la presentación — los hitos, las lecturas y las metas de los tres objetivos", cardReporte()) : "",
+    admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""
+  ].filter(Boolean);
+
+  /* El ejecutivo solo ve «Tu cuenta»: dos columnas con una vacía dejaría un
+     hueco raro al costado. Con una sola pila queda como corresponde. */
+  const dosColumnas = izq.length > 0 && der.length > 0;
+  const columnas = dosColumnas
+    ? `<div class="aj-col">${izq.join("")}</div><div class="aj-col">${der.join("")}</div>`
+    : `<div class="aj-col aj-ancho">${izq.concat(der).join("")}</div>`;
+
   return `
-  <!-- Dos columnas y un orden con criterio: a la izquierda lo que se toca a
-       diario —la cuenta, las descargas, la cartera asignada, la facturación—;
-       a la derecha lo que se configura una vez y se revisa de tanto en tanto.
-       Los dos apartados con tabla cruzan las dos columnas al final. -->
-  ${ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta)}
-  ${admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""}
-  ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
-  ${admin ? ajSeccion("Reporte de avance", "El relato de la presentación — los hitos, las lecturas y las metas de los tres objetivos", cardReporte()) : ""}
-  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
-  ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
-  ${admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : ""}
-  ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
+  ${columnas}
+  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas(), "aj-ancho") : ""}
+  ${admin ? ajSeccion("Equipo", `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo(), "aj-ancho") : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora, "aj-ancho") : ""}
   ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona, "aj-ancho")}
   <div class="aj-pie aj-ancho"><b>Stratis CRM</b> · campaña BBVA Adquirencia<br>
@@ -11318,8 +11383,41 @@ function cardParametrosBono(){
   const usada = periodosProyecto().filter(x => (versionDe(x) || {}).vigente_desde === pv);
   const selladas = usada.filter(periodoSellado);
 
+  /* Lo que rige, en cinco líneas. Antes había que leer diecinueve casillas de
+     texto para saber qué exige el modelo este mes, y las casillas son para
+     editar, no para enterarse. El resumen se arma de los mismos parámetros que
+     el editor guarda, así que no puede quedar desfasado. */
+  const rvP = reglaVisitas(val.requisitos, pv);
+  const esc2 = escalaDe(val);
+  const bol  = val.bolsa || BONO_DEF.bolsa;
+  const M    = metaPeriodo(pv, val);
+  const resumen = `
+    <!-- Una sola columna a propósito: esto ya vive dentro de una columna de
+         Ajustes, y partirlo otra vez deja renglones de cuatro palabras. -->
+    <div class="aj-reglas aj-reglas-1">
+      <div class="kv"><dt>Metas del proyecto</dt><dd>+${val.metas.reactivacion_pp} p.p. de reactivación ·
+        +${val.metas.facturacion_pct}% de facturación · ${val.metas.ventas_mes} ventas por ejecutivo al mes</dd></div>
+      <div class="kv"><dt>La meta de este periodo</dt><dd>${M.i >= 1 ? `mes ${M.i} de ${M.total}: ` : ""}+${
+        M.reactivacion_pp} p.p. acumulados${M.facturacion_pct ? ` · +${M.facturacion_pct}% de facturación`
+        : " · la facturación todavía no se mide"} · ${M.ventas_mes} ventas</dd></div>
+      <div class="kv"><dt>La llave</dt><dd>cobertura ${val.requisitos.cobertura_pct}% ·
+        ${esc(rvP.corto)} de visitas efectivas · puntualidad ${val.requisitos.puntualidad_pct}%</dd></div>
+      <div class="kv"><dt>Cuánto se paga</dt><dd>con 2 de 3 requisitos, ${val.base_incumple_uno}% fijo.
+        Con los 3, gradual desde ${esc2[0][0]}% de cumplimiento (${esc2[0][1]}% del sueldo) hasta
+        ${esc2[esc2.length-1][0]}% (${esc2[esc2.length-1][1]}%, el tope)</dd></div>
+      <div class="kv"><dt>Cuándo se paga</dt><dd>${val.pago_mensual}% con la remuneración del mes y
+        ${100 - val.pago_mensual}% a la bolsa retenida, que se duplica (×${bol.factor}) solo con la
+        llave abierta en ${bol.periodos_con_llave} de ${periodosProyecto().length} periodos</dd></div>
+    </div>`;
+
   return `
   <div class="card">
+    ${resumen}
+
+    <details class="aj-mas" style="margin-top:13px">
+      <summary>Editar esta versión de los parámetros</summary>
+      <div class="cuerpo aj-editor">
+
     <div class="pie" style="margin:0 0 13px">
       <b>Los parámetros tienen fecha de vigencia.</b> Cada periodo se calcula con la versión que
       regía entonces, así que cambiar una meta hoy <b>no reescribe lo ya liquidado</b>. Para la
@@ -11380,6 +11478,9 @@ function cardParametrosBono(){
       <button class="btn" id="bonoGuardar" style="flex:1;min-width:180px">Guardar esta versión</button>
       <button class="btn ghost" id="bonoReset">Volver a los del documento</button>
     </div>
+
+      </div>
+    </details>
   </div>`;
 }
 
