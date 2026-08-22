@@ -2065,7 +2065,24 @@ const BONO_DEF = {
      cumplimiento en los dos tramos, así que la recta única pasa por el mismo
      25% al 100%. Migrar a tabla no movió a nadie de su número; lo que gana es
      que mañana la curva puede dejar de ser recta sin tocar el código. */
-  escala: [[80, 15], [110, 30]]
+  escala: [[80, 15], [110, 30]],
+  /* ---- La bolsa retenida ------------------------------------------------
+     Cada periodo se paga el 80% del incentivo y se retiene el 20%. Esas
+     retenciones NO se liquidan una por una: forman una sola bolsa que se
+     evalúa una vez, al cierre del proyecto, y se duplica si se cumplió la
+     condición.
+
+     `periodos_con_llave` es cuántos de los cinco periodos tienen que haber
+     tenido la llave abierta —los tres requisitos de gestión— para que la
+     bolsa se duplique. Quedó en 5, o sea todos, por decisión del 22/08/2026.
+
+     Vale decir en voz alta lo que eso significa, porque el CRM lo va a
+     mostrar y conviene que no sorprenda: el periodo 1 cerró en 2 de 3 para
+     los cuatro ejecutivos, así que con la condición en 5 la duplicación ya
+     no es alcanzable para nadie. No es un error de cálculo ni un dato que
+     falte: es la regla acordada aplicada a lo que pasó. Se cambia acá y en
+     Ajustes, por versión, sin tocar el código. */
+  bolsa: { factor:2, periodos_con_llave:5 }
 };
 /* Los parámetros no son uno solo: son una lista de versiones, cada una
    vigente desde un periodo del bono. Un periodo se calcula con la versión que
@@ -10494,6 +10511,56 @@ function incentivoDe(correo, p){
   return incentivoVivo(correo, p);
 }
 
+/* =========================================================================
+   La bolsa retenida
+
+   El 20% que no se paga cada mes no es un descuento: es lo que financia el
+   premio del cierre. Las cinco retenciones se acumulan en una sola bolsa y se
+   evalúan UNA VEZ, en diciembre, contra la condición del acuerdo. Liquidarla
+   mes a mes la convertiría en el descuento que justamente no se quiso.
+
+   Dos cosas que esta función se cuida de no confundir:
+
+     · Un periodo que todavía no terminó NO cuenta como periodo sin llave.
+       Contar el futuro como incumplido daría un veredicto falso en octubre.
+     · El veredicto es definitivo solo cuando ya no se puede recuperar. Si
+       quedan periodos por correr y los corridos van bien, se dice «en
+       carrera»; si un periodo corrido ya se perdió y la condición pide
+       todos, se dice que no alcanza, y se dice cuál fue.
+   ========================================================================= */
+function bolsaRetenida(correo){
+  const B    = paramsDe(periodoHoy());
+  const cfg  = B.bolsa || BONO_DEF.bolsa;
+  const pide = Number(cfg.periodos_con_llave) || 0;
+  const fac  = Number(cfg.factor) || 1;
+  const hoy  = hoyISO();
+
+  const detalle = periodosProyecto().map(p => {
+    const v = ventanaPeriodo(p);
+    const corrido = v.fin <= hoy;
+    if (!corrido) return { periodo:p, corrido:false, retenido:0, llave:null };
+    const x = incentivoDe(correo, p);
+    return { periodo:p, corrido:true, retenido:x.retenido || 0,
+             llave: x.llave.estado === "activo", sellado:!!x.sellado };
+  });
+
+  const corridos  = detalle.filter(d => d.corrido);
+  const conLlave  = corridos.filter(d => d.llave).length;
+  const perdidos  = corridos.filter(d => !d.llave).map(d => d.periodo);
+  const faltan    = detalle.length - corridos.length;
+  const acumulada = corridos.reduce((n,d) => n + d.retenido, 0);
+
+  /* El máximo que todavía se puede alcanzar: lo que ya tiene con llave más
+     todo lo que queda por correr. Si ni así llega, la condición está perdida. */
+  const techo = conLlave + faltan;
+  const estado = conLlave >= pide ? "cumple"
+               : techo   <  pide  ? "perdida"
+               : "en_carrera";
+
+  return { detalle, corridos:corridos.length, faltan, conLlave, perdidos, pide, factor:fac,
+           acumulada, alCierre: estado === "cumple" ? acumulada * fac : acumulada, estado };
+}
+
 /* La foto que se sella: los números de cada ejecutivo y los parámetros con
    los que se calcularon. Se guarda todo junto para que dentro de tres meses
    se pueda releer sin depender de nada más. */
@@ -10787,6 +10854,79 @@ async function anularCierre(){
   };
 }
 
+/* ---- La bolsa en pantalla ------------------------------------------------
+   Va en Incentivos y no en el Panel porque no es una cifra del mes: es la
+   única que mira los cinco periodos a la vez. Se muestra aunque el veredicto
+   sea malo —sobre todo si es malo—: una condición de pago que ya no se puede
+   cumplir tiene que verse, no descubrirse en diciembre. */
+function bloqueBolsa(){
+  const ejec = ejecutivosDelBono();
+  if (!ejec.length) return "";
+  const B    = paramsDe(periodoHoy());
+  const cfg  = B.bolsa || BONO_DEF.bolsa;
+  const filas = ejec.map(u => ({ u, b:bolsaRetenida(u.correo) }));
+  const ref   = filas[0].b;
+  const nadie = filas.every(x => x.b.estado === "perdida");
+  const alguno= filas.some(x => x.b.estado === "perdida");
+
+  /* Los mismos tres colores que la llave en el Panel, para que «no alcanza»
+     se lea igual acá y allá. `chip` ya existe y es el que usa la tabla de la
+     llave; no se inventa un badge nuevo. */
+  const sem = { cumple:["ok","Duplica"], en_carrera:["warn","En carrera"], perdida:["crit","No alcanza"] };
+
+  return `
+  <div class="card ctrl" style="margin-top:12px">
+    <div class="ctrl-h">
+      <h3>La bolsa retenida</h3>
+      <span class="sub">El ${100 - B.pago_mensual}% de cada periodo, acumulado. Se evalúa una sola vez
+        al cierre del proyecto, no mes a mes</span>
+    </div>
+
+    ${nadie ? `<div class="note crit" style="margin:0 0 12px">
+      <b>Con la condición acordada, hoy nadie duplica.</b> Se pide la llave abierta en
+      ${cfg.periodos_con_llave} de ${ref.detalle.length} periodos, y el primero cerró sin llave
+      para todo el equipo. No es un dato que falte ni un cálculo a medias: es la regla aplicada a
+      lo que pasó. La bolsa se sigue acumulando y se paga íntegra al cierre; lo que no se activa es
+      la duplicación. Si la condición tiene que cambiar, se edita en
+      <b>Ajustes → Parámetros del incentivo</b> y rige desde el periodo que se elija.</div>`
+    : alguno ? `<div class="note warn" style="margin:0 0 12px">
+      Hay ejecutivos que ya no pueden cumplir la condición de la duplicación. Su bolsa se sigue
+      acumulando y se paga al cierre; lo que pierden es el factor.</div>` : ""}
+
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblBolsa">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Suma de lo retenido en los periodos que ya cerraron">Bolsa acumulada</th>
+        <th title="En cuántos de los periodos ya corridos tuvo los tres requisitos">Periodos con llave</th>
+        <th title="Periodos del proyecto que todavía no terminan">Por correr</th>
+        <th title="Si la condición se cumple, la bolsa se multiplica por el factor acordado">Al cierre</th>
+        <th>Duplicación</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(({u, b}) => {
+        const [cls, txt] = sem[b.estado];
+        return `<tr>
+          <td class="nom">${esc(u.nombre)}</td>
+          <td class="num fuerte">${pct1(b.acumulada)}</td>
+          <td class="num ${b.estado === "perdida" ? "alerta" : ""}">${b.conLlave} de ${b.corridos}</td>
+          <td class="num tenue">${b.faltan || "—"}</td>
+          <td class="num fuerte">${pct1(b.alCierre)}</td>
+          <td class="num"><span class="chip ${cls}">${txt}</span></td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    <p class="pie">Todo en <b>porcentaje del sueldo base</b>: las remuneraciones no viven en el CRM.
+      La columna <b>Periodos con llave</b> cuenta solo los periodos que ya cerraron — un periodo que
+      todavía no termina no se cuenta como perdido, porque no lo está. La condición vigente pide la
+      llave abierta en <b>${cfg.periodos_con_llave} de ${ref.detalle.length}</b> periodos y el factor
+      de duplicación es <b>×${cfg.factor}</b>.</p>
+  </div>`;
+}
+
 function viewBono(){
   if (S.user.rol === "Ejecutivo")
     return `<div class="card"><h3>Solo para supervisión</h3>
@@ -10863,6 +11003,8 @@ function viewBono(){
     </details>
   </div>
 
+  ${bloqueBolsa()}
+
   ${ejec.length ? ejec.map(u => tarjetaEjecutivo(u, p)).join("")
     : `<div class="card"><p style="margin:0">No hay ejecutivos activos cargados.</p></div>`}
 
@@ -10879,7 +11021,11 @@ function viewBono(){
       <div class="kv"><dt>Facturación</dt><dd>El CRM no la ve. Se carga el monto inicial y el final del periodo
         y el crecimiento se calcula solo.</dd></div>
       <div class="kv"><dt>Visitas efectivas</dt><dd>Las que el CRM marca como <b>cumple visita</b>: presencial o virtual
-        <b>y</b> con el cliente respondiendo. El mínimo se escala a las semanas reales del periodo.</dd></div>
+        <b>y</b> con el cliente respondiendo. El mínimo del periodo es de <b>${esc(reglaVisitas(B.requisitos, p).largo)}</b>.</dd></div>
+      <div class="kv"><dt>La bolsa retenida</dt><dd>Cada periodo se paga el ${B.pago_mensual}% y se retiene el ${
+        100 - B.pago_mensual}%. Las retenciones forman una sola bolsa que se evalúa al cierre del proyecto,
+        no mes a mes, y se duplica solo con la llave abierta en ${
+        (B.bolsa || BONO_DEF.bolsa).periodos_con_llave} de ${periodosProyecto().length} periodos.</dd></div>
       <div class="kv"><dt>Sin sueldos</dt><dd>Todo se expresa en porcentaje del sueldo base. Las remuneraciones
         no viven en el CRM y no tienen por qué.</dd></div>
     </div>
@@ -11031,7 +11177,12 @@ const CAMPOS_BONO = [
   ["sobre",                      "Sobrecumplimiento hasta",     "%"],
   ["tope",                       "Tope de pago",                "%"],
   ["base_incumple_uno",          "Bono base (1 requisito caído)","%"],
-  ["pago_mensual",               "Se paga cada mes",            "%"]
+  ["pago_mensual",               "Se paga cada mes",            "%"],
+  /* La bolsa retenida: en cuántos periodos hace falta la llave abierta para
+     que se duplique, y por cuánto se multiplica. Se editan acá y viajan con
+     la versión, como todo lo demás. */
+  ["bolsa.periodos_con_llave",   "Bolsa: periodos con llave",   ""],
+  ["bolsa.factor",               "Bolsa: factor al cierre",     "×"]
 ];
 /* ---- La ruta mensual hacia la meta --------------------------------------
    El documento de incentivos no reparte la meta en cinco partes iguales: da
