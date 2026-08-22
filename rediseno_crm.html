@@ -1,0 +1,791 @@
+<title>Rediseño del CRM de campo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+:root{
+  --rail:#0b2545; --rail-ink:#c9d6e8; --rail-on:#ffffff;
+  --paper:#f4f6f9; --card:#ffffff; --sunk:#eef1f6;
+  --ink:#0d1b2a; --ink-2:#4a5768; --muted:#7d8898;
+  --line:#dee4ec; --line-2:#eaeef4;
+  --accent:#2f6fd0; --accent-soft:#e8f0fc; --accent-ink:#1d4f9e;
+  --ok:#12805a; --ok-bg:#e4f4ed; --ok-ink:#0c6144;
+  --warn:#cf9400; --warn-bg:#fdf2d8; --warn-ink:#8a6100;
+  --crit:#bd2b2b; --crit-bg:#fbe8e8; --crit-ink:#98211f;
+  --r:12px; --r-sm:8px;
+  --sh:0 1px 2px rgba(13,27,42,.06), 0 6px 16px rgba(13,27,42,.05);
+  --f-disp:"Archivo", ui-sans-serif, system-ui, sans-serif;
+  --f-body:"Public Sans", ui-sans-serif, system-ui, sans-serif;
+}
+:root:not([data-theme="light"]){ }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --rail:#08111f; --rail-ink:#8ea3bf; --rail-on:#ffffff;
+    --paper:#0d151f; --card:#141d29; --sunk:#1a2432;
+    --ink:#eef3f9; --ink-2:#aab8c8; --muted:#7f8ea1;
+    --line:#26313f; --line-2:#1d2733;
+    --accent:#5a8fe8; --accent-soft:#16243a; --accent-ink:#9dbdf4;
+    --ok:#26a074; --ok-bg:#10281f; --ok-ink:#4cc79a;
+    --warn:#cf9f2a; --warn-bg:#2b2311; --warn-ink:#e0b552;
+    --crit:#d5544a; --crit-bg:#2c1615; --crit-ink:#e88178;
+    --sh:0 1px 2px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --rail:#08111f; --rail-ink:#8ea3bf; --rail-on:#ffffff;
+  --paper:#0d151f; --card:#141d29; --sunk:#1a2432;
+  --ink:#eef3f9; --ink-2:#aab8c8; --muted:#7f8ea1;
+  --line:#26313f; --line-2:#1d2733;
+  --accent:#5a8fe8; --accent-soft:#16243a; --accent-ink:#9dbdf4;
+  --ok:#26a074; --ok-bg:#10281f; --ok-ink:#4cc79a;
+  --warn:#cf9f2a; --warn-bg:#2b2311; --warn-ink:#e0b552;
+  --crit:#d5544a; --crit-bg:#2c1615; --crit-ink:#e88178;
+  --sh:0 1px 2px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--f-body); font-size:15px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{font-family:var(--f-disp); margin:0; text-wrap:balance; letter-spacing:-.01em}
+.num{font-family:var(--f-disp); font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- andamio del prototipo (no es parte del diseño) ---------- */
+.andamio{
+  position:sticky; top:0; z-index:50; background:var(--card);
+  border-bottom:1px solid var(--line); padding:10px 18px;
+  display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+}
+.andamio .marca{font-family:var(--f-disp); font-weight:700; font-size:13px; letter-spacing:.02em;
+  text-transform:uppercase; color:var(--muted)}
+.andamio nav{display:flex; gap:6px; flex-wrap:wrap}
+.andamio button{
+  font:inherit; font-size:13px; font-weight:600; padding:7px 13px; border-radius:999px; cursor:pointer;
+  border:1px solid var(--line); background:transparent; color:var(--ink-2);
+}
+.andamio button[aria-current="true"]{background:var(--accent); border-color:var(--accent); color:#fff}
+.andamio .der{margin-left:auto; font-size:12.5px; color:var(--muted)}
+
+.escena{display:none; padding:26px 18px 60px}
+.escena[data-on]{display:block}
+.escena > .intro{max-width:63ch; margin:0 auto 22px}
+.escena > .intro h2{font-size:22px; font-weight:700}
+.escena > .intro p{margin:8px 0 0; color:var(--ink-2); font-size:14.5px}
+
+/* ---------- maqueta: ventana ---------- */
+.ventana{
+  max-width:1180px; margin:0 auto; background:var(--card); border:1px solid var(--line);
+  border-radius:16px; overflow:hidden; box-shadow:var(--sh);
+}
+.ventana.telefono{max-width:392px; border-radius:26px}
+
+/* ---------- barra lateral ---------- */
+.app{display:grid; grid-template-columns:212px minmax(0,1fr); min-height:620px}
+.rail{background:var(--rail); color:var(--rail-ink); padding:16px 12px; display:flex; flex-direction:column; gap:22px}
+.rail .logo{display:flex; gap:9px; align-items:center; padding:0 6px}
+.rail .logo i{width:30px; height:30px; border-radius:8px; background:linear-gradient(140deg,#2f6fd0,#7aa8ee);
+  display:grid; place-items:center; color:#fff; font-family:var(--f-disp); font-weight:700; font-size:14px; font-style:normal}
+.rail .logo b{color:var(--rail-on); font-family:var(--f-disp); font-size:14.5px; font-weight:600; letter-spacing:-.01em}
+.rail .logo span{display:block; font-size:11px; color:var(--rail-ink); opacity:.75; font-weight:400}
+.rail .grupo{display:flex; flex-direction:column; gap:2px}
+.rail .grupo > p{margin:0 0 6px 8px; font-size:10.5px; font-weight:700; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--rail-ink); opacity:.55}
+.rail a{
+  display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:8px;
+  color:var(--rail-ink); text-decoration:none; font-size:13.5px; font-weight:500;
+}
+.rail a svg{width:17px; height:17px; flex:none; opacity:.85}
+.rail a.on{background:rgba(255,255,255,.11); color:var(--rail-on)}
+.rail a.on svg{opacity:1}
+.rail a .cuenta{margin-left:auto; font-size:11px; font-weight:700; background:var(--crit); color:#fff;
+  border-radius:999px; padding:1px 7px; font-variant-numeric:tabular-nums}
+.rail .yo{margin-top:auto; display:flex; gap:9px; align-items:center; padding:9px 8px; border-top:1px solid rgba(255,255,255,.1)}
+.rail .yo i{width:29px;height:29px;border-radius:50%;background:#2f6fd0;display:grid;place-items:center;
+  color:#fff;font-size:11px;font-weight:700;font-style:normal;flex:none;font-family:var(--f-disp)}
+.rail .yo b{display:block; color:var(--rail-on); font-size:12.5px; font-weight:600}
+.rail .yo span{display:block; font-size:11px; opacity:.7}
+
+/* ---------- lienzo ---------- */
+.lienzo{padding:20px 22px; background:var(--paper); min-width:0}
+.cab{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:18px}
+.cab h2{font-size:19px; font-weight:700}
+.cab .periodo{margin-top:3px; font-size:12.5px; color:var(--muted)}
+.cab .periodo b{color:var(--ink-2); font-weight:600}
+.busca{display:flex; align-items:center; gap:8px; background:var(--card); border:1px solid var(--line);
+  border-radius:999px; padding:7px 14px; font-size:13px; color:var(--muted); min-width:210px}
+
+.kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:13px 14px}
+.kpi .lbl{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+.kpi .val{font-size:27px; font-weight:700; margin-top:5px; line-height:1}
+.kpi .sub{font-size:12px; color:var(--ink-2); margin-top:6px; display:flex; align-items:center; gap:6px}
+.medidor{height:5px; border-radius:999px; background:var(--sunk); overflow:hidden; margin-top:9px}
+.medidor i{display:block; height:100%; border-radius:999px; background:var(--accent)}
+.medidor.alerta i{background:var(--crit)}
+.medidor.ojo i{background:var(--warn)}
+
+/* `min-width:0` en las dos columnas: sin esto, una pista `1fr` no baja de su
+   contenido mínimo, y la tabla —que lleva `nowrap` en los encabezados— empuja
+   el ancho de toda la página. Es el desborde horizontal más común de grid y no
+   se ve hasta que el contenido crece. */
+.cols{display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:12px; align-items:start}
+.cols > *{min-width:0}
+.panel{background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px}
+.panel + .panel{margin-top:12px}
+.panel h3{font-size:14.5px; font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:10px}
+.panel h3 span{font-size:12px; font-weight:400; color:var(--muted); font-family:var(--f-body)}
+.panel .nota{font-size:12.5px; color:var(--muted); margin:4px 0 0}
+
+/* ---------- tabla ---------- */
+.tabla-cont{overflow-x:auto; margin-top:11px}
+table{border-collapse:collapse; width:100%; font-size:13px}
+/* El aire entre columnas va en el padding de cada celda, no en el ancho de la
+   tabla: así las cifras respiran y la tabla sigue pudiendo encogerse dentro de
+   su contenedor con scroll propio. Sin esto los encabezados se tocan y se leen
+   como una sola palabra. */
+th{font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--muted);
+  text-align:right; padding:0 0 8px 16px; white-space:nowrap}
+th:first-child{text-align:left; padding-left:0}
+td{padding:9px 0 9px 16px; border-top:1px solid var(--line-2); text-align:right;
+  font-variant-numeric:tabular-nums; white-space:nowrap}
+td:first-child{text-align:left; font-weight:600; padding-left:0}
+tbody tr:last-child td{border-top:1px solid var(--line); font-weight:700}
+.barra-fila{display:flex; align-items:center; gap:9px; justify-content:flex-end}
+.barra-fila .pista{width:62px; height:7px; border-radius:999px; background:var(--sunk); overflow:hidden; flex:none}
+.barra-fila .pista i{display:block; height:100%; border-radius:999px; background:var(--accent)}
+.barra-fila .cifra{width:34px; text-align:right}
+
+/* ---------- chips ---------- */
+.chip{display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px;
+  font-size:11.5px; font-weight:600; line-height:1.6; white-space:nowrap}
+.chip svg{width:12px;height:12px;flex:none}
+.chip.ok{background:var(--ok-bg); color:var(--ok-ink)}
+.chip.warn{background:var(--warn-bg); color:var(--warn-ink)}
+.chip.crit{background:var(--crit-bg); color:var(--crit-ink)}
+.chip.info{background:var(--accent-soft); color:var(--accent-ink)}
+.chip.neutro{background:var(--sunk); color:var(--ink-2)}
+
+/* ---------- lista de atención ---------- */
+.aten{display:flex; flex-direction:column; gap:2px; margin-top:8px}
+.aten a{display:flex; gap:10px; align-items:flex-start; padding:9px 8px; border-radius:var(--r-sm);
+  text-decoration:none; color:inherit; border:1px solid transparent}
+.aten a:hover{background:var(--sunk); border-color:var(--line-2)}
+.aten .pip{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
+.aten .pip.crit{background:var(--crit)} .aten .pip.warn{background:var(--warn)} .aten .pip.ok{background:var(--ok)}
+.aten b{display:block; font-size:13px; font-weight:600}
+.aten span{display:block; font-size:12px; color:var(--muted); line-height:1.4}
+.aten .n{margin-left:auto; font-family:var(--f-disp); font-weight:700; font-size:15px;
+  font-variant-numeric:tabular-nums; color:var(--ink-2)}
+
+/* ---------- gráfico ---------- */
+.grafico{margin-top:12px}
+.grafico svg{display:block; width:100%; height:auto; overflow:visible}
+.eje{font-size:10px; fill:var(--muted); font-family:var(--f-body)}
+.rejilla{stroke:var(--line-2); stroke-width:1}
+.serie{fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+.area{fill:var(--accent); opacity:.10}
+.punto{fill:var(--accent); stroke:var(--card); stroke-width:2}
+.meta{stroke:var(--crit); stroke-width:1.5; stroke-dasharray:4 4}
+.meta-txt{font-size:10px; fill:var(--crit-ink); font-weight:600; font-family:var(--f-body)}
+
+/* ---------- teléfono ---------- */
+.tel-top{background:var(--rail); color:#fff; padding:12px 16px; display:flex; align-items:center; gap:10px}
+.tel-top b{font-family:var(--f-disp); font-size:14px; font-weight:600}
+.tel-top span{font-size:11.5px; opacity:.72; display:block; font-weight:400}
+.tel-cuerpo{padding:16px; background:var(--paper); min-height:530px}
+.tel-nav{display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid var(--line); background:var(--card)}
+.tel-nav div{padding:9px 4px 11px; text-align:center; font-size:10.5px; font-weight:600; color:var(--muted)}
+.tel-nav div.on{color:var(--accent)}
+.tel-nav svg{width:19px;height:19px;display:block;margin:0 auto 3px}
+
+.tira{display:flex; gap:7px; overflow-x:auto; padding-bottom:5px; margin-bottom:13px; scrollbar-width:none}
+.tira::-webkit-scrollbar{display:none}
+.tira .t{flex:0 0 auto; display:flex; align-items:baseline; gap:6px; background:var(--card);
+  border:1px solid var(--line); border-radius:999px; padding:7px 12px}
+.tira .t b{font-family:var(--f-disp); font-size:15px; font-weight:700; font-variant-numeric:tabular-nums}
+.tira .t span{font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted)}
+
+.paso{background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:14px; margin-bottom:11px}
+.paso > .h{display:flex; align-items:center; gap:9px; margin-bottom:11px}
+.paso > .h i{width:21px;height:21px;border-radius:50%;background:var(--accent);color:#fff;font-style:normal;
+  display:grid;place-items:center;font-size:11px;font-weight:700;font-family:var(--f-disp);flex:none}
+.paso > .h b{font-family:var(--f-disp); font-size:13.5px; font-weight:600}
+.paso > .h em{margin-left:auto;font-style:normal;font-size:11.5px;color:var(--muted)}
+.opts{display:grid; gap:7px}
+.opts.dos{grid-template-columns:1fr 1fr}
+.opt{display:flex; align-items:center; gap:9px; padding:12px 12px; border:1px solid var(--line);
+  border-radius:var(--r-sm); font-size:13.5px; font-weight:500; background:var(--card); min-height:46px}
+.opt.on{border-color:var(--accent); background:var(--accent-soft); color:var(--accent-ink); font-weight:600}
+.opt .rd{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);flex:none}
+.opt.on .rd{border-color:var(--accent); box-shadow:inset 0 0 0 3px var(--card); background:var(--accent)}
+.gps{display:flex; gap:11px; align-items:center; background:var(--ok-bg); border:1px solid var(--ok);
+  border-radius:var(--r-sm); padding:11px 12px}
+.gps svg{width:20px;height:20px;flex:none;color:var(--ok-ink)}
+.gps b{display:block; font-size:13px; color:var(--ok-ink); font-family:var(--f-disp); font-weight:600}
+.gps span{display:block; font-size:11.5px; color:var(--ok-ink); opacity:.85; font-variant-numeric:tabular-nums}
+.campo{width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:var(--r-sm);
+  font:inherit; font-size:13.5px; background:var(--card); color:var(--ink); min-height:46px}
+.btn-primario{display:block; width:100%; padding:14px; border:0; border-radius:var(--r-sm);
+  background:var(--accent); color:#fff; font-family:var(--f-disp); font-size:15px; font-weight:600; cursor:pointer}
+.plegado{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:13px 14px;
+  background:var(--card); border:1px solid var(--line); border-radius:var(--r); margin-bottom:11px;
+  font-size:13.5px; color:var(--ink-2)}
+.plegado b{font-family:var(--f-disp); font-weight:600; color:var(--ink); font-size:13.5px}
+
+/* ---------- decisiones ---------- */
+.decisiones{max-width:1180px; margin:34px auto 0}
+.decisiones h2{font-size:20px; font-weight:700; margin-bottom:4px}
+.decisiones > p{color:var(--ink-2); font-size:14.5px; max-width:63ch; margin:0 0 18px}
+.dec-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(268px,1fr)); gap:12px}
+.dec{background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:15px 16px}
+.dec h4{font-size:14px; font-weight:600; margin-bottom:7px}
+.dec p{margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.55}
+.dec p + p{margin-top:8px}
+.dec .antes{display:block; font-size:12px; color:var(--muted); margin-top:9px; padding-top:9px;
+  border-top:1px solid var(--line-2)}
+.dec .antes b{color:var(--ink-2); font-weight:600}
+
+@media(max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .rail{display:none}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .cols{grid-template-columns:1fr}
+}
+</style>
+
+<div class="andamio">
+  <span class="marca">Prototipo</span>
+  <nav>
+    <button aria-current="true" data-ir="super">Supervisión · escritorio</button>
+    <button data-ir="ejec">Ejecutivo · su avance</button>
+    <button data-ir="movil">Ejecutivo · registrar visita</button>
+  </nav>
+  <span class="der">Campaña BBVA Adquirencia · periodo 19/08 – 18/09</span>
+</div>
+
+<!-- ============================ SUPERVISIÓN ============================ -->
+<section class="escena" data-on id="super">
+  <div class="intro">
+    <h2>El tablero de Gabriel y tuyo</h2>
+    <p>Todo el análisis de la campaña en una pantalla: cómo va el periodo, quién está dónde,
+    y qué necesita una decisión hoy. La columna de la derecha no es un resumen — es la lista
+    de lo que está trabado, con el número y el camino para resolverlo.</p>
+  </div>
+
+  <div class="ventana">
+    <div class="app">
+      <aside class="rail">
+        <div class="logo">
+          <i>S</i>
+          <div><b>Stratis CRM</b><span>BBVA Adquirencia</span></div>
+        </div>
+
+        <div class="grupo">
+          <p>Campaña</p>
+          <a href="#" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Tablero</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Cartera<span class="cuenta">408</span></a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Agenda</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16l-7-3.5L5 20z"/></svg>Registros</a>
+        </div>
+
+        <div class="grupo">
+          <p>Solo supervisión</p>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Incentivos</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Reporte</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M17 11a2.5 2.5 0 1 0 0-5M18 19a5 5 0 0 0-2.5-4.3"/></svg>Equipo</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Ajustes</a>
+        </div>
+
+        <div class="yo">
+          <i>JR</i>
+          <div><b>José Luis Ríos</b><span>Analista</span></div>
+        </div>
+      </aside>
+
+      <main class="lienzo">
+        <div class="cab">
+          <div>
+            <h2>Tablero de la campaña</h2>
+            <div class="periodo">Periodo <b>19 ago – 18 sep</b> · día 4 de 31 · 841 comercios asignados</div>
+          </div>
+          <div class="busca">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:15px;height:15px"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            Buscar comercio, RUC o ejecutivo
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi">
+            <div class="lbl">Cobertura del periodo</div>
+            <div class="val num">9,5<span style="font-size:16px">%</span></div>
+            <div class="sub">80 de 841 gestionados</div>
+            <div class="medidor alerta"><i style="width:9.5%"></i></div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Visitas efectivas</div>
+            <div class="val num">14</div>
+            <div class="sub">de 160 del periodo · 40 por ejecutivo</div>
+            <div class="medidor alerta"><i style="width:8.75%"></i></div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Objetivo cumplido</div>
+            <div class="val num">3</div>
+            <div class="sub">2 retenidos · 1 venta nueva</div>
+            <div class="medidor ojo"><i style="width:11%"></i></div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Calidad del registro</div>
+            <div class="val num">93,7<span style="font-size:16px">%</span></div>
+            <div class="sub"><span class="chip warn">bajo el mínimo de 95%</span></div>
+            <div class="medidor ojo"><i style="width:93.7%"></i></div>
+          </div>
+        </div>
+
+        <div class="cols">
+          <div>
+            <div class="panel">
+              <h3>Avance por ejecutivo <span>gestionados sobre su cartera asignada</span></h3>
+              <div class="tabla-cont">
+                <table>
+                  <thead>
+                    <tr><th>Ejecutivo</th><th>Asignados</th><th>Registrados</th><th>Gestionados</th>
+                      <th>Visitas</th><th>Cumplido</th><th style="text-align:right">Cobertura</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Aníbal Reyes</td><td>206</td><td>204</td><td>66</td><td>0</td><td>—</td>
+                      <td><div class="barra-fila"><div class="pista"><i style="width:32%"></i></div><span class="cifra num">32%</span></div></td></tr>
+                    <tr><td>Vanessa Perez</td><td>176</td><td>176</td><td>7</td><td>5</td><td>2</td>
+                      <td><div class="barra-fila"><div class="pista"><i style="width:4%"></i></div><span class="cifra num">4%</span></div></td></tr>
+                    <tr><td>Juan Torres</td><td>315</td><td>315</td><td>6</td><td>3</td><td>—</td>
+                      <td><div class="barra-fila"><div class="pista"><i style="width:2%"></i></div><span class="cifra num">2%</span></div></td></tr>
+                    <tr><td>Alfredo Arrascue</td><td>144</td><td>105</td><td>1</td><td>6</td><td>1</td>
+                      <td><div class="barra-fila"><div class="pista"><i style="width:1%"></i></div><span class="cifra num">1%</span></div></td></tr>
+                    <tr><td>Equipo</td><td>841</td><td>800</td><td>80</td><td>14</td><td>3</td>
+                      <td><div class="barra-fila"><div class="pista"><i style="width:9.5%"></i></div><span class="cifra num">9,5%</span></div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="nota">Asignados los pone BBVA. Registrados son las fichas cargadas en el CRM.
+                Gestionados son los que recibieron al menos un contacto en este periodo.</p>
+            </div>
+
+            <div class="panel">
+              <h3>Gestiones por día <span>19 – 22 de agosto</span></h3>
+              <div class="grafico">
+                <svg viewBox="0 0 620 150" role="img" aria-label="Gestiones registradas por día: 19 de agosto 6, 20 de agosto 21, 21 de agosto 47, 22 de agosto 6. El ritmo necesario para el periodo es 27 gestiones por día.">
+                  <line class="rejilla" x1="34" y1="14" x2="612" y2="14"/>
+                  <line class="rejilla" x1="34" y1="52" x2="612" y2="52"/>
+                  <line class="rejilla" x1="34" y1="90" x2="612" y2="90"/>
+                  <line class="rejilla" x1="34" y1="118" x2="612" y2="118"/>
+                  <text class="eje" x="28" y="17" text-anchor="end">60</text>
+                  <text class="eje" x="28" y="55" text-anchor="end">40</text>
+                  <text class="eje" x="28" y="93" text-anchor="end">20</text>
+                  <text class="eje" x="28" y="121" text-anchor="end">0</text>
+
+                  <path class="area" d="M62,107 L245,79 L428,29 L611,107 L611,118 L62,118 Z"/>
+                  <path class="serie" d="M62,107 L245,79 L428,29 L611,107"/>
+
+                  <line class="meta" x1="34" y1="66" x2="612" y2="66"/>
+                  <text class="meta-txt" x="612" y="61" text-anchor="end">ritmo necesario · 27 al día</text>
+
+                  <circle class="punto" cx="62"  cy="107" r="4.5"/>
+                  <circle class="punto" cx="245" cy="79"  r="4.5"/>
+                  <circle class="punto" cx="428" cy="29"  r="4.5"/>
+                  <circle class="punto" cx="611" cy="107" r="4.5"/>
+
+                  <text class="eje" x="62"  y="138" text-anchor="middle">mar 19 · 6</text>
+                  <text class="eje" x="245" y="138" text-anchor="middle">mié 20 · 21</text>
+                  <text class="eje" x="428" y="138" text-anchor="middle">jue 21 · 47</text>
+                  <text class="eje" x="611" y="138" text-anchor="middle">vie 22 · 6</text>
+                </svg>
+              </div>
+              <p class="nota">Van 80 gestiones de las 841 que pide la cobertura. Quedan 27 días hábiles:
+                el ritmo necesario es 27 al día y el promedio de estos cuatro es 20.</p>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Requiere una decisión</h3>
+              <div class="aten">
+                <a href="#"><span class="pip crit"></span>
+                  <span><b>Correos sin aclarar</b><span>No se sabe si fueron al banco o al cliente</span></span>
+                  <span class="n num">408</span></a>
+                <a href="#"><span class="pip crit"></span>
+                  <span><b>Aníbal sin una sola visita</b><span>66 gestionados, 0 visitas en el periodo</span></span>
+                  <span class="n num">0</span></a>
+                <a href="#"><span class="pip warn"></span>
+                  <span><b>Comercios sin comentario</b><span>Ninguno registra una gestión</span></span>
+                  <span class="n num">37</span></a>
+                <a href="#"><span class="pip warn"></span>
+                  <span><b>Fichas sin coordinar con BBVA</b><span>El caso no puede avanzar</span></span>
+                  <span class="n num">55</span></a>
+                <a href="#"><span class="pip ok"></span>
+                  <span><b>Facturación de agosto</b><span>Falta cargarla para cerrar el alcance</span></span>
+                  <span class="n num">—</span></a>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Los tres mínimos</h3>
+              <p class="nota" style="margin-bottom:11px">Dos de tres dan derecho al bono base de 15%.</p>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px">
+                    <span>Cobertura</span><b class="num">9,5% <span style="color:var(--muted);font-weight:400">/ 60%</span></b></div>
+                  <div class="medidor alerta"><i style="width:16%"></i></div>
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px">
+                    <span>Calidad del registro</span><b class="num">93,7% <span style="color:var(--muted);font-weight:400">/ 80%</span></b></div>
+                  <div class="medidor"><i style="width:100%"></i></div>
+                </div>
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px">
+                    <span>Visitas efectivas</span><b class="num">14 <span style="color:var(--muted);font-weight:400">/ 160</span></b></div>
+                  <div class="medidor alerta"><i style="width:9%"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ EJECUTIVO ============================ -->
+<section class="escena" id="ejec">
+  <div class="intro">
+    <h2>Lo que ve el ejecutivo</h2>
+    <p>Su cartera, su periodo, su avance. Sin Incentivos, sin Reporte, sin el equipo.
+    La pregunta que responde esta pantalla es una sola: <b>qué tengo y qué me falta hoy</b>.</p>
+  </div>
+
+  <div class="ventana">
+    <div class="app">
+      <aside class="rail">
+        <div class="logo">
+          <i>S</i>
+          <div><b>Stratis CRM</b><span>BBVA Adquirencia</span></div>
+        </div>
+        <div class="grupo">
+          <p>Mi trabajo</p>
+          <a href="#" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Mi avance</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Mi cartera<span class="cuenta">158</span></a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Mi agenda</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16l-7-3.5L5 20z"/></svg>Mis registros</a>
+          <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Ajustes</a>
+        </div>
+        <div class="yo">
+          <i>VP</i>
+          <div><b>Vanessa Perez</b><span>Ejecutiva</span></div>
+        </div>
+      </aside>
+
+      <main class="lienzo">
+        <div class="cab">
+          <div>
+            <h2>Mi avance</h2>
+            <div class="periodo">Periodo <b>19 ago – 18 sep</b> · quedan 27 días hábiles</div>
+          </div>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi">
+            <div class="lbl">Mi cartera</div>
+            <div class="val num">176</div>
+            <div class="sub">asignados por BBVA · 176 registrados</div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Gestionados</div>
+            <div class="val num">7</div>
+            <div class="sub">de 176 · faltan 169</div>
+            <div class="medidor alerta"><i style="width:4%"></i></div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Visitas efectivas</div>
+            <div class="val num">5</div>
+            <div class="sub">de 40 del periodo</div>
+            <div class="medidor alerta"><i style="width:12.5%"></i></div>
+          </div>
+          <div class="kpi">
+            <div class="lbl">Objetivo cumplido</div>
+            <div class="val num">2</div>
+            <div class="sub">2 retenidos · 0 ventas nuevas</div>
+          </div>
+        </div>
+
+        <div class="cols">
+          <div>
+            <div class="panel">
+              <h3>Mis comercios, por dónde va cada uno</h3>
+              <div class="tabla-cont">
+                <table>
+                  <thead><tr><th>Punto del caso</th><th>Comercios</th><th>Qué hago</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="chip warn">Por validar</span></td><td>96</td>
+                      <td style="text-align:left;font-weight:400;color:var(--ink-2)">Coordinar con el ejecutivo de BBVA</td></tr>
+                    <tr><td><span class="chip info">Por contactar</span></td><td>71</td>
+                      <td style="text-align:left;font-weight:400;color:var(--ink-2)">Llamar o visitar al comercio</td></tr>
+                    <tr><td><span class="chip info">En negociación</span></td><td>7</td>
+                      <td style="text-align:left;font-weight:400;color:var(--ink-2)">Cerrar la retención</td></tr>
+                    <tr><td><span class="chip ok">Retenido</span></td><td>2</td>
+                      <td style="text-align:left;font-weight:400;color:var(--muted)">Listo</td></tr>
+                    <tr><td>Total</td><td>176</td><td style="text-align:left"></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Mis ventas nuevas <span>fuera de la cartera de BBVA</span></h3>
+              <div class="tabla-cont">
+                <table>
+                  <thead><tr><th>Tipo</th><th>RUC registrados</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="chip info">Lead de venta</span></td><td>10</td></tr>
+                    <tr><td><span class="chip ok">Venta cerrada</span></td><td>0</td></tr>
+                    <tr><td>Total</td><td>10</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="nota">Las ventas nuevas cuentan para el indicador de venta y para tus visitas,
+                pero no entran en la cobertura de la cartera.</p>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <h3>Lo que me falta hoy</h3>
+              <div class="aten">
+                <a href="#"><span class="pip crit"></span>
+                  <span><b>Aclarar mis correos</b><span>¿Fue al banco o al cliente con copia?</span></span>
+                  <span class="n num">158</span></a>
+                <a href="#"><span class="pip crit"></span>
+                  <span><b>Seguimientos vencidos</b><span>Comprometidos y sin retomar</span></span>
+                  <span class="n num">3</span></a>
+                <a href="#"><span class="pip warn"></span>
+                  <span><b>Para hoy</b><span>Lo que quedó agendado</span></span>
+                  <span class="n num">4</span></a>
+                <a href="#"><span class="pip warn"></span>
+                  <span><b>Sin coordinar con BBVA</b><span>No puedo avanzar hasta pedirlos</span></span>
+                  <span class="n num">12</span></a>
+              </div>
+            </div>
+
+            <div class="panel">
+              <h3>Mi ritmo</h3>
+              <p class="nota" style="margin-bottom:12px">Para llegar al mínimo de visitas del periodo.</p>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span class="num" style="font-size:34px;font-weight:700;line-height:1">1,3</span>
+                <span style="font-size:13px;color:var(--ink-2)">visitas al día</span>
+              </div>
+              <p class="nota" style="margin-top:7px">Llevas 5 de 40. Quedan 35 en 27 días hábiles.</p>
+              <div class="medidor alerta" style="margin-top:11px"><i style="width:12.5%"></i></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ MÓVIL ============================ -->
+<section class="escena" id="movil">
+  <div class="intro">
+    <h2>Registrar una visita, en la calle</h2>
+    <p>Es el momento que más importa y el que hoy cuesta más: siete pasos con el teléfono en una mano.
+    Acá son tres, la ubicación se pide <b>apenas se abre la pantalla</b> en vez de a mitad del formulario,
+    y lo que no aplica no se muestra hasta que aplica.</p>
+  </div>
+
+  <div style="display:flex;gap:22px;justify-content:center;flex-wrap:wrap">
+    <div class="ventana telefono">
+      <div class="tel-top">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><path d="M15 5l-7 7 7 7"/></svg>
+        <div><b>Bodega Doña Rosa</b><span>Customer ID 40218750 · San Miguel</span></div>
+      </div>
+      <div class="tel-cuerpo">
+
+        <div class="paso">
+          <div class="h"><i>1</i><b>¿Qué pasó?</b><em>jue 22 · 10:14</em></div>
+          <div class="opts dos">
+            <div class="opt on"><span class="rd"></span>Visita</div>
+            <div class="opt"><span class="rd"></span>Llamada</div>
+            <div class="opt"><span class="rd"></span>WhatsApp</div>
+            <div class="opt"><span class="rd"></span>Correo</div>
+          </div>
+        </div>
+
+        <div class="paso">
+          <div class="h"><i>2</i><b>¿Habló con el titular?</b></div>
+          <div class="opts dos" style="margin-bottom:11px">
+            <div class="opt on"><span class="rd"></span>Sí, atendió</div>
+            <div class="opt"><span class="rd"></span>No estaba</div>
+          </div>
+          <div class="gps">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+            <div>
+              <b>Ubicación capturada</b>
+              <span>−12.0776, −77.0844 · ±8 m</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="paso">
+          <div class="h"><i>3</i><b>¿Qué te dijo?</b><em>obligatorio</em></div>
+          <textarea class="campo" rows="3" style="resize:none">Le preocupa la comisión. Pidió que volvamos el lunes con la propuesta por escrito.</textarea>
+        </div>
+
+        <div class="plegado">
+          <span><b>¿Se cierra el caso?</b><br>Retenido, perdido o venta</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px;color:var(--muted)"><path d="M9 6l6 6-6 6"/></svg>
+        </div>
+        <div class="plegado">
+          <span><b>¿Qué sigue?</b><br>Agendar la próxima acción</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:17px;height:17px;color:var(--muted)"><path d="M9 6l6 6-6 6"/></svg>
+        </div>
+
+        <button class="btn-primario">Guardar la visita</button>
+      </div>
+      <div class="tel-nav">
+        <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Cartera</div>
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Agenda</div>
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Mi avance</div>
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Ajustes</div>
+      </div>
+    </div>
+
+    <div class="ventana telefono">
+      <div class="tel-top">
+        <div><b>Mi avance</b><span>Vanessa Perez · 19 ago – 18 sep</span></div>
+      </div>
+      <div class="tel-cuerpo">
+        <div class="tira">
+          <div class="t"><b class="num">176</b><span>Cartera</span></div>
+          <div class="t"><b class="num">7</b><span>Gestionados</span></div>
+          <div class="t"><b class="num">5</b><span>Visitas</span></div>
+          <div class="t"><b class="num">2</b><span>Cumplido</span></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:11px">
+          <h3 style="font-size:13.5px">Lo que me falta hoy</h3>
+          <div class="aten">
+            <a href="#"><span class="pip crit"></span>
+              <span><b>Seguimientos vencidos</b><span>Sin retomar</span></span><span class="n num">3</span></a>
+            <a href="#"><span class="pip warn"></span>
+              <span><b>Para hoy</b><span>Agendados</span></span><span class="n num">4</span></a>
+            <a href="#"><span class="pip warn"></span>
+              <span><b>Aclarar correos</b><span>¿Banco o cliente?</span></span><span class="n num">158</span></a>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 style="font-size:13.5px">Mi ritmo de visitas</h3>
+          <div style="display:flex;align-items:baseline;gap:8px;margin-top:8px">
+            <span class="num" style="font-size:30px;font-weight:700;line-height:1">1,3</span>
+            <span style="font-size:12.5px;color:var(--ink-2)">al día para llegar a 40</span>
+          </div>
+          <div class="medidor alerta" style="margin-top:10px"><i style="width:12.5%"></i></div>
+          <p class="nota" style="margin-top:7px">Llevas 5 · quedan 27 días hábiles</p>
+        </div>
+      </div>
+      <div class="tel-nav">
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Cartera</div>
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Agenda</div>
+        <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Mi avance</div>
+        <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Ajustes</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="decisiones">
+  <h2>Las decisiones detrás</h2>
+  <p>Cada una responde a algo que está pasando hoy en la campaña, no a una preferencia visual.</p>
+
+  <div class="dec-grid">
+    <div class="dec">
+      <h4>Barra lateral en escritorio, barra inferior en el celular</h4>
+      <p>La referencia que mandaste usa barra lateral, y para ti y Gabriel es lo correcto: siete destinos
+      entran de un vistazo y sobra ancho. Pero en el celular la navegación tiene que estar donde llega el
+      pulgar, así que abajo se queda como está.</p>
+      <span class="antes"><b>Hoy:</b> las mismas siete pestañas arriba en las dos pantallas.</span>
+    </div>
+
+    <div class="dec">
+      <h4>El rail separa lo que es de cada rol</h4>
+      <p>«Mi trabajo» para el ejecutivo, «Campaña» y «Solo supervisión» para ustedes. El ejecutivo no ve
+      Incentivos ni Reporte —eso ya funciona así hoy— y ahora además <b>se ve por qué</b>: el grupo está
+      rotulado en vez de simplemente faltar.</p>
+      <span class="antes"><b>Hoy:</b> las pestañas desaparecen sin explicación.</span>
+    </div>
+
+    <div class="dec">
+      <h4>El ejecutivo tiene su propio panel, no el tuyo filtrado</h4>
+      <p>Hoy el Panel del ejecutivo es el de supervisión con el universo acotado a lo suyo: bloques de
+      proyecto, de equipo, de corrección. Se lee como un informe.</p>
+      <p>«Mi avance» responde una pregunta y nada más: qué tengo, qué me falta y a qué ritmo tengo que ir.</p>
+      <span class="antes"><b>Hoy:</b> seis bloques de análisis; cuatro números y una lista bastan.</span>
+    </div>
+
+    <div class="dec">
+      <h4>La visita, de siete pasos a tres</h4>
+      <p>Fecha y hora se ponen solas —es ahora—. El medio y el resultado se juntan en dos preguntas en
+      lenguaje de calle: «¿qué pasó?» y «¿habló con el titular?». El cierre y el seguimiento se pliegan:
+      la mayoría de las visitas no cierran nada.</p>
+      <span class="antes"><b>Hoy:</b> fecha, hora, medio, resultado, ubicación, cierre, seguimiento y dos comentarios.</span>
+    </div>
+
+    <div class="dec">
+      <h4>La ubicación se pide al abrir, no a mitad de camino</h4>
+      <p>El GPS tarda entre tres y doce segundos. Hoy se pide en el paso cuatro y el ejecutivo espera
+      mirando la pantalla. Si la visita es presencial, el permiso se pide al abrir el formulario y la
+      captura corre mientras se llenan los otros campos.</p>
+      <p>No se pierde nada de lo que ya existe: la salida «registrar sin ubicación verificada» sigue ahí,
+      y esos registros siguen quedando marcados.</p>
+      <span class="antes"><b>Hoy:</b> se espera al GPS parado en el paso 4.</span>
+    </div>
+
+    <div class="dec">
+      <h4>Una columna que dice qué está trabado</h4>
+      <p>Los 408 correos sin aclarar, las visitas en cero de Aníbal, los 37 comercios sin comentario. Hoy
+      esos números hay que ir a buscarlos a pantallas distintas; acá viven juntos, con el camino para
+      resolverlos.</p>
+      <p>El ejecutivo tiene la suya, con lo que le toca a él. Eso es lo que hace la campaña autogestionable:
+      cada uno ve su propia lista de pendientes sin que nadie se la tenga que mandar.</p>
+    </div>
+
+    <div class="dec">
+      <h4>El color dice estado, no decora</h4>
+      <p>Azul es la marca y las acciones. Verde, ámbar y rojo son estados y solo estados —nunca se usan
+      para distinguir series en un gráfico—. Cada uno lleva siempre su palabra al lado, así que quien no
+      distinga los colores lee igual.</p>
+      <p>Los cuatro se validaron contra daltonismo y contraste antes de escribir una línea.</p>
+    </div>
+
+    <div class="dec">
+      <h4>Lo que no cambia</h4>
+      <p>La captura de ubicación con su exención y su marca. La línea de tiempo única por comercio. El
+      apartado de pruebas. Las reglas de quién puede editar qué. El vocabulario <code>bbva_</code> que
+      mantiene la coordinación fuera de los cálculos de gestión.</p>
+      <p>Es un rediseño de la superficie y de los flujos, no del motor.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const botones = document.querySelectorAll('.andamio [data-ir]');
+const escenas = document.querySelectorAll('.escena');
+botones.forEach(b => b.addEventListener('click', () => {
+  botones.forEach(x => x.setAttribute('aria-current', String(x === b)));
+  escenas.forEach(s => s.id === b.dataset.ir ? s.setAttribute('data-on','') : s.removeAttribute('data-on'));
+  window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion:reduce)').matches ? 'auto' : 'smooth' });
+}));
+</script>
