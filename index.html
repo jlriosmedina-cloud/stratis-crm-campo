@@ -434,6 +434,10 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cal-ev{display:flex;align-items:center;gap:4px;font-size:10.5px;line-height:1.3;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
 .cal-ev b{font-variant-numeric:tabular-nums;font-weight:700;flex:none}
+/* El nombre del comercio, en su propio elemento. Como nodo de texto suelto no
+   se le podía aplicar el recorte: la casilla lo cortaba a mitad de letra en
+   vez de dejar los puntos suspensivos. */
+.cal-ev-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cal-ev.ok i{background:var(--good)} .cal-ev.warn i{background:var(--warn)}
 .cal-ev.crit i{background:var(--crit)} .cal-ev.info i{background:var(--brand-2)}
 .cal-ev.no i{background:var(--muted)}
@@ -902,6 +906,32 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 .tbl-ctrl tfoot td.nom{background:var(--card)}
 /* En el celular las tres opciones tienen que verse las tres: una que quede
    fuera del borde deslizable es una opción que nadie descubre. */
+/* ---------- El pulgar en el celular ----------------------------------------
+   Esto lo usa un ejecutivo parado en la puerta de una bodega, con una mano y
+   con prisa. Los controles venían entre 35 y 38 px de alto: entran en la
+   pantalla, pero no en el pulgar —cada filtro tocado de refilón es un rebote
+   y un dato que no se registra en el momento—. Se llevan todos a 44, que es
+   la medida que usan iOS y Android para un objetivo tocable.
+
+   Solo cambia la ALTURA MÍNIMA y solo en el celular. Nada se mueve de sitio
+   en tablet ni en escritorio, donde se apunta con el mouse. */
+@media(max-width:759px){
+  .seg button, .pill{min-height:44px}
+  select, input[type="text"], input[type="date"], input[type="time"],
+  input[type="number"], input[type="password"]{min-height:44px}
+  .btn{min-height:44px}
+  .stat-row .stat{min-height:44px}
+  /* Los enlaces que viven DENTRO de una frase no se pueden agrandar sin
+     romper el renglón. Se les da alto de sobra con relleno y se descuenta con
+     margen negativo: el dedo gana el área, la línea de texto no se mueve. */
+  .cifra-link, .g-ley-x, .tbl-ctrl .cifra-link{
+    padding:13px 5px;margin:-13px -5px;display:inline-flex;align-items:center}
+  .g-ley-x{padding:13px 3px;margin:-9px -3px}
+  /* Los desplegables se abren tocando su título. Ya eran inline-flex, así que
+     alcanza con darles alto: no cambia el modo de caja ni mueve la flecha. */
+  details.explica > summary, details.aj-mas > summary, .tab-mas > summary{min-height:44px}
+}
+
 @media(max-width:759px){ .pnl-per .seg{flex-wrap:wrap;overflow:visible}
   .pnl-per .seg button{flex:1 1 auto;padding:8px 10px} }
 @media(min-width:760px){ .pnl-per{grid-template-columns:auto auto 1fr;align-items:end}
@@ -1261,6 +1291,31 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 @media(min-width:900px){
   .kpis{grid-template-columns:repeat(4,1fr);gap:12px}
   .kpi .val{font-size:28px}
+}
+/* En la tablet ya caben dos: el mes y el día del que se habla. Apilarlas
+   obligaba a bajar toda la rejilla para ver las visitas del día que se acababa
+   de tocar, que es justo el gesto que el calendario existe para servir. La
+   columna del día va más angosta que en escritorio —268 px— porque el mes
+   necesita sus siete casillas con el número adentro; por debajo de eso la
+   rejilla deja de leerse y se adivina. */
+@media(min-width:760px) and (max-width:1179px){
+  .cal3{grid-template-columns:minmax(0,1fr) 262px;gap:11px}
+  .cal3-cola{grid-column:1 / -1}
+  .cal3-dia{max-height:none}
+  .cal-x{min-height:66px;padding:5px 4px}
+  /* En la casilla queda la hora, que es lo accionable. El nombre del comercio
+     no entra en 60 px y recortado a dos sílabas no identifica a nadie: vive
+     entero en el panel del día, que ahora está al lado y no debajo. */
+  .cal3 .cal-ev{font-size:10px;gap:3px}
+  .cal3 .cal-ev-n{display:none}
+  /* Cinco tarjetas de resumen y cuatro columnas dejaban la quinta sola, con
+     tres huecos al lado que no explicaba nada. A 136 px entran las cinco en
+     una fila; el texto de abajo se achica para no estirar la tarjeta. */
+  .stat-row{grid-template-columns:repeat(auto-fit,minmax(136px,1fr));gap:9px}
+  .stat-row .stat{padding:11px 11px}
+  .stat-row .stat .lbl{font-size:10px;letter-spacing:.4px}
+  .stat-row .stat .val{font-size:22px}
+  .stat-row .stat .sub{font-size:11px;line-height:1.38}
 }
 @media(min-width:1180px){
   .cols-tab{grid-template-columns:minmax(0,1fr) 322px;gap:12px}
@@ -9859,7 +9914,8 @@ function rejillaMes(){
         ${del.slice(0, TOPE).map(s => {
           const c = byId[String(s.customer_id)];
           return `<span class="cal-ev ${TONO_PIP[estadoCita(s)] || "no"}">
-            <i></i><b>${esc(horaCorta(s.hora_inicio))}</b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</span>`;
+            <i></i><b>${esc(horaCorta(s.hora_inicio))}</b><span class="cal-ev-n">${
+              esc(titulo(c ? nombreCliente(c) : s.customer_id))}</span></span>`;
         }).join("")}
         ${del.length > TOPE ? `<span class="cal-mas">+${del.length - TOPE} más</span>` : ""}
       </span>
