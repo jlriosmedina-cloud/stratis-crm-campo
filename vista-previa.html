@@ -434,6 +434,28 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cal-ev.no i{background:var(--muted)}
 .cal-mas{font-size:10px;font-weight:700;color:var(--brand-2)}
 
+/* Tres columnas: el mes, el día y la cola de lo que falta agendar. Cada una
+   se desliza sola —la del día y la de la cola pueden ser largas— para que la
+   página no crezca sin fin y el calendario no se pierda de vista. */
+.cal3{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+.cal3 > *{min-width:0}
+.cal3-dia .sec-title{margin-top:0}
+.cola-sin h3{display:flex;align-items:center;justify-content:space-between;gap:9px;
+  margin:0;font-size:14.5px;font-weight:650}
+.cola-n{font-size:12px;font-weight:700;background:var(--crit-bg);color:var(--crit-ink);
+  border-radius:999px;padding:2px 9px;font-variant-numeric:tabular-nums}
+.cola-sin[data-vacia] .cola-n{background:var(--good-bg);color:var(--good-ink)}
+.cola-lista{display:flex;flex-direction:column;gap:1px}
+.cola-x{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 9px;padding:8px;
+  border-radius:var(--r-sm);background:none;border:1px solid transparent;cursor:pointer;
+  font:inherit;color:inherit;text-align:left;width:100%;align-items:baseline}
+.cola-x:hover{background:var(--plane);border-color:var(--grid)}
+.cola-x b{font-size:12.8px;font-weight:640;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cola-x > span{font-size:11.5px;color:var(--muted);grid-column:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cola-x .cola-d{grid-column:2;grid-row:1;font-size:11px;font-weight:700;white-space:nowrap}
+.cola-x .cola-d.tarde{color:var(--crit-ink)}
+
 .cal-res{display:flex;gap:12px;align-items:flex-start;margin-bottom:9px}
 .cal-res-f{flex:none;width:96px;padding-top:14px;text-align:right}
 .cal-res-f b{display:block;font-size:13px;font-variant-numeric:tabular-nums}
@@ -988,7 +1010,18 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
      sin los huecos que dejaba el masonry. La pantalla no se estira de borde a
      borde —un panel de configuración a 1600px de ancho no se lee mejor, se lee
      peor: los botones quedan del largo de la mesa y el ojo pierde la columna. */
-  .view-ajustes{max-width:1020px;margin:0 auto}
+  /* Ajustes en dos columnas. Antes era una tira vertical de nueve apartados y
+     llegar al último pedía bajar toda la pantalla, aunque el que se buscaba
+     estuviera a la derecha y a la misma altura. `align-items:start` para que
+     cada apartado mida lo suyo y no se estire al alto del vecino. */
+  .view-ajustes{max-width:1320px;margin:0 auto;
+    display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:0 26px;align-items:start}
+  .view-ajustes > *{min-width:0}
+  /* Lo que se usa a diario, a la izquierda; lo que se configura una vez, a la
+     derecha. Los dos apartados anchos —la bitácora y las reglas— cruzan las
+     dos columnas porque llevan tabla. */
+  .view-ajustes > .aj-ancho{grid-column:1 / -1}
   .aj-grid{grid-template-columns:repeat(2,1fr);gap:13px;align-items:stretch}
   .aj-grid.una{grid-template-columns:1fr}
   .aj-sec{margin-bottom:26px}
@@ -1054,7 +1087,8 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
     grid-template-rows:auto 1fr;
   }
   #app.con-rail > header.top{grid-area:cab; position:sticky; top:0}
-  #app.con-rail > main{grid-area:vista; padding:22px 26px 44px}
+  #app.con-rail > main{grid-area:vista; padding:22px 26px 44px;
+    max-width:1560px; width:100%; margin:0 auto}
   #app.con-rail > nav.bottom{display:none}
   #app.con-rail > .rail{
     grid-area:rail; display:flex; flex-direction:column; gap:20px;
@@ -1221,7 +1255,30 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 @media(min-width:1180px){
   .cols-tab{grid-template-columns:minmax(0,1fr) 322px;gap:12px}
   .tab-cab h2{font-size:21px}
+  /* Dos columnas primero: el mes y el día. La cola pasa debajo, a lo ancho. */
+  .cal3{grid-template-columns:minmax(0,1fr) 330px}
+  .cal3-cola{grid-column:1 / -1}
+  .cal3-dia, .cal3-cola{max-height:none}
 }
+@media(min-width:1500px){
+  /* Las tres, una al lado de la otra. Las dos de la derecha se deslizan solas
+     para que el calendario siempre quede a la vista. */
+  .cal3{grid-template-columns:minmax(0,1fr) 348px 296px}
+  .cal3-cola{grid-column:auto}
+  .cal3-dia, .cal3-cola{max-height:78vh;overflow-y:auto;padding-right:3px}
+  .cal3-dia .card, .cal3-cola .card{margin-bottom:9px}
+}
+
+/* La columna del día es angosta a propósito: la tarjeta se aprieta para que
+   quepa sin que los botones salten de línea uno debajo del otro. */
+.cal3-dia .card{padding:11px 12px}
+.cal3-dia .ag-acc{gap:6px}
+.cal3-dia .ag-acc .btn{padding:6px 9px;font-size:12.5px}
+.cal3-dia .who{font-size:13.5px}
+.cal3-dia .dt{font-size:11.5px;line-height:1.35}
+.cal3-dia .chip{font-size:10.5px;padding:2px 7px}
+/* El filtro por ejecutivo no necesita el ancho de la pantalla. */
+.cal-filtro{max-width:340px}
 </style>
 </head>
 <body>
@@ -6417,7 +6474,11 @@ function viewRegistros(){
       <h2>${mando ? "Gestiones del equipo" : "Mis gestiones"}</h2>
       <div class="sub">Cada contacto y cada intento, con su respaldo, del más reciente al más antiguo</div>
     </div>
-    ${lista.length ? `<button class="btn ghost sm" id="bajarReg">Descargar lo que estoy viendo</button>` : ""}
+    ${/* Descargar es de supervisión. Un ejecutivo con la base de gestiones en
+         un Excel puede reenviarla, y lo que sale de este CRM son datos de la
+         cartera de un banco. Los archivos viven en Ajustes → Descargas, que ya
+         es solo de supervisión; este botón era la última puerta abierta. */
+      mando && lista.length ? `<button class="btn ghost sm" id="bajarReg">Descargar lo que estoy viendo</button>` : ""}
   </div>
 
   <div class="seg seg-periodo" role="group" aria-label="Período">
@@ -7836,7 +7897,11 @@ function filasVisitas(){
 
 /* Lo que se está viendo en «Gestiones del equipo», tal cual, a Excel. Sirve
    para llevar el detalle a una reunión sin bajar el archivo completo. */
+/* La descarga se ofrece solo a supervisión, y se comprueba también acá: la
+   pantalla puede equivocarse, pero esta función es el único camino al archivo
+   y desde acá no sale nada para un ejecutivo. */
 function descargarGestiones(){
+  if (vistaDeCampo()) return toast("Las descargas son de supervisión. Pídeselas a tu supervisor.");
   const regs = typeof gestionesFiltradas === "function" ? gestionesFiltradas() : DB.todos();
   if (!regs.length) return toast("No hay gestiones que descargar con estos filtros");
   const cols = ["Fecha","Hora","Ejecutivo","Customer_id","Nombre_Comercio","Distrito",
@@ -8598,7 +8663,7 @@ function exportarCSV(que){
    ========================================================================= */
 
 function ajSeccion(titulo, bajada, cuerpo, clase){
-  return `<section class="aj-sec">
+  return `<section class="aj-sec ${clase || ""}">
     <div class="aj-h"><h2>${titulo}</h2>${bajada ? `<span>${bajada}</span>` : ""}</div>
     ${cuerpo}
   </section>`;
@@ -8828,17 +8893,21 @@ function viewAyuda(){
 
   /* ---- La página -------------------------------------------------------- */
   return `
+  <!-- Dos columnas y un orden con criterio: a la izquierda lo que se toca a
+       diario —la cuenta, las descargas, la cartera asignada, la facturación—;
+       a la derecha lo que se configura una vez y se revisa de tanto en tanto.
+       Los dos apartados con tabla cruzan las dos columnas al final. -->
   ${ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta)}
-  ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
-  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
-  ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
-  ${admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : ""}
   ${admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""}
+  ${admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : ""}
   ${admin ? ajSeccion("Reporte de avance", "El relato de la presentación — los hitos, las lecturas y las metas de los tres objetivos", cardReporte()) : ""}
+  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas()) : ""}
   ${admin ? ajSeccion(`Equipo`, `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo()) : ""}
-  ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora) : ""}
-  ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona)}
-  <div class="aj-pie"><b>Stratis CRM</b> · campaña BBVA Adquirencia<br>
+  ${admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : ""}
+  ${admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""}
+  ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora, "aj-ancho") : ""}
+  ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona, "aj-ancho")}
+  <div class="aj-pie aj-ancho"><b>Stratis CRM</b> · campaña BBVA Adquirencia<br>
     Los datos viven en Supabase con las reglas de acceso por rol activas.</div>`;
 }
 
@@ -9413,6 +9482,10 @@ function bloqueProyeccion(){
   const filas = proyeccionEquipo();
   if (!filas.length) return "";
   const pct = v => v === null ? "—" : v + "%";
+  const suma = k => filas.reduce((n,f) => n + (f[k] || 0), 0);
+  /* La mediana del equipo se calcula sobre TODAS las demoras, no promediando
+     las medianas de cada uno: la mediana de medianas no es la mediana. */
+  const medEquipo = mediana(CLIENTES.map(c => demoraEnAgendar(c.customer_id)).filter(n => n !== null));
   return `
   <div class="card ctrl">
     <div class="ctrl-h">
@@ -9444,6 +9517,23 @@ function bloqueProyeccion(){
         <td class="num ${f.habilitados && f.conCita < f.habilitados ? "alerta" : ""}">${f.conCita || "—"}</td>
         <td class="num">${f.demora === null ? "—" : `${f.demora} <span class="tenue">día${f.demora === 1 ? "" : "s"}</span>`}</td>
       </tr>`).join("")}
+      ${/* La fila del equipo es SEGUIMIENTO, no requisito. La llave del bono es
+           individual: cada ejecutivo la abre o no con su propio mínimo, y nadie
+           pierde su bono porque el equipo no llegó. Poner el total sin decir
+           esto sería dejar que se lea como una cuarta condición. */""}
+      <tr class="total-eq">
+        <td class="nom">Equipo</td>
+        <td class="num fuerte">${suma("hoy") || "—"}</td>
+        <td class="num fuerte">${suma("semana") || "—"}</td>
+        <td class="num tenue">${filas.reduce((n,f) => n + f.pide, 0)}</td>
+        <td class="num ${suma("vencidas") ? "alerta" : ""}">${suma("vencidas") || "—"}</td>
+        <td class="num">${suma("juzgables")
+          ? `${Math.round(suma("concretadas") / suma("juzgables") * 100)}% <span class="tenue">${
+              suma("concretadas")} de ${suma("juzgables")}</span>` : "—"}</td>
+        <td class="num">${suma("habilitados") || "—"}</td>
+        <td class="num ${suma("conCita") < suma("habilitados") ? "alerta" : ""}">${suma("conCita") || "—"}</td>
+        <td class="num">${medEquipo === null ? "—" : `${medEquipo} <span class="tenue">día${medEquipo === 1 ? "" : "s"}</span>`}</td>
+      </tr>
       </tbody>
     </table>
     </div>
@@ -9452,6 +9542,11 @@ function bloqueProyeccion(){
       hay una visita puesta. La diferencia entre las dos columnas es el hueco de la campaña.
       La <b>demora</b> va en mediana y no en promedio: un caso agendado cuarenta días tarde
       arrastraría el promedio y escondería a los que se agendaron al día siguiente.</p>
+    <p class="pie"><b>La fila del equipo es seguimiento, no requisito.</b> La llave del bono se
+      mide persona por persona: cada ejecutivo la abre con su propio mínimo de
+      ${filas[0] ? filas[0].pide : 25} visitas efectivas por semana, y nadie pierde su bono porque
+      el equipo no haya llegado. El total del equipo está acá para mirarlo con BBVA, no para
+      liquidar.</p>
   </div>`;
 }
 
@@ -9772,7 +9867,7 @@ function viewAgenda(){
   </div>
 
   ${mando ? `<div class="filtros">
-    <div class="sel-row">
+    <div class="sel-row cal-filtro">
       <label class="fsel"><span>Ejecutivo</span>
         <select id="ejecAgenda">
           <option value="todos"${S.fEjecAgenda==="todos"?" selected":""}>Todo el equipo · ${citasTodas().filter(s=>!s.cerrado_en).length}</option>
@@ -9791,37 +9886,51 @@ function viewAgenda(){
   </div>
 
   ${buscando ? resultadosBusqueda() : `
-    ${rejillaMes()}
-    ${panelDelDia()}
+  <!-- Tres columnas, y en este orden por una razón: el calendario dice CUÁNDO,
+       la columna del medio dice QUÉ hay ese día, y la de la derecha dice QUÉ
+       FALTA agendar. Se lee de izquierda a derecha como se trabaja: miro el
+       mes, abro el día, y lo que sobra a la derecha es la cola por atender. -->
+  <div class="cal3">
+    <div class="cal3-rej">${rejillaMes()}</div>
+    <div class="cal3-dia">${panelDelDia()}</div>
+    <div class="cal3-cola">${columnaSinAgendar(sinAgendar, mando)}</div>
+  </div>
   `}
 
   ${mando ? bloqueProyeccion() : ""}
   ${mando ? bloqueDisponibilidad() : ""}
 
-  ${!buscando && !citasVisibles().length ? `<div class="empty"><div class="big">◷</div>
+  ${!buscando && !citasVisibles().length && !sinAgendar.length ? `<div class="empty"><div class="big">◷</div>
       No hay visitas agendadas.<br><br>
       <span style="font-size:13px;color:var(--muted)">Una cita se crea al registrar una gestión que
-      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>` : ""}
+      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>` : ""}`;
+}
 
-  ${sinAgendar.length ? `
-  <div class="card" style="margin-top:16px;border-left:3px solid var(--crit)">
-    <h3>Habilitados sin visita agendada · ${sinAgendar.length}</h3>
-    <div class="note crit" style="margin-bottom:11px">
-      En estos comercios el banco ya confirmó los datos o el cliente ya respondió: se puede
-      agendar hoy mismo. Cada día que pasan acá es una visita que no ocurrió.
-    </div>
-    <div class="huerf">
-      ${sinAgendar.slice(0, 30).map(c => {
+/* ---- La cola: habilitados sin visita agendada ---------------------------
+   El hueco que el calendario existe para cerrar, en su propia columna y a la
+   vista permanente. Antes vivía al fondo de la pantalla, que es donde se van a
+   morir las listas de pendientes. */
+function columnaSinAgendar(lista, mando){
+  return `
+  <div class="card cola-sin"${lista.length ? "" : ' data-vacia="1"'}>
+    <h3>Habilitados sin visita <span class="cola-n">${lista.length}</span></h3>
+    ${lista.length ? `
+    <p class="pie" style="margin:5px 0 10px">BBVA ya confirmó los datos o el cliente ya
+      respondió: se puede agendar hoy mismo. Cada día que pasan acá es una visita que no ocurrió.</p>
+    <div class="cola-lista">
+      ${lista.slice(0, 40).map(c => {
         const dias = habilesDesde(habilitadoEn(c.customer_id));
-        return `<button class="huerf-x" data-cid="${esc(c.customer_id)}">
+        return `<button class="cola-x" data-cid="${esc(c.customer_id)}">
           <b>${esc(titulo(nombreCliente(c)))}</b>
-          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}${
-            dias ? ` · habilitado hace ${textoDias(dias)}` : " · habilitado hoy"}</span>
+          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
+          <span class="cola-d ${dias > 5 ? "tarde" : ""}">${
+            dias ? "hace " + textoDias(dias) : "hoy"}</span>
         </button>`;
       }).join("")}
     </div>
-    ${sinAgendar.length > 30 ? `<div class="pie" style="margin-top:9px">…y ${sinAgendar.length - 30} más.</div>` : ""}
-  </div>` : ""}`;
+    ${lista.length > 40 ? `<p class="pie" style="margin-top:9px">…y ${lista.length - 40} más.</p>` : ""}`
+    : `<div class="vacio">Ningún comercio habilitado se quedó sin visita agendada.</div>`}
+  </div>`;
 }
 
 async function descartarSeguimiento(id){
