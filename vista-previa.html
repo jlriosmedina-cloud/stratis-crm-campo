@@ -936,6 +936,170 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
   .cl-grid{grid-template-columns:repeat(4,1fr)}
   .sel-row{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
 }
+
+/* =====================================================================
+   BARRA LATERAL DE SUPERVISIÓN
+   =====================================================================
+   Solo para el Analista y el Manager, y solo cuando hay ancho de sobra.
+   En un celular una barra lateral es un cajón que se abre y se cierra: peor
+   que la fila de abajo, que está a un pulgar. Por eso aparece a partir de
+   1100 px y no antes.
+
+   El ejecutivo nunca la ve. Su navegación no cambia. */
+.rail{display:none}
+
+@media(min-width:1100px){
+  #app.con-rail{
+    display:grid;
+    grid-template-columns:226px minmax(0,1fr);
+    grid-template-areas:"rail cab" "rail vista";
+    grid-template-rows:auto 1fr;
+  }
+  #app.con-rail > header.top{grid-area:cab; position:sticky; top:0}
+  #app.con-rail > main{grid-area:vista; padding:22px 26px 44px}
+  #app.con-rail > nav.bottom{display:none}
+  #app.con-rail > .rail{
+    grid-area:rail; display:flex; flex-direction:column; gap:20px;
+    background:var(--brand); color:#c9d6e8; padding:15px 11px;
+    min-height:100dvh; position:sticky; top:0; align-self:start;
+    max-height:100dvh; overflow-y:auto;
+  }
+  .rail .rl-logo{display:flex; gap:9px; align-items:center; padding:2px 6px}
+  .rail .rl-logo i{width:30px;height:30px;border-radius:8px;flex:none;font-style:normal;
+    background:linear-gradient(140deg,#2a78d6,#7aa8ee);display:grid;place-items:center;
+    color:#fff;font-weight:800;font-size:13px}
+  .rail .rl-logo b{display:block;color:#fff;font-size:14px;font-weight:700;letter-spacing:-.2px}
+  .rail .rl-logo span{display:block;font-size:11px;opacity:.72}
+  .rail .rl-grupo{display:flex;flex-direction:column;gap:2px}
+  .rail .rl-grupo > p{margin:0 0 6px 8px;font-size:10.5px;font-weight:700;letter-spacing:.09em;
+    text-transform:uppercase;opacity:.55}
+  .rail button.rl-x{
+    display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;width:100%;
+    background:none;border:0;color:inherit;font-size:13.5px;font-weight:500;cursor:pointer;text-align:left;
+  }
+  .rail button.rl-x:hover{background:rgba(255,255,255,.07)}
+  .rail button.rl-x .ic{font-size:15px;line-height:1;width:18px;flex:none;opacity:.85;text-align:center}
+  .rail button.rl-x.on{background:rgba(255,255,255,.13);color:#fff}
+  .rail button.rl-x.on .ic{opacity:1}
+  .rail button.rl-x .cuenta{margin-left:auto;font-size:11px;font-weight:700;background:var(--crit);
+    color:#fff;border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
+  .rail .rl-yo{margin-top:auto;display:flex;gap:9px;align-items:center;padding:11px 8px 2px;
+    border-top:1px solid rgba(255,255,255,.11)}
+  .rail .rl-yo i{width:29px;height:29px;border-radius:50%;background:#2a78d6;display:grid;
+    place-items:center;color:#fff;font-size:11px;font-weight:700;font-style:normal;flex:none}
+  .rail .rl-yo b{display:block;color:#fff;font-size:12.5px;font-weight:600;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rail .rl-yo span{display:block;font-size:11px;opacity:.7}
+  /* Con la barra lateral el nombre ya está a la vista: la cabecera se queda
+     con lo que de verdad es de la ventana —el pulso, el tema y la cuenta—. */
+  #app.con-rail > header.top .mark{display:none}
+  #app.con-rail > header.top h1{font-size:13.5px;font-weight:600;opacity:.9}
+  #app.con-rail > header.top h1 small{display:inline;margin-left:8px}
+}
+
+/* =====================================================================
+   TABLERO DE SUPERVISIÓN
+   ===================================================================== */
+.tab-cab{margin-bottom:12px}
+.tab-cab h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.3px}
+.tab-periodo{margin-top:3px;font-size:12.5px;color:var(--muted)}
+
+/* Las cuatro cifras contra las que se juzga el periodo. Cada una con su
+   mínimo escrito: un porcentaje sin umbral no dice si está bien o mal. */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 14px}
+.kpi{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  padding:13px 14px;text-align:left;display:block;width:100%}
+button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inherit}
+button.kpi:hover{border-color:var(--brand-2)}
+.kpi .lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kpi .val{font-size:26px;font-weight:700;margin-top:4px;line-height:1;
+  font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.kpi .val .pc{font-size:15px;font-weight:600}
+.kpi .sub{font-size:12px;color:var(--ink-2);margin-top:6px;min-height:19px}
+.medidor{height:5px;border-radius:999px;background:var(--plane);overflow:hidden;margin-top:9px}
+.medidor i{display:block;height:100%;border-radius:999px;background:var(--good)}
+.medidor.ojo i{background:var(--warn)}
+.medidor.alerta i{background:var(--crit)}
+
+/* `minmax(0,1fr)` en la pista ancha: sin eso, una tabla con encabezados que no
+   parten empuja el ancho de la página entera. Es el desborde horizontal más
+   común de grid y no se ve hasta que el contenido crece. */
+.cols-tab{display:grid;grid-template-columns:minmax(0,1fr);gap:11px;align-items:start}
+.cols-tab > *{min-width:0}
+.panel{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);padding:15px 16px}
+.panel + .panel{margin-top:11px}
+.panel h3{margin:0;font-size:14.5px;font-weight:650;display:flex;align-items:baseline;
+  justify-content:space-between;gap:10px;flex-wrap:wrap}
+.panel h3 span{font-size:12px;font-weight:400;color:var(--muted)}
+.panel .nota{font-size:12.5px;color:var(--muted);margin:9px 0 0;line-height:1.45}
+.panel .nota b{color:var(--ink-2);font-weight:600}
+
+.tabla-cont{overflow-x:auto;margin-top:11px}
+table.tbl-tab{border-collapse:collapse;width:100%;font-size:13px}
+table.tbl-tab th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);text-align:right;padding:0 0 8px 16px;white-space:nowrap}
+table.tbl-tab th:first-child{text-align:left;padding-left:0}
+table.tbl-tab td{padding:9px 0 9px 16px;border-top:1px solid var(--grid);text-align:right;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+table.tbl-tab td:first-child{text-align:left;font-weight:600;padding-left:0}
+table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
+.barra-fila{display:flex;align-items:center;gap:9px;justify-content:flex-end}
+.barra-fila .pista{width:62px;height:7px;border-radius:999px;background:var(--plane);
+  overflow:hidden;flex:none}
+.barra-fila .pista i{display:block;height:100%;border-radius:999px;background:var(--brand-2)}
+.barra-fila .cifra{width:36px;text-align:right}
+
+/* Lo accionable. Cada línea es un botón que abre su lista: un número sin
+   salida obliga a buscar a mano lo que ya se contó. */
+.aten{display:flex;flex-direction:column;gap:1px;margin-top:9px}
+.aten-x{display:flex;gap:10px;align-items:flex-start;padding:9px 8px;border-radius:var(--r-sm);
+  background:none;border:1px solid transparent;cursor:pointer;font:inherit;color:inherit;
+  text-align:left;width:100%}
+.aten-x:hover{background:var(--plane);border-color:var(--grid)}
+.aten-x .pip{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
+.aten-x .pip.crit{background:var(--crit)}
+.aten-x .pip.warn{background:var(--warn)}
+.aten-x .pip.ok{background:var(--good)}
+.aten-x .txt{min-width:0;flex:1}
+.aten-x b{display:block;font-size:13px;font-weight:650}
+.aten-x .txt span{display:block;font-size:12px;color:var(--muted);line-height:1.4}
+.aten-x .n{margin-left:auto;font-weight:700;font-size:15px;
+  font-variant-numeric:tabular-nums;color:var(--ink-2);flex:none}
+
+.minimos{display:flex;flex-direction:column;gap:12px}
+.min-h{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;margin-bottom:5px}
+.min-h b{font-variant-numeric:tabular-nums}
+.min-h .de{color:var(--muted);font-weight:400}
+
+.grafico{margin-top:12px}
+.grafico svg{display:block;width:100%;height:auto;overflow:visible}
+.grafico .eje{font-size:10px;fill:var(--muted)}
+.grafico .rejilla{stroke:var(--grid);stroke-width:1}
+.grafico .serie{fill:none;stroke:var(--brand-2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.grafico .area{fill:var(--brand-2);opacity:.10}
+.grafico .punto{fill:var(--brand-2);stroke:var(--card);stroke-width:2}
+.grafico .meta{stroke:var(--crit);stroke-width:1.5;stroke-dasharray:4 4}
+.grafico .meta-txt{font-size:10px;fill:var(--crit-ink);font-weight:600}
+
+/* Todo lo que antes era la pantalla entera sigue acá, un nivel más abajo.
+   Nada se perdió: cambió de qué se habla primero. */
+.tab-mas{margin-top:14px;border:1px solid var(--grid);border-radius:var(--r);background:var(--card)}
+.tab-mas > summary{cursor:pointer;padding:13px 16px;font-size:13.5px;font-weight:650;
+  list-style:none;display:flex;align-items:center;gap:9px}
+.tab-mas > summary::-webkit-details-marker{display:none}
+.tab-mas > summary:before{content:"▸";color:var(--muted);font-size:12px}
+.tab-mas[open] > summary:before{content:"▾"}
+.tab-mas[open] > summary{border-bottom:1px solid var(--grid)}
+.tab-mas-cuerpo{padding:14px 16px 4px}
+
+@media(min-width:900px){
+  .kpis{grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi .val{font-size:28px}
+}
+@media(min-width:1180px){
+  .cols-tab{grid-template-columns:minmax(0,1fr) 322px;gap:12px}
+  .tab-cab h2{font-size:21px}
+}
 </style>
 </head>
 <body>
@@ -949,6 +1113,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
     <button class="icon-btn" id="btnUser" title="Cuenta">▾</button>
   </header>
   <nav class="bottom" id="nav"></nav>
+  <aside class="rail" id="rail"></aside>
   <main id="view"></main>
 </div>
 <div id="overlay"></div>
@@ -2681,6 +2846,63 @@ function renderNav(){
       <span class="ic">${n.ic}</span>${n.label}
     </button>`).join("");
   $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.tab));
+  renderRail();
+}
+
+/* La barra lateral de supervisión.
+ *
+ * Es la misma navegación de siempre, en otro sitio y agrupada: lo de la
+ * campaña arriba, lo que solo miran el Analista y el Manager abajo. Agruparla
+ * no es decoración —dice de un vistazo qué ve el equipo y qué no, que es una
+ * pregunta que aparece cada vez que alguien pide una pantalla compartida—.
+ *
+ * Solo se dibuja para supervisión, y el CSS solo la muestra a partir de
+ * 1100 px. Debajo de ese ancho manda la fila de abajo, que está a un pulgar.
+ * El ejecutivo no la recibe nunca: su navegación no cambia en este tramo. */
+const RAIL = [
+  { g:"Campaña", items:["panel","cartera","agenda","registros"] },
+  { g:"Solo supervisión", items:["bono","reporte","ayuda"] }
+];
+const ETIQUETA_RAIL = { panel:"Tablero" };
+
+function renderRail(){
+  const el = $("#rail"), app = $("#app");
+  if (!el || !app) return;
+  if (!S.user || S.user.rol === "Ejecutivo"){
+    app.classList.remove("con-rail");
+    el.innerHTML = "";
+    return;
+  }
+  app.classList.add("con-rail");
+
+  const porId = {};
+  navVisible().forEach(n => porId[n.id] = n);
+  const iniciales = String(S.user.nombreCompleto || S.user.nombre || "")
+    .trim().split(/\s+/).slice(0,2).map(p => p[0] || "").join("").toUpperCase();
+
+  /* El contador de correos por aclarar viaja con la Cartera: es la lista que
+     hay que vaciar, y el número al lado del nombre evita tener que entrar a
+     ver si bajó. */
+  const pend = CLIENTES.filter(correoAmbiguo).length;
+
+  el.innerHTML = `
+    <div class="rl-logo"><i>S</i>
+      <div><b>Stratis CRM</b><span>BBVA Adquirencia</span></div></div>
+    ${RAIL.map(gr => {
+      const items = gr.items.map(id => porId[id]).filter(Boolean);
+      if (!items.length) return "";
+      return `<div class="rl-grupo"><p>${esc(gr.g)}</p>
+        ${items.map(n => `<button class="rl-x ${S.tab === n.id ? "on" : ""}" data-tab="${n.id}">
+          <span class="ic">${n.ic}</span>${esc(ETIQUETA_RAIL[n.id] || n.label)}
+          ${n.id === "cartera" && pend ? `<span class="cuenta">${pend}</span>` : ""}
+        </button>`).join("")}
+      </div>`;
+    }).join("")}
+    <div class="rl-yo"><i>${esc(iniciales || "··")}</i>
+      <div><b>${esc(S.user.nombreCompleto || S.user.nombre || "")}</b>
+        <span>${esc(S.user.rol || "")}</span></div></div>`;
+
+  el.querySelectorAll("button[data-tab]").forEach(b => b.onclick = () => go(b.dataset.tab));
 }
 /* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
    los filtros desplegados, para que se vea por qué la lista es esa. */
@@ -2945,6 +3167,15 @@ function viewCartera(){
     /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
        de análisis: existe para vaciarse. */
     if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
+    /* Trabajados y sin una sola palabra escrita. No es lo mismo que «sin
+       gestión»: a estos ya se les dedicó tiempo, y la celda de comentario que
+       BBVA lee se va a llenar sola con lo deducido. Vale la pena pedir la de
+       verdad antes de que salga la otra. */
+    if (S.fContacto === "sin_comentario"){
+      const rs = DB.delCliente(c.customer_id);
+      return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                         || String(x.Comentario_Ejecutivo || "").trim());
+    }
     /* Los dos que llegan desde el Panel. Dejan fuera las ventas nuevas a
        propósito: las columnas «Registrados» y «Gestionados» se miden sobre la
        cartera que entregó BBVA, y meter acá los RUC que trajo Stratis haría que
@@ -5787,18 +6018,22 @@ const ejecutivosPanel = () => S.user.rol === "Ejecutivo"
   : USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
 
 /* ---- El selector, uno para toda la pantalla ----------------------------- */
-function selectorPanel(r){
+/* `conTitulo` en falso lo deja como lo que es: un control. El tablero de
+   supervisión ya trae su propia cabecera con el periodo escrito, y dos títulos
+   seguidos diciendo casi lo mismo hacen dudar de cuál manda. */
+function selectorPanel(r, conTitulo){
   const opciones = r.id === "proyecto" ? []
     : r.id === "mes" ? mesesProyecto().map(m => [m, nombreMes(m)])
     : periodosProyecto().slice().reverse().map(p => [p, `${nombrePeriodo(p)} · ${textoPeriodo(p)}`]);
 
   return `
+  ${conTitulo === false ? "" : `
   <div class="page-head">
     <div>
       <h2>Panel de la campaña</h2>
       <div class="sub">Cartera asignada, alcance y actividad — todo medido contra el mismo periodo</div>
     </div>
-  </div>
+  </div>`}
 
   <div class="pnl-per">
     <div class="seg" role="group" aria-label="Periodo">
@@ -6423,6 +6658,11 @@ function bloqueDetalle(r, regs){
 }
 
 function viewPanel(){
+  /* Supervisión tiene su propio tablero: mismas cuentas, otro orden de lectura.
+     El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
+     se le cambia la herramienta de trabajo en medio de una campaña sin que sea
+     su turno—. */
+  if (mandoTotal()) return viewTablero();
   const r = rangoPanel();
   universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
 
@@ -6443,6 +6683,407 @@ function viewPanel(){
     ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
         <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
     : ""}`;
+}
+
+/* =========================================================================
+   El tablero de supervisión
+   =========================================================================
+
+   Una pantalla que se mira, no que se lee de arriba abajo. Eso cambia el orden
+   de las cosas: primero las cuatro cifras contra las que se juzga el periodo,
+   después el detalle por persona y el ritmo, y en la columna de la derecha lo
+   único accionable —lo que está trabado y a un clic de su lista—.
+
+   Todo lo que sale acá ya se calculaba antes; no hay una sola cuenta nueva.
+   Lo que cambió es qué se pone delante y qué se guarda un nivel más abajo.
+
+   El ejecutivo NO ve esta pantalla: sigue con su Panel de siempre. Cuando le
+   toque su turno tendrá el suyo, con sus propios números y sin los del resto.
+   ========================================================================= */
+
+/* ---- Las cuatro cifras de cabecera ---------------------------------------
+   Cada una trae su mínimo, porque un porcentaje sin su umbral no dice si está
+   bien o mal: 93,7% suena a mucho hasta que se sabe que el mínimo es 95%. */
+function cifrasTablero(r, regs){
+  const p    = r.periodo || periodoHoy();
+  const req  = paramsDe(p).requisitos;
+  const ejec = ejecutivosPanel();
+  const filas = ejec.map(u => filaEjecutivo(u, r));
+
+  const asignada   = filas.reduce((n,f) => n + (f.asignada || 0), 0);
+  const gestionados= filas.reduce((n,f) => n + (f.trabajados || 0), 0);
+  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const puntuales  = regs.filter(aTiempo).length;
+
+  const base = universoPanel();
+  const cumplidos = base.filter(c => !esClienteNuevo(c)
+    && (esRetencion(c) || esRecuperado(c)) && enRango(c.cerrado_en, r)).length;
+  const ventas = base.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
+
+  /* Las visitas que pide el periodo: el requisito es semanal y por persona, así
+     que el objetivo del periodo se arma con las semanas que ya corrieron —no
+     con las que faltan—. Exigir por días que todavía no ocurren es inventar
+     un incumplimiento. */
+  const sem = semanasRango(r);
+  const pideVisitas = Math.round(req.visitas_semana * sem * (ejec.length || 1));
+
+  return {
+    filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, pideVisitas,
+    cobertura:   asignada ? gestionados / asignada * 100 : null,
+    calidad:     regs.length ? puntuales / regs.length * 100 : null,
+    gestiones:   regs.length
+  };
+}
+
+/* Una barra de 5 px que dice de un vistazo si el número llegó o no. El color
+   no va solo: al lado siempre está la cifra y su mínimo escrito. */
+const medidor = (pct, tono) =>
+  `<div class="medidor ${tono || ""}"><i style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%"></i></div>`;
+
+const tonoContra = (valor, minimo) =>
+  valor === null ? "" : (valor >= minimo ? "" : (valor >= minimo * 0.8 ? "ojo" : "alerta"));
+
+function kpisTablero(x, r){
+  const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const cobOk = x.cobertura !== null && x.cobertura >= x.req.cobertura_pct;
+  const calOk = x.calidad   !== null && x.calidad   >= x.req.puntualidad_pct;
+
+  return `
+  <div class="kpis">
+    <button class="kpi kpi-link" data-verlista="gestionado" data-vercuantos="${x.gestionados}">
+      <div class="lbl">Cobertura del periodo</div>
+      ${/* Sin cartera asignada no hay porcentaje que dar, y poner «—%» al lado de
+           una barra vacía se lee como cero. Se muestra lo que sí se sabe —los
+           comercios gestionados— y se dice qué falta para poder medirlo. */
+        x.asignada
+          ? `<div class="val num">${pct1(x.cobertura)}<span class="pc">%</span></div>
+             <div class="sub">${x.gestionados} de ${x.asignada} gestionados · mínimo ${x.req.cobertura_pct}%</div>
+             ${medidor(x.cobertura, cobOk ? "" : tonoContra(x.cobertura, x.req.cobertura_pct))}`
+          : `<div class="val num">${x.gestionados}</div>
+             <div class="sub">comercios gestionados · falta cargar la cartera asignada en Ajustes</div>
+             ${medidor(0, "ojo")}`}
+    </button>
+
+    <div class="kpi">
+      <div class="lbl">Visitas efectivas</div>
+      <div class="val num">${x.efectivas}</div>
+      <div class="sub">${x.pideVisitas ? `de ${x.pideVisitas} que pide el periodo · ${x.req.visitas_semana} por semana y ejecutivo`
+        : `se piden ${x.req.visitas_semana} por semana y ejecutivo`}</div>
+      ${medidor(x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0,
+                x.pideVisitas && x.efectivas >= x.pideVisitas ? "" : "alerta")}
+    </div>
+
+    <button class="kpi kpi-link" data-vercierre="cumplido_cartera">
+      <div class="lbl">Objetivo cumplido</div>
+      <div class="val num">${x.cumplidos}</div>
+      <div class="sub">${x.cumplidos === 1 ? "comercio retenido o recuperado" : "comercios retenidos o recuperados"}${
+        x.ventas ? ` · ${x.ventas} venta${x.ventas === 1 ? "" : "s"} nueva${x.ventas === 1 ? "" : "s"}` : ""}</div>
+      ${medidor(x.asignada ? x.cumplidos / x.asignada * 100 : 0, "ojo")}
+    </button>
+
+    <div class="kpi">
+      <div class="lbl">Calidad del registro</div>
+      <div class="val num">${pct1(x.calidad)}<span class="pc">%</span></div>
+      <div class="sub">${x.gestiones
+        ? `${calOk ? `<span class="chip ok">llega al mínimo de ${x.req.puntualidad_pct}%</span>`
+                   : `<span class="chip warn">bajo el mínimo de ${x.req.puntualidad_pct}%</span>`}`
+        : "sin gestiones en el periodo"}</div>
+      ${medidor(x.calidad, calOk ? "" : "ojo")}
+    </div>
+  </div>`;
+}
+
+/* ---- Avance por ejecutivo ------------------------------------------------
+   La misma tabla de siempre, con dos cambios: la cobertura se lee como barra
+   —comparar cuatro porcentajes en texto obliga a hacer la resta a mano— y las
+   columnas de detalle siguen a un clic, sin ocupar la primera lectura. */
+function tablaTablero(x){
+  const b = (pct) => `<div class="barra-fila">
+    <div class="pista"><i style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%"></i></div>
+    <span class="cifra num">${pct === null ? "—" : Math.round(pct) + "%"}</span></div>`;
+
+  const suma = k => x.filas.reduce((n,f) => n + (f[k] || 0), 0);
+  const equipo = {
+    asignada: x.asignada, registrados: suma("registrados"), trabajados: suma("trabajados"),
+    efectivas: suma("efectivas"), logrado: suma("logrado"),
+    cobertura: x.cobertura
+  };
+
+  const fila = (f, esEquipo) => `<tr${esEquipo ? ' class="total"' : ""}>
+    <td>${esc(f.nombre || "Equipo")}</td>
+    <td>${f.asignada || "—"}</td>
+    <td>${f.registrados
+      ? `<button class="cifra-link" data-verlista="registrado" ${esEquipo ? "" : `data-verejec="${esc(f.nombre)}"`}
+                 data-vercuantos="${f.registrados}">${f.registrados}</button>` : "—"}</td>
+    <td>${f.trabajados
+      ? `<button class="cifra-link" data-verlista="gestionado" ${esEquipo ? "" : `data-verejec="${esc(f.nombre)}"`}
+                 data-vercuantos="${f.trabajados}">${f.trabajados}</button>` : "—"}</td>
+    <td>${f.efectivas || "—"}</td>
+    <td>${f.logrado || "—"}</td>
+    <td>${b(esEquipo ? f.cobertura : (f.asignada ? f.trabajados / f.asignada * 100 : null))}</td>
+  </tr>`;
+
+  return `
+  <div class="panel">
+    <h3>Avance por ejecutivo <span>cobertura = gestionados sobre su cartera asignada</span></h3>
+    <div class="tabla-cont">
+      <table class="tbl-tab">
+        <thead><tr>
+          <th>Ejecutivo</th><th>Asignados</th><th>Registrados</th><th>Gestionados</th>
+          <th>Visitas</th><th>Cumplido</th><th>Cobertura</th>
+        </tr></thead>
+        <tbody>
+          ${x.filas.map(f => fila(f, false)).join("")}
+          ${fila(equipo, true)}
+        </tbody>
+      </table>
+    </div>
+    <p class="nota"><b>Asignados</b> los pone BBVA. <b>Registrados</b> son las fichas cargadas en el
+      CRM, se hayan trabajado o no. <b>Gestionados</b> son los que recibieron al menos un contacto
+      con el cliente en este periodo. Los números subrayados abren su lista.</p>
+  </div>`;
+}
+
+/* ---- Gestiones por día ---------------------------------------------------
+   La cifra del periodo dice dónde se está; esta línea dice si se está yendo
+   hacia allá. Sin ella un 9,5% de cobertura se lee igual el día que sube que
+   el día que se detiene. */
+function lineaDiaria(r, regs){
+  const dias = [];
+  const fin  = r.fin > hoyISO() ? hoyISO() : r.fin;
+  if (r.ini && fin >= r.ini){
+    for (let d = new Date(r.ini + "T12:00:00Z"); ; ){
+      const iso = d.toISOString().slice(0,10);
+      dias.push(iso);
+      if (iso >= fin || dias.length > 400) break;
+      d = new Date(d.getTime() + 86400000);
+    }
+  }
+  if (dias.length < 2) return `
+    <div class="panel"><h3>Gestiones por día</h3>
+      <div class="vacio">Todavía no hay días suficientes en este periodo para dibujar una línea.</div>
+    </div>`;
+
+  /* Con periodos largos la línea se vuelve ilegible y las etiquetas se pisan.
+     Se muestran los últimos 21 días: es el tramo sobre el que se puede actuar. */
+  const VENTANA = 21;
+  const vistos  = dias.slice(-VENTANA);
+  const cuenta  = iso => regs.filter(x => String(x.Fecha_Contacto).slice(0,10) === iso).length;
+  const vals    = vistos.map(cuenta);
+
+  /* El ritmo necesario: lo que falta de cobertura repartido entre los días
+     trabajados que quedan. Es la pregunta que sigue a «vamos en 9,5%». */
+  const fer   = feriadosDe(r.periodo || periodoHoy());
+  const quedan = dias.filter(iso => iso > fin && esDiaTrabajado(iso, fer)).length
+    + (r.fin > fin ? diasHabilesHasta(fin, r.fin, fer) : 0);
+
+  const asignada = ejecutivosPanel().reduce((n,u) => n + asignadaDe(u.correo, r), 0);
+  const hechos   = new Set(regs.map(x => String(x.Customer_id))).size;
+  /* Sin cartera asignada no hay meta contra la que calcular un ritmo. Dibujar
+     la línea igual la pondría en cero, y una meta en cero se lee como
+     «cumplido», que es lo contrario de lo que pasa. */
+  const ritmo    = (asignada && quedan > 0) ? Math.ceil(Math.max(0, asignada - hechos) / quedan) : null;
+
+  const W = 620, H = 150, L = 34, R = 611, T = 14, B = 118;
+  const tope = Math.max(10, Math.ceil(Math.max(...vals, ritmo || 0) / 10) * 10);
+  const px = i => vistos.length === 1 ? (L + R) / 2 : L + 28 + (R - L - 28) * i / (vistos.length - 1);
+  const py = v => B - (B - T) * (v / tope);
+
+  const pts   = vals.map((v,i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`);
+  const linea = "M" + pts.join(" L");
+  const area  = `${linea} L${px(vals.length-1).toFixed(1)},${B} L${px(0).toFixed(1)},${B} Z`;
+  const yMeta = ritmo !== null && ritmo <= tope ? py(ritmo) : null;
+
+  /* Con muchos días no cabe una etiqueta por punto: se rotulan como mucho seis,
+     repartidas. Una etiqueta ilegible es peor que ninguna. */
+  const paso = Math.max(1, Math.ceil(vistos.length / 6));
+  const dia  = iso => { const [,m,d] = iso.split("-"); return `${d}/${m}`; };
+  const prom = vals.length ? (vals.reduce((a,b) => a + b, 0) / vals.length) : 0;
+
+  return `
+  <div class="panel">
+    <h3>Gestiones por día <span>${dia(vistos[0])} al ${dia(vistos[vistos.length-1])}</span></h3>
+    <div class="grafico">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gestiones registradas por día: ${
+        vistos.map((iso,i) => `${dia(iso)} ${vals[i]}`).join(", ")}.${
+        ritmo !== null ? ` El ritmo necesario es de ${ritmo} comercios por día trabajado.` : ""}">
+        ${[0, 0.5, 1].map(f => {
+          const y = (B - (B - T) * f).toFixed(1);
+          return `<line class="rejilla" x1="${L}" y1="${y}" x2="${R + 1}" y2="${y}"/>
+                  <text class="eje" x="${L - 6}" y="${(+y + 3).toFixed(1)}" text-anchor="end">${Math.round(tope * f)}</text>`;
+        }).join("")}
+        <path class="area" d="${area}"/>
+        <path class="serie" d="${linea}"/>
+        ${yMeta !== null ? `<line class="meta" x1="${L}" y1="${yMeta.toFixed(1)}" x2="${R + 1}" y2="${yMeta.toFixed(1)}"/>
+          <text class="meta-txt" x="${R + 1}" y="${(yMeta - 5).toFixed(1)}" text-anchor="end">ritmo necesario · ${ritmo} al día</text>` : ""}
+        ${vals.map((v,i) => `<circle class="punto" cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="4"/>`).join("")}
+        ${vistos.map((iso,i) => (i % paso === 0 || i === vistos.length - 1)
+          ? `<text class="eje" x="${px(i).toFixed(1)}" y="138" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
+      </svg>
+    </div>
+    <p class="nota">${hechos} comercios distintos tocados en el periodo${
+      asignada ? ` de ${asignada} asignados` : ""}. ${
+      ritmo !== null
+        ? `Quedan ${quedan} día${quedan === 1 ? "" : "s"} trabajado${quedan === 1 ? "" : "s"}: el ritmo necesario es ${ritmo} al día y el promedio de estos ${vistos.length} es ${prom.toFixed(0)}.`
+        : !asignada
+          ? `El ritmo necesario no se puede calcular sin la cartera asignada, que se carga en <b>Ajustes</b>.`
+          : "El periodo ya cerró: la línea es el registro de lo que pasó."}</p>
+  </div>`;
+}
+
+/* Días trabajados entre dos fechas, sin contar la primera. Se usa para saber
+   cuánto queda del periodo; `demoraHabil` hace la misma cuenta hacia atrás. */
+function diasHabilesHasta(desde, hasta, fer){
+  let n = 0;
+  if (!desde || !hasta || hasta <= desde) return 0;
+  for (let d = new Date(desde + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= hasta || n > 400) break;
+  }
+  return n;
+}
+
+/* ---- Requiere una decisión ----------------------------------------------
+   Antes se llamaba «Lo que hay que corregir» y vivía al fondo de la pantalla,
+   que es donde se van a morir las listas de pendientes. Acá va a la derecha,
+   a la altura de los ojos, y cada punto lleva a su lista. */
+function decisionesTablero(r, regs){
+  const base = universoPanel();
+  const sinUbi   = regs.filter(sinUbicacion);
+  const tarde    = regs.filter(x => demoraHabil(x) > 1);
+  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+  const ambiguos = base.filter(c => typeof correoAmbiguo === "function" && correoAmbiguo(c));
+  const sinComentario = base.filter(c => {
+    const rs = DB.delCliente(c.customer_id);
+    return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                       || String(x.Comentario_Ejecutivo || "").trim());
+  });
+
+  const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en);
+  const vencidas = abiertas.filter(x => estadoAccion(x) === "vencida");
+  const conAccion = new Set(abiertas.map(x => String(x.customer_id)));
+  const huerfanos = base.filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0
+    && !conAccion.has(String(c.customer_id)));
+
+  /* Un ejecutivo con gestiones y sin una sola visita en el periodo no es un
+     número más de la tabla: es una conversación que hay que tener hoy. */
+  const sinVisitas = ejecutivosPanel().map(u => filaEjecutivo(u, r))
+    .filter(f => f.gestiones > 0 && f.efectivas === 0);
+
+  const puntos = [
+    { n:ambiguos.length, t:"Correos sin aclarar", d:"No se sabe si fueron al banco o al cliente",
+      ir:`data-vercartera="correo_ambiguo"`, tono:"crit" },
+    ...sinVisitas.map(f => ({ n:0, t:`${f.nombre.split(" ")[0]} sin una sola visita`,
+      d:`${f.trabajados} gestionados, 0 visitas en el periodo`,
+      ir:`data-verges="todos" data-verejec="${esc(f.nombre)}"`, tono:"crit", siempre:true })),
+    { n:sinUbi.length, t:"Gestiones sin ubicación", d:"Presenciales sin coordenada y sin exención",
+      ir:`data-verges="sin_ubicacion"`, tono:"crit" },
+    { n:vencidas.length, t:"Acciones vencidas", d:"Pasó la fecha comprometida y nadie retomó",
+      ir:`data-go="agenda"`, tono:"crit" },
+    { n:tarde.length, t:"Gestiones fuera de plazo", d:"Registradas más de un día trabajado después",
+      ir:`data-verges="fuera_plazo"`, tono:"warn" },
+    { n:sinComentario.length, t:"Comercios sin comentario", d:"Ninguna gestión dejó nota del cliente",
+      ir:`data-vercartera="sin_comentario"`, tono:"warn" },
+    { n:sinCanal.length, t:"Fichas sin coordinar con BBVA", d:"El caso no puede avanzar sin el dato",
+      ir:`data-vercartera="sin_bbva"`, tono:"warn" },
+    { n:huerfanos.length, t:"Sin próxima acción", d:"Trabajados, abiertos y sin nada agendado",
+      ir:`data-go="agenda"`, tono:"warn" }
+  ].filter(x => x.siempre || x.n > 0);
+
+  return `
+  <div class="panel">
+    <h3>Requiere una decisión <span>${puntos.length || "nada"} ${puntos.length === 1 ? "punto" : "puntos"}</span></h3>
+    ${puntos.length ? `<div class="aten">
+      ${puntos.map(x => `<button class="aten-x" ${x.ir}>
+        <span class="pip ${x.tono}"></span>
+        <span class="txt"><b>${esc(x.t)}</b><span>${esc(x.d)}</span></span>
+        <span class="n num">${x.n}</span>
+      </button>`).join("")}
+    </div>` : `<div class="vacio">No hay nada trabado: sin correos por aclarar, sin acciones vencidas
+      y sin gestiones sin ubicación.</div>`}
+  </div>`;
+}
+
+/* ---- Los tres mínimos ---------------------------------------------------
+   Es la llave del bono, resumida a lo que se mira todos los días. El detalle
+   por persona sigue en Incentivos; acá va el estado del equipo. */
+function minimosTablero(x){
+  const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const barra = (etiqueta, valor, meta, texto) => `
+    <div class="min-x">
+      <div class="min-h"><span>${etiqueta}</span>
+        <b class="num">${texto}<span class="de"> / ${meta}</span></b></div>
+      ${medidor(valor, "")}
+    </div>`;
+
+  const cobPct = x.cobertura === null ? 0 : x.cobertura / x.req.cobertura_pct * 100;
+  const calPct = x.calidad   === null ? 0 : x.calidad   / x.req.puntualidad_pct * 100;
+  const visPct = x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0;
+
+  return `
+  <div class="panel">
+    <h3>Los tres mínimos</h3>
+    <p class="nota" style="margin-bottom:12px">Cumplir los tres abre la llave del bono base.
+      Acá va el equipo completo; el detalle por persona está en <b>Incentivos</b>.</p>
+    <div class="minimos">
+      ${barra("Cobertura", cobPct, x.req.cobertura_pct + "%", pct1(x.cobertura) + "%")}
+      ${barra("Calidad del registro", calPct, x.req.puntualidad_pct + "%", pct1(x.calidad) + "%")}
+      ${barra("Visitas efectivas", visPct, x.pideVisitas || "—", String(x.efectivas))}
+    </div>
+  </div>`;
+}
+
+/* ---- La pantalla completa ----------------------------------------------- */
+function viewTablero(){
+  const r = rangoPanel();
+  universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
+
+  const visibles = new Set(universoPanel().map(c => String(c.customer_id)));
+  const regs = DB.todos().filter(x => visibles.has(String(x.Customer_id)) && enRango(x.Fecha_Contacto, r));
+  const x = cifrasTablero(r, regs);
+  const av = avanceProyecto();
+
+  return `
+  <div class="tab-cab">
+    <div>
+      <h2>Tablero de la campaña</h2>
+      <div class="tab-periodo">${esc(r.label ? r.label[0].toUpperCase() + r.label.slice(1) : "Periodo")} ·
+        ${esc(r.detalle)} · día ${av.corrido} de ${av.total} del proyecto</div>
+    </div>
+  </div>
+
+  ${selectorPanel(r, false)}
+  ${kpisTablero(x, r)}
+
+  <div class="cols-tab">
+    <div>
+      ${tablaTablero(x)}
+      ${lineaDiaria(r, regs)}
+      ${flujoBbva() ? cardPipeline() : ""}
+    </div>
+    <div>
+      ${decisionesTablero(r, regs)}
+      ${minimosTablero(x)}
+    </div>
+  </div>
+
+  <details class="tab-mas">
+    <summary>El proyecto completo, el reparto de la cartera y el detalle del periodo</summary>
+    <div class="tab-mas-cuerpo">
+      ${bloqueProyecto()}
+      ${bloqueActividad(r, regs)}
+      ${bloqueEquipo(r)}
+      ${bloqueLlave(r)}
+      ${bloqueDetalle(r, regs)}
+    </div>
+  </details>
+
+  <div class="pie" style="margin:14px 2px 0">Las descargas viven en
+    <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`;
 }
 
 /* =========================================================================
