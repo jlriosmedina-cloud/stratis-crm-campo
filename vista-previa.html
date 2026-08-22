@@ -42,6 +42,10 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
+/* La página no se desliza de lado. Lo que de verdad es ancho —las tablas— se
+   desliza dentro de su propia caja, que es donde se entiende que hay más. */
+html{overflow-x:hidden}
+main{min-width:0;overflow-x:clip}
 body{
   font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
   background:var(--plane); color:var(--ink);
@@ -289,7 +293,8 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cl .body{flex:1;min-width:0}
 .cl .name{font-weight:670;font-size:14.5px;letter-spacing:-.15px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2}
 .cl .sub{font-size:12.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cl .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.cl .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;min-width:0}
+.cl .meta .chip{white-space:normal;overflow-wrap:anywhere;text-align:left}
 .cl .rt{text-align:right;flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
 .cl .amt{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
 .cl .amt small{display:block;font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.3px}
@@ -386,6 +391,71 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 /* La leyenda de la Agenda: tres columnas de texto chico, sin marco por dentro.
    No es una alerta ni una tarjeta más, es el pie de página que explica los
    botones de arriba. */
+/* =====================================================================
+   EL CALENDARIO DE VISITAS
+   =====================================================================
+   Una rejilla de mes, no una lista. La lista responde «qué tengo pendiente»;
+   la rejilla responde «qué tengo el jueves», que es la pregunta que se hace al
+   pactar una visita nueva. */
+.cal{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  padding:13px 14px;margin-bottom:13px}
+.cal-cab{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;margin-bottom:11px}
+.cal-nav{display:flex;align-items:center;gap:7px}
+.cal-nav .btn{min-width:34px;padding:7px 10px}
+.cal-mes{font-size:16px;font-weight:700;letter-spacing:-.2px;min-width:150px;text-align:center}
+.cal-leyenda{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+.cal-leyenda span{display:flex;align-items:center;gap:5px}
+.cal-leyenda .pip,.cal-ev i{width:7px;height:7px;border-radius:50%;flex:none;display:block}
+.pip.ok{background:var(--good)} .pip.warn{background:var(--warn)}
+.pip.crit{background:var(--crit)} .pip.info{background:var(--brand-2)}
+.pip.no{background:var(--muted)}
+
+.cal-dow{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:4px}
+.cal-dow span{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);text-align:center;padding:2px 0}
+.cal-rej{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal-x{min-height:78px;border:1px solid var(--grid);border-radius:9px;background:var(--card);
+  padding:5px 5px 4px;display:flex;flex-direction:column;gap:3px;cursor:pointer;
+  text-align:left;font:inherit;color:inherit;min-width:0;overflow:hidden}
+.cal-x:hover{border-color:var(--brand-2)}
+.cal-x.vacia{background:var(--plane);border-color:transparent;cursor:default;min-height:0}
+.cal-x.finde{background:var(--plane)}
+.cal-x .n{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.cal-x.hoy{border-color:var(--brand-2);box-shadow:inset 0 0 0 1px var(--brand-2)}
+.cal-x.hoy .n{color:var(--brand-2)}
+.cal-x.sel{background:var(--info-bg);border-color:var(--brand-2)}
+.cal-x .ev{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cal-ev{display:flex;align-items:center;gap:4px;font-size:10.5px;line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
+.cal-ev b{font-variant-numeric:tabular-nums;font-weight:700;flex:none}
+.cal-ev.ok i{background:var(--good)} .cal-ev.warn i{background:var(--warn)}
+.cal-ev.crit i{background:var(--crit)} .cal-ev.info i{background:var(--brand-2)}
+.cal-ev.no i{background:var(--muted)}
+.cal-mas{font-size:10px;font-weight:700;color:var(--brand-2)}
+
+.cal-res{display:flex;gap:12px;align-items:flex-start;margin-bottom:9px}
+.cal-res-f{flex:none;width:96px;padding-top:14px;text-align:right}
+.cal-res-f b{display:block;font-size:13px;font-variant-numeric:tabular-nums}
+.cal-res-f span{display:block;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.cal-res-c{flex:1;min-width:0}
+.cal-res-c .card{margin-bottom:0}
+.cal-movida{color:var(--warn-ink)}
+
+/* En el celular la rejilla se aprieta: se dejan solo los puntos de color, y el
+   detalle vive en el panel del día. Siete columnas con texto a 390 px no se
+   leen — se adivinan. */
+@media(max-width:759px){
+  .cal{padding:11px 10px}
+  .cal-x{min-height:52px;padding:4px 3px}
+  .cal-ev{gap:0}
+  .cal-ev b,.cal-ev{font-size:0}
+  .cal-ev i{width:6px;height:6px;margin:0 auto}
+  .cal-ev{justify-content:center}
+  .cal-mas{font-size:9px}
+  .cal-res-f{width:70px}
+}
+
 /* Quién está libre: una fila por persona, con el punto del semáforo delante.
    El color no va solo — al lado siempre está qué tiene encima. */
 .disp{display:flex;flex-direction:column;gap:2px;margin-top:11px}
@@ -657,7 +727,12 @@ table.tbl tr:last-child td{border-bottom:0}
 
 
 /* La lista de comercios se acomoda al ancho disponible */
+/* `minmax(0,1fr)` y no `1fr`: una pista `1fr` nunca baja de su contenido
+   mínimo, así que un chip largo sin espacios estira la pista, la rejilla y con
+   ella la página. Se ve solo cuando el contenido crece, que es cuando ya está
+   en producción. */
 .cl-grid{display:grid;gap:9px}
+.cl-grid > *{min-width:0}
 .cl-grid .cl{margin-bottom:0}
 
 
@@ -891,7 +966,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 @media(min-width:1180px){
   main{max-width:1400px;padding:24px 28px 48px}
   .card{padding:18px 20px}
-  .cl-grid{grid-template-columns:repeat(2,1fr);gap:12px}
+  .cl-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
   .cl{padding:14px 15px}
   .stat-row{gap:12px}
 
@@ -944,7 +1019,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 /* ---------- MONITOR: una columna más ---------- */
 @media(min-width:1560px){
   main{max-width:1680px;padding:26px 32px 52px}
-  .cl-grid{grid-template-columns:repeat(3,1fr)}
+  .cl-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .stat .val{font-size:28px}
   .view-form, .view-cols{column-count:3;column-gap:18px}
   .tl-lectura{column-count:3}
@@ -956,7 +1031,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 /* ---------- PANTALLA GRANDE: se usa casi todo el ancho ---------- */
 @media(min-width:1900px){
   main{max-width:min(1880px, 94vw)}
-  .cl-grid{grid-template-columns:repeat(4,1fr)}
+  .cl-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
   .sel-row{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
 }
 
@@ -1120,7 +1195,13 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 .grafico .area{fill:var(--brand-2);opacity:.10}
 .grafico .punto{fill:var(--brand-2);stroke:var(--card);stroke-width:2}
 .grafico .meta{stroke:var(--crit);stroke-width:1.5;stroke-dasharray:4 4}
-.grafico .meta-txt{font-size:10px;fill:var(--crit-ink);font-weight:600}
+.grafico .meta-txt{font-size:10px;fill:var(--crit-ink);font-weight:600;
+  paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}
+/* La cifra de cada día. El borde del color del papel por detrás la hace legible
+   cuando cae sobre la línea, sobre el área o sobre la meta. */
+.grafico .cifra-punto{font-size:9.5px;font-weight:700;fill:var(--ink-2);
+  font-variant-numeric:tabular-nums;
+  paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}
 
 /* Todo lo que antes era la pantalla entera sigue acá, un nivel más abajo.
    Nada se perdió: cambió de qué se habla primero. */
@@ -1567,6 +1648,36 @@ function mediana(nums){
    Para la reunión de equipo: quién tiene el rango libre. Una cita ocupa desde
    su hora hasta su hora más la duración; dos citas se pisan cuando cada una
    empieza antes de que termine la otra. */
+/* ---- Aritmética de calendario -------------------------------------------
+   Todo se hace con cadenas «AAAA-MM-DD» y números, nunca sumando milisegundos
+   a un Date: eso arrastra la zona horaria del navegador y un día de más o de
+   menos según a qué hora se abra la pantalla. */
+const pad2 = n => String(n).padStart(2, "0");
+const mesDe = iso => String(iso || "").slice(0,7);
+const isoYMD = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+const diasDelMes = ym => {
+  const [y, m] = String(ym).split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+};
+/* Lunes = 0. La semana laboral peruana empieza el lunes y un calendario que
+   empieza el domingo obliga a contar dos veces. */
+const diaSemana = iso => {
+  const [y,m,d] = String(iso).slice(0,10).split("-").map(Number);
+  return (new Date(Date.UTC(y, m-1, d)).getUTCDay() + 6) % 7;
+};
+const mesMas = (ym, n) => {
+  const [y, m] = String(ym).split("-").map(Number);
+  const t = (y * 12 + (m - 1)) + n;
+  return `${Math.floor(t / 12)}-${pad2(t % 12 + 1)}`;
+};
+const NOMBRE_MES = ["enero","febrero","marzo","abril","mayo","junio",
+  "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const mesLargo = ym => {
+  const [y, m] = String(ym).split("-").map(Number);
+  return `${NOMBRE_MES[m-1]} ${y}`;
+};
+const DIAS_CORTOS = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+
 function ocupacionDe(correo, fecha){
   return citasTodas()
     .filter(s => s.correo_stratis === correo
@@ -2485,6 +2596,7 @@ const S = {
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
   comoEjec:"",   /* supervisión mirando el CRM con los ojos de un ejecutivo */
   dispFecha:"", dispDesde:"15:00", dispHasta:"16:00",  /* consulta de disponibilidad */
+  calMes:"", calDia:"", qCal:"", calVista:"mes",       /* el calendario de visitas */
   repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
   formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
   loteBbva:null, /* borrador de la coordinación para varios comercios */
@@ -7303,7 +7415,9 @@ function lineaDiaria(r, regs){
      «cumplido», que es lo contrario de lo que pasa. */
   const ritmo    = (asignada && quedan > 0) ? Math.ceil(Math.max(0, asignada - hechos) / quedan) : null;
 
-  const W = 620, H = 150, L = 34, R = 611, T = 14, B = 118;
+  /* Más aire arriba (T) que antes: cada punto lleva su cifra encima y sin ese
+     margen la del día más alto se salía del marco. */
+  const W = 620, H = 156, L = 34, R = 611, T = 24, B = 118;
   const tope = Math.max(10, Math.ceil(Math.max(...vals, ritmo || 0) / 10) * 10);
   const px = i => vistos.length === 1 ? (L + R) / 2 : L + 28 + (R - L - 28) * i / (vistos.length - 1);
   const py = v => B - (B - T) * (v / tope);
@@ -7334,10 +7448,24 @@ function lineaDiaria(r, regs){
         <path class="area" d="${area}"/>
         <path class="serie" d="${linea}"/>
         ${yMeta !== null ? `<line class="meta" x1="${L}" y1="${yMeta.toFixed(1)}" x2="${R + 1}" y2="${yMeta.toFixed(1)}"/>
-          <text class="meta-txt" x="${R + 1}" y="${(yMeta - 5).toFixed(1)}" text-anchor="end">ritmo necesario · ${ritmo} al día</text>` : ""}
+          <text class="meta-txt" x="${R + 1}" y="${(yMeta - 6).toFixed(1)}" text-anchor="end">ritmo necesario · ${ritmo} al día</text>` : ""}
         ${vals.map((v,i) => `<circle class="punto" cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="4"/>`).join("")}
+        ${/* La cifra de cada día, encima de su punto. Leer una línea sin números
+             obliga a estimar contra la rejilla, y estimar contra una rejilla de
+             tres marcas no da un número: da una impresión.
+
+             El `paint-order:stroke` del CSS dibuja un borde del color del papel
+             por detrás del texto, así la cifra se lee aunque caiga sobre la
+             línea o sobre el relleno del área. */
+          vals.map((v,i) => {
+            const y = py(v);
+            /* Si el punto está muy arriba, la cifra va debajo para no salirse. */
+            const arriba = y - T > 13;
+            return `<text class="cifra-punto" x="${px(i).toFixed(1)}" y="${
+              (arriba ? y - 8 : y + 14).toFixed(1)}" text-anchor="middle">${v}</text>`;
+          }).join("")}
         ${vistos.map((iso,i) => (i % paso === 0 || i === vistos.length - 1)
-          ? `<text class="eje" x="${px(i).toFixed(1)}" y="138" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
+          ? `<text class="eje" x="${px(i).toFixed(1)}" y="144" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
       </svg>
     </div>
     <p class="nota">${hechos} comercios distintos tocados en el periodo${
@@ -9173,10 +9301,11 @@ function tarjetaCita(s){
   const e = estadoCita(s);
   const meta = ESTADO_CITA[e] || {};
   const d = diasParaAccion(s);
+  /* El chip ya dice el estado; el complemento solo se añade cuando aporta algo
+     que el estado no dice. «Es hoy · es hoy» no informa, distrae. */
   const cuando = e === "vencida" ? `venció hace ${textoDias(Math.abs(d))}`
-               : e === "hoy"     ? "es hoy"
-               : d === 1         ? "mañana"
-               : d > 1           ? `en ${textoDias(d)}`
+               : e === "programada" && d === 1 ? "mañana"
+               : e === "programada" && d > 1   ? `en ${textoDias(d)}`
                : "";
   const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
 
@@ -9193,6 +9322,7 @@ function tarjetaCita(s){
       <span class="chip ${meta.tono || "no"}">${esc(meta.label || "")}${cuando ? " · " + esc(cuando) : ""}</span>
     </div>
     ${s.comentario ? `<div class="quote" style="margin-top:7px">${esc(s.comentario)}</div>` : ""}
+    ${movida(s)}
     ${g ? `<div class="pie" style="margin-top:6px">Se concretó el <b>${fmtFecha(String(g.Fecha_Contacto).slice(0,10))}</b>${
       String(g.Fecha_Contacto).slice(0,10) !== String(s.fecha_objetivo).slice(0,10)
         ? " · se pactó para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) : ""}.</div>` : ""}
@@ -9201,7 +9331,8 @@ function tarjetaCita(s){
         ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar la visita</button>` : ""}
       <button class="btn ghost sm" data-cid="${esc(s.customer_id)}">Ver comercio</button>
       ${!s.cerrado_en && (s.correo_stratis === S.user.correo || !vistaDeCampo())
-        ? `<button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
+        ? `<button class="btn ghost sm" data-reag="${esc(s.id)}">Reagendar</button>
+           <button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
              title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>` : ""}
     </div>
   </div>`;
@@ -9209,6 +9340,18 @@ function tarjetaCita(s){
 /* El identificador que se está tramitando, tal cual se pidió que figure en el
    calendario: Customer ID para la cartera, RUC para una venta nueva. */
 const llaveDesnudaCita = c => String((c && c.customer_id) || "").replace(/^NUEVO-/, "");
+
+/* Si la cita se movió, se dice. Mover una fecha es legítimo; moverla cuatro
+   veces cuenta otra historia, y esa historia solo existe si se ve. */
+function movida(s){
+  const h = Array.isArray(s && s.historial) ? s.historial : [];
+  if (!h.length) return "";
+  const primera = h[0];
+  return `<div class="pie cal-movida" style="margin-top:6px">
+    <b>Reagendada ${h.length === 1 ? "una vez" : h.length + " veces"}.</b>
+    Originalmente para el ${esc(fmtFecha(String(primera.fecha).slice(0,10)))}${
+      primera.hora ? " a las " + esc(horaCorta(primera.hora)) : ""}.</div>`;
+}
 
 /* ---- Las cifras de arriba ------------------------------------------------
    Proyección a la izquierda, cumplimiento a la derecha. Son dos preguntas
@@ -9363,8 +9506,226 @@ function bloqueDisponibilidad(){
   </div>`;
 }
 
+
+/* =========================================================================
+   La rejilla del mes
+   =========================================================================
+   Un calendario de verdad, no una lista larga. La razón es concreta: una lista
+   responde «qué tengo pendiente», y un calendario responde «qué tengo el
+   jueves» —que es la pregunta que se hace al pactar una visita nueva y la que
+   se hace al cuadrar una reunión de equipo—.
+
+   Se empieza el lunes. La semana laboral peruana empieza el lunes y un
+   calendario que arranca el domingo obliga a contar dos veces.
+   ========================================================================= */
+const mesVisible = () => S.calMes || mesDe(hoyISO());
+
+/* Las citas de un día, ya filtradas por quién mira y por la búsqueda. */
+function citasDelDia(iso){
+  return citasFiltradas().filter(s => String(s.fecha_objetivo).slice(0,10) === iso);
+}
+
+/* La búsqueda: por Customer ID, RUC, razón social o nombre del comercio. Busca
+   sobre TODAS las citas, no solo las del mes a la vista: quien escribe un RUC
+   quiere encontrarlo, no que le digan que no está en agosto. */
+function citasFiltradas(){
+  const q = String(S.qCal || "").trim().toLowerCase();
+  let l = citasVisibles();
+  if (!q) return l;
+  return l.filter(s => {
+    const c = byId[String(s.customer_id)] || {};
+    return String(s.customer_id).toLowerCase().includes(q)
+      || String(c.ruc || "").toLowerCase().includes(q)
+      || String(c.razon_social || "").toLowerCase().includes(q)
+      || String(c.nombre_comercio || "").toLowerCase().includes(q)
+      || String(c.distrito || "").toLowerCase().includes(q);
+  });
+}
+
+/* El punto de color de cada cita en la rejilla. El color nunca va solo: al
+   lado están la hora y el nombre, y la tarjeta de abajo dice el estado con
+   todas las letras. */
+const TONO_PIP = { cumplida:"ok", cumplida_tarde:"warn", corrida:"warn",
+  vencida:"crit", hoy:"warn", programada:"info", reagendada:"no", descartada:"no" };
+
+function rejillaMes(){
+  const ym = mesVisible();
+  const hoy = hoyISO();
+  const total = diasDelMes(ym);
+  const [y, m] = ym.split("-").map(Number);
+  const offset = diaSemana(isoYMD(y, m, 1));       // cuántas casillas vacías al inicio
+  const celdas = [];
+  for (let i = 0; i < offset; i++) celdas.push(null);
+  for (let d = 1; d <= total; d++) celdas.push(isoYMD(y, m, d));
+  while (celdas.length % 7) celdas.push(null);
+
+  const porDia = {};
+  citasFiltradas().forEach(s => {
+    const k = String(s.fecha_objetivo).slice(0,10);
+    (porDia[k] = porDia[k] || []).push(s);
+  });
+
+  const TOPE = 3;   // cuántas caben en la casilla antes de resumir
+  const casilla = iso => {
+    if (!iso) return `<div class="cal-x vacia"></div>`;
+    const dia = Number(iso.slice(8,10));
+    const del = (porDia[iso] || []).sort((a,b) =>
+      String(a.hora_inicio||"").localeCompare(String(b.hora_inicio||"")));
+    const finde = diaSemana(iso) >= 5;
+    return `<button class="cal-x ${iso === hoy ? "hoy" : ""} ${iso === S.calDia ? "sel" : ""} ${
+      finde ? "finde" : ""} ${del.length ? "con" : ""}" data-caldia="${iso}"
+      aria-label="${dia} de ${esc(mesLargo(ym))}, ${del.length} ${del.length === 1 ? "cita" : "citas"}">
+      <span class="n">${dia}</span>
+      <span class="ev">
+        ${del.slice(0, TOPE).map(s => {
+          const c = byId[String(s.customer_id)];
+          return `<span class="cal-ev ${TONO_PIP[estadoCita(s)] || "no"}">
+            <i></i><b>${esc(horaCorta(s.hora_inicio))}</b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</span>`;
+        }).join("")}
+        ${del.length > TOPE ? `<span class="cal-mas">+${del.length - TOPE} más</span>` : ""}
+      </span>
+    </button>`;
+  };
+
+  return `
+  <div class="cal">
+    <div class="cal-cab">
+      <div class="cal-nav">
+        <button class="btn ghost sm" data-calmes="${mesMas(ym,-1)}" aria-label="Mes anterior">‹</button>
+        <b class="cal-mes">${esc(titulo(mesLargo(ym)))}</b>
+        <button class="btn ghost sm" data-calmes="${mesMas(ym,1)}" aria-label="Mes siguiente">›</button>
+        <button class="btn ghost sm" data-calhoy="1">Hoy</button>
+      </div>
+      <div class="cal-leyenda">
+        <span><i class="pip info"></i>Programada</span>
+        <span><i class="pip warn"></i>Es hoy</span>
+        <span><i class="pip crit"></i>No concretada</span>
+        <span><i class="pip ok"></i>Concretada</span>
+      </div>
+    </div>
+    <div class="cal-dow">${DIAS_CORTOS.map(d => `<span>${d}</span>`).join("")}</div>
+    <div class="cal-rej">${celdas.map(casilla).join("")}</div>
+  </div>`;
+}
+
+/* El día elegido, con sus citas completas. Es la segunda mitad del calendario:
+   la rejilla dice cuántas, esto dice cuáles. */
+function panelDelDia(){
+  const iso = S.calDia || hoyISO();
+  const del = citasDelDia(iso).sort((a,b) =>
+    String(a.hora_inicio||"").localeCompare(String(b.hora_inicio||"")));
+  const hay = del.length;
+  return `
+  <div class="sec-title">${esc(titulo(fechaLarga(iso)))} · ${hay} ${hay === 1 ? "cita" : "citas"}</div>
+  ${hay ? del.map(tarjetaCita).join("")
+        : `<div class="card"><div class="vacio">No hay visitas agendadas para este día.
+           Toca otro día en el calendario, o busca un comercio arriba.</div></div>`}`;
+}
+
+/* Los resultados de la búsqueda, con su fecha delante: buscar un RUC y que la
+   respuesta sea «no está en este mes» no es una respuesta. */
+function resultadosBusqueda(){
+  const l = citasFiltradas().sort((a,b) =>
+    String(b.fecha_objetivo).localeCompare(String(a.fecha_objetivo)));
+  return `
+  <div class="sec-title">${l.length} ${l.length === 1 ? "cita encontrada" : "citas encontradas"}
+    para «${esc(S.qCal)}»</div>
+  ${l.length ? l.map(s => `
+    <div class="cal-res">
+      <div class="cal-res-f">
+        <b>${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))}</b>
+        <span>${esc(horaCorta(s.hora_inicio))}</span>
+      </div>
+      <div class="cal-res-c">${tarjetaCita(s)}</div>
+    </div>`).join("")
+   : `<div class="card"><div class="vacio">Ningún comercio con cita coincide con esa búsqueda.
+      Se busca por Customer ID, RUC, razón social, nombre del comercio o distrito.</div></div>`}`;
+}
+
+/* ---- Reagendar ----------------------------------------------------------
+   Mover una cita tiene que poder hacerse: el cliente cancela, se cruza otra
+   visita, llueve. Lo que no puede pasar es que mover la fecha borre la
+   anterior — así el cumplimiento se llevaría al 100% empujando fechas.
+   La base guarda cada movimiento con quién lo hizo, y la tarjeta lo dice. */
+async function reagendarCita(id){
+  const s = SEGUIMIENTOS.find(x => String(x.id) === String(id));
+  if (!s) return;
+  const c = byId[String(s.customer_id)];
+  const dur = Number(s.duracion_min) || duracionDe(s.modalidad);
+
+  const datos = await new Promise(res => {
+    modal(`<h3>Reagendar la visita</h3>
+      <p style="margin-top:0"><b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b><br>
+      <span class="tenue">Ahora está para el ${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))}
+      a las ${esc(horaCorta(s.hora_inicio))}</span></p>
+      <div class="row2">
+        <div class="field"><label>Nuevo día</label>
+          <input type="date" id="reFecha" value="${esc(String(s.fecha_objetivo).slice(0,10))}" min="${hoyISO()}"></div>
+        <div class="field"><label>Hora</label>
+          <input type="time" id="reHora" value="${esc(horaCorta(s.hora_inicio))}" step="900"></div>
+      </div>
+      <div class="field campo-corto"><label>Cuánto dura</label>
+        <select id="reDur">${[30,45,60,90,120].map(n =>
+          `<option value="${n}"${n === dur ? " selected" : ""}>${n} minutos</option>`).join("")}</select></div>
+      <div id="reAviso"></div>
+      <div class="note">El compromiso original no se borra: queda anotado quién lo movió y cuándo.
+      Una cita que se mueve tres veces se ve en la tabla del equipo.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="reOk" style="flex:1">Reagendar</button>
+        <button class="btn ghost" id="reNo" style="flex:1">Cancelar</button>
+      </div>`);
+
+    /* El choque se avisa mientras se elige, igual que al agendar. */
+    const revisar = () => {
+      const f = $("#reFecha").value, h = $("#reHora").value, d = Number($("#reDur").value);
+      const av = $("#reAviso"); if (!av) return;
+      const desde = minutosDe(h);
+      if (!f || desde === null){ av.innerHTML = ""; return; }
+      const choques = ocupacionDe(s.correo_stratis, f)
+        .filter(o => String(o.id) !== String(s.id) && chocaCon(o, desde, desde + d));
+      av.innerHTML = choques.length ? `<div class="note crit" style="margin-bottom:11px">
+        <b>Ya hay algo a esa hora.</b> ${choques.map(o => {
+          const cc = byId[String(o.customer_id)];
+          return `${esc(rangoCita(o))} · ${esc(titulo(cc ? nombreCliente(cc) : o.customer_id))}`;
+        }).join(" · ")}</div>` : "";
+    };
+    ["reFecha","reHora","reDur"].forEach(k => { const el = $("#"+k); if (el) el.onchange = revisar; });
+    revisar();
+
+    $("#reOk").onclick = () => {
+      const f = $("#reFecha").value, h = $("#reHora").value, d = Number($("#reDur").value);
+      if (!f || !h) return toast("Falta el día o la hora");
+      cerrarModal(); res({ fecha:f, hora:h, dur:d });
+    };
+    $("#reNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!datos) return;
+
+  const igual = datos.fecha === String(s.fecha_objetivo).slice(0,10)
+    && datos.hora === horaCorta(s.hora_inicio) && datos.dur === dur;
+  if (igual) return toast("No cambió nada");
+
+  /* El `.select()` otra vez: sin él, un rechazo por permisos vuelve sin error
+     y sin filas, y la pantalla diría que se movió algo que no se movió. */
+  const { data, error } = await sb.from("seguimientos")
+    .update({ fecha_objetivo: datos.fecha, hora_inicio: datos.hora, duracion_min: datos.dur })
+    .eq("id", id).select("id");
+  if (error) return toast("No se pudo reagendar: " + error.message);
+  if (!(data || []).length)
+    return toast("La base no dejó mover esta cita. Es de otro ejecutivo y tu usuario no tiene permiso.");
+  await cargarSeguimientos();
+  S.calDia = datos.fecha; S.calMes = mesDe(datos.fecha);
+  render();
+  toast(`Reagendada para el ${fmtFecha(datos.fecha)} a las ${datos.hora}`);
+}
+
 function viewAgenda(){
   const mando = !vistaDeCampo();
+  const buscando = !!String(S.qCal || "").trim();
+  /* El calendario arranca en el mes de hoy y con hoy seleccionado. Si se llega
+     desde otra pantalla con un día ya elegido, el mes lo sigue. */
+  if (!S.calDia) S.calDia = hoyISO();
+  if (!S.calMes) S.calMes = mesDe(S.calDia);
   const x = cifrasCalendario();
   const lista = citasAbiertas();
   const porPlazo = {};
@@ -9423,15 +9784,24 @@ function viewAgenda(){
     </div>
   </div>` : ""}
 
+  <div class="filtros" style="margin-bottom:11px">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="qCal" value="${esc(S.qCal || "")}"
+             placeholder="Buscar por Customer ID, RUC, razón social, comercio o distrito…"></div>
+  </div>
+
+  ${buscando ? resultadosBusqueda() : `
+    ${rejillaMes()}
+    ${panelDelDia()}
+  `}
+
   ${mando ? bloqueProyeccion() : ""}
   ${mando ? bloqueDisponibilidad() : ""}
 
-  ${lista.length ? ORDEN_PLAZO.map(k => porPlazo[k].length ? `
-    <div class="sec-title">${ETIQUETA_PLAZO[k]} · ${porPlazo[k].length}</div>
-    ${porPlazo[k].map(tarjetaCita).join("")}` : "").join("")
-   : `<div class="empty"><div class="big">◷</div>No hay visitas agendadas.<br><br>
+  ${!buscando && !citasVisibles().length ? `<div class="empty"><div class="big">◷</div>
+      No hay visitas agendadas.<br><br>
       <span style="font-size:13px;color:var(--muted)">Una cita se crea al registrar una gestión que
-      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>`}
+      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>` : ""}
 
   ${sinAgendar.length ? `
   <div class="card" style="margin-top:16px;border-left:3px solid var(--crit)">
@@ -12948,6 +13318,37 @@ function bindExtras(){
   if (typeof bindBono === "function") bindBono();
   if (typeof bindReporte === "function") bindReporte();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
+
+  /* ---- El calendario de visitas ---------------------------------------- */
+  document.querySelectorAll("[data-calmes]").forEach(b => b.onclick = () => {
+    S.calMes = b.dataset.calmes;
+    /* Al cambiar de mes el día elegido deja de tener sentido si no está en el
+       mes nuevo: se pone el primero, para que el panel de abajo siempre
+       corresponda con lo que se está mirando arriba. */
+    if (mesDe(S.calDia) !== S.calMes) S.calDia = S.calMes + "-01";
+    render();
+  });
+  if ($("[data-calhoy]")) $("[data-calhoy]").onclick = () => {
+    S.calDia = hoyISO(); S.calMes = mesDe(S.calDia); render();
+  };
+  document.querySelectorAll("[data-caldia]").forEach(b => b.onclick = () => {
+    S.calDia = b.dataset.caldia; render();
+  });
+  document.querySelectorAll("[data-reag]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); reagendarCita(b.dataset.reag);
+  });
+  if ($("#qCal")){
+    const cajaCal = $("#qCal");
+    cajaCal.oninput = e => {
+      S.qCal = e.target.value;
+      clearTimeout(cajaCal._t);
+      cajaCal._t = setTimeout(() => {
+        render();
+        const n = $("#qCal");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 260);
+    };
+  }
   /* La consulta de disponibilidad: se redibuja al cambiar cualquiera de los
      tres campos, para que la respuesta se vea mientras se elige la franja. */
   [["dispFecha","dispFecha"], ["dispDesde","dispDesde"], ["dispHasta","dispHasta"]]
