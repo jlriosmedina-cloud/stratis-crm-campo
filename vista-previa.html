@@ -1485,10 +1485,16 @@ const CALIFICACIONES = [
   { id:"E", label:"E — Perdido",        desc:"Decidido a retirarse o ya migró" }
 ];
 
-/* Cómo se contactó al ejecutivo de BBVA para confirmar los datos del comercio.
-   Un comercio de cartera no aparece solo: alguien coordinó con el banco antes
-   de registrarlo. Sin este dato no se puede dar de alta. No aplica a ventas
-   nuevas: ahí todavía no hay ejecutivo BBVA de por medio. */
+/* Por dónde se coordinó con la AGENCIA BBVA para confirmar los datos del
+   comercio. Un comercio de cartera no aparece solo: alguien habló con el banco
+   antes de registrarlo. Sin este dato no se puede dar de alta. No aplica a
+   ventas nuevas: ahí todavía no hay agencia de por medio.
+
+   El campo se llamaba «Contacto BBVA» y se prestaba a confusión, sobre todo en
+   una opción: «Visita presencial» se leía como haber visitado al CLIENTE,
+   cuando lo que describe es al ejecutivo yendo a la agencia a reunirse con los
+   ejecutivos del banco. Todo lo de acá pasa entre Stratis y la agencia; el
+   contacto con el cliente vive en otro lado y se mide aparte. */
 const CONTACTO_BBVA = [
   { id:"CORREO",   label:"Correo a BBVA",       desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos del comercio" },
   /* El otro correo. Solo se puede escribir si los datos del cliente YA
@@ -1498,7 +1504,7 @@ const CONTACTO_BBVA = [
     desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA" },
   { id:"LLAMADA",  label:"Llamada telefónica",  desc:"Se coordinó por teléfono con el ejecutivo de BBVA" },
   { id:"WHATSAPP", label:"Mensaje WhatsApp",    desc:"Se coordinó por WhatsApp con el ejecutivo de BBVA" },
-  { id:"VISITA",   label:"Visita presencial",   desc:"Se fue a las oficinas de BBVA y se coordinó en persona" },
+  { id:"VISITA",   label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco" },
   { id:"CHAT",     label:"Chat BBVA",           desc:"Se coordinó por el chat interno del banco" }
 ];
 const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
@@ -1531,7 +1537,7 @@ const MEDIOS_BBVA = [
   { id:"bbva_chat",       label:"Chat BBVA",          desc:"Se coordinó por el chat interno del banco", exigeCorreo:true },
   { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono" },
   { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp" },
-  { id:"bbva_presencial", label:"Visita presencial",  desc:"Se fue a las oficinas de BBVA" }
+  { id:"bbva_presencial", label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco" }
 ];
 const esMedioBBVA  = id => String(id || "").startsWith("bbva_");
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -3675,10 +3681,10 @@ function avisoVentana(){
       ${(() => {
         const faltan = cartera().filter(c => !esClienteNuevo(c) && !c.contacto_bbva).length;
         return faltan ? `<div style="margin-top:8px"><b>Te faltan ${faltan} comercio${faltan===1?"":"s"}</b>
-          por indicar cómo se contactó al ejecutivo de BBVA. Se completa entrando al comercio y
+          por indicar por dónde se coordinó con la agencia BBVA. Se completa entrando al comercio y
           tocando <b>Editar comercio</b>.
           <button class="btn ghost sm" id="verFaltanBBVA" style="margin-top:7px">Ver los que faltan</button>
-          </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con el contacto de BBVA.</div>`;
+          </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con la agencia BBVA declarada.</div>`;
       })()}
       <div style="margin-top:6px">Para que una visita cuente con respaldo de GPS hay que capturar la
       ubicación estando en el local, en el momento. Lo que se escriba hoy ubica el comercio en el mapa.</div>
@@ -3973,7 +3979,7 @@ function viewFicha(c){
             esc(fmtFecha(sg.fecha_objetivo))}${est==="vencida"?` · venció hace ${esc(textoDias(Math.abs(d)))}`:""}</span>
           ${sg.comentario ? `<div style="font-size:12.5px;color:var(--muted);margin-top:3px">${esc(sg.comentario)}</div>` : ""}
         </dd></div>` ; })()}
-      ${(!esClienteNuevo(c) && !flujoBbva()) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
+      ${(!esClienteNuevo(c) && !flujoBbva()) ? `<div class="kv"><dt>Agencia BBVA</dt><dd>${
         c.contacto_bbva
           ? esc(nomContactoBBVA(c.contacto_bbva))
           : `<span class="chip warn">Sin indicar</span><div style="font-size:12px;color:var(--muted);margin-top:3px">Se registró antes de que el dato fuera obligatorio</div>`
@@ -4371,11 +4377,13 @@ function renderFormCliente(){
   </div>
 
   <div class="card" id="cardContactoBBVA">
-    <h3>¿Cómo se contactó al ejecutivo de BBVA? <span class="req">*</span></h3>
+    <h3>Agencia BBVA <span class="req">*</span></h3>
     <div class="note" style="margin-bottom:11px">
-      Este comercio llega porque alguien coordinó con el banco y el ejecutivo de BBVA
-      confirmó los datos del cliente. Indica por dónde fue esa coordinación:
+      Este comercio llega porque alguien coordinó con la agencia y el ejecutivo de BBVA
+      confirmó los datos del cliente. Indica <b>por dónde fue esa coordinación</b>:
       es lo que sostiene que el caso viene de una gestión real y no de una lista suelta.
+      Todo lo de acá pasa <b>entre tú y la agencia</b> — el contacto con el cliente se
+      registra después, como gestión.
     </div>
     <div class="opts">
       ${CONTACTO_BBVA.map(x => `
@@ -4722,7 +4730,7 @@ async function guardarCliente(){
      cartera porque sin el banco no hay datos del titular, y en un RUC porque
      sin el banco no hay afiliación. Es el mismo paso del mismo flujo. */
   if (!editando && !f.contacto_bbva)
-    errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
+    errores.push("Indica por dónde se coordinó con la agencia BBVA. Sin ese dato no se puede registrar el comercio.");
   /* Dar de alta es trabajo de campo. Se avisa acá con todas las letras en vez
      de dejar que la base responda con un error de permisos que no le dice a
      nadie qué hacer. */
@@ -7302,7 +7310,7 @@ function bloqueCorregir(r, regs){
     { n:mando ? tarde.length : 0, t:"Gestiones fuera de plazo",
       d:"registradas más de un día trabajado después del contacto",
       ir:`data-verges="fuera_plazo"` },
-    { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
+    { n:sinCanal.length, t:"Comercios sin agencia BBVA", d:"se registraron antes de que el dato fuera obligatorio",
       ir:`data-vercartera="sin_bbva"` },
     { n:vencidas.length, t:"Acciones vencidas", d:"pasó la fecha comprometida y nadie retomó",
       ir:`data-go="agenda"`, grave:true },
@@ -7322,7 +7330,7 @@ function bloqueCorregir(r, regs){
         <span class="d">${p.d}</span>
       </button>`).join("")}
     </div>` : `<div class="vacio">No hay gestiones sin ubicación${mando ? ", ni registros fuera de plazo" : ""}, ni
-      acciones vencidas${sinCanal.length ? "" : ", ni comercios sin canal BBVA"}. Todo al día.</div>`}
+      acciones vencidas${sinCanal.length ? "" : ", ni comercios sin agencia BBVA"}. Todo al día.</div>`}
   </div>`;
 }
 
@@ -7382,7 +7390,7 @@ function bloqueDetalle(r, regs){
 
    <div>
     <div class="card">
-      <h3>Contacto con el ejecutivo de BBVA · por dónde llega la cartera</h3>
+      <h3>Agencia BBVA · por dónde llega la cartera</h3>
       ${conCanalBBVA ? `
         ${canalBBVA.map(x => `
         <div class="bar-row">
@@ -7390,10 +7398,11 @@ function bloqueDetalle(r, regs){
           <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanal*100).toFixed(1)}%"></span></span>
           <span class="bar-val">${x.n}</span>
         </div>`).join("")}
-        <div class="pie">${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado
-          el canal.${sinCanalBBVA ? ` Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el
-          dato fuera obligatorio; se completan al editar el comercio.` : " Están todos."}</div>`
-      : `<div class="vacio">Todavía ningún comercio tiene declarado el canal.</div>`}
+        <div class="pie">${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarada
+          la agencia.${sinCanalBBVA ? ` Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el
+          dato fuera obligatorio; se completan al editar el comercio.` : " Están todos."}
+          <b>Todo lo de este bloque pasa entre Stratis y la agencia</b>, no con el cliente.</div>`
+      : `<div class="vacio">Todavía ningún comercio tiene declarada la agencia.</div>`}
     </div>
 
     <div class="card">
@@ -7776,7 +7785,7 @@ function decisionesTablero(r, regs){
       ir:`data-verges="fuera_plazo"`, tono:"warn" },
     { n:sinComentario.length, t:"Comercios sin comentario", d:"Ninguna gestión dejó nota del cliente",
       ir:`data-vercartera="sin_comentario"`, tono:"warn" },
-    { n:sinCanal.length, t:"Fichas sin coordinar con BBVA", d:"El caso no puede avanzar sin el dato",
+    { n:sinCanal.length, t:"Fichas sin agencia BBVA", d:"El caso no puede avanzar sin el dato",
       ir:`data-vercartera="sin_bbva"`, tono:"warn" },
     { n:habilitadosSinCita.length, t:"Habilitados sin visita",
       d:"BBVA confirmó o el cliente respondió, y no hay cita puesta",
@@ -7892,7 +7901,7 @@ const COLS_BBVA_RESUMEN = [
   "BBVA_Falta_Correo_De_Respaldo"];
 
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
-  "Estado_Gestion","Contacto_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Estado_Gestion","Agencia_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
   "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
@@ -8347,7 +8356,7 @@ const COLS_DETALLE = [
   "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
 
   /* --- Paso 1 · La coordinación con el ejecutivo de BBVA ---------------- */
-  "Contacto_BBVA","Coordinaciones_BBVA",
+  "Agencia_BBVA","Coordinaciones_BBVA",
   "BBVA_1er_Contacto","BBVA_1er_Medio","BBVA_2do_Contacto","BBVA_2do_Medio",
   "BBVA_Respondio","BBVA_Fecha_Respuesta",
   "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
@@ -8593,7 +8602,7 @@ function filaComercio(c, soloEntrega){
       Rubro:           rubroLabel(c),
       Distrito:        titulo(c.distrito || ""),
       Fecha_Alta:      String(c.creado_en || "").slice(0,10),
-      Contacto_BBVA:   esNuevo ? "" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
+      Agencia_BBVA:    esNuevo ? "" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
 
       Estado_Contacto:      estadoContacto(regs.length, efectivos.length),
       Respuestas_del_Cliente: efectivos.length,
