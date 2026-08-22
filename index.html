@@ -386,6 +386,18 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 /* La leyenda de la Agenda: tres columnas de texto chico, sin marco por dentro.
    No es una alerta ni una tarjeta más, es el pie de página que explica los
    botones de arriba. */
+/* Quién está libre: una fila por persona, con el punto del semáforo delante.
+   El color no va solo — al lado siempre está qué tiene encima. */
+.disp{display:flex;flex-direction:column;gap:2px;margin-top:11px}
+.disp-x{display:flex;gap:10px;align-items:flex-start;padding:9px 8px;border-radius:var(--r-sm)}
+.disp-x:nth-child(odd){background:var(--plane)}
+.disp-x .pip{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:none}
+.disp-x.libre .pip{background:var(--good)}
+.disp-x.ocupado .pip{background:var(--crit)}
+.disp-x b{display:block;font-size:13px;font-weight:640}
+.disp-x span:last-child{display:block;font-size:12px;color:var(--muted);line-height:1.4}
+.ag-item.hoy{border-left:3px solid var(--warn)}
+.ag-item.vencida{border-left:3px solid var(--crit)}
 .ag-ley{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:14px}
 .ag-ley-x b{display:block;font-size:13px;font-weight:640;margin-bottom:3px}
 .ag-ley-x span{display:block;font-size:12px;color:var(--muted);line-height:1.45}
@@ -1384,6 +1396,190 @@ function estadoAccion(s){
 }
 const ETIQUETA_PLAZO = { vencida:"Vencida", hoy:"Para hoy", semana:"Esta semana", despues:"Más adelante" };
 
+/* =========================================================================
+   EL CALENDARIO DE VISITAS
+   =========================================================================
+
+   Una CITA es un compromiso con el cliente: fecha, hora, y si es en el local o
+   por videollamada. Se distingue de una próxima acción suelta por tener
+   modalidad — «llamar el lunes» no va al calendario, «visitar el jueves a las
+   3» sí.
+
+   Lo que se mide acá no es actividad: es LATENCIA. El hueco más caro de la
+   campaña está entre dos hechos que el CRM ya registra —el banco confirmó los
+   datos, o el cliente respondió— y el momento en que hay una visita puesta en
+   el calendario. Ese hueco no aparecía en ninguna pantalla.
+   ========================================================================= */
+const MODALIDADES = [
+  { id:"PRESENCIAL", label:"Visita en el local", corto:"Presencial", min:60, ic:"◎" },
+  { id:"VIRTUAL",    label:"Reunión virtual",    corto:"Virtual",    min:30, ic:"▷" }
+];
+const nomModalidad = id => (MODALIDADES.find(m => m.id === id) || {}).label || "";
+const cortoModalidad = id => (MODALIDADES.find(m => m.id === id) || {}).corto || "";
+const duracionDe = id => (MODALIDADES.find(m => m.id === id) || {}).min || 60;
+
+const esCita = s => !!(s && s.modalidad);
+const citasTodas = () => SEGUIMIENTOS.filter(esCita);
+/* La cita abierta de un comercio. Una a la vez: si hubiera dos, ninguna sería
+   «la próxima». La base lo garantiza con un índice único. */
+const citaDe = cid =>
+  SEGUIMIENTOS.find(x => esCita(x) && String(x.customer_id) === String(cid) && !x.cerrado_en) || null;
+
+const horaCorta = h => String(h || "").slice(0,5);
+/* Minutos desde medianoche. Es la unidad con la que se comparan dos citas para
+   saber si se pisan: comparar cadenas de hora funciona hasta que alguien
+   escribe «9:30» en vez de «09:30». */
+function minutosDe(h){
+  const [hh, mm] = horaCorta(h).split(":");
+  const n = Number(hh) * 60 + Number(mm);
+  return isNaN(n) ? null : n;
+}
+const finDeCita = s => {
+  const ini = minutosDe(s && s.hora_inicio);
+  return ini === null ? null : ini + (Number(s.duracion_min) || duracionDe(s.modalidad));
+};
+const rangoCita = s => {
+  const ini = minutosDe(s && s.hora_inicio), fin = finDeCita(s);
+  if (ini === null) return "";
+  const dosDig = n => String(Math.floor(n / 60)).padStart(2,"0") + ":" + String(n % 60).padStart(2,"0");
+  return `${dosDig(ini)}–${dosDig(fin)}`;
+};
+
+/* ---- T0 · Cuándo quedó habilitado el caso -------------------------------
+   Es el momento en que el comercio pasó a ser contactable. Se DEDUCE con la
+   misma regla con la que `estadoDerivado` lo mueve a «Por contactar»: si
+   hubiera dos definiciones de «el caso está listo», tarde o temprano darían
+   números distintos y no habría forma de saber cuál miente.
+
+   Devuelve la fecha más temprana entre:
+     · una coordinación con BBVA que el banco respondió,
+     · un correo al cliente con copia al banco (solo posible con los datos), y
+     · el primer contacto logrado con el cliente, que prueba que los datos
+       estaban aunque nadie anotara la coordinación. */
+function habilitadoEn(cid){
+  const fechas = [];
+  DB.bbvaDe(cid).forEach(r => {
+    if (respondioBBVA(r.Resultado) || yaHayDatosDelCliente(r.Tipo_Contacto))
+      fechas.push(String(r.Fecha_Contacto).slice(0,10));
+  });
+  DB.delCliente(cid).forEach(r => {
+    if (r.Con !== "BBVA" && esEfectivo(r.Resultado))
+      fechas.push(String(r.Fecha_Contacto).slice(0,10));
+  });
+  /* El sello del alta —«el correo fue al cliente con copia»— no trae fecha
+     propia: se toma la de creación de la ficha, que es cuando se declaró. */
+  const c = byId[String(cid)];
+  if (c && c.contacto_bbva === "CORREO_CC" && c.creado_en)
+    fechas.push(String(c.creado_en).slice(0,10));
+  return fechas.length ? fechas.sort()[0] : "";
+}
+
+/* ---- El estado de una cita ----------------------------------------------
+   La regla que acordamos: lo que decide si la reunión se concretó es la FECHA
+   EN QUE OCURRIÓ, no la fecha en que se registró. Si el ejecutivo la registra
+   tres días después, eso ya se le descuenta en la puntualidad del registro;
+   descontárselo otra vez acá sería castigar dos veces el mismo retraso. */
+const TOLERANCIA_CITA = 1;      // días trabajados de gracia sobre la fecha pactada
+
+function estadoCita(s){
+  if (!esCita(s)) return "";
+  if (s.cerrado_motivo === "REAGENDADA") return "reagendada";
+
+  const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
+  if (g){
+    const ocurrio = String(g.Fecha_Contacto).slice(0,10);
+    const pactada = String(s.fecha_objetivo).slice(0,10);
+    if (ocurrio <= pactada) return "cumplida";
+    const fer = feriadosDe(periodoDe(pactada));
+    let n = 0;
+    for (let d = new Date(pactada + "T12:00:00Z"); ; ){
+      d = new Date(d.getTime() + 86400000);
+      const iso = d.toISOString().slice(0,10);
+      if (esDiaTrabajado(iso, fer)) n++;
+      if (iso >= ocurrio || n > 60) break;
+    }
+    return n <= TOLERANCIA_CITA ? "cumplida_tarde" : "corrida";
+  }
+  if (s.cerrado_en) return "descartada";
+
+  const d = diasParaAccion(s);
+  if (d < 0)   return "vencida";
+  if (d === 0) return "hoy";
+  return "programada";
+}
+
+const ESTADO_CITA = {
+  programada:     { label:"Programada",      tono:"no",   dice:"Todavía no llega la fecha" },
+  hoy:            { label:"Es hoy",          tono:"warn", dice:"Toca hoy" },
+  vencida:        { label:"No concretada",   tono:"crit", dice:"Pasó la fecha y no hay visita registrada" },
+  cumplida:       { label:"Concretada",      tono:"ok",   dice:"La visita ocurrió el día pactado" },
+  cumplida_tarde: { label:"Concretada tarde",tono:"warn", dice:"Ocurrió dentro del día trabajado siguiente" },
+  corrida:        { label:"Concretada, otro día", tono:"warn", dice:"La visita ocurrió, pero fuera de la fecha pactada" },
+  reagendada:     { label:"Reagendada",      tono:"no",   dice:"Se movió a otra fecha antes de vencer" },
+  descartada:     { label:"Descartada",      tono:"no",   dice:"Se cerró sin visita" }
+};
+const seConcreto = e => e === "cumplida" || e === "cumplida_tarde" || e === "corrida";
+const cuentaCumplimiento = e => seConcreto(e) || e === "vencida";
+
+/* ---- Demora en agendar (T0 → T1) ----------------------------------------
+   Días trabajados entre que el caso quedó habilitado y que alguien puso la
+   visita en el calendario. Es la métrica del embudo: no dice cuánto se
+   trabajó, dice cuánto se tardó en comprometerse. */
+function demoraEnAgendar(cid){
+  const t0 = habilitadoEn(cid);
+  if (!t0) return null;
+  const citas = SEGUIMIENTOS.filter(x => esCita(x) && String(x.customer_id) === String(cid))
+    .map(x => String(x.creado_en || "").slice(0,10)).filter(Boolean).sort();
+  if (!citas.length) return null;
+  const t1 = citas[0];
+  if (t1 <= t0) return 0;
+  const fer = feriadosDe(periodoDe(t0));
+  let n = 0;
+  for (let d = new Date(t0 + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= t1 || n > 400) break;
+  }
+  return n;
+}
+
+/* Anticipación: días corridos entre crear la cita y la fecha pactada. Cero
+   significa «agendó hoy para hoy», que es registrar, no planificar. Sin esta
+   métrica la demora en agendar se cumple al 100% agendando el mismo día. */
+function anticipacionDe(s){
+  const creada = String(s && s.creado_en || "").slice(0,10);
+  const pactada = String(s && s.fecha_objetivo || "").slice(0,10);
+  if (!creada || !pactada) return null;
+  return Math.round((new Date(pactada) - new Date(creada)) / 86400000);
+}
+
+/* La mediana y no el promedio: un caso agendado cuarenta días tarde arrastra
+   el promedio y esconde a los quince que se agendaron al día siguiente. */
+function mediana(nums){
+  const l = nums.filter(n => n !== null && !isNaN(n)).sort((a,b) => a - b);
+  if (!l.length) return null;
+  const m = Math.floor(l.length / 2);
+  return l.length % 2 ? l[m] : Math.round((l[m-1] + l[m]) / 2 * 10) / 10;
+}
+
+/* ---- Disponibilidad -----------------------------------------------------
+   Para la reunión de equipo: quién tiene el rango libre. Una cita ocupa desde
+   su hora hasta su hora más la duración; dos citas se pisan cuando cada una
+   empieza antes de que termine la otra. */
+function ocupacionDe(correo, fecha){
+  return citasTodas()
+    .filter(s => s.correo_stratis === correo
+      && String(s.fecha_objetivo).slice(0,10) === String(fecha).slice(0,10)
+      && !["reagendada","descartada"].includes(estadoCita(s)))
+    .sort((a,b) => (minutosDe(a.hora_inicio) || 0) - (minutosDe(b.hora_inicio) || 0));
+}
+function chocaCon(s, desdeMin, hastaMin){
+  const ini = minutosDe(s.hora_inicio), fin = finDeCita(s);
+  if (ini === null) return false;
+  return ini < hastaMin && desdeMin < fin;
+}
+
 const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
 
 /* Cierre de la gestión. Es lo que alimenta la columna "Gestión" del archivo
@@ -2288,6 +2484,7 @@ const S = {
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
   comoEjec:"",   /* supervisión mirando el CRM con los ojos de un ejecutivo */
+  dispFecha:"", dispDesde:"15:00", dispHasta:"16:00",  /* consulta de disponibilidad */
   repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
   formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
   loteBbva:null, /* borrador de la coordinación para varios comercios */
@@ -2842,7 +3039,7 @@ function modoDemo(){
    ========================================================================= */
 const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
-  { id:"agenda",   ic:"◷", label:"Agenda" },
+  { id:"agenda",   ic:"◷", label:"Calendario" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
@@ -2876,7 +3073,7 @@ const RAIL = [
   { g:"Campaña", items:["panel","cartera","agenda","registros"] },
   { g:"Solo supervisión", items:["bono","reporte","ayuda"] }
 ];
-const ETIQUETA_RAIL = { panel:"Tablero" };
+const ETIQUETA_RAIL = { panel:"Tablero", agenda:"Calendario de visitas" };
 
 function renderRail(){
   const el = $("#rail"), app = $("#app");
@@ -3464,7 +3661,7 @@ function viewFicha(c){
     </div>
     ${(b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio && esDeCampo()) ? `
     <div class="card">
-      <div class="note warn" style="margin:0">
+      <div class="note crit" style="margin:0">
         <b>Esta gestión sigue abierta.</b> Ya hablaste con el titular, así que puedes cerrarla como
         ${esClienteNuevo(c) ? "venta" : (c.estado === "ACTIVO" ? "retención" : "venta")} o como perdida. Mientras siga pendiente, a
         BBVA le llega <b>Gestión = NO</b>.
@@ -3529,7 +3726,7 @@ function cardCoordinacionBBVA(c, mio){
           : `<span class="chip warn">Sin coordinar</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">Este comercio todavía no se le ha pedido a BBVA</div>`}
     </dd></div>
-    ${k.faltaRespaldo ? `<div class="note warn" style="margin-top:10px">
+    ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
       <b>Falta el correo de respaldo.</b> Se coordinó por chat, que no deja constancia consultable.
       La campaña pide enviar después un correo con lo acordado y registrarlo acá.</div>` : ""}
     ${avisoCorreoAmbiguo(c, k, mio)}
@@ -3575,10 +3772,10 @@ function avisoPorActualizar(){
   const mios = cartera().filter(correoAmbiguo);
   if (!mios.length) return "";
   if (S.fContacto === "correo_ambiguo")
-    return `<div class="note warn" style="margin:0">
+    return `<div class="note crit" style="margin:0">
       <b>Quedan ${mios.length}.</b> Abre cada comercio y dime si el correo fue al ejecutivo de BBVA
       o al cliente con copia. La lista se acorta sola a medida que respondes.</div>`;
-  return `<div class="note warn" style="margin:0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  return `<div class="note crit" style="margin:0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
     <div style="flex:1 1 260px;min-width:0">
       <b>${mios.length} comercio${mios.length===1?"":"s"} con el correo sin aclarar.</b>
       <span class="solo-ancho">Antes «correo enviado» servía para dos cosas opuestas: pedirle los
@@ -3596,7 +3793,7 @@ function correoAmbiguo(c){
 function avisoCorreoAmbiguo(c, k, mio){
   if (!correoAmbiguo(c)) return "";
   if (esDeCampo() && !mio) return "";
-  return `<div class="note warn" style="margin-top:11px">
+  return `<div class="note crit" style="margin-top:11px">
     <b>¿A quién fue ese correo?</b> Este comercio quedó registrado como «correo enviado», que
     antes servía para las dos cosas. Ahora se distinguen, y de esto depende saber si el caso
     está trabado del lado del banco o del nuestro.
@@ -4523,7 +4720,7 @@ function renderFormBBVA(){
           <span class="rd"></span><span><b>${m.label}</b><span>${m.desc}</span></span>
         </div>`).join("")}
     </div>
-    ${exigeRespaldo(f.Medio) ? `<div class="note warn" style="margin-top:11px">
+    ${exigeRespaldo(f.Medio) ? `<div class="note crit" style="margin-top:11px">
       El chat no deja constancia consultable. Después de esta coordinación
       <b>envía un correo con lo acordado</b> y regístralo acá como segundo contacto:
       la ficha va a pedirlo hasta que aparezca.</div>` : ""}
@@ -5048,7 +5245,7 @@ function avisoCorreccion(f){
   if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
     avisos.push(`Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe abajo qué respondió: sin eso no se puede guardar.`);
   if (!avisos.length) return "";
-  return `<div class="note warn" style="margin-top:11px">${avisos.join("<div style=\"height:6px\"></div>")}</div>`;
+  return `<div class="note crit" style="margin-top:11px">${avisos.join("<div style=\"height:6px\"></div>")}</div>`;
 }
 
 /* El pop de confirmación: se ve exactamente qué va a cambiar antes de tocar
@@ -5093,12 +5290,32 @@ function pintarSeguimiento(){
   if (!activas.length){ box.innerHTML = ""; return; }
   if (!f.Fecha_Accion) f.Fecha_Accion = hoyISO();
 
+  if (!f.Hora_Accion) f.Hora_Accion = "10:00";
+
+  /* Una visita o una reunión son una CITA: van al calendario y necesitan hora.
+     Lo demás —llamar, mandar el tarifario, esperar respuesta— es una próxima
+     acción suelta, que no ocupa una franja de nadie. La distinción no es
+     burocrática: sin hora no se puede responder «¿está libre el jueves a las
+     tres?», que es justo para lo que se pidió el calendario. */
+  const esVisita = f.Accion === "VISITAR";
+  if (esVisita){
+    if (!f.Modalidad) f.Modalidad = "PRESENCIAL";
+    if (!f.Duracion)  f.Duracion = duracionDe(f.Modalidad);
+  } else {
+    /* La limpieza vive acá y no solo en el clic: si la acción cambia por
+       cualquier otro camino, no queda una hora colgada de algo que no ocupa
+       ninguna franja. Un estado que depende de por dónde se llegó es un
+       estado que algún día va a estar mal. */
+    f.Modalidad = ""; f.Duracion = null;
+  }
+
   box.innerHTML = `
   <div class="card">
     <h3>¿Qué sigue con este comercio? <span class="req">*</span></h3>
     <div class="note" style="margin-bottom:11px">
-      Esta gestión no cierra el comercio, así que queda algo por hacer. Anótalo acá y aparece
-      en tu <b>Agenda</b> el día que toca. Al registrar la siguiente gestión se marca como cumplido solo.
+      Esta gestión no cierra el comercio, así que queda algo por hacer. Si es una <b>visita o una
+      reunión</b>, va al calendario con su hora y se puede ver quién está ocupado. Al registrar la
+      visita se da por concretada sola.
     </div>
     <div class="opts">
       ${activas.map(a => `
@@ -5106,23 +5323,82 @@ function pintarSeguimiento(){
           <span class="rd"></span><span><b>${esc(a.nombre)}</b>${a.descripcion ? `<span>${esc(a.descripcion)}</span>` : ""}</span>
         </div>`).join("")}
     </div>
-    <div class="field" style="margin-top:11px">
-      <label>¿Para cuándo? <span class="req">*</span></label>
-      <input type="date" data-f="Fecha_Accion" value="${esc(f.Fecha_Accion)}" min="${hoyISO()}">
+
+    ${esVisita ? `
+    <div class="field" style="margin-top:13px">
+      <label>¿Cómo va a ser? <span class="req">*</span></label>
+      <div class="seg" role="group" aria-label="Modalidad">
+        ${MODALIDADES.map(m => `<button type="button" class="${f.Modalidad === m.id ? "on" : ""}"
+          data-modal="${m.id}">${m.ic} ${esc(m.label)}</button>`).join("")}
+      </div>
+    </div>` : ""}
+
+    <div class="row2" style="margin-top:11px">
+      <div class="field">
+        <label>${esVisita ? "Día de la cita" : "¿Para cuándo?"} <span class="req">*</span></label>
+        <input type="date" data-f="Fecha_Accion" value="${esc(f.Fecha_Accion)}" min="${hoyISO()}">
+      </div>
+      ${esVisita ? `
+      <div class="field">
+        <label>Hora <span class="req">*</span></label>
+        <input type="time" data-f="Hora_Accion" value="${esc(f.Hora_Accion)}" step="900">
+      </div>` : ""}
     </div>
+
+    ${esVisita ? `
+    <div class="field campo-corto">
+      <label>Cuánto dura <span class="hint">— para saber quién está ocupado en esa franja</span></label>
+      <select data-f="Duracion">
+        ${[30,45,60,90,120].map(n => `<option value="${n}"${
+          Number(f.Duracion) === n ? " selected" : ""}>${n} minutos</option>`).join("")}
+      </select>
+    </div>
+    ${avisoChoque(f)}` : ""}
+
     <div class="field" style="margin-bottom:0">
       <label>Detalle <span class="hint">— qué pidió exactamente</span></label>
       <input type="text" data-f="Comentario_Accion" value="${esc(f.Comentario_Accion || "")}"
              placeholder="Ej.: llevarle el tarifario de POS y hablar con el dueño, no con la cajera">
     </div>
   </div>`;
+
   box.querySelectorAll("[data-acc]").forEach(el => el.onclick = () => {
     f.Accion = el.dataset.acc;
-    box.querySelectorAll("[data-acc]").forEach(x => x.classList.toggle("on", x.dataset.acc === f.Accion));
+    /* Al salir de «volver a visitar» la cita deja de serlo: no queda una hora
+       colgada de una acción que no ocupa franja. */
+    if (f.Accion !== "VISITAR"){ f.Modalidad = ""; f.Duracion = null; }
+    pintarSeguimiento();
+  });
+  box.querySelectorAll("[data-modal]").forEach(el => el.onclick = () => {
+    f.Modalidad = el.dataset.modal;
+    f.Duracion = duracionDe(f.Modalidad);
+    pintarSeguimiento();
   });
   box.querySelectorAll("[data-f]").forEach(el => {
-    el.oninput = el.onchange = () => { f[el.dataset.f] = el.value; };
+    el.oninput = el.onchange = () => {
+      f[el.dataset.f] = el.value;
+      /* La hora y el día cambian el aviso de choque: se vuelve a pintar para
+         que el ejecutivo lo vea mientras elige, no después de guardar. */
+      if (["Fecha_Accion","Hora_Accion","Duracion"].includes(el.dataset.f) && esVisita) pintarSeguimiento();
+    };
   });
+}
+
+/* Dos citas que se pisan no se prohíben —a veces el cliente solo puede a esa
+   hora y algo hay que mover— pero no se dejan pasar en silencio. */
+function avisoChoque(f){
+  if (!f.Fecha_Accion || !f.Hora_Accion || !S.user) return "";
+  const desde = minutosDe(f.Hora_Accion);
+  if (desde === null) return "";
+  const hasta = desde + (Number(f.Duracion) || 60);
+  const choques = ocupacionDe(correoObservado() || S.user.correo, f.Fecha_Accion)
+    .filter(s => chocaCon(s, desde, hasta));
+  if (!choques.length) return "";
+  return `<div class="note crit" style="margin-top:9px">
+    <b>Ya tienes algo a esa hora.</b> ${choques.map(s => {
+      const c = byId[String(s.customer_id)];
+      return `${esc(rangoCita(s))} · ${esc(titulo(c ? nombreCliente(c) : s.customer_id))}`;
+    }).join(" · ")}. Puedes guardarla igual, pero una de las dos se va a caer.</div>`;
 }
 
 function renderFormulario(){
@@ -5151,7 +5427,7 @@ function renderFormulario(){
       <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
     </div>
     ${fechaFutura(f.Fecha_Contacto) ? `
-    <div class="note warn" style="margin-top:8px">
+    <div class="note crit" style="margin-top:8px">
       <b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
       Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.
     </div>` : diasDeAtraso(f.Fecha_Contacto) > 2 ? `
@@ -5178,7 +5454,7 @@ function renderFormulario(){
       <div class="field" style="margin-bottom:0"><label>Hora</label>
         <input type="time" data-f="Hora_Contacto" value="${esc(String(f.Hora_Contacto||"").slice(0,5))}"></div>
     </div>
-    ${fechaFutura(f.Fecha_Contacto) ? `<div class="note warn" style="margin-top:8px">
+    ${fechaFutura(f.Fecha_Contacto) ? `<div class="note crit" style="margin-top:8px">
       Esa fecha todavía no llega. Hoy es ${esc(fmtFecha(hoyISO()))}.</div>` : ""}`
     : `<div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>`}
 
@@ -5223,7 +5499,7 @@ function renderFormulario(){
   ` : `
   <div class="card">
     <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
-    <div class="note warn" style="margin-bottom:11px">
+    <div class="note crit" style="margin-bottom:11px">
       El plazo para corregir el medio y el resultado <b>ya venció</b>: son ${DIAS_CORRECCION} días
       trabajados desde que se registró. ${esc(plazoCorreccion(f))}
       Si hay algo mal, pídeselo a tu supervisor: él sí puede corregirlo y queda en la bitácora.
@@ -5281,7 +5557,7 @@ function renderFormulario(){
       <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
     <div class="field" style="margin-bottom:0"><label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''} <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
       <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
-      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note warn" style="margin-top:8px">
+      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note crit" style="margin-top:8px">
         Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
         es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
         es <b>No respondió</b>.</div>` : ""}</div>
@@ -5438,7 +5714,7 @@ function pintarGps(){
       ${/^-?\d+\.\d+,\s*-?\d+\.\d+/.test(f.Ubicacion||"") ? `<div style="margin-top:9px">
         <a class="btn ghost sm" target="_blank" rel="noopener"
            href="https://www.google.com/maps?q=${encodeURIComponent(String(f.Ubicacion).split("(")[0].trim())}">Ver en el mapa</a></div>` : ""}`
-      : `<div class="note warn" style="margin-top:9px"><b>Sin ubicación verificada.</b> Este registro se guardó sin señal de GPS, así que no tiene respaldo del lugar. La marca es permanente.</div>`}
+      : `<div class="note crit" style="margin-top:9px"><b>Sin ubicación verificada.</b> Este registro se guardó sin señal de GPS, así que no tiene respaldo del lugar. La marca es permanente.</div>`}
     </div>`;
     return;
   }
@@ -5499,7 +5775,7 @@ function pintarGps(){
     f.Ubicacion = ""; f.Ubicacion_Verificada = false;
     $("#gpsVal").innerHTML = "";
     $("#gpsMsg").innerHTML = `
-      <div class="note warn" style="margin-top:9px">
+      <div class="note crit" style="margin-top:9px">
         <b>No se pudo obtener la ubicación.</b> ${esc(motivo || "")}
         <div style="margin-top:5px;font-size:12px">Revisa que el GPS del celular esté encendido y que el navegador
         tenga permiso de ubicación. Vuelve a intentarlo desde el botón de arriba.</div>
@@ -5551,6 +5827,10 @@ async function guardar(c){
     if (!f.Accion) errores.push("Indica qué sigue con este comercio: sin próxima acción el caso se pierde de vista.");
     if (!f.Fecha_Accion) errores.push("Ponle fecha a la próxima acción.");
     else if (f.Fecha_Accion < hoyISO()) errores.push("La próxima acción no puede quedar en una fecha que ya pasó.");
+    /* Sin hora no hay cita: no ocupa franja, no se puede consultar
+       disponibilidad y no se puede contrastar contra lo que de verdad pasó. */
+    if (f.Accion === "VISITAR" && f.Modalidad && !f.Hora_Accion)
+      errores.push("Ponle hora a la visita. Sin hora no entra al calendario y nadie puede saber si estás ocupado.");
   }
   if (S.editId && volverPresencialProhibido(f))
     errores.push(`No puedes cambiar el medio a ${nomTipo(f.Tipo_Contacto).toLowerCase()}: una gestión presencial necesita la ubicación capturada en el momento, y esa no se modifica. Elimina el registro y créalo de nuevo desde el local.`);
@@ -5633,15 +5913,24 @@ async function guardar(c){
          la que estuviera abierta cuando entra una gestión nueva, así que esta
          tiene que llegar al final para quedar como la vigente. */
       if (requiereSeguimiento(f) && f.Accion){
-        const { error: eSeg } = await sb.from("seguimientos").insert({
+        /* La modalidad es lo que convierte una próxima acción en una cita del
+           calendario. Va con hora y duración; sin ellas la base la rechaza,
+           porque una cita sin hora no ocupa ninguna franja y no se le puede
+           preguntar nada. */
+        const cita = f.Accion === "VISITAR" && !!f.Modalidad;
+        const { error: eSeg } = await sb.from("seguimientos").insert(Object.assign({
           customer_id: String(c.customer_id),
           accion: f.Accion,
           fecha_objetivo: f.Fecha_Accion,
           comentario: String(f.Comentario_Accion || "").trim() || null,
           correo_stratis: S.user.correo,
           ejecutivo: S.user.nombre
-        });
-        if (eSeg) toast("La gestión se guardó, pero la próxima acción no: " + eSeg.message);
+        }, cita ? {
+          modalidad: f.Modalidad,
+          hora_inicio: f.Hora_Accion,
+          duracion_min: Number(f.Duracion) || duracionDe(f.Modalidad)
+        } : {}));
+        if (eSeg) toast("La gestión se guardó, pero " + (cita ? "la cita" : "la próxima acción") + " no: " + eSeg.message);
       }
 
       // El cierre va después de la gestión, nunca antes: la base exige que ya
@@ -6236,7 +6525,7 @@ function bloqueProyecto(){
         denominador al que nunca pertenecieron. Cuentan —y pesan en el incentivo— en su propia cifra.</p>
       </div>
     </details>
-  </div>` : `<div class="card"><div class="note warn" style="margin:0">
+  </div>` : `<div class="card"><div class="note crit" style="margin:0">
     Falta cargar la cartera asignada por ejecutivo en <b>Ajustes → Cartera asignada</b>.
     Sin ese número el avance solo se puede medir sobre lo ya registrado, que siempre se ve
     mejor de lo que es.</div></div>`}
@@ -7091,13 +7380,18 @@ function decisionesTablero(r, regs){
                                        || String(x.Comentario_Ejecutivo || "").trim());
   });
 
-  const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en);
-  const vencidas = abiertas.filter(x => estadoAccion(x) === "vencida");
-  const conAccion = new Set(abiertas.map(x => String(x.customer_id)));
-  const huerfanos = base.filter(c =>
+  /* Las citas del calendario, no las acciones sueltas. Quedaron setecientas y
+     pico abiertas de la mecánica anterior: contarlas acá sería reportar todos
+     los días el incumplimiento de un mecanismo que ya no existe. */
+  const citasAbiertasT = citasTodas().filter(x => !x.cerrado_en);
+  const vencidas = citasAbiertasT.filter(x => estadoCita(x) === "vencida");
+  const conCita = new Set(citasAbiertasT.map(x => String(x.customer_id)));
+  /* El hueco de la campaña: el banco confirmó o el cliente respondió, y no hay
+     ninguna visita puesta en el calendario. */
+  const habilitadosSinCita = base.filter(c =>
     (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
-    && (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0
-    && !conAccion.has(String(c.customer_id)));
+    && habilitadoEn(c.customer_id)
+    && !conCita.has(String(c.customer_id)));
 
   /* Un ejecutivo con gestiones y sin una sola visita en el periodo no es un
      número más de la tabla: es una conversación que hay que tener hoy. */
@@ -7112,7 +7406,7 @@ function decisionesTablero(r, regs){
       ir:`data-verges="todos" data-verejec="${esc(f.nombre)}"`, tono:"crit", siempre:true })),
     { n:sinUbi.length, t:"Gestiones sin ubicación", d:"Presenciales sin coordenada y sin exención",
       ir:`data-verges="sin_ubicacion"`, tono:"crit" },
-    { n:vencidas.length, t:"Acciones vencidas", d:"Pasó la fecha comprometida y nadie retomó",
+    { n:vencidas.length, t:"Citas no concretadas", d:"Pasó el día pactado y no hay visita registrada",
       ir:`data-go="agenda"`, tono:"crit" },
     { n:tarde.length, t:"Gestiones fuera de plazo", d:"Registradas más de un día trabajado después",
       ir:`data-verges="fuera_plazo"`, tono:"warn" },
@@ -7120,8 +7414,9 @@ function decisionesTablero(r, regs){
       ir:`data-vercartera="sin_comentario"`, tono:"warn" },
     { n:sinCanal.length, t:"Fichas sin coordinar con BBVA", d:"El caso no puede avanzar sin el dato",
       ir:`data-vercartera="sin_bbva"`, tono:"warn" },
-    { n:huerfanos.length, t:"Sin próxima acción", d:"Trabajados, abiertos y sin nada agendado",
-      ir:`data-go="agenda"`, tono:"warn" }
+    { n:habilitadosSinCita.length, t:"Habilitados sin visita",
+      d:"BBVA confirmó o el cliente respondió, y no hay cita puesta",
+      ir:`data-go="agenda"`, tono:"crit" }
   ].filter(x => x.siempre || x.n > 0);
 
   return `
@@ -8839,143 +9134,323 @@ function bindMetas(){
 }
 
 /* =========================================================================
-   Agenda — lo que quedó comprometido con cada comercio
+   Calendario de visitas
 
-   Es la primera pantalla de la mañana: qué vencí, qué toca hoy, qué viene.
-   El ejecutivo ve lo suyo; el Analista y el Manager, lo de todo el equipo,
-   con el filtro por persona. Las vencidas van primero y en rojo, porque son
-   las que cuestan plata.
+   Antes esto era una agenda de «próximas acciones»: una lista de pendientes
+   con fecha y sin hora. No se usaba, y por una razón que se ve al mirarla:
+   una lista de trescientos compromisos vencidos no es una herramienta, es un
+   reproche. Nadie abre eso por la mañana.
+
+   El calendario mide otra cosa. Una CITA es un compromiso con el cliente —día,
+   hora y modalidad— y lo que interesa de ella son tres preguntas:
+
+     · ¿Cuánto tardamos en agendarla desde que el caso quedó habilitado?
+     · ¿Cuántas hay comprometidas para esta semana?
+     · ¿Se concretaron?
+
+   Las acciones sueltas de la mecánica anterior siguen existiendo en la base,
+   pero no salen acá: son de otro modelo y aparecer juntas haría que ninguna de
+   las dos cuentas signifique nada.
    ========================================================================= */
 const ORDEN_PLAZO = ["vencida", "hoy", "semana", "despues"];
 
-function agendaVisible(){
-  /* Con «ver como» puesto, la agenda es la del ejecutivo observado: es la
-     mitad de la pregunta «¿por qué dice que no tiene nada pendiente?». */
+/* Las citas que le corresponden a quien está mirando. Con «ver como» puesto,
+   las del ejecutivo observado: es la mitad de la pregunta «¿por qué dice que
+   no tiene nada esta semana?». */
+function citasVisibles(){
   const mio = correoObservado();
-  let l = SEGUIMIENTOS.filter(x => !x.cerrado_en);
+  let l = citasTodas();
   if (mio) l = l.filter(x => x.correo_stratis === mio);
   else if (S.fEjecAgenda !== "todos") l = l.filter(x => x.ejecutivo === S.fEjecAgenda);
-  return l.sort((a,b) => String(a.fecha_objetivo).localeCompare(String(b.fecha_objetivo)));
+  return l.sort((a,b) =>
+    String(a.fecha_objetivo).localeCompare(String(b.fecha_objetivo))
+    || String(a.hora_inicio || "").localeCompare(String(b.hora_inicio || "")));
 }
+const citasAbiertas = () => citasVisibles().filter(s => !s.cerrado_en);
 
-function tarjetaAccion(s){
+function tarjetaCita(s){
   const c = byId[String(s.customer_id)];
-  const est = estadoAccion(s);
+  const e = estadoCita(s);
+  const meta = ESTADO_CITA[e] || {};
   const d = diasParaAccion(s);
-  const cuando = est === "vencida" ? `venció hace ${textoDias(Math.abs(d))}`
-               : est === "hoy"     ? "para hoy"
-               : d === 1           ? "para mañana"
-               : `en ${textoDias(d)}`;
-  return `<div class="card ag-item ${est}">
+  const cuando = e === "vencida" ? `venció hace ${textoDias(Math.abs(d))}`
+               : e === "hoy"     ? "es hoy"
+               : d === 1         ? "mañana"
+               : d > 1           ? `en ${textoDias(d)}`
+               : "";
+  const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
+
+  return `<div class="card ag-item ${e === "vencida" ? "vencida" : e === "hoy" ? "hoy" : ""}">
     <div class="ag-h">
       <div>
-        <div class="who" data-cid="${esc(s.customer_id)}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</div>
-        <div class="dt">${esc(nomAccion(s.accion))}${c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
-          S.user.rol !== "Ejecutivo" ? " · " + esc(s.ejecutivo) : ""}</div>
+        <div class="who" data-cid="${esc(s.customer_id)}" style="cursor:pointer;color:var(--brand-2)">${
+          esc(titulo(c ? nombreCliente(c) : s.customer_id))}</div>
+        <div class="dt"><b>${esc(rangoCita(s))}</b> · ${esc(cortoModalidad(s.modalidad))}${
+          c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
+          vistaDeCampo() ? "" : " · " + esc(s.ejecutivo)}</div>
+        <div class="dt tenue">${esc(c ? (esClienteNuevo(c) ? "RUC " + (c.ruc || llaveDesnudaCita(c)) : "Customer ID " + c.customer_id) : "")}</div>
       </div>
-      <span class="chip ${est === "vencida" ? "crit" : est === "hoy" ? "warn" : "no"}">${esc(fmtFecha(s.fecha_objetivo))} · ${esc(cuando)}</span>
+      <span class="chip ${meta.tono || "no"}">${esc(meta.label || "")}${cuando ? " · " + esc(cuando) : ""}</span>
     </div>
     ${s.comentario ? `<div class="quote" style="margin-top:7px">${esc(s.comentario)}</div>` : ""}
+    ${g ? `<div class="pie" style="margin-top:6px">Se concretó el <b>${fmtFecha(String(g.Fecha_Contacto).slice(0,10))}</b>${
+      String(g.Fecha_Contacto).slice(0,10) !== String(s.fecha_objetivo).slice(0,10)
+        ? " · se pactó para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) : ""}.</div>` : ""}
     <div class="ag-acc">
-      ${esDeCampo() && c ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar gestión</button>` : ""}
+      ${esDeCampo() && c && !s.cerrado_en
+        ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar la visita</button>` : ""}
       <button class="btn ghost sm" data-cid="${esc(s.customer_id)}">Ver comercio</button>
-      ${(s.correo_stratis === S.user.correo || S.user.rol !== "Ejecutivo")
+      ${!s.cerrado_en && (s.correo_stratis === S.user.correo || !vistaDeCampo())
         ? `<button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
-             title="Cierra esta acción sin registrar una gestión. Úsalo solo si el compromiso dejó de tener sentido; si sí hiciste algo, registra la gestión.">Ya no aplica</button>` : ""}
+             title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>` : ""}
     </div>
+  </div>`;
+}
+/* El identificador que se está tramitando, tal cual se pidió que figure en el
+   calendario: Customer ID para la cartera, RUC para una venta nueva. */
+const llaveDesnudaCita = c => String((c && c.customer_id) || "").replace(/^NUEVO-/, "");
+
+/* ---- Las cifras de arriba ------------------------------------------------
+   Proyección a la izquierda, cumplimiento a la derecha. Son dos preguntas
+   distintas —qué viene y qué pasó— y mezclarlas en una sola fila fue lo que
+   hizo que la agenda vieja no dijera nada. */
+function cifrasCalendario(){
+  const todas = citasVisibles();
+  const abiertas = todas.filter(s => !s.cerrado_en);
+  const est = s => estadoCita(s);
+
+  const hoy = abiertas.filter(s => est(s) === "hoy");
+  const semana = abiertas.filter(s => { const d = diasParaAccion(s); return d > 0 && d <= 7; });
+  const vencidas = abiertas.filter(s => est(s) === "vencida");
+
+  /* El cumplimiento solo se puede medir sobre citas cuya fecha ya pasó: contar
+     las futuras como incumplidas sería castigar por no haber viajado al
+     futuro. */
+  const juzgables = todas.filter(s => cuentaCumplimiento(est(s)));
+  const concretadas = juzgables.filter(s => seConcreto(est(s)));
+  const pct = juzgables.length ? Math.round(concretadas.length / juzgables.length * 100) : null;
+
+  return { todas, abiertas, hoy, semana, vencidas, juzgables, concretadas, pct };
+}
+
+/* ---- La proyección por ejecutivo ----------------------------------------
+   Lo que pediste poder evidenciar: cuántas visitas tiene comprometidas cada
+   uno esta semana, y cuántas de las que ya vencieron se concretaron. Sale
+   solo para supervisión. */
+function proyeccionEquipo(){
+  const req = paramsDe(periodoHoy()).requisitos;
+  return USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false).map(u => {
+    const suyas = citasTodas().filter(s => s.correo_stratis === u.correo);
+    const abiertas = suyas.filter(s => !s.cerrado_en);
+    const d = s => diasParaAccion(s);
+    const juzgables = suyas.filter(s => cuentaCumplimiento(estadoCita(s)));
+    const concretadas = juzgables.filter(s => seConcreto(estadoCita(s)));
+    /* La demora en agendar, medida sobre los comercios de esa persona que ya
+       quedaron habilitados. La mediana, no el promedio. */
+    const demoras = CLIENTES.filter(c => c.asignado_correo === u.correo)
+      .map(c => demoraEnAgendar(c.customer_id)).filter(n => n !== null);
+    const habilitados = CLIENTES.filter(c => c.asignado_correo === u.correo && habilitadoEn(c.customer_id));
+    return {
+      nombre:u.nombre, correo:u.correo,
+      hoy: abiertas.filter(s => d(s) === 0).length,
+      semana: abiertas.filter(s => d(s) > 0 && d(s) <= 7).length,
+      vencidas: abiertas.filter(s => estadoCita(s) === "vencida").length,
+      juzgables: juzgables.length,
+      concretadas: concretadas.length,
+      pct: juzgables.length ? Math.round(concretadas.length / juzgables.length * 100) : null,
+      habilitados: habilitados.length,
+      conCita: demoras.length,
+      demora: mediana(demoras),
+      pide: req.visitas_semana
+    };
+  }).sort((a,b) => (b.semana + b.hoy) - (a.semana + a.hoy));
+}
+
+function bloqueProyeccion(){
+  const filas = proyeccionEquipo();
+  if (!filas.length) return "";
+  const pct = v => v === null ? "—" : v + "%";
+  return `
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Proyección de visitas por ejecutivo</h3>
+      <span class="sub">Lo comprometido hacia adelante, y qué pasó con lo que ya venció</span>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblProyeccion">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Citas para hoy">Hoy</th>
+        <th title="Citas en los próximos 7 días">Esta semana</th>
+        <th title="Mínimo de visitas efectivas por semana que pide el incentivo">Pide</th>
+        <th title="Citas cuya fecha ya pasó y no tienen visita registrada">No concretadas</th>
+        <th title="De las citas cuya fecha ya pasó, cuántas se concretaron">Cumplimiento</th>
+        <th title="Comercios de su cartera que ya quedaron habilitados: BBVA confirmó los datos o el cliente respondió">Habilitados</th>
+        <th title="De esos, cuántos ya tienen al menos una cita agendada">Con cita</th>
+        <th title="Mediana de días trabajados entre que el caso quedó habilitado y que se agendó la visita">Demora en agendar</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(f => `<tr>
+        <td class="nom">${esc(f.nombre)}</td>
+        <td class="num fuerte">${f.hoy || "—"}</td>
+        <td class="num fuerte">${f.semana || "—"}</td>
+        <td class="num tenue">${f.pide}</td>
+        <td class="num ${f.vencidas ? "alerta" : ""}">${f.vencidas || "—"}</td>
+        <td class="num">${f.juzgables ? `${pct(f.pct)} <span class="tenue">${f.concretadas} de ${f.juzgables}</span>` : "—"}</td>
+        <td class="num">${f.habilitados || "—"}</td>
+        <td class="num ${f.habilitados && f.conCita < f.habilitados ? "alerta" : ""}">${f.conCita || "—"}</td>
+        <td class="num">${f.demora === null ? "—" : `${f.demora} <span class="tenue">día${f.demora === 1 ? "" : "s"}</span>`}</td>
+      </tr>`).join("")}
+      </tbody>
+    </table>
+    </div>
+    <p class="pie"><b>Habilitados</b> son los comercios en los que BBVA ya confirmó los datos o el
+      cliente ya respondió: desde ahí se puede agendar. <b>Con cita</b> dice en cuántos de esos ya
+      hay una visita puesta. La diferencia entre las dos columnas es el hueco de la campaña.
+      La <b>demora</b> va en mediana y no en promedio: un caso agendado cuarenta días tarde
+      arrastraría el promedio y escondería a los que se agendaron al día siguiente.</p>
+  </div>`;
+}
+
+/* ---- ¿Quién está libre? -------------------------------------------------
+   Para la reunión de equipo. Se elige día y franja, y el CRM dice quién tiene
+   algo encima. No propone horarios: dice lo que hay. */
+function bloqueDisponibilidad(){
+  const fecha = S.dispFecha || hoyISO();
+  const desde = S.dispDesde || "15:00";
+  const hasta = S.dispHasta || "16:00";
+  const dMin = minutosDe(desde), hMin = minutosDe(hasta);
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+
+  const estado = ejec.map(u => {
+    const choques = (dMin === null || hMin === null) ? []
+      : ocupacionDe(u.correo, fecha).filter(s => chocaCon(s, dMin, hMin));
+    return { u, choques };
+  });
+  const libres = estado.filter(x => !x.choques.length);
+
+  return `
+  <div class="card">
+    <h3>¿Quién está libre?</h3>
+    <p class="pie" style="margin:4px 0 12px">Para cuadrar una reunión de equipo sin preguntarle a
+      nadie. Solo mira las citas del calendario: una franja libre acá no significa que la persona
+      no esté en la calle.</p>
+    <div class="sel-row">
+      <label class="fsel"><span>Día</span>
+        <input type="date" id="dispFecha" value="${esc(fecha)}"></label>
+      <label class="fsel"><span>Desde</span>
+        <input type="time" id="dispDesde" value="${esc(desde)}" step="900"></label>
+      <label class="fsel"><span>Hasta</span>
+        <input type="time" id="dispHasta" value="${esc(hasta)}" step="900"></label>
+    </div>
+    <div class="disp">
+      ${estado.map(({u, choques}) => `
+        <div class="disp-x ${choques.length ? "ocupado" : "libre"}">
+          <span class="pip"></span>
+          <div>
+            <b>${esc(u.nombre)}</b>
+            <span>${choques.length
+              ? choques.map(s => {
+                  const c = byId[String(s.customer_id)];
+                  return `${esc(rangoCita(s))} · ${esc(titulo(c ? nombreCliente(c) : s.customer_id))}`;
+                }).join(" · ")
+              : "sin citas en esa franja"}</span>
+          </div>
+        </div>`).join("")}
+    </div>
+    <p class="pie">${libres.length} de ${ejec.length} sin nada agendado el
+      ${fmtFecha(fecha)} entre las ${esc(horaCorta(desde))} y las ${esc(horaCorta(hasta))}.</p>
   </div>`;
 }
 
 function viewAgenda(){
   const mando = !vistaDeCampo();
-  const lista = agendaVisible();
+  const x = cifrasCalendario();
+  const lista = citasAbiertas();
   const porPlazo = {};
-  ORDEN_PLAZO.forEach(k => porPlazo[k] = lista.filter(s => estadoAccion(s) === k));
+  ORDEN_PLAZO.forEach(k => porPlazo[k] = []);
+  lista.forEach(s => {
+    const e = estadoCita(s);
+    const d = diasParaAccion(s);
+    porPlazo[e === "vencida" ? "vencida" : e === "hoy" ? "hoy" : d <= 7 ? "semana" : "despues"].push(s);
+  });
 
-  /* Comercios trabajados que quedaron sin próxima acción: el hueco que la
-     agenda existe para tapar. */
-  const conAccion = new Set(lista.map(s => String(s.customer_id)));
-  const huerfanos = cartera().filter(c =>
-    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" &&
-    (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0 &&
-    !conAccion.has(String(c.customer_id)));
+  /* Comercios habilitados —el banco confirmó o el cliente respondió— y sin una
+     visita puesta. Es el hueco que el calendario existe para cerrar. */
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  const sinAgendar = cartera().filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && habilitadoEn(c.customer_id)
+    && !conCita.has(String(c.customer_id)));
 
   return `
   ${bannerComoEjec()}
   <div class="page-head">
     <div>
-      <h2>${mando ? "Agenda del equipo" : "Mi agenda"}</h2>
-      <div class="sub">Lo que quedó comprometido con cada comercio, del más urgente al más lejano</div>
+      <h2>${mando ? "Calendario de visitas del equipo" : "Mi calendario de visitas"}</h2>
+      <div class="sub">Lo que está comprometido con cada comercio: día, hora y si es en el local o por videollamada</div>
     </div>
   </div>
 
   <div class="stat-row">
-    <div class="stat ${porPlazo.vencida.length ? "malo" : ""}"><div class="lbl">Vencidas</div><div class="val">${porPlazo.vencida.length}</div><div class="sub">pasó la fecha y nadie retomó</div></div>
-    <div class="stat"><div class="lbl">Para hoy</div><div class="val">${porPlazo.hoy.length}</div><div class="sub">comprometidas para ${fmtFecha(hoyISO())}</div></div>
-    <div class="stat"><div class="lbl">Esta semana</div><div class="val">${porPlazo.semana.length}</div><div class="sub">en los próximos 7 días</div></div>
-    <div class="stat"><div class="lbl">Sin próxima acción</div><div class="val">${huerfanos.length}</div><div class="sub">trabajados y sin nada agendado</div></div>
+    <div class="stat"><div class="lbl">Hoy</div><div class="val">${x.hoy.length}</div>
+      <div class="sub">citas para ${fmtFecha(hoyISO())}</div></div>
+    <div class="stat"><div class="lbl">Esta semana</div><div class="val">${x.semana.length}</div>
+      <div class="sub">en los próximos 7 días</div></div>
+    <div class="stat ${x.vencidas.length ? "malo" : ""}"><div class="lbl">No concretadas</div>
+      <div class="val">${x.vencidas.length}</div>
+      <div class="sub">pasó la fecha y no hay visita registrada</div></div>
+    <div class="stat"><div class="lbl">Cumplimiento</div>
+      <div class="val">${x.pct === null ? "—" : x.pct + "%"}</div>
+      <div class="sub">${x.juzgables.length
+        ? `${x.concretadas.length} de ${x.juzgables.length} citas ya vencidas se concretaron`
+        : "todavía no vence ninguna cita"}</div></div>
+    <div class="stat ${sinAgendar.length ? "malo" : ""}"><div class="lbl">Habilitados sin cita</div>
+      <div class="val">${sinAgendar.length}</div>
+      <div class="sub">BBVA confirmó o el cliente respondió, y no hay visita puesta</div></div>
   </div>
 
   ${mando ? `<div class="filtros">
     <div class="sel-row">
       <label class="fsel"><span>Ejecutivo</span>
         <select id="ejecAgenda">
-          <option value="todos"${S.fEjecAgenda==="todos"?" selected":""}>Todo el equipo · ${SEGUIMIENTOS.filter(x=>!x.cerrado_en).length}</option>
+          <option value="todos"${S.fEjecAgenda==="todos"?" selected":""}>Todo el equipo · ${citasTodas().filter(s=>!s.cerrado_en).length}</option>
           ${USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
-            const n = SEGUIMIENTOS.filter(x => !x.cerrado_en && x.ejecutivo === u.nombre).length;
+            const n = citasTodas().filter(s => !s.cerrado_en && s.ejecutivo === u.nombre).length;
             return `<option value="${esc(u.nombre)}"${S.fEjecAgenda===u.nombre?" selected":""}>${esc(u.nombre)} · ${n}</option>`;
           }).join("")}
         </select></label>
     </div>
   </div>` : ""}
 
-  <!-- «Ya no aplica» solo se explicaba dentro del modal, o sea después de
-       tocarlo. Quien no sabe qué hace un botón no lo toca, y las acciones se
-       quedaban abiertas para siempre. La leyenda va antes. -->
-  ${lista.length ? `<div class="card ag-ley">
-    <div class="ag-ley-x">
-      ${esDeCampo()
-        ? `<b>Registrar gestión</b>
-           <span>Se hizo algo: se anota la gestión y la acción <b>se cierra sola</b>, con el
-             registro de lo que pasó. Es el camino normal.</span>`
-        : `<b>Se cierran solas</b>
-           <span>Cuando el ejecutivo registra una gestión nueva sobre ese comercio, la acción
-             se da por cumplida <b>sin que nadie la toque</b>. Que siga acá significa que
-             nadie volvió a trabajar ese comercio.</span>`}
-    </div>
-    <div class="ag-ley-x">
-      <b>Ya no aplica</b>
-      <span>El compromiso <b>dejó de tener sentido</b> —el cliente ya no atiende, se decidió
-        dejarlo enfriar, se agendó por error—. Cierra la acción <b>sin registrar ninguna
-        gestión</b>. No borra nada y queda con tu nombre.</span>
-    </div>
-    <div class="ag-ley-x">
-      <b>Ver comercio</b>
-      <span>Abre la ficha con todo su historial.</span>
-    </div>
-  </div>` : ""}
+  ${mando ? bloqueProyeccion() : ""}
+  ${mando ? bloqueDisponibilidad() : ""}
 
   ${lista.length ? ORDEN_PLAZO.map(k => porPlazo[k].length ? `
     <div class="sec-title">${ETIQUETA_PLAZO[k]} · ${porPlazo[k].length}</div>
-    ${porPlazo[k].map(tarjetaAccion).join("")}` : "").join("")
-   : `<div class="empty"><div class="big">✓</div>No hay nada pendiente por ahora.<br><br>
-      <span style="font-size:13px;color:var(--muted)">Las próximas acciones se anotan al registrar una gestión que no cierra el comercio.</span></div>`}
+    ${porPlazo[k].map(tarjetaCita).join("")}` : "").join("")
+   : `<div class="empty"><div class="big">◷</div>No hay visitas agendadas.<br><br>
+      <span style="font-size:13px;color:var(--muted)">Una cita se crea al registrar una gestión que
+      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>`}
 
-  ${huerfanos.length ? `
-  <div class="card" style="margin-top:16px;border-left:3px solid var(--warn)">
-    <h3>Comercios trabajados sin próxima acción · ${huerfanos.length}</h3>
-    <div class="note" style="margin-bottom:11px">
-      Tienen gestiones y siguen pendientes, pero nadie anotó qué sigue. Se resuelve registrando
-      la siguiente gestión: ahí el CRM va a pedir la próxima acción.
+  ${sinAgendar.length ? `
+  <div class="card" style="margin-top:16px;border-left:3px solid var(--crit)">
+    <h3>Habilitados sin visita agendada · ${sinAgendar.length}</h3>
+    <div class="note crit" style="margin-bottom:11px">
+      En estos comercios el banco ya confirmó los datos o el cliente ya respondió: se puede
+      agendar hoy mismo. Cada día que pasan acá es una visita que no ocurrió.
     </div>
     <div class="huerf">
-      ${huerfanos.slice(0, 30).map(c => `
-        <button class="huerf-x" data-cid="${esc(c.customer_id)}">
+      ${sinAgendar.slice(0, 30).map(c => {
+        const dias = habilesDesde(habilitadoEn(c.customer_id));
+        return `<button class="huerf-x" data-cid="${esc(c.customer_id)}">
           <b>${esc(titulo(nombreCliente(c)))}</b>
-          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
-        </button>`).join("")}
+          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}${
+            dias ? ` · habilitado hace ${textoDias(dias)}` : " · habilitado hoy"}</span>
+        </button>`;
+      }).join("")}
     </div>
-    ${huerfanos.length > 30 ? `<div class="note" style="margin-top:9px">…y ${huerfanos.length - 30} más.</div>` : ""}
+    ${sinAgendar.length > 30 ? `<div class="pie" style="margin-top:9px">…y ${sinAgendar.length - 30} más.</div>` : ""}
   </div>` : ""}`;
 }
 
@@ -8983,14 +9458,17 @@ async function descartarSeguimiento(id){
   const s = SEGUIMIENTOS.find(x => String(x.id) === String(id));
   if (!s) return;
   const c = byId[String(s.customer_id)];
+  const cita = esCita(s);
   const ok = await new Promise(res => {
-    modal(`<h3>Ya no aplica</h3>
-      <p style="margin-top:0">Se dará por cerrada la acción <b>${esc(nomAccion(s.accion))}</b> de
-      <b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b>, sin registrar una gestión.</p>
-      <div class="note">Úsalo cuando el compromiso dejó de tener sentido. Si sí hiciste algo,
-      regístralo como gestión: así queda el registro y la acción se cierra sola.</div>
-      <div class="pie">No se borra la gestión ni el comercio: solo se cierra este compromiso,
-      con tu nombre y la fecha.</div>
+    modal(`<h3>${cita ? "La cita se cayó" : "Ya no aplica"}</h3>
+      <p style="margin-top:0">Se dará por cerrada ${cita
+        ? `la <b>${esc(cortoModalidad(s.modalidad).toLowerCase())}</b> del
+           <b>${fmtFecha(String(s.fecha_objetivo).slice(0,10))} a las ${esc(horaCorta(s.hora_inicio))}</b>`
+        : `la acción <b>${esc(nomAccion(s.accion))}</b>`} de
+      <b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b>, sin registrar una visita.</p>
+      <div class="note crit">Cerrarla acá cuenta como <b>no concretada</b>: eso es lo que pasó.
+      Si la visita sí ocurrió, regístrala como gestión y la cita se cierra sola como concretada.</div>
+      <div class="pie">No se borra nada: la cita queda con su fecha, tu nombre y el motivo.</div>
       <div style="display:flex;gap:8px;margin-top:15px">
         <button class="btn danger" id="sgOk" style="flex:1">Cerrarla</button>
         <button class="btn ghost" id="sgNo" style="flex:1">Cancelar</button>
@@ -9000,13 +9478,13 @@ async function descartarSeguimiento(id){
   });
   if (!ok) return;
   const { error } = await sb.from("seguimientos")
-    .update({ cerrado_en: new Date().toISOString(), cerrado_por: S.user.correo })
+    .update({ cerrado_en: new Date().toISOString(), cerrado_por: S.user.correo,
+              cerrado_motivo: "DESCARTADA" })
     .eq("id", id);
   if (error) return toast("No se pudo cerrar: " + error.message);
   await cargarSeguimientos(); render();
-  toast("Acción cerrada");
+  toast(cita ? "Cita cerrada como no concretada" : "Acción cerrada");
 }
-
 /* =========================================================================
    El catálogo de acciones, editable desde Ajustes
 
@@ -9103,6 +9581,7 @@ function bindAcciones(){
   if ($("#accNueva")) $("#accNueva").onkeydown = e => { if (e.key === "Enter") agregarAccion(); };
   document.querySelectorAll("[data-accsw]").forEach(b => b.onclick = () => alternarAccion(b.dataset.accsw));
 }
+
 
 /* =========================================================================
    Incentivos: la llave de acceso y el cumplimiento
@@ -9584,14 +10063,14 @@ function cardSello(p, sello, ver, abierto){
         </div>
         <button class="btn sm" id="cerrarPeriodo">Cerrar y sellar el periodo</button>
       </div>
-      ${paramsConfirmados(p) ? "" : `<div class="note warn" style="margin:11px 0 0">
+      ${paramsConfirmados(p) ? "" : `<div class="note crit" style="margin:11px 0 0">
         <b>Los parámetros de ${esc(nombrePeriodo(p))} todavía no están confirmados.</b>
         Se está heredando la versión${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : " del documento"},
         y eso incluye las metas y el mínimo de visitas semanales, que quedó en revisión.
         Confírmalos —o edítalos en Ajustes— antes de sellar.
         <div style="margin-top:8px"><button class="btn ghost sm" id="confirmarParams"
           >Confirmar los parámetros de ${esc(nombrePeriodo(p))}</button></div></div>`}
-      ${faltan ? `<div class="note warn" style="margin:11px 0 0">
+      ${faltan ? `<div class="note crit" style="margin:11px 0 0">
         Faltan <b>${faltan}</b> ${faltan === 1 ? "ejecutivo" : "ejecutivos"} con la facturación del
         periodo. Si sellas ahora, el cumplimiento queda firme sin ese peso.</div>` : ""}
     </div>`;
@@ -9847,7 +10326,7 @@ function cardFacturacion(){
 
     ${sello ? `<div class="note" style="margin:0 0 11px">Este periodo está <b>sellado</b>. Puedes
       corregir el monto, pero el incentivo liquidado no cambia hasta que se anule el cierre.</div>` : ""}
-    ${faltaBase ? `<div class="note warn" style="margin:0 0 11px">Faltan <b>${faltaBase}</b>
+    ${faltaBase ? `<div class="note crit" style="margin:0 0 11px">Faltan <b>${faltaBase}</b>
       ${faltaBase === 1 ? "ejecutivo" : "ejecutivos"} sin base fijada arriba: para ${
       faltaBase === 1 ? "ese" : "esos"} el crecimiento no se puede calcular.</div>` : ""}
 
@@ -10105,7 +10584,7 @@ function cardParametrosBono(){
         <b>${usada.map(x => esc(nombreMes(x))).join(", ")}</b>.` : "Todavía no rige ningún periodo."}
     </div>
 
-    ${selladas.length ? `<div class="note warn" style="margin:0 0 11px">
+    ${selladas.length ? `<div class="note crit" style="margin:0 0 11px">
       ${selladas.length === 1 ? "El periodo" : "Los periodos"}
       <b>${selladas.map(x => esc(nombreMes(x))).join(", ")}</b>
       ${selladas.length === 1 ? "ya está sellado" : "ya están sellados"}: cambiar esta versión
@@ -10571,7 +11050,7 @@ function viewReporte(){
     </div>
   </div>
 
-  ${avisos.map(a => `<div class="note warn" style="margin-bottom:11px">${esc(a)}</div>`).join("")}
+  ${avisos.map(a => `<div class="note crit" style="margin-bottom:11px">${esc(a)}</div>`).join("")}
 
   <div class="card">
     <div class="rep-t">
@@ -12469,6 +12948,13 @@ function bindExtras(){
   if (typeof bindBono === "function") bindBono();
   if (typeof bindReporte === "function") bindReporte();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
+  /* La consulta de disponibilidad: se redibuja al cambiar cualquiera de los
+     tres campos, para que la respuesta se vea mientras se elige la franja. */
+  [["dispFecha","dispFecha"], ["dispDesde","dispDesde"], ["dispHasta","dispHasta"]]
+    .forEach(([id, clave]) => {
+      const el = $("#" + id);
+      if (el) el.onchange = () => { S[clave] = el.value; render(); };
+    });
   /* El reloj del Panel: al cambiar de tipo de ventana se suelta el periodo
      elegido, porque «2026-08» significa cosas distintas en cada uno. */
   document.querySelectorAll("[data-vpanel]").forEach(b => b.onclick = () => {
