@@ -490,6 +490,21 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .note b{color:var(--ink)}
 .note.ok{background:var(--good-bg);color:var(--good-ink)} .note.ok b{color:var(--good-ink)}
 .note.warn{background:var(--warn-bg);color:var(--warn-ink)} .note.warn b{color:var(--warn-ink)}
+
+/* El jalavistas de la coordinación con BBVA.
+
+   Un comercio sin coordinar es un caso parado, y antes eso se leía como un
+   guion tímido en una fila de la tarjeta. Acá el siguiente paso ocupa el lugar
+   que le corresponde: bloque propio, borde vivo y el botón a la derecha, sin
+   competir con los datos que ya están resueltos. */
+.cta-bbva{display:flex;gap:14px;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;margin-top:13px;padding:14px 15px;border-radius:11px;
+  background:var(--warn-bg);border:1px solid var(--warn-ink);
+  box-shadow:0 1px 2px rgba(16,24,40,.05)}
+.cta-bbva-txt{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:3px}
+.cta-bbva-txt b{color:var(--warn-ink);font-size:13.5px}
+.cta-bbva-txt span{font-size:12.5px;color:var(--warn-ink);opacity:.85;line-height:1.45}
+.cta-bbva .btn{white-space:nowrap;flex:0 0 auto}
 .note.crit{background:var(--crit-bg);color:var(--crit-ink)} .note.crit b{color:var(--crit-ink)}
 .sticky-actions{position:sticky;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--plane) 62%,transparent);padding:12px 0 4px;display:flex;gap:9px;margin-top:14px}
 .sticky-actions .btn{flex:1}
@@ -1021,7 +1036,12 @@ const CALIFICACIONES = [
    de registrarlo. Sin este dato no se puede dar de alta. No aplica a ventas
    nuevas: ahí todavía no hay ejecutivo BBVA de por medio. */
 const CONTACTO_BBVA = [
-  { id:"CORREO",   label:"Correo enviado",      desc:"Se le escribió al ejecutivo de BBVA y confirmó los datos" },
+  { id:"CORREO",   label:"Correo a BBVA",       desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos del comercio" },
+  /* El otro correo. Solo se puede escribir si los datos del cliente YA
+     llegaron, así que el caso deja de esperar al banco y pasa a la calle: por
+     eso fuerza «Por contactar» aunque el banco no haya contestado nada más. */
+  { id:"CORREO_CC", label:"Correo al cliente con copia a BBVA",
+    desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA" },
   { id:"LLAMADA",  label:"Llamada telefónica",  desc:"Se coordinó por teléfono con el ejecutivo de BBVA" },
   { id:"WHATSAPP", label:"Mensaje WhatsApp",    desc:"Se coordinó por WhatsApp con el ejecutivo de BBVA" },
   { id:"VISITA",   label:"Visita presencial",   desc:"Se fue a las oficinas de BBVA y se coordinó en persona" },
@@ -1047,7 +1067,13 @@ const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label
    contacto logrado, y la tasa de respuesta al cliente sigue midiendo clientes.
    Nada de eso hubo que tocarlo: simplemente no coinciden. */
 const MEDIOS_BBVA = [
-  { id:"bbva_correo",     label:"Correo enviado",     desc:"Se le escribió al ejecutivo de BBVA" },
+  { id:"bbva_correo",     label:"Correo a BBVA",      desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos" },
+  /* Escribirle al cliente con copia al banco no es pedirle nada al banco: es
+     avisarle que ya salimos. Distinguirlo es lo que permite responder la
+     pregunta que abre cada reunión —si el caso está trabado del lado del
+     banco o del nuestro—, que con un solo «correo» no se podía contestar. */
+  { id:"bbva_correo_cliente", label:"Correo al cliente con copia a BBVA",
+    desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA", yaHayDatos:true },
   { id:"bbva_chat",       label:"Chat BBVA",          desc:"Se coordinó por el chat interno del banco", exigeCorreo:true },
   { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono" },
   { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp" },
@@ -1058,6 +1084,9 @@ const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "
 /* El chat no deja rastro consultable, así que la campaña exige mandar después
    un correo de respaldo. El CRM no se limita a permitirlo: lo reclama. */
 const exigeRespaldo = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).exigeCorreo;
+/* Escribirle al cliente prueba que sus datos ya están en nuestras manos:
+   nadie manda un correo a una dirección que no tiene. */
+const yaHayDatosDelCliente = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).yaHayDatos;
 
 const RESULTADOS_BBVA = [
   { id:"bbva_respondio",     label:"Respondió",     desc:"El ejecutivo de BBVA contestó y confirmó los datos del comercio", ok:true },
@@ -1206,7 +1235,15 @@ function estadoDerivado(c){
      nacía cerrada y el estado no tenía de dónde salir. */
   if (esClienteNuevo(c)) return "POR_CONTACTAR";
 
-  return bbvaDe(c.customer_id).respondio ? "POR_CONTACTAR" : "POR_VALIDAR";
+  /* El banco «respondió» de la forma clásica, o bien ya le escribimos al
+     cliente con copia al banco —que solo es posible si los datos llegaron—.
+     Las dos cosas significan lo mismo para el siguiente paso: salir a
+     contactar. */
+  const k = bbvaDe(c.customer_id);
+  if (k.respondio) return "POR_CONTACTAR";
+  if (k.contactos.some(r => yaHayDatosDelCliente(r.Tipo_Contacto))) return "POR_CONTACTAR";
+  if (c.contacto_bbva === "CORREO_CC") return "POR_CONTACTAR";
+  return "POR_VALIDAR";
 }
 const estadoFijadoAMano = c => !!(c && c.estado_fijado);
 
@@ -1835,7 +1872,12 @@ function bbvaDe(cid){
     intentosHasta: resp ? co.indexOf(resp) + 1 : co.length,
     /* Chat sin correo de respaldo: la constancia que la campaña exige y que
        hoy no se estaba pidiendo en ninguna parte. */
-    faltaRespaldo: !!chat && !co.some(r => r.Tipo_Contacto === "bbva_correo" && ts(r) >= ts(chat)),
+    /* El respaldo escrito puede ser el correo al ejecutivo o el correo al
+       cliente con copia al banco: los dos dejan constancia consultable, que
+       es lo único que la campaña exige después de un chat. */
+    faltaRespaldo: !!chat && !co.some(r =>
+      (r.Tipo_Contacto === "bbva_correo" || r.Tipo_Contacto === "bbva_correo_cliente")
+      && ts(r) >= ts(chat)),
     ultima: co.length ? co[co.length - 1] : null
   };
 }
@@ -2713,6 +2755,20 @@ function bindComunes(){
   document.querySelectorAll("[data-del]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminar(el.dataset.del); });
   document.querySelectorAll("[data-edit]").forEach(el => el.onclick = e => { e.stopPropagation(); editarRegistro(el.dataset.edit); });
   document.querySelectorAll("[data-editcli]").forEach(el => el.onclick = e => { e.stopPropagation(); editarCliente(el.dataset.editcli); });
+  document.querySelectorAll("[data-cbbva-fix]").forEach(el => el.onclick = async e => {
+    e.stopPropagation();
+    const [valor, cid] = el.dataset.cbbvaFix.split("|");
+    el.disabled = true; el.textContent = "Guardando…";
+    /* El `.select()` otra vez: sin él, un rechazo por permisos vuelve sin
+       error y sin filas, y la pantalla diría que se guardó algo que no. */
+    const { data, error } = await sb.from("clientes")
+      .update({ contacto_bbva: valor }).eq("customer_id", cid).select("customer_id");
+    if (error) return toast("No se pudo guardar: " + error.message);
+    if (!(data || []).length) return toast("La base no dejó guardar el cambio en este comercio.");
+    await recargarCartera(); await cargarAuditoria(); render();
+    toast(valor === "CORREO" ? "Anotado: el correo fue al ejecutivo de BBVA"
+                             : "Anotado: el correo fue al cliente, con copia a BBVA");
+  });
   document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
   document.querySelectorAll("[data-segdel]").forEach(el => el.onclick = e => { e.stopPropagation(); descartarSeguimiento(el.dataset.segdel); });
   document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
@@ -2807,6 +2863,9 @@ function viewCartera(){
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
     if (S.fContacto === "sin_bbva") return !esClienteNuevo(c) && !c.contacto_bbva;
+    /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
+       de análisis: existe para vaciarse. */
+    if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
     /* Los dos que llegan desde el Panel. Dejan fuera las ventas nuevas a
        propósito: las columnas «Registrados» y «Gestionados» se miden sobre la
        cartera que entregó BBVA, y meter acá los RUC que trajo Stratis haría que
@@ -2897,6 +2956,7 @@ function viewCartera(){
           k === "gestionado" ? ` title="Comercios con al menos un contacto o intento de contacto con el cliente"` : ""
         }>${l}</button>`).join("")}
     </div>
+    ${avisoPorActualizar()}
     ${S.fContacto === "registrado" ? `<div class="note" style="margin:0">
       Mostrando los <b>registrados en el CRM</b>: fichas de la cartera de BBVA que alguien
       ya cargó, se hayan trabajado o no. Las ventas nuevas no entran acá.</div>` : ""}
@@ -3151,8 +3211,79 @@ function cardCoordinacionBBVA(c, mio){
     ${k.faltaRespaldo ? `<div class="note warn" style="margin-top:10px">
       <b>Falta el correo de respaldo.</b> Se coordinó por chat, que no deja constancia consultable.
       La campaña pide enviar después un correo con lo acordado y registrarlo acá.</div>` : ""}
-    ${(mio && esDeCampo()) ? `<button class="btn ghost sm block" style="margin-top:11px"
-      data-go="form_bbva|${c.customer_id}">＋ Registrar coordinación con BBVA</button>` : ""}
+    ${avisoCorreoAmbiguo(c, k, mio)}
+    ${/* El jalavistas. Un comercio recién registrado que no tiene ni una
+          coordinación es un caso parado: sin los datos del banco no hay a
+          quién llamar. Antes eso se leía como un guion en una fila y se
+          quedaba ahí semanas. Ahora el siguiente paso es el elemento más
+          visible de la tarjeta, y dice qué pasa si no se da. */
+      (!k.n && (mio || !esDeCampo())) ? `
+      <div class="cta-bbva">
+        <div class="cta-bbva-txt">
+          <b>El caso está parado hasta coordinar con BBVA</b>
+          <span>Sin los datos que entrega el banco no hay a quién llamar ni dónde ir.
+          Es el primer paso del ciclo y hoy este comercio no lo tiene.</span>
+        </div>
+        <button class="btn" data-go="form_bbva|${c.customer_id}">Coordinar ahora</button>
+      </div>`
+      : ((mio || !esDeCampo()) ? `<button class="btn ghost sm block" style="margin-top:11px"
+          data-go="form_bbva|${c.customer_id}">＋ Registrar coordinación con BBVA</button>` : "")}
+  </div>`;
+}
+
+/* Los 408 correos que no se sabe a quién fueron.
+ *
+ * Hasta la versión de hoy «correo enviado» era un solo valor, y ahí caben dos
+ * cosas opuestas: pedirle los datos al banco —el caso espera— o escribirle al
+ * cliente con copia al banco —el caso ya está en la calle—. No se puede
+ * adivinar cuál fue: lo sabe quien lo mandó.
+ *
+ * Se pregunta en la ficha, con las dos respuestas a un clic, y no se toca
+ * nada hasta que alguien responda. Un dato inventado acá cambiaría de lado la
+ * culpa de cada caso trabado, que es exactamente lo que se está tratando de
+ * medir. */
+/* El recordatorio de los correos por aclarar.
+ *
+ * Son 408 fichas repartidas entre cuatro personas, y pedirlas de a una desde
+ * la ficha sería condenar a Aníbal a 185 clics buscando cuál le falta. El
+ * aviso vive arriba de la lista, dice cuántas quedan y lleva directo a ellas:
+ * el trabajo se hace de corrido, y el contador baja a la vista.
+ *
+ * Desaparece solo cuando llega a cero. No hay nada que apagar ni recordar. */
+function avisoPorActualizar(){
+  if (S.verPruebas) return "";
+  const mios = (esDeCampo() ? CLIENTES.filter(esMiCliente) : CLIENTES).filter(correoAmbiguo);
+  if (!mios.length) return "";
+  if (S.fContacto === "correo_ambiguo")
+    return `<div class="note warn" style="margin:0">
+      <b>Quedan ${mios.length}.</b> Abre cada comercio y dime si el correo fue al ejecutivo de BBVA
+      o al cliente con copia. La lista se acorta sola a medida que respondes.</div>`;
+  return `<div class="note warn" style="margin:0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1 1 260px;min-width:0">
+      <b>${mios.length} comercio${mios.length===1?"":"s"} con el correo sin aclarar.</b>
+      Antes «correo enviado» servía para dos cosas opuestas: pedirle los datos al banco,
+      o escribirle al cliente con copia al banco. De esto depende saber si el caso está
+      trabado del lado de BBVA o del nuestro.
+    </div>
+    <button class="btn sm" data-f="contacto" data-v="correo_ambiguo">Ver ${
+      esDeCampo() ? "los míos" : "la lista"}</button>
+  </div>`;
+}
+
+function correoAmbiguo(c){
+  return !!c && c.contacto_bbva === "CORREO" && estadoDerivado(c) === "POR_CONTACTAR";
+}
+function avisoCorreoAmbiguo(c, k, mio){
+  if (!correoAmbiguo(c)) return "";
+  if (esDeCampo() && !mio) return "";
+  return `<div class="note warn" style="margin-top:11px">
+    <b>¿A quién fue ese correo?</b> Este comercio quedó registrado como «correo enviado», que
+    antes servía para las dos cosas. Ahora se distinguen, y de esto depende saber si el caso
+    está trabado del lado del banco o del nuestro.
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn sm" data-cbbva-fix="CORREO|${c.customer_id}">Fue correo a BBVA</button>
+      <button class="btn sm" data-cbbva-fix="CORREO_CC|${c.customer_id}">Fue correo al cliente con copia</button>
+    </div>
   </div>`;
 }
 
@@ -11340,7 +11471,11 @@ function bindExtras(){
   }
   const MAPA_F = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
                    ejecutivo:"fEjecutivo", distrito:"fDistrito", cierre:"fCierre" };
-  document.querySelectorAll(".seg button[data-f], .pill[data-f]").forEach(b => b.onclick = () => {
+  /* Cualquier botón que traiga el par data-f + data-v pone ese filtro, esté
+     donde esté. Antes el selector nombraba las dos clases que existían aquel
+     día, y un botón nuevo en cualquier otro sitio quedaba mudo sin que nada
+     avisara: se veía, se pulsaba y no pasaba nada. */
+  document.querySelectorAll("button[data-f][data-v], .pill[data-f][data-v]").forEach(b => b.onclick = () => {
     S[MAPA_F[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
   });
   document.querySelectorAll("select[data-f]").forEach(el => el.onchange = () => {
