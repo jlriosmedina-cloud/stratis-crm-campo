@@ -8964,7 +8964,11 @@ function viewAyuda(){
     ["Respaldo de la gestión", "El GPS de la visita, lo que dijo el cliente y la fecha, que no puede ser futura. La foto de evidencia se retiró en agosto de 2026"],
     ["Datos sensibles", "No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para identificar la venta"],
     ["Dominio permitido", "@" + CONFIG.dominio],
-    ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"]
+    ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"],
+    /* Se dice acá a propósito. Los viáticos se retiraron del CRM en agosto de
+       2026 y la pregunta «¿dónde cargo el taxi?» vuelve cada tanto; sin esta
+       línea alguien la busca en el sistema equivocado. */
+    ["Viáticos", "No se registran en el CRM. Van íntegramente en <b>Expensify</b>: el adelanto mensual, la cobertura adicional y el plan de telefonía"]
   ];
 
   const comoFunciona = `
