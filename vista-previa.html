@@ -447,9 +447,9 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .ctrl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
 .tbl-ctrl{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
 .tbl-ctrl th{text-align:right;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
-  font-weight:700;padding:0 9px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+  font-weight:700;padding:0 7px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
 .tbl-ctrl th:first-child{text-align:left}
-.tbl-ctrl td{padding:9px;border-bottom:1px solid var(--grid);vertical-align:middle}
+.tbl-ctrl td{padding:9px 7px;border-bottom:1px solid var(--grid);vertical-align:middle}
 .tbl-ctrl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tbl-ctrl td.fuerte{font-weight:700}
 .tbl-ctrl td.nom{font-weight:640}
@@ -460,6 +460,17 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .tbl-ctrl tbody tr.on{background:var(--info-bg)}
 .tbl-ctrl tbody tr.on td.nom{color:var(--brand-2)}
 .tbl-ctrl tbody tr.vacia td{color:var(--muted)}
+/* La fila del equipo cierra la tabla y no se puede tocar: no es de nadie. */
+.tbl-ctrl tbody tr.total-eq{cursor:default;font-weight:700}
+.tbl-ctrl tbody tr.total-eq td{border-top:2px solid var(--line);border-bottom:0}
+.tbl-ctrl tbody tr.total-eq:hover{background:transparent}
+.tbl-ctrl tbody tr.total-eq:hover td.nom{background:var(--card)}
+/* Una cifra que abre su lista se ve como lo que es: un enlace. */
+.tbl-ctrl .cifra-link{background:none;border:0;padding:0;font:inherit;color:var(--brand-2);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+  font-variant-numeric:tabular-nums}
+.tbl-ctrl .cifra-link:hover{text-decoration-thickness:2px}
+.ctrl-pie:empty{display:none}
 .ctrl-pie{display:flex;flex-wrap:wrap;gap:6px;padding:11px 0 6px;border-top:1px solid var(--grid);margin-top:4px}
 /* En celular la tabla se desliza, pero el nombre se queda fijo a la izquierda:
    si no, se pierde de vista justo la columna que dice de quién es la fila. */
@@ -983,7 +994,15 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
   .rail button.rl-x.on .ic{opacity:1}
   .rail button.rl-x .cuenta{margin-left:auto;font-size:11px;font-weight:700;background:var(--crit);
     color:#fff;border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
-  .rail .rl-yo{margin-top:auto;display:flex;gap:9px;align-items:center;padding:11px 8px 2px;
+  /* El selector de «ver como», al pie de la barra: es un cambio de contexto,
+     no una pestaña más, así que no vive entre los enlaces. */
+  .rail .rl-como{margin-top:auto;padding:0 6px}
+  .rail .rl-como .fsel span{color:#c9d6e8;opacity:.62;font-size:10.5px;letter-spacing:.07em;
+    text-transform:uppercase;font-weight:700}
+  .rail .rl-como select{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);
+    color:#fff;font-size:13px;padding:8px 9px}
+  .rail .rl-como select option{color:var(--ink);background:var(--card)}
+  .rail .rl-yo{display:flex;gap:9px;align-items:center;padding:11px 8px 2px;margin-top:14px;
     border-top:1px solid rgba(255,255,255,.11)}
   .rail .rl-yo i{width:29px;height:29px;border-radius:50%;background:#2a78d6;display:grid;
     place-items:center;color:#fff;font-size:11px;font-weight:700;font-style:normal;flex:none}
@@ -997,10 +1016,20 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
   #app.con-rail > header.top h1 small{display:inline;margin-left:8px}
 }
 
+/* Mirar el CRM como un ejecutivo: la franja que lo dice. Ocupa el ancho
+   entero a propósito — una pantalla con los datos de otra persona que no lo
+   anuncia se lee como si fueran los propios. */
+.como-ejec{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 13px}
+.como-ejec > div{flex:1 1 300px;min-width:0}
+.como-ejec .btn{flex:none}
+.como-sel select{min-width:180px}
+
 /* =====================================================================
    TABLERO DE SUPERVISIÓN
    ===================================================================== */
-.tab-cab{margin-bottom:12px}
+.tab-cab{margin-bottom:12px;display:flex;gap:14px;align-items:flex-end;
+  justify-content:space-between;flex-wrap:wrap}
+.tab-cab > div:first-child{min-width:0}
 .tab-cab h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.3px}
 .tab-periodo{margin-top:3px;font-size:12.5px;color:var(--muted)}
 
@@ -1538,31 +1567,10 @@ const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO",
 
 /* ---- Datos en memoria --------------------------------------------------- */
 /* CLIENTES es la POBLACIÓN: sobre esta lista se cuenta todo —cobertura,
-   visitas, ventas, incentivo, el Excel del banco—. Los comercios de prueba
-   NO están acá, y por eso ningún cálculo puede contarlos aunque se olvide de
-   excluirlos: no existen para él.
-
-   PRUEBAS es el apartado, y byId es el índice: contiene a los dos, porque
-   abrir una ficha, ver su línea de tiempo y registrarle una gestión tiene que
-   funcionar igual en el apartado que en la cartera de verdad. Es la misma
-   distinción de siempre: buscar uno es una cosa, contar todos es otra. */
-let CLIENTES = [], PRUEBAS = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
-
-/* ---- El apartado de pruebas --------------------------------------------
-   Un comercio es de prueba si su llave empieza en 0000. La marca es la llave
-   misma y no una bandera aparte: no hay nada que alguien pueda olvidar de
-   marcar ni desmarcar por accidente, y se reconoce a simple vista en la
-   pantalla, en el Excel y en cualquier consulta a la base.
-
-   Cuatro ceros y no uno: en la cartera de BBVA hay nueve comercios que
-   empiezan con cero —00458376 y 00407607 son los más extremos— y ninguno
-   llega a tres. Con cuatro no hay choque posible.
-
-   Un RUC de prueba entra como NUEVO-00000000001, así que se le quita ese
-   prefijo antes de mirar. */
-const llaveDesnuda = v => String(v || "").replace(/^NUEVO-/, "");
-const esDePrueba = c => !!c && /^0000/.test(llaveDesnuda(c.customer_id));
-const esLlaveDePrueba = v => /^0000/.test(llaveDesnuda(v));
+   visitas, ventas, incentivo, el Excel del banco—. byId es el índice, para
+   abrir una ficha por su llave sin recorrer la lista. Buscar uno es una cosa,
+   contar todos es otra. */
+let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
 
 /* ---- Metas: la cartera que BBVA asignó a cada quien, mes a mes ----------
    Es el denominador del alcance. Sin él, once comercios trabajados se ven
@@ -2078,10 +2086,8 @@ const DB = {
      encontrar nada, sin ruido—. Por eso no se asignan por separado en ningún
      sitio: se siembra la lista completa y las otras dos salen de ella. */
   sembrar(filas){
-    this.todo = filas;
-    /* Acá es donde el apartado de pruebas deja de existir para el resto del
-       CRM. Una sola línea, en el único sitio por donde pasan las gestiones. */
-    this.crudo   = this.todo.filter(r => !esLlaveDePrueba(r.Customer_id));
+    this.todo    = filas;
+    this.crudo   = this.todo;
     this.visitas = this.crudo.filter(r => r.Con !== "BBVA");
   },
   cargar(filas){ this.sembrar(filas.map(deDB)); }
@@ -2281,7 +2287,7 @@ const S = {
   pParam:"",     /* qué versión de los parámetros se está editando */
   pPanel:"",     /* qué periodo o mes; vacío = el que corre */
   verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
-  verPruebas:false, /* el apartado de pruebas: comercios con llave 0000 */
+  comoEjec:"",   /* supervisión mirando el CRM con los ojos de un ejecutivo */
   repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
   formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
   loteBbva:null, /* borrador de la coordinación para varios comercios */
@@ -2316,13 +2322,30 @@ function nombrePorCorreo(correo){
 }
 const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio " + c.customer_id) : "";
 
+/* ---- Mirar el CRM con los ojos de un ejecutivo --------------------------
+ *
+ * Supervisión elige a alguien del equipo y ve exactamente lo que ese ejecutivo
+ * ve: su cartera, su avance, sus gestiones. Sirve para dos cosas que antes
+ * obligaban a pedirle una captura de pantalla: entender por qué dice que no
+ * encuentra algo, y corregirle una ficha sin buscarla entre ochocientas.
+ *
+ * Lo que cambia es QUÉ SE VE, nunca QUÉ SE PUEDE HACER. Los permisos siguen
+ * siendo los de quien inició sesión: si Jose corrige una gestión desde acá, el
+ * cambio queda en la bitácora a nombre de Jose y la gestión sigue siendo del
+ * ejecutivo. No es suplantar a nadie; es ponerse a su lado. */
+const ejecObservado = () => {
+  if (!S.user || S.user.rol === "Ejecutivo" || !S.comoEjec) return null;
+  return USUARIOS.find(u => u.correo === S.comoEjec) || null;
+};
+/* La vista es de campo cuando quien mira ES un ejecutivo, o cuando supervisión
+   pidió mirar como uno. Decide contenido, no permisos. */
+const vistaDeCampo = () => esDeCampo() || !!ejecObservado();
+
 function cartera(){
   if (!S.user) return [];
-  /* Con el apartado abierto se ve el apartado y NADA más. No se mezclan: una
-     lista con comercios de verdad y de mentira juntos es exactamente cómo se
-     cuela uno de mentira en un informe. */
-  if (S.verPruebas) return PRUEBAS;
   if (S.user.rol === "Ejecutivo") return CLIENTES;      // la base ya filtró por RLS
+  const q = ejecObservado();
+  if (q) return CLIENTES.filter(c => c.asignado_correo === q.correo);
   if (S.fEjecutivo !== "todos")   return CLIENTES.filter(c => c.asignado === S.fEjecutivo);
   return CLIENTES;
 }
@@ -2581,8 +2604,8 @@ function pantallaCarga(msg){
 async function salir(){
   detenerSync();
   if (sb) await sb.auth.signOut();
-  S.user = null; S.entrando = false; S.verPruebas = false;
-  CLIENTES = []; PRUEBAS = []; byId = {}; DB.visitas = []; DB.crudo = []; DB.todo = [];
+  S.user = null; S.entrando = false; S.comoEjec = "";
+  CLIENTES = []; byId = {}; DB.visitas = []; DB.crudo = []; DB.todo = [];
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
   renderLogin();
@@ -2590,22 +2613,13 @@ async function salir(){
 
 /* ---- Carga de datos ----------------------------------------------------- */
 
-/* El único sitio donde el apartado de pruebas se separa de la cartera.
+/* La cartera en memoria: la lista sobre la que se cuenta todo, y su índice.
  *
- * Los comercios de prueba salen de CLIENTES —la lista sobre la que se cuenta
- * todo— y se van a PRUEBAS. Ningún cálculo del CRM los puede contar, ni por
- * descuido ni por una condición que alguien olvidó escribir: sencillamente no
- * están en la lista que mira. El índice byId sí los tiene, para que su ficha
- * y su línea de tiempo funcionen igual que las demás.
- *
- * Se hace acá, al cargar, y no en cada cálculo, porque los sitios que cuentan
- * comercios son más de una docena y basta olvidar uno para que una gestión de
- * juguete termine en el archivo que se le entrega al banco. */
+ * `_i` es el orden de llegada; se usa para desempatar sin depender del orden
+ * en que la base devolvió las filas. */
 function repartirComercios(filas){
-  const todos = filas.map((c,i) => Object.assign({ _i:i }, c));
-  CLIENTES = todos.filter(c => !esDePrueba(c));
-  PRUEBAS  = todos.filter(esDePrueba);
-  byId = {}; todos.forEach(c => byId[String(c.customer_id)] = c);
+  CLIENTES = filas.map((c,i) => Object.assign({ _i:i }, c));
+  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
 }
 
 
@@ -2683,7 +2697,7 @@ async function cargarDatos(){
   });
 
   DB.cargar(inter.data || []);
-  CLIENTES.concat(PRUEBAS).forEach(c => RULES.recomputarBase(c.customer_id));
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
   await cargarMetas();
   /* Los parámetros del bono se cargaban recién con la primera sincronización.
@@ -2790,9 +2804,8 @@ async function refrescar(){
   const { data, error } = await traerTodo("interacciones", "id");
   if (error) return toast("No se pudo actualizar: " + error.message);
   DB.cargar(data || []);
-  const todos = CLIENTES.concat(PRUEBAS);
-  todos.forEach(c => c._base = null);
-  todos.forEach(c => RULES.recomputarBase(c.customer_id));
+  CLIENTES.forEach(c => c._base = null);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
 }
 
 /* Recarga la cartera tras un alta, edición o borrado */
@@ -2800,7 +2813,7 @@ async function recargarCartera(){
   const cli = await traerTodo("clientes", "customer_id");
   if (cli.error) throw new Error(cli.error.message);
   repartirComercios(cli.data || []);
-  CLIENTES.concat(PRUEBAS).forEach(c => RULES.recomputarBase(c.customer_id));
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
 }
 
 /* ---- Modo demostración (sin Supabase) ---------------------------------- */
@@ -2898,11 +2911,13 @@ function renderRail(){
         </button>`).join("")}
       </div>`;
     }).join("")}
+    <div class="rl-como">${selectorComoEjec()}</div>
     <div class="rl-yo"><i>${esc(iniciales || "··")}</i>
       <div><b>${esc(S.user.nombreCompleto || S.user.nombre || "")}</b>
         <span>${esc(S.user.rol || "")}</span></div></div>`;
 
   el.querySelectorAll("button[data-tab]").forEach(b => b.onclick = () => go(b.dataset.tab));
+  el.querySelectorAll(".selComoEjec").forEach(sel => { sel.onchange = () => mirarComo(sel.value); });
 }
 /* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
    los filtros desplegados, para que se vea por qué la lista es esa. */
@@ -2958,14 +2973,16 @@ function verCarteraLista(tipo, ejecutivo, esperado){
 }
 
 /* Del Panel a la cartera, por el punto en que está parado el comercio */
-function verCarteraEstado(id){
+function verCarteraEstado(id, ejecutivo){
   S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
-  S.fContacto = "est:" + id; S.fEjecutivo = "todos";
+  S.fContacto = "est:" + id; S.fEjecutivo = ejecutivo || "todos";
   S.filtrosAbiertos = false; S.limite = 40;
   go("cartera");
   const e = estadoDerivadoById(id);
-  const n = cartera().filter(c => !esClienteNuevo(c) && estadoDerivado(c) === id).length;
-  if (e) toast(`${e.label}: ${n} ${n === 1 ? "comercio" : "comercios"}${e.hacer ? " · " + e.hacer.toLowerCase() : ""}`);
+  const n = cartera().filter(c => !esClienteNuevo(c) && estadoDerivado(c) === id
+    && (!ejecutivo || c.asignado === ejecutivo)).length;
+  if (e) toast(`${e.label}${ejecutivo ? " de " + ejecutivo : ""}: ${n} ${
+    n === 1 ? "comercio" : "comercios"}${e.hacer ? " · " + e.hacer.toLowerCase() : ""}`);
 }
 
 /* Del Panel a la cartera, por situación del comercio */
@@ -3087,20 +3104,17 @@ function bindComunes(){
     verCarteraLista(el.dataset.verlista, el.dataset.verejec || "", el.dataset.vercuantos);
   });
   document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
-    e.stopPropagation(); verCarteraEstado(el.dataset.verest);
+    e.stopPropagation(); verCarteraEstado(el.dataset.verest, el.dataset.verejec || "");
   });
-  const tog = document.querySelector("#togglePruebas");
-  if (tog) tog.onclick = () => {
-    S.verPruebas = !S.verPruebas;
-    /* Los filtros no cruzan la puerta: los de la cartera no significan nada en
-       el apartado, y al volver conviene ver la cartera entera otra vez. */
-    S.cid = null; S.q = ""; S.limite = 40;
-    S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = S.fEjecutivo = S.fCierre = "todos";
-    render();
-    toast(S.verPruebas
-      ? "Apartado de pruebas · nada de lo que registres acá cuenta para ningún indicador"
-      : "De vuelta en la cartera de la campaña");
-  };
+  document.querySelectorAll("[data-comoejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); mirarComo(el.dataset.comoejec);
+  });
+  /* Por clase y no por id: el selector aparece en la barra lateral y en la
+     cabecera del tablero a la vez, y dos elementos con el mismo id hacen que
+     el segundo deje de encontrarse. */
+  document.querySelectorAll(".selComoEjec").forEach(sel => {
+    sel.onchange = () => mirarComo(sel.value);
+  });
   const lote = document.querySelector("#loteBbva");
   if (lote) lote.onclick = () => abrirLoteBBVA();
   if (typeof bindExtras === "function") bindExtras();
@@ -3221,19 +3235,16 @@ function viewCartera(){
     items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
 
   return `
-  ${bannerPruebas()}
+  ${bannerComoEjec()}
   <div class="page-head">
     <div>
-      <h2>${S.verPruebas ? "Apartado de pruebas"
-            : (S.user.rol === "Ejecutivo" ? "Mi cartera" : "Cartera de la campaña")}</h2>
+      <h2>${vistaDeCampo() ? "Mi cartera" : "Cartera de la campaña"}</h2>
       <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
     </div>
     <div class="page-head-acc">
       ${(flujoBbva() && esDeCampo()) ? `<button class="btn ghost sm" id="loteBbva"
         title="Un correo con varios Customer ID se escribe una vez">✉ Coordinar en lote<span class="solo-ancho"> con BBVA</span></button>` : ""}
-      ${mandoTotal() ? `<button class="btn ghost" id="togglePruebas">${S.verPruebas
-          ? "‹ Volver a la cartera de verdad" : "⚗ Apartado de pruebas"}</button>` : ""}
-      ${puedeDarDeAlta() ? `<button class="btn" data-go="form_cliente">＋ Registrar ${S.verPruebas ? "comercio de prueba" : "nuevo comercio"}</button>` : ""}
+      ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
     </div>
   </div>
 
@@ -3561,8 +3572,7 @@ function cardCoordinacionBBVA(c, mio){
  *
  * Desaparece solo cuando llega a cero. No hay nada que apagar ni recordar. */
 function avisoPorActualizar(){
-  if (S.verPruebas) return "";
-  const mios = (esDeCampo() ? CLIENTES.filter(esMiCliente) : CLIENTES).filter(correoAmbiguo);
+  const mios = cartera().filter(correoAmbiguo);
   if (!mios.length) return "";
   if (S.fContacto === "correo_ambiguo")
     return `<div class="note warn" style="margin:0">
@@ -3600,28 +3610,54 @@ function avisoCorreoAmbiguo(c, k, mio){
 /* La coordinación con el banco se ve distinta en la línea de tiempo, y a
    propósito: es la misma historia del comercio pero con otro interlocutor.
    Mezclarlas sin distinguirlas sería tan confuso como tenerlas separadas. */
-/* El apartado de pruebas, anunciado sin sutileza.
-
-   Un banco de pruebas que no se distingue de la cartera de verdad es peor que
-   no tener banco de pruebas: en algún momento alguien registra en el sitio
-   equivocado. Por eso la franja es del color de las advertencias, ocupa el
-   ancho entero y dice las dos cosas que importan: dónde está parado y qué
-   consecuencia tiene. */
-function bannerPruebas(){
-  if (!S.verPruebas) return "";
-  return `<div class="err" style="margin-bottom:14px">
-    <b>⚗ Estás en el apartado de pruebas.</b> Todo lo que registres acá lleva una llave que
-    empieza en <b>0000</b> y queda fuera de absolutamente todo: cobertura, visitas, ventas,
-    calidad del registro, incentivos, el Panel, el Reporte y el Excel que se le entrega a BBVA.
-    Sirve para probar el ciclo completo sin ensuciar un solo número.
+/* Mirar el CRM con los ojos de un ejecutivo, anunciado sin sutileza.
+ *
+ * Una pantalla que muestra los datos de otra persona y no lo dice es una
+ * trampa: basta un momento de distracción para leer «6 comercios gestionados»
+ * como si fuera el equipo entero. Por eso la franja ocupa el ancho completo,
+ * dice de quién es lo que se está viendo, y aclara lo que más se malinterpreta
+ * de esta función: que los permisos no cambiaron. */
+function bannerComoEjec(){
+  const q = ejecObservado();
+  if (!q) return "";
+  return `<div class="note info como-ejec">
+    <div>
+      <b>Estás viendo el CRM como ${esc(q.nombre)}.</b>
+      La cartera, el avance y las gestiones son los suyos, tal cual los ve él.
+      <span class="solo-ancho">Tus permisos no cambian: si corriges algo desde acá, el cambio
+      queda en la bitácora a tu nombre y la gestión sigue siendo de ${esc(q.nombre)}.</span>
+    </div>
+    <button class="btn ghost sm" data-comoejec="">Volver a mi vista</button>
   </div>`;
 }
 
-/* Quién puede dar de alta. El ejecutivo, su cartera. La supervisión, solo en
-   el apartado de pruebas —el alta de verdad es trabajo de campo, y la base
-   rechaza cualquier otra cosa que intente registrar desde el escritorio—. */
-function puedeDarDeAlta(){
-  return esDeCampo() || (mandoTotal() && S.verPruebas);
+/* Entrar y salir de esa vista. Los filtros no cruzan la puerta: los de la
+   cartera completa no significan lo mismo dentro de la de una persona, y al
+   volver conviene ver todo otra vez. */
+function mirarComo(correo){
+  const antes = S.comoEjec;
+  S.comoEjec = correo || "";
+  S.cid = null; S.q = ""; S.qReg = ""; S.limite = 40; S.limiteReg = 40;
+  S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = S.fEjecutivo = S.fCierre = "todos";
+  S.fResultado = S.fMedio = S.fEjecReg = "todos";
+  window.scrollTo(0,0);
+  render();
+  const q = ejecObservado();
+  if (q) toast(`Viendo el CRM como ${q.nombre}`);
+  else if (antes) toast("De vuelta en tu vista de supervisión");
+}
+
+/* El selector, para la barra lateral y para la cabecera del tablero. */
+function selectorComoEjec(){
+  if (!mandoTotal()) return "";
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  if (!ejec.length) return "";
+  return `<label class="fsel como-sel"><span>Ver el CRM como</span>
+    <select class="selComoEjec">
+      <option value=""${S.comoEjec ? "" : " selected"}>Yo · supervisión</option>
+      ${ejec.map(u => `<option value="${esc(u.correo)}"${
+        S.comoEjec === u.correo ? " selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+    </select></label>`;
 }
 
 /* BBVA pide que ningún comercio llegue sin comentario. Cuando nadie anotó
@@ -3754,10 +3790,10 @@ function editarCliente(cid){
 }
 
 function renderFormCliente(){
-  /* El alta de verdad es trabajo de campo. La supervisión entra acá solo para
-     el apartado de pruebas, y la base rechaza cualquier otra cosa que intente
-     registrar: acá no se está confiando en la pantalla. */
-  if (!esDeCampo() && !S.editCli && !(mandoTotal() && S.verPruebas)){
+  /* El alta es trabajo de campo. La supervisión entra acá solo para corregir
+     una ficha existente; la base rechaza cualquier alta desde el escritorio,
+     así que acá no se está confiando en la pantalla. */
+  if (!esDeCampo() && !S.editCli){
     S.tab = "cartera";
     return toast("El alta de comercios la hacen los ejecutivos en campo");
   }
@@ -4156,16 +4192,11 @@ async function guardarCliente(){
      sin el banco no hay afiliación. Es el mismo paso del mismo flujo. */
   if (!editando && !f.contacto_bbva)
     errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
-  /* La supervisión solo da de alta en el apartado. Se avisa acá con todas las
-     letras en vez de dejar que la base responda con un error de permisos que
-     no le dice a nadie qué hacer. */
-  if (!editando && !esDeCampo()){
-    const llave = nuevo ? ruc : cid;
-    if (!esLlaveDePrueba(llave))
-      errores.push(nuevo
-        ? "Desde supervisión solo se registran comercios de prueba: el RUC tiene que empezar en 0000 (por ejemplo 00000000001)."
-        : "Desde supervisión solo se registran comercios de prueba: el Customer ID tiene que empezar en 0000 (por ejemplo 00000000).");
-  }
+  /* Dar de alta es trabajo de campo. Se avisa acá con todas las letras en vez
+     de dejar que la base responda con un error de permisos que no le dice a
+     nadie qué hacer. */
+  if (!editando && !esDeCampo())
+    errores.push("El alta de comercios la hacen los ejecutivos en campo. Desde supervisión se corrigen fichas, no se crean.");
   if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
   if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
 
@@ -5724,74 +5755,153 @@ function enPeriodo(r, periodo){
 }
 
 /* Una fila por ejecutivo: lo que hay que mirar cuando los resultados no salen */
+/* ---- En qué está parada la cartera de cada ejecutivo ---------------------
+ *
+ * Antes esta tabla contaba actividad: gestiones, días con movimiento, por día.
+ * Decía cuánto se trabajó, que no es lo mismo que en qué punto está la cartera
+ * —y era esta segunda la pregunta que se hacía todos los días—. Trescientas
+ * cuarenta gestiones no dicen si quedan ochenta comercios sin contactar.
+ *
+ * Dos relojes conviven acá y hay que decirlo, no esconderlo:
+ *
+ *   · El estado del comercio —registrados, faltan, en negociación, esperando a
+ *     BBVA, por contactar, y los tres cierres— es DE HOY. No tiene periodo:
+ *     un comercio retenido en julio sigue retenido en agosto.
+ *   · Las visitas efectivas SÍ siguen el periodo elegido arriba, porque son
+ *     gestiones y el requisito del incentivo se mide por semana.
+ *
+ * Mezclar los dos sin avisar es exactamente cómo dos números correctos se leen
+ * como una contradicción. Por eso la nota al pie lo dice con todas las letras.
+ */
 function controlEquipo(regs){
-  const porNombre = {};
-  USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
-          .forEach(u => porNombre[u.nombre] = []);
-  regs.forEach(r => { (porNombre[r.Ejecutivo] = porNombre[r.Ejecutivo] || []).push(r); });
+  const porCorreo = {};
+  regs.forEach(r => { (porCorreo[r.Correo_Stratis] = porCorreo[r.Correo_Stratis] || []).push(r); });
 
-  return Object.entries(porNombre).map(([nombre, lista]) => {
-    const dias = new Set(lista.map(r => String(r.Fecha_Contacto).slice(0,10)));
+  const p = periodoHoy();
+  const rBono = { periodo:p };
+
+  return USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false).map(u => {
+    const lista = porCorreo[u.correo] || [];
+    const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo);
+    const cartera = suyos.filter(c => !esClienteNuevo(c));
+    const enEstado = id => cartera.filter(c => estadoDerivado(c) === id).length;
+
+    const asignada = asignadaDe(u.correo, rBono);
     const ultima = lista.length ? lista.map(r => String(r.Fecha_Contacto).slice(0,10)).sort().pop() : "";
-    const respuestas = lista.filter(r => esEfectivo(r.Resultado)).length;
+
     return {
-      nombre,
+      nombre: u.nombre, correo: u.correo,
+      asignada,
+      registrados: cartera.length,
+      /* Lo que BBVA asignó y todavía no tiene ficha en el CRM. Sin la cartera
+         cargada en Ajustes no hay resta posible, y se dice con un guion en vez
+         de con un cero, que se leería como «no falta nada». */
+      faltan: asignada ? Math.max(0, asignada - cartera.length) : null,
+      negociacion:  enEstado("EN_NEGOCIACION"),
+      esperaBbva:   enEstado("POR_VALIDAR"),
+      porContactar: enEstado("POR_CONTACTAR"),
+      /* Del periodo que se esté mirando arriba, no de toda la campaña. */
+      visitas: lista.filter(r => r.Cumple_Visita === "SI").length,
+      retenciones: suyos.filter(esRetencion).length,
+      ventas:      suyos.filter(esRecuperado).length,
+      sinLead:     suyos.filter(esVentaNueva).length,
       gestiones: lista.length,
-      comercios: new Set(lista.map(r => String(r.Customer_id))).size,
-      dias: dias.size,
-      porDia: dias.size ? Math.round(lista.length / dias.size * 10) / 10 : 0,
-      respuestas,
-      tasa: lista.length ? respuestas / lista.length : 0,
       sinGps: lista.filter(sinUbicacion).length,
-      declaradas: lista.filter(ubicacionDeclarada).length,
-      /* En el día: cuántas se registraron el mismo día en que se gestionaron */
-      alDia: lista.filter(r => demoraRegistro(r) === 0).length,
       ultima,
       silencio: ultima ? diasDeAtraso(ultima) : null
     };
-  }).sort((a,b) => b.gestiones - a.gestiones);
+  }).sort((a,b) => b.registrados - a.registrados);
 }
+
+const COLS_EQUIPO = [
+  { k:"registrados", th:"Registrados", fuerte:true,
+    ttl:"Comercios de cartera con ficha creada en el CRM, se hayan trabajado o no" },
+  { k:"faltan", th:"Faltan",
+    ttl:"Cartera que BBVA asignó y todavía no tiene ficha en el CRM" },
+  { k:"negociacion", th:"Negociación", est:"EN_NEGOCIACION",
+    ttl:"Ya se habló con el titular y el caso sigue abierto" },
+  { k:"esperaBbva", th:"Espera a BBVA", est:"POR_VALIDAR",
+    ttl:"El ejecutivo de BBVA todavía no entrega los datos del titular" },
+  { k:"porContactar", th:"Por contactar", est:"POR_CONTACTAR",
+    ttl:"Los datos ya llegaron y nadie ha llamado al comercio" },
+  { k:"visitas", th:"Visitas efectivas", periodo:true,
+    ttl:"Presenciales o virtuales en las que se logró hablar, dentro del periodo elegido arriba" },
+  { k:"retenciones", th:"Retenciones", cierre:"retenido",
+    ttl:"Ya operaban y se quedaron" },
+  { k:"ventas", th:"Ventas", cierre:"recuperado",
+    ttl:"Estaban de baja y volvieron a operar" },
+  { k:"sinLead", th:"Sin lead", cierre:"venta",
+    ttl:"RUC que Stratis captó y cerró; nunca estuvo en la cartera que entregó BBVA" }
+];
 
 function tablaControl(filas){
   if (!filas.length) return "";
-  const celda = (v, clase) => `<td class="${clase||""}">${v}</td>`;
+  /* Basta con que a UNO le falte la cartera cargada para que su guion pida
+     explicación. Preguntar si alguien la tiene deja al que no la tiene con un
+     guion mudo en medio de una columna de números. */
+  const faltaMeta = filas.some(f => f.faltan === null);
+
+  const celda = (f, c) => {
+    const v = f[c.k];
+    if (v === null) return `<td class="num tenue">—</td>`;
+    if (!v) return `<td class="num">—</td>`;
+    /* Cada cifra abre su lista. Un número sin salida obliga a buscar a mano lo
+       que el CRM acaba de contar. */
+    const ir = c.est    ? `data-verest="${c.est}" data-verejec="${esc(f.nombre)}"`
+             : c.cierre ? `data-vercierre="${c.cierre}" data-verejec="${esc(f.nombre)}"`
+             : c.k === "registrados" ? `data-verlista="registrado" data-verejec="${esc(f.nombre)}" data-vercuantos="${v}"`
+             : "";
+    return `<td class="num ${c.fuerte ? "fuerte" : ""}">${
+      ir ? `<button class="cifra-link" ${ir}>${v}</button>` : v}</td>`;
+  };
+
   return `
   <div class="card ctrl">
     <div class="ctrl-h">
-      <h3>Actividad por ejecutivo</h3>
-      <span class="sub">Toca una fila para ver solo sus gestiones</span>
+      <h3>En qué está parada la cartera de cada ejecutivo</h3>
+      <span class="sub">Toca una fila para ver solo sus gestiones · toca una cifra para ver de qué comercios se trata</span>
     </div>
     <div class="ctrl-scroll">
-    <table class="tbl-ctrl">
+    <table class="tbl-ctrl" id="tblControl">
       <thead><tr>
-        <th>Ejecutivo</th><th>Gestiones</th><th title="Comercios distintos con al menos una gestión">Comercios tocados</th><th>Días con actividad</th>
-        <th>Por día</th><th>Respuestas</th><th>% respuesta</th>
-        <th title="Gestiones registradas el mismo día en que ocurrieron">En el día</th>
+        <th>Ejecutivo</th>
+        ${COLS_EQUIPO.map(c => `<th title="${esc(c.ttl)}">${c.th}</th>`).join("")}
         <th>Última gestión</th>
       </tr></thead>
       <tbody>
       ${filas.map(f => {
         const mudo = f.silencio === null || f.silencio > 6;
-        return `<tr data-fejec="${esc(f.nombre)}" class="${S.fEjecReg === f.nombre ? "on" : ""}${f.gestiones ? "" : " vacia"}">
+        return `<tr data-fejec="${esc(f.nombre)}" class="${S.fEjecReg === f.nombre ? "on" : ""}${f.registrados ? "" : " vacia"}">
           <td class="nom">${esc(f.nombre)}</td>
-          ${celda(f.gestiones, "num fuerte")}
-          ${celda(f.comercios, "num")}
-          ${celda(f.dias, "num")}
-          ${celda(f.gestiones ? f.porDia.toFixed(1) : "—", "num")}
-          ${celda(f.respuestas, "num")}
-          ${celda(f.gestiones ? Math.round(f.tasa * 100) + "%" : "—", "num")}
-          ${celda(f.gestiones ? `${f.alDia} <span class="tenue">de ${f.gestiones}</span>` : "—", "num")}
+          ${COLS_EQUIPO.map(c => celda(f, c)).join("")}
           <td class="num ${mudo ? "alerta" : ""}">${
             f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}`
                      : "sin gestiones"}</td>
         </tr>`;
       }).join("")}
+      <tr class="total-eq">
+        <td class="nom">Equipo</td>
+        ${COLS_EQUIPO.map(c => {
+          const n = filas.reduce((a,f) => a + (f[c.k] || 0), 0);
+          /* Cero se escribe con guion, igual que en las filas de arriba: un
+             cero en una columna y un guion en la de abajo se leen como dos
+             cosas distintas cuando son la misma. */
+          return `<td class="num ${c.fuerte ? "fuerte" : ""}">${n || "—"}</td>`;
+        }).join("")}
+        <td></td>
+      </tr>
       </tbody>
     </table>
     </div>
-    ${filas.some(f => f.sinGps) ? `<div class="ctrl-pie">
-      ${filas.filter(f => f.sinGps).map(f => `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
-    </div>` : ""}
+    <div class="ctrl-pie">
+      ${filas.filter(f => f.sinGps).map(f =>
+        `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
+    </div>
+    <p class="pie">Los estados del comercio —registrados, faltan, en negociación, espera a BBVA, por
+      contactar y los tres cierres— son <b>de hoy</b> y no cambian con el periodo de arriba: un
+      comercio retenido en julio sigue retenido. Las <b>visitas efectivas</b> sí siguen el periodo
+      elegido, porque son gestiones.${faltaMeta ?
+      " <b>Faltan</b> sale en guion cuando ese ejecutivo todavía no tiene su cartera asignada cargada en Ajustes: sin ese número no hay resta posible." : ""}</p>
   </div>`;
 }
 
@@ -5840,8 +5950,12 @@ function tarjetaGestion(r){
 }
 
 function viewRegistros(){
-  const mando = S.user.rol !== "Ejecutivo";
-  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === S.user.correo))
+  const mando = !vistaDeCampo();
+  /* Con «ver como» puesto, «mis gestiones» son las del ejecutivo observado.
+     `correoObservado` devuelve el suyo cuando quien mira es ejecutivo, y el
+     elegido cuando supervisión pidió mirar como uno. */
+  const mio = correoObservado();
+  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === mio))
                   .filter(r => enPeriodo(r, S.fPeriodoReg))
                   .sort((a,b) => ts(b) - ts(a));
 
@@ -5896,6 +6010,7 @@ function viewRegistros(){
   if (diaActual) bloques += `</div>`;
 
   return `
+  ${bannerComoEjec()}
   <div class="page-head">
     <div>
       <h2>${mando ? "Gestiones del equipo" : "Mis gestiones"}</h2>
@@ -5966,8 +6081,8 @@ function viewRegistros(){
 
 /* Lo que está en pantalla, a Excel: la misma selección, sin volver a filtrar */
 function gestionesFiltradas(){
-  const mando = S.user.rol !== "Ejecutivo";
-  let l = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === S.user.correo))
+  const mando = !vistaDeCampo();
+  let l = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === correoObservado()))
             .filter(r => enPeriodo(r, S.fPeriodoReg))
             .sort((a,b) => ts(b) - ts(a));
   const q = S.qReg.trim().toLowerCase();
@@ -6009,13 +6124,27 @@ function gestionesFiltradas(){
 /* La cartera que mira el Panel no depende de los filtros de la pantalla de
    Cartera. Antes sí, y bastaba con haber tocado «ver cuáles» para que el
    Panel entero se quedara filtrado por un ejecutivo sin avisarlo. */
-const universoPanel = () => !S.user ? []
-  : S.user.rol === "Ejecutivo" ? CLIENTES.filter(c => c.asignado_correo === S.user.correo)
-  : CLIENTES;
+/* Con «ver como» puesto, el universo del Panel es el del ejecutivo elegido:
+   es lo que hace que supervisión vea exactamente sus números y no los del
+   equipo recortados. */
+const correoObservado = () => {
+  if (!S.user) return "";
+  if (S.user.rol === "Ejecutivo") return S.user.correo;
+  const q = ejecObservado();
+  return q ? q.correo : "";
+};
 
-const ejecutivosPanel = () => S.user.rol === "Ejecutivo"
-  ? USUARIOS.filter(u => u.correo === S.user.correo)
-  : USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+const universoPanel = () => {
+  if (!S.user) return [];
+  const c = correoObservado();
+  return c ? CLIENTES.filter(x => x.asignado_correo === c) : CLIENTES;
+};
+
+const ejecutivosPanel = () => {
+  const c = correoObservado();
+  return c ? USUARIOS.filter(u => u.correo === c)
+           : USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+};
 
 /* ---- El selector, uno para toda la pantalla ----------------------------- */
 /* `conTitulo` en falso lo deja como lo que es: un control. El tablero de
@@ -6516,7 +6645,7 @@ function bloqueLlave(r){
    pantallas y por eso nadie lo miraba. */
 function bloqueCorregir(r, regs){
   const base = universoPanel();
-  const mando = S.user.rol !== "Ejecutivo";
+  const mando = !vistaDeCampo();
 
   const sinUbi   = regs.filter(sinUbicacion);
   const tarde    = regs.filter(x => demoraHabil(x) > 1);
@@ -6662,7 +6791,7 @@ function viewPanel(){
      El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
      se le cambia la herramienta de trabajo en medio de una campaña sin que sea
      su turno—. */
-  if (mandoTotal()) return viewTablero();
+  if (!vistaDeCampo()) return viewTablero();
   const r = rangoPanel();
   universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
 
@@ -6670,16 +6799,17 @@ function viewPanel(){
   const regs = DB.todos().filter(x => visibles.has(String(x.Customer_id)) && enRango(x.Fecha_Contacto, r));
 
   return `
+  ${bannerComoEjec()}
   ${selectorPanel(r)}
   ${bloqueProyecto()}
   ${bloqueActividad(r, regs)}
   ${bloqueEquipo(r)}
   ${/* El seguimiento del incentivo lo miran el Analista y el Manager; al
        ejecutivo no se le ofrece la pestaña y tampoco se le filtra por acá. */
-    S.user.rol !== "Ejecutivo" ? bloqueLlave(r) : ""}
+    !vistaDeCampo() ? bloqueLlave(r) : ""}
   ${bloqueCorregir(r, regs)}
   ${bloqueDetalle(r, regs)}
-  ${S.user.rol !== "Ejecutivo"
+  ${!vistaDeCampo()
     ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
         <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
     : ""}`;
@@ -7054,6 +7184,7 @@ function viewTablero(){
       <div class="tab-periodo">${esc(r.label ? r.label[0].toUpperCase() + r.label.slice(1) : "Periodo")} ·
         ${esc(r.detalle)} · día ${av.corrido} de ${av.total} del proyecto</div>
     </div>
+    ${selectorComoEjec()}
   </div>
 
   ${selectorPanel(r, false)}
@@ -8718,9 +8849,11 @@ function bindMetas(){
 const ORDEN_PLAZO = ["vencida", "hoy", "semana", "despues"];
 
 function agendaVisible(){
-  const mia = S.user.rol === "Ejecutivo";
+  /* Con «ver como» puesto, la agenda es la del ejecutivo observado: es la
+     mitad de la pregunta «¿por qué dice que no tiene nada pendiente?». */
+  const mio = correoObservado();
   let l = SEGUIMIENTOS.filter(x => !x.cerrado_en);
-  if (mia) l = l.filter(x => x.correo_stratis === S.user.correo);
+  if (mio) l = l.filter(x => x.correo_stratis === mio);
   else if (S.fEjecAgenda !== "todos") l = l.filter(x => x.ejecutivo === S.fEjecAgenda);
   return l.sort((a,b) => String(a.fecha_objetivo).localeCompare(String(b.fecha_objetivo)));
 }
@@ -8754,7 +8887,7 @@ function tarjetaAccion(s){
 }
 
 function viewAgenda(){
-  const mando = S.user.rol !== "Ejecutivo";
+  const mando = !vistaDeCampo();
   const lista = agendaVisible();
   const porPlazo = {};
   ORDEN_PLAZO.forEach(k => porPlazo[k] = lista.filter(s => estadoAccion(s) === k));
@@ -8768,6 +8901,7 @@ function viewAgenda(){
     !conAccion.has(String(c.customer_id)));
 
   return `
+  ${bannerComoEjec()}
   <div class="page-head">
     <div>
       <h2>${mando ? "Agenda del equipo" : "Mi agenda"}</h2>
