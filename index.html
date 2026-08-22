@@ -2022,13 +2022,18 @@ const FERIADOS_DEF = [
 ];
 
 const BONO_DEF = {
-  metas:      { reactivacion_pp:18, facturacion_pct:15, ventas_mes:7 },
-  /* La ruta mensual hacia la meta, tal como está en el documento de
-     incentivos: no es la meta del proyecto dividida entre cinco, es una curva
-     que da más aire a los primeros meses. Los valores son ACUMULADOS —al mes
-     2 se esperan 8 p.p. en total, no 8 adicionales— y el último punto tiene
-     que coincidir con la meta del proyecto. */
-  curva:      { reactivacion_pp:[4, 8, 11, 15, 18], facturacion_pct:[3, 6, 9, 12, 15] },
+  metas:      { reactivacion_pp:20, facturacion_pct:15, ventas_mes:7 },
+  /* La ruta mensual hacia la meta. No es la meta del proyecto dividida entre
+     cinco: es una curva. Los valores son ACUMULADOS —al mes 3 se esperan 10
+     p.p. en total, no 10 adicionales— y el último punto tiene que coincidir
+     con la meta del proyecto.
+
+     Reajustada el 20/08/2026 con el cierre del primer periodo a la vista. La
+     reactivación arranca en 0 porque el mes 1 terminó en 0,36 p.p. y sube 5
+     por mes hasta 20. La facturación arranca en el mes 3 y no en el 1: el
+     dato del banco llega un periodo desfasado, así que exigir crecimiento en
+     el mes 1 era pedir cuentas de algo que todavía no se puede medir. */
+  curva:      { reactivacion_pp:[0, 5, 10, 15, 20], facturacion_pct:[0, 0, 5, 10, 15] },
   pesos:      { reactivacion:30, facturacion:50, venta:20 },
   /* cobertura_base decide qué cuenta como cartera cubierta:
        · «registro» — la ficha cargada, sobre la cartera asignada.
@@ -2040,7 +2045,10 @@ const BONO_DEF = {
      El primer mes fue por registro: el cuello estaba en la respuesta del
      banco. De ahí en adelante rige «contacto». Se cambia por periodo desde
      Ajustes, y cambiarlo no reescribe los meses ya medidos. */
-  requisitos: { cobertura_pct:90, visitas_semana:25, puntualidad_pct:95, cobertura_base:"contacto" },
+  /* visitas_periodo manda sobre visitas_semana; la semanal queda para leer
+     las versiones viejas —el periodo 1— sin reescribirlas. Ver reglaVisitas. */
+  requisitos: { cobertura_pct:90, visitas_semana:25, visitas_periodo:40,
+                puntualidad_pct:95, cobertura_base:"contacto" },
   /* Los días que no son de trabajo, además de sábados y domingos. Se editan
      en Ajustes y viajan con la versión de parámetros. */
   feriados:   FERIADOS_DEF,
@@ -2295,6 +2303,81 @@ function habilesDesde(iso){
     if (n > 400) break;
   }
   return n;
+}
+
+/* Los días trabajados que tiene un periodo del bono. Se cuentan de verdad
+   —sin sábados, sin domingos, sin los feriados de ese periodo— porque es la
+   base sobre la que se dice «dos visitas al día»: repartir 40 visitas entre
+   30 días corridos daría 1,3 y no es lo que se le pide a nadie. */
+function diasTrabajadosEntre(ini, fin, fer){
+  const a = String(ini || "").slice(0,10), b = String(fin || "").slice(0,10);
+  if (!a || !b || b < a) return 0;
+  let n = 0, guarda = 0;
+  for (let d = new Date(a + "T12:00:00Z"); ; ){
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= b || ++guarda > 400) break;
+    d = new Date(d.getTime() + 86400000);
+  }
+  return n;
+}
+function diasTrabajadosPeriodo(p){
+  const v = ventanaPeriodo(p);
+  return v.ini ? diasTrabajadosEntre(v.ini, v.fin, feriadosDe(p)) : 0;
+}
+
+/* ---- El mínimo de visitas -----------------------------------------------
+   Cambió de unidad el 19 de agosto de 2026, al terminar la marcha blanca:
+   antes eran 25 efectivas POR SEMANA —que escaladas al periodo daban 107 por
+   ejecutivo, y ninguno llegó— y ahora son 40 EN EL PERIODO, medidas del 19 al
+   18. La semana y el día pasan a ser referencia, no requisito.
+
+   Las dos reglas conviven a propósito. El periodo 1 ya está medido con la
+   vieja y reescribirlo cambiaría un resultado cerrado hacia atrás; por eso la
+   versión de agosto no lleva `visitas_periodo` y la de setiembre sí. Cuando
+   existe, manda; cuando falta, rige la semanal de siempre.
+
+   Las referencias no se escriben a mano: se dividen. Si un periodo tiene 21
+   días trabajados salen 1,9 al día, y si tiene 23 salen 1,7. Poner «2 al día»
+   fijo sería mentir en los periodos que no midan 21 días. */
+function reglaVisitas(req, p){
+  const r = req || {};
+  const sem  = semanasPeriodo(p) || 0;
+  const dias = diasTrabajadosPeriodo(p);
+  const porPeriodo = r.visitas_periodo !== undefined && r.visitas_periodo !== null;
+  const pide = porPeriodo
+    ? Math.round(Number(r.visitas_periodo) || 0)
+    : Math.round((Number(r.visitas_semana) || 0) * sem);
+  return {
+    porPeriodo, pide, dias, semanas: sem,
+    /* Con qué se compara en pantalla y contra qué número */
+    meta:   porPeriodo ? pide : (Number(r.visitas_semana) || 0),
+    unidad: porPeriodo ? "periodo" : "semana",
+    /* Las referencias, solo para orientar */
+    porSemana: sem  ? Math.round(pide / sem * 10) / 10 : 0,
+    porDia:    dias ? Math.round(pide / dias * 10) / 10 : 0,
+    corto: porPeriodo ? `${pide} en el periodo` : `${Number(r.visitas_semana) || 0} por semana`,
+    largo: porPeriodo
+      ? `${pide} efectivas en el periodo · referencia ${sem ? Math.round(pide / sem * 10) / 10 : 0} por semana y ${dias ? Math.round(pide / dias * 10) / 10 : 0} por día trabajado`
+      : `${Number(r.visitas_semana) || 0} por semana · ${pide} en el periodo`
+  };
+}
+
+/* Lo que un tramo de tiempo alcanza a exigir. El Panel y el tablero no miran
+   siempre el periodo completo —se puede mirar hoy, la semana o lo que va del
+   mes— y exigir el mínimo entero por tres días sería inventar un
+   incumplimiento. Con la regla semanal se escala por semanas corridas; con la
+   del periodo, por los días trabajados que YA pasaron sobre los que tiene el
+   periodo. Nunca pasa del 100%: un tramo no puede pedir más que el periodo. */
+function pideVisitasRango(req, r, personas){
+  const p  = (r && r.periodo) || periodoHoy();
+  const rv = reglaVisitas(req, p);
+  const n  = Math.max(1, personas || 1);
+  if (!rv.porPeriodo) return Math.round(rv.meta * semanasRango(r) * n);
+  if (!r || !r.ini || !rv.dias) return rv.pide * n;
+  const hasta = r.fin > hoyISO() ? hoyISO() : r.fin;
+  const corridos = diasTrabajadosEntre(r.ini, hasta, feriadosDe(p));
+  return Math.round(rv.pide * Math.min(1, corridos / rv.dias) * n);
 }
 
 const factDe = (correo, p) =>
@@ -6781,7 +6864,13 @@ function bloqueActividad(r, regs){
   const sem   = semanasRango(r);
   const gente = ejecutivosPanel().length || 1;
   const ritmo = sem ? efectivas / sem / gente : 0;
-  const pide  = paramsDe(r.periodo || periodoHoy()).requisitos.visitas_semana;
+  /* El ritmo se sigue mirando por semana porque es la unidad con la que uno
+     se organiza. Lo que cambió es contra qué se compara: desde el 19/08 el
+     requisito son 40 en el periodo, y la referencia semanal sale de dividir,
+     no de un número escrito a mano. */
+  const rvP   = reglaVisitas(paramsDe(r.periodo || periodoHoy()).requisitos,
+                             r.periodo || periodoHoy());
+  const pide  = rvP.porSemana || rvP.meta;
 
   return `
   <div class="pnl-h"><span class="pnl-n">2</span>
@@ -6802,7 +6891,8 @@ function bloqueActividad(r, regs){
       <div class="sub">${dias ? `${(gestiones/dias).toFixed(1)} gestiones por día` : "sin movimiento"}</div></div>
     <div class="stat ${sem && ritmo < pide ? "malo" : ""}"><div class="lbl">Ritmo semanal</div>
       <div class="val">${sem ? ritmo.toFixed(1) : "—"}</div>
-      <div class="sub">visitas efectivas por semana y por ejecutivo · se piden ${pide}</div></div>
+      <div class="sub">visitas efectivas por semana y por ejecutivo · referencia ${pide}${
+        rvP.porPeriodo ? ` · el mínimo son ${rvP.pide} en el periodo` : ""}</div></div>
   </div>
   <details class="explica suelta"><summary>Por qué acá dice ${efectivas} gestiones y en la Cartera otro número</summary>
       <div class="cuerpo">
@@ -7061,7 +7151,7 @@ function bloqueLlave(r){
       <thead><tr>
         <th>Ejecutivo</th>
         <th title="Comercios asignados con al menos una gestión en el periodo">Cobertura · mín ${req.cobertura_pct}%</th>
-        <th title="Presenciales o virtuales en las que se logró hablar, escaladas a las semanas reales">Visitas efectivas · mín ${req.visitas_semana}/sem</th>
+        <th title="Presenciales o virtuales en las que se logró hablar. Desde el periodo 2 el mínimo se mide en el periodo completo; antes se escalaba por semanas">Visitas efectivas · mín ${esc(reglaVisitas(req, p).corto)}</th>
         <th title="Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan">Puntualidad · mín ${req.puntualidad_pct}%</th>
         <th>Llave</th><th>Cumplimiento</th><th>Incentivo</th>
       </tr></thead>
@@ -7312,15 +7402,17 @@ function cifrasTablero(r, regs){
     && (esRetencion(c) || esRecuperado(c)) && enRango(c.cerrado_en, r)).length;
   const ventas = base.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
 
-  /* Las visitas que pide el periodo: el requisito es semanal y por persona, así
-     que el objetivo del periodo se arma con las semanas que ya corrieron —no
-     con las que faltan—. Exigir por días que todavía no ocurren es inventar
-     un incumplimiento. */
+  /* Las visitas que pide el tramo mirado, por persona y prorrateadas: solo se
+     exige por los días que ya pasaron. Exigir por días que todavía no
+     ocurrieron es inventar un incumplimiento. Desde el 19/08 el mínimo es del
+     periodo —40 efectivas— y antes era semanal; `pideVisitasRango` sabe cuál
+     rige en cada periodo. */
   const sem = semanasRango(r);
-  const pideVisitas = Math.round(req.visitas_semana * sem * (ejec.length || 1));
+  const rv  = reglaVisitas(req, p);
+  const pideVisitas = pideVisitasRango(req, r, ejec.length || 1);
 
   return {
-    filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, pideVisitas,
+    filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, rv, pideVisitas,
     cobertura:   asignada ? gestionados / asignada * 100 : null,
     calidad:     regs.length ? puntuales / regs.length * 100 : null,
     gestiones:   regs.length
@@ -7359,8 +7451,9 @@ function kpisTablero(x, r){
     <div class="kpi">
       <div class="lbl">Visitas efectivas</div>
       <div class="val num">${x.efectivas}</div>
-      <div class="sub">${x.pideVisitas ? `de ${x.pideVisitas} que pide el periodo · ${x.req.visitas_semana} por semana y ejecutivo`
-        : `se piden ${x.req.visitas_semana} por semana y ejecutivo`}</div>
+      <div class="sub">${x.pideVisitas
+        ? `de ${x.pideVisitas} que pide el tramo · ${esc(x.rv.corto)} y ejecutivo`
+        : `se piden ${esc(x.rv.corto)} y ejecutivo`}</div>
       ${medidor(x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0,
                 x.pideVisitas && x.efectivas >= x.pideVisitas ? "" : "alerta")}
     </div>
@@ -9451,6 +9544,11 @@ function cifrasCalendario(){
    solo para supervisión. */
 function proyeccionEquipo(){
   const req = paramsDe(periodoHoy()).requisitos;
+  /* La tabla mira «hoy» y «esta semana», así que el mínimo se muestra en
+     semanas aunque el requisito sea del periodo: la referencia semanal sale
+     de dividir las 40 entre las semanas del periodo, no de un número puesto
+     a mano. `reglaVisitas` guarda la de cada versión. */
+  const rvP = reglaVisitas(req, periodoHoy());
   return USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false).map(u => {
     const suyas = citasTodas().filter(s => s.correo_stratis === u.correo);
     const abiertas = suyas.filter(s => !s.cerrado_en);
@@ -9473,7 +9571,7 @@ function proyeccionEquipo(){
       habilitados: habilitados.length,
       conCita: demoras.length,
       demora: mediana(demoras),
-      pide: req.visitas_semana
+      pide: rvP.porSemana || rvP.meta, regla: rvP
     };
   }).sort((a,b) => (b.semana + b.hoy) - (a.semana + a.hoy));
 }
@@ -9498,7 +9596,7 @@ function bloqueProyeccion(){
         <th>Ejecutivo</th>
         <th title="Citas para hoy">Hoy</th>
         <th title="Citas en los próximos 7 días">Esta semana</th>
-        <th title="Mínimo de visitas efectivas por semana que pide el incentivo">Pide</th>
+        <th title="Referencia semanal del mínimo de visitas efectivas que pide el incentivo">Pide/sem</th>
         <th title="Citas cuya fecha ya pasó y no tienen visita registrada">No concretadas</th>
         <th title="De las citas cuya fecha ya pasó, cuántas se concretaron">Cumplimiento</th>
         <th title="Comercios de su cartera que ya quedaron habilitados: BBVA confirmó los datos o el cliente respondió">Habilitados</th>
@@ -9544,8 +9642,8 @@ function bloqueProyeccion(){
       arrastraría el promedio y escondería a los que se agendaron al día siguiente.</p>
     <p class="pie"><b>La fila del equipo es seguimiento, no requisito.</b> La llave del bono se
       mide persona por persona: cada ejecutivo la abre con su propio mínimo de
-      ${filas[0] ? filas[0].pide : 25} visitas efectivas por semana, y nadie pierde su bono porque
-      el equipo no haya llegado. El total del equipo está acá para mirarlo con BBVA, no para
+      ${filas[0] ? esc(filas[0].regla.corto) : "40 en el periodo"} visitas efectivas, y nadie
+      pierde su bono porque el equipo no haya llegado. El total del equipo está acá para mirarlo con BBVA, no para
       liquidar.</p>
   </div>`;
 }
@@ -10177,7 +10275,10 @@ function llaveDe(correo, p){
 
   const efectivas = gest.filter(r => r.Cumple_Visita === "SI").length;
   const semanas   = semanasPeriodo(p);
-  const pide      = Math.round(req.visitas_semana * semanas);
+  /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
+     de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
+  const rv        = reglaVisitas(req, p);
+  const pide      = rv.pide;
   const porSemana = semanas ? efectivas / semanas : 0;
 
   const puntuales = gest.filter(aTiempo).length;
@@ -10192,7 +10293,12 @@ function llaveDe(correo, p){
                   número que el ejecutivo necesita para reaccionar antes del 18,
                   y no lo tenía en ninguna pantalla. */
                faltan: Math.max(0, Math.ceil(denom * req.cobertura_pct / 100) - cubiertos) };
-  const r2 = { valor:porSemana,   meta:req.visitas_semana,   ok: efectivas   >= pide,
+  /* Cuando el mínimo es del periodo, lo que se muestra es el total efectivo
+     contra las 40; cuando es semanal, el ritmo por semana contra las 25. Se
+     compara siempre lo mismo con lo mismo. */
+  const r2 = { valor: rv.porPeriodo ? efectivas : porSemana,
+               meta:  rv.meta, unidad: rv.unidad, regla: rv,
+               ok: efectivas >= pide, efectivas, pide, porSemana,
                detalle:`${efectivas} efectivas, se piden ${pide}` };
   const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
                detalle: gest.length ? `${puntuales} de ${gest.length} a tiempo` : "sin gestiones en el periodo" };
@@ -10235,8 +10341,15 @@ function cumplimientoDe(correo, p){
      proyecto, no contra el cierre del mes anterior. Lo que cambia es contra
      qué meta se compara. */
   const crec  = crecimientoFact(correo, p);
-  const cFact = crec === null ? null
-              : M.facturacion_pct ? crec / M.facturacion_pct * 100 : 0;
+  /* Una meta de facturación en cero no es una meta fácil: es un mes en el que
+     todavía no se mide. La ruta reajustada arranca la facturación en el mes 3
+     porque el dato del banco llega un periodo desfasado, y los meses 1 y 2
+     quedan en cero a propósito. Puntuar eso como 0% de cumplimiento sería
+     hundir el ponderado de todos con el peso más grande —50— por un dato que
+     nadie podía tener. Se trata como no medible, igual que si faltara el
+     monto: sale del promedio y se dice en pantalla. */
+  const cFact = crec === null || !M.facturacion_pct ? null
+              : crec / M.facturacion_pct * 100;
 
   /* La venta sí es mensual, y así está en el documento: 7 por periodo. No se
      acumula ni se prorratea. */
@@ -10251,10 +10364,16 @@ function cumplimientoDe(correo, p){
       logro:`${pp.toFixed(1)} p.p.`,
       detalle:`${logrados} de ${cart.n} comercios acumulados${
         enElMes !== logrados ? ` · ${enElMes} en este periodo` : ""}`, cumpl:cReact },
+    /* Los meses sin meta de facturación se nombran como lo que son. Decir
+       «falta cargar la facturación» en el mes 2 mandaría a buscar un dato que
+       el banco todavía no entregó. */
     { id:"fact", nombre:"Facturación", peso:B.pesos.facturacion,
-      meta:`+${M.facturacion_pct}%`, metaPie:`acumulado al ${mes}`,
+      meta: M.facturacion_pct ? `+${M.facturacion_pct}%` : "no se mide todavía",
+      metaPie: M.facturacion_pct ? `acumulado al ${mes}`
+             : `el dato del banco llega un periodo desfasado · la medición arranca en el ${mesArranqueFact(B)}`,
       logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
-      detalle: crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
+      detalle: !M.facturacion_pct ? "sin meta este mes: no entra al promedio"
+             : crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
       cumpl:cFact },
     { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
       meta:`${M.ventas_mes} ${M.ventas_mes === 1 ? "venta" : "ventas"}`, metaPie:"por periodo, no se acumula",
@@ -10281,6 +10400,15 @@ function montoFact(correo, p){
 }
 /* Decir qué falta exactamente: no es lo mismo que nadie fijó la base del
    proyecto a que falta el monto de cierre de este periodo. */
+/* En qué mes del proyecto la facturación empieza a pedir algo. Sale de la
+   curva y no de un número escrito: si mañana el banco entrega el dato antes y
+   la ruta se corrige en Ajustes, esta frase se corrige sola. */
+function mesArranqueFact(params){
+  const c = ((params || BONO).curva || {}).facturacion_pct || [];
+  const i = c.findIndex(v => Number(v) > 0);
+  return i < 0 ? "mes que corresponda" : `mes ${i + 1}`;
+}
+
 function textoFaltaFact(correo, p){
   const ini = inicioFact(correo, p), f = factDe(correo, p);
   if (ini.monto === null) return "falta fijar la base de facturación del proyecto";
@@ -10568,7 +10696,7 @@ async function confirmarParametros(){
     <p>Se guarda una versión propia de este periodo con los valores que ya se están
     heredando${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : ""}. No cambia ningún número:
     deja constancia de que alguien los revisó para este mes.</p>
-    <p class="pie">Mínimo de visitas: <b>${valor.requisitos.visitas_semana} por semana</b> ·
+    <p class="pie">Mínimo de visitas: <b>${esc(reglaVisitas(valor.requisitos, p).corto)}</b> ·
     cobertura <b>${valor.requisitos.cobertura_pct}%</b> ·
     puntualidad <b>${valor.requisitos.puntualidad_pct}%</b>.
     Si alguno tiene que cambiar, edítalo en Ajustes en vez de confirmar.</p>
@@ -10886,7 +11014,12 @@ const CAMPOS_BONO = [
   ["pesos.facturacion",          "Peso de facturación",         "%"],
   ["pesos.venta",                "Peso de venta",               "%"],
   ["requisitos.cobertura_pct",   "Cobertura mínima",            "%"],
-  ["requisitos.visitas_semana",  "Visitas efectivas por semana",""],
+  /* Las dos unidades del mínimo de visitas. `visitas_periodo` es la que rige
+     desde el 19/08; la semanal se deja visible para poder leer y corregir las
+     versiones viejas —el periodo 1— sin tener que entrar a la base. Vaciar
+     `visitas_periodo` devuelve el periodo a la regla semanal. */
+  ["requisitos.visitas_periodo", "Visitas efectivas en el periodo",""],
+  ["requisitos.visitas_semana",  "Visitas por semana (regla vieja)",""],
   ["requisitos.puntualidad_pct", "Puntualidad mínima",          "%"],
   ["piso",                       "Piso del incentivo",          "%"],
   ["pago_en_piso",               "Paga en el piso",             "%"],
@@ -11100,8 +11233,16 @@ async function guardarParametros(){
   const nuevo = paramsDe(pv);
   let malo = "";
   document.querySelectorAll("[data-bono]").forEach(el => {
-    const n = Number(String(el.value).replace(",", "."));
-    if (!isFinite(n) || n < 0) malo = el.dataset.bono;
+    const txt = String(el.value).trim();
+    /* Vaciar el mínimo del periodo no es escribir un cero: es decir «este
+       periodo se mide con la regla semanal», que es como quedó medido el
+       primero. Un cero pediría cero visitas, que no es lo mismo. */
+    if (txt === "" && el.dataset.bono === "requisitos.visitas_periodo"){
+      ponerBono(nuevo, el.dataset.bono, null);
+      return;
+    }
+    const n = Number(txt.replace(",", "."));
+    if (!isFinite(n) || n < 0 || txt === "") malo = el.dataset.bono;
     else ponerBono(nuevo, el.dataset.bono, n);
   });
   if (malo) return toast("Hay un valor que no es un número: " + malo);
@@ -12261,6 +12402,7 @@ const FIL = {                 // fila de cada parámetro en la hoja
 function hojaParametros(p, d){
   const B = paramsDe(p);
   const M = metaPeriodo(p, B);
+  const rvLibro = reglaVisitas(B.requisitos, p);
   const v = ventanaPeriodo(p);
   const fer = Array.isArray(B.feriados) ? B.feriados : FERIADOS_DEF;
   const filas = [
@@ -12281,7 +12423,14 @@ function hojaParametros(p, d){
     ["", "", ""],
     ["LLAVE DE ACCESO", "MÍNIMO", ""],
     ["Cobertura de cartera", B.requisitos.cobertura_pct, "% de la cartera con al menos una gestión"],
-    ["Visitas efectivas por semana", B.requisitos.visitas_semana, "presenciales o virtuales con respuesta"],
+    /* Desde el periodo 2 el mínimo es del periodo y no de la semana; el libro
+       escribe el que rigió ese periodo, con su unidad, para que una hoja
+       vieja no se lea con la regla nueva. */
+    [rvLibro.porPeriodo ? "Visitas efectivas en el periodo" : "Visitas efectivas por semana",
+     rvLibro.meta,
+     rvLibro.porPeriodo
+       ? `presenciales o virtuales con respuesta · referencia ${rvLibro.porSemana} por semana y ${rvLibro.porDia} por día trabajado`
+       : `presenciales o virtuales con respuesta · ${rvLibro.pide} en el periodo`],
     ["Puntualidad del registro", B.requisitos.puntualidad_pct, "% registrado a tiempo"],
     /* Escribe «registro» o «gestion» y el libro entero recalcula la cobertura.
        El primer mes se fue en coordinar con los ejecutivos de BBVA: sin la
@@ -12504,6 +12653,18 @@ function FORMULA_TRAMO(c, filaEsc, n){
 const CELDA_PISO = filaEsc => Y_(filaEsc);
 
 /* ---- Resumen: una fila por ejecutivo, todo fórmula ---------------------- */
+/* Cuántas visitas pide el periodo, escrito como fórmula para que el libro se
+   recalcule solo si alguien toca la celda del parámetro. Las dos reglas dan
+   fórmulas distintas y no da lo mismo cuál se escriba: con la vieja el mínimo
+   se escala por las semanas del periodo (25 × 4,43 = 111), con la nueva el
+   parámetro YA es el total del periodo y multiplicarlo otra vez pediría 177
+   visitas que nadie acordó. */
+function pideVisitasFormula(p){
+  const rv = reglaVisitas(paramsDe(p).requisitos, p);
+  return rv.porPeriodo ? P_(FIL.visitas)
+                       : `ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`;
+}
+
 function hojaResumen(p, d, nG, nC, nN){
   const cols = ["Ejecutivo","Correo","Cartera asignada","Gestiones del periodo",
                 "Cobertura","Mínimo","¿Cobertura?",
@@ -12533,7 +12694,7 @@ function hojaResumen(p, d, nG, nC, nN){
       `=${P_(FIL.cobertura)}`,
       `=${F.cumpleCobertura(`$E${f}`, `$F${f}`, `$C${f}`)}`,
       `=${F.efectivas}`,
-      `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
+      `=${pideVisitasFormula(p)}`,
       `=IF($H${f}>=$I${f},"Sí","No")`,
       `=IF($D${f}=0,0,${F.puntuales}/$D${f}*100)`,
       `=${P_(FIL.puntualidad)}`,
@@ -12549,9 +12710,13 @@ function hojaResumen(p, d, nG, nC, nN){
       `=${F.ventas}`,
       `=${P_(FIL.metaVenta)}`,
       `=IF($W${f}=0,0,$V${f}/$W${f}*100)`,
-      /* El ponderado reparte solo entre lo medible: sin facturación cargada,
-         su 50% sale del reparto en vez de contar como cero. */
-      `=IF(ISBLANK($S${f}),($R${f}*${P_(FIL.pesoReact)}+$X${f}*${P_(FIL.pesoVenta)})/(${P_(FIL.pesoReact)}+${P_(FIL.pesoVenta)}),` +
+      /* El ponderado reparte solo entre lo medible. Dos motivos lo sacan del
+         reparto, y los dos tienen que estar en la fórmula: que no se haya
+         cargado el monto (celda vacía) y que el mes todavía no pida
+         facturación (meta en cero, los meses 1 y 2 de la ruta reajustada).
+         Si solo se mirara la celda vacía, un mes sin meta puntuaría 0% con el
+         peso más grande del modelo y hundiría el resultado de todos. */
+      `=IF(OR(ISBLANK($S${f}),$T${f}=0),($R${f}*${P_(FIL.pesoReact)}+$X${f}*${P_(FIL.pesoVenta)})/(${P_(FIL.pesoReact)}+${P_(FIL.pesoVenta)}),` +
         `($R${f}*${P_(FIL.pesoReact)}+$U${f}*${P_(FIL.pesoFact)}+$X${f}*${P_(FIL.pesoVenta)})/100)`,
       `=${FORMULA_TRAMO(`$Y${f}`, d.esc.fila, d.esc.n)}`,
       /* Tres requisitos: la escala, pero nunca menos que el primer punto —la
@@ -12632,7 +12797,7 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Cobertura de cartera", `=${F.coberturaPct("$B$4")}`, `=${P_(FIL.cobertura)}`,
      `=${F.cumpleCobertura("$B$7", "$C$7", "$B$4")}`,
      "Según la regla del periodo: la ficha cargada, el comercio con algún intento, o el comercio con contacto logrado sobre lo registrado"],
-    ["Visitas efectivas", `=${F.efectivas}`, `=ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`,
+    ["Visitas efectivas", `=${F.efectivas}`, `=${pideVisitasFormula(p)}`,
      `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar"],
     ["Puntualidad del registro", `=IF($B$12=0,0,${F.puntuales}/$B$12*100)`, `=${P_(FIL.puntualidad)}`,
      `=IF(AND($B$12>0,$B$9>=$C$9),"Sí","No")`, "Registradas el mismo día trabajado o el siguiente"],
@@ -12654,8 +12819,10 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["", "", "", "", ""],
     ["RESULTADO", "", "", "", ""],
     ["Cumplimiento ponderado",
-     `=IF(ISBLANK($B$18),($D$17*$E$17+$D$19*$E$19)/($E$17+$E$19),($D$17*$E$17+$D$18*$E$18+$D$19*$E$19)/100)`,
-     "", "", crec === null ? "Sin la facturación cargada, su peso sale del reparto" : ""],
+     `=IF(OR(ISBLANK($B$18),$C$18=0),($D$17*$E$17+$D$19*$E$19)/($E$17+$E$19),($D$17*$E$17+$D$18*$E$18+$D$19*$E$19)/100)`,
+     "", "", crec === null ? "Sin la facturación cargada, su peso sale del reparto"
+           : (metaPeriodo(p, paramsDe(p)).facturacion_pct ? ""
+              : "Este mes la facturación todavía no se mide: su peso sale del reparto")],
     ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23", d.esc.fila, d.esc.n)}`,
      "", "", "% del sueldo base según la escala de cumplimiento"],
     ["Incentivo del periodo",
