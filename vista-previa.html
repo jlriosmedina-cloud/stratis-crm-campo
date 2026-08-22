@@ -1735,6 +1735,31 @@ function demoraHabil(r){
 }
 const aTiempo = r => demoraHabil(r) <= 1;
 
+/* Días trabajados entre una fecha y hoy. Es la misma cuenta que `demoraHabil`
+   —sin sábados, sin domingos, sin feriados— pero con el otro extremo abierto:
+   sirve para saber cuánto plazo le queda a alguien, no cuánto tardó.
+
+   Se usa para la ventana de corrección del ejecutivo. Va en días trabajados y
+   no en días corridos por la misma razón que la puntualidad: registrar el
+   viernes y corregir el lunes es corregir al día siguiente, no tres días
+   después. Un plazo que corre los domingos castiga por descansar. */
+function habilesDesde(iso){
+  const desde = String(iso || "").slice(0,10);
+  if (!desde) return 0;
+  const hoy = hoyISO();
+  if (hoy <= desde) return 0;
+  const fer = feriadosDe(periodoDe(desde));
+  let n = 0;
+  for (let d = new Date(desde + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso2 = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso2, fer)) n++;
+    if (iso2 >= hoy) break;
+    if (n > 400) break;
+  }
+  return n;
+}
+
 const factDe = (correo, p) =>
   FACTURACION.find(x => x.correo === correo && x.periodo === p) || null;
 
@@ -2115,6 +2140,15 @@ const soles = n => (n === null || n === undefined || n === "" || isNaN(n)) ? ""
 const titulo = s => String(s||"").toLowerCase()
   .replace(/(^|[\s\-—–/(.,;:"'¿¡])([a-záéíóúüñ])/g, (m, sep, l) => sep + l.toUpperCase());
 const userColor = n => { const i = USUARIOS.findIndex(u => u.nombre === n); return COLORES[i < 0 ? 0 : i % COLORES.length]; };
+
+/* Quién es el dueño de un correo. Se usa en la bitácora: ahí lo único fiable
+   sobre QUIÉN hizo el cambio es el correo con el que se hizo. */
+function nombrePorCorreo(correo){
+  const c = String(correo || "").trim().toLowerCase();
+  if (!c) return "";
+  const u = USUARIOS.find(x => String(x.correo || "").toLowerCase() === c);
+  return u ? u.nombre : correo;
+}
 const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio " + c.customer_id) : "";
 
 function cartera(){
@@ -3431,10 +3465,10 @@ function itemTimeline(r){
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
-      ${editable ? `<div style="display:flex;gap:7px;margin-top:11px">
-        <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
-        <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
-      </div>` : ""}
+      ${editable && (corregible(r) || borrable(r)) ? `<div style="display:flex;gap:7px;margin-top:11px">
+        ${corregible(r) ? `<button class="btn ghost sm" data-edit="${r._id}">Editar</button>` : ""}
+        ${borrable(r)   ? `<button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+      </div>` : editable ? `<div class="pie" style="margin-top:9px">${esc(plazoCorreccion(r))}</div>` : ""}
     </div>
   </div>`;
 }
@@ -4580,11 +4614,19 @@ function nuevoForm(){
 
 /* ---- Corregir el medio y el resultado ----------------------------------
    Un dedazo al elegir «llamada» en vez de WhatsApp se arregla acá mismo, sin
-   borrar el registro. La ventana es corta a propósito: hasta la medianoche del
-   día siguiente al que se registró. No son 48 horas corridas — es «hoy y
-   mañana», que es como lo piensa quien está en la calle.
-   El Analista y el Manager no tienen ventana: son los que auditan. */
-const DIAS_CORRECCION = 1;
+   borrar el registro.
+
+   Dos días trabajados para corregir lo propio.
+
+   Registrar no tiene plazo —una gestión de hace un mes se puede cargar hoy, y
+   así debe ser: lo que se mide es la puntualidad, no se prohíbe el registro—.
+   Corregir sí: pasados dos días trabajados desde que se registró, la gestión
+   queda como está y cualquier arreglo lo hace supervisión.
+
+   Van en días trabajados por la misma razón que la puntualidad: si se registró
+   un viernes, el plazo llega hasta el martes. Un plazo que corre el domingo
+   castiga por descansar. */
+const DIAS_CORRECCION = 2;
 
 /* El Analista y el Manager corrigen cualquier gestión, sin plazo: son los que
    responden por el dato frente al banco y no deberían depender de nadie para
@@ -4660,27 +4702,41 @@ async function anularUbicacion(id){
   toast("Ubicación anulada");
 }
 
-/* Quién puede corregir una gestión, y hasta cuándo.
+/* Quién puede corregir una gestión, y hasta cuándo. Tres reglas, en este
+   orden:
 
-   Hasta ahora el ejecutivo tenía un día desde que la registró, y pasado ese
-   plazo dependía de que la supervisión le abriera la ventana. En la práctica
-   el error se descubre después —al revisar la cartera, al preparar el cierre—
-   y el ejecutivo quedaba mirando su propio dato equivocado sin poder tocarlo.
+   1 · Periodo sellado → nadie reescribe nada, salvo supervisión. Sobre esos
+       números ya se pagó.
+   2 · Supervisión (Analista y Manager) → cualquier gestión, de cualquier
+       fecha, sin plazo. El cambio queda en la bitácora a su nombre y la
+       gestión NO cambia de dueño.
+   3 · Ejecutivo → solo lo suyo, y dentro de dos días trabajados desde que lo
+       registró. Después se le pide a supervisión.
 
-   El límite pasa a ser el que de verdad importa: **el sello del periodo**. Una
-   gestión se puede corregir mientras su periodo no esté liquidado; una vez
-   sellado, nadie la reescribe, porque sobre esos números ya se pagó. Es una
-   regla sola, se explica en una frase y no depende de que alguien de oficina
-   esté disponible.
-
-   Lo que NO cambia: la ubicación sigue sin reescribirse nunca —solo se anula—,
-   y una gestión no puede volverse presencial después del hecho. Esas dos son
-   las que sostienen la visita ante BBVA. */
+   Lo que NO cambia con ninguna de las tres: la ubicación no se reescribe nunca
+   —solo se anula—, y una gestión no puede volverse presencial después del
+   hecho. Esas dos son las que sostienen la visita ante BBVA. */
 function corregible(f){
   if (!f || !S.user) return false;
   if (periodoSellado(periodoDe(f.Fecha_Contacto))) return mandoTotal();
-  if (S.user.rol !== "Ejecutivo") return true;
-  return !f.Correo_Stratis || f.Correo_Stratis === S.user.correo;
+  /* Supervisión corrige cualquier gestión, de cualquier fecha: es quien
+     responde por el dato ante el banco. Queda en la bitácora con su nombre, y
+     la gestión NO cambia de dueño —sigue siendo del ejecutivo que la hizo—. */
+  if (mandoTotal()) return true;
+  if (f.Correo_Stratis && f.Correo_Stratis !== S.user.correo) return false;
+  return habilesDesde(f.Creado_En) <= DIAS_CORRECCION;
+}
+
+/* Cuántos días trabajados le quedan al ejecutivo sobre una gestión suya. */
+const habilesRestantes = f => Math.max(0, DIAS_CORRECCION - habilesDesde(f && f.Creado_En));
+
+/* Eliminar corre con el mismo plazo que corregir, y no por simetría estética:
+   si borrar no tuviera plazo, el plazo de edición no existiría —bastaría con
+   borrar la gestión vencida y volver a crearla con otra fecha—. Eliminar es
+   además la única salida para una ubicación equivocada, porque las coordenadas
+   no se reescriben; por eso la puerta es la misma y se cierra el mismo día. */
+function borrable(f){
+  return !!f && puedeEditar(f) && corregible(f);
 }
 
 function diasDesdeRegistro(f){
@@ -4698,9 +4754,13 @@ function plazoCorreccion(f){
   if (periodoSellado(per))
     return `El periodo ${nombrePeriodo(per)} está sellado: esta gestión ya no se corrige${
       S.user && S.user.rol !== "Ejecutivo" ? ", salvo desde supervisión" : ""}.`;
-  if (S.user && S.user.rol !== "Ejecutivo")
-    return `Se registró el ${fmtFecha(c)}; como supervisor no tienes plazo.`;
-  return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : " (hoy)"}. Puedes corregirla hasta que se selle el periodo ${nombrePeriodo(per)}.`;
+  if (mandoTotal())
+    return `Se registró el ${fmtFecha(c)}; como supervisión no tienes plazo. El cambio queda en la bitácora a tu nombre y la gestión sigue siendo de ${f.Ejecutivo || "quien la registró"}.`;
+  const quedan = habilesRestantes(f);
+  if (!quedan)
+    return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : ""}. Pasaron los ${DIAS_CORRECCION} días trabajados de plazo: para cambiarla ahora, pídeselo a tu supervisor.`;
+  return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : " (hoy)"}. Te ${
+    quedan === 1 ? "queda 1 día trabajado" : "quedan " + quedan + " días trabajados"} para corregirla.`;
 }
 
 /* Avisos que dependen de lo que acaba de elegir, sin bloquear todavía */
@@ -4902,8 +4962,8 @@ function renderFormulario(){
   <div class="card">
     <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
     <div class="note warn" style="margin-bottom:11px">
-      El plazo para corregir el medio y el resultado <b>ya venció</b>: se puede hasta la medianoche del
-      día siguiente al registro. ${esc(plazoCorreccion(f))}
+      El plazo para corregir el medio y el resultado <b>ya venció</b>: son ${DIAS_CORRECCION} días
+      trabajados desde que se registró. ${esc(plazoCorreccion(f))}
       Si hay algo mal, pídeselo a tu supervisor: él sí puede corregirlo y queda en la bitácora.
     </div>
     <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
@@ -5363,6 +5423,7 @@ function confirmarEliminar(id){
   const r = DB.buscar(id);
   if (!r) return;
   if (!puedeEditar(r)) return toast("Solo puedes eliminar tus propios registros");
+  if (!borrable(r)) return toast(plazoCorreccion(r));
   const c = byId[String(r.Customer_id)];
   modal(`
     <h3>Eliminar registro</h3>
@@ -5532,14 +5593,17 @@ function tarjetaGestion(r){
             ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
               : ubicacionExenta(r)?`<span class="chip no" title="${esc(r.Ubicacion_Exenta_Motivo||"")}">Ubicación no exigible</span>`
               : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
-            ${demoraRegistro(r) > 2?`<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>`:""}
+            ${/* La demora de registro es la evidencia de la puntualidad: se
+                 muestra solo a supervisión, igual que la columna del panel. */
+              mandoTotal() && demoraRegistro(r) > 2
+                ? `<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>` : ""}
           </div>
         </div>
       </div>
 
       ${puedeEditar(r)?`<div class="ges-acc">
-        <button class="btn ghost sm" data-edit="${r._id}">Editar</button>
-        <button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>
+        ${corregible(r) ? `<button class="btn ghost sm" data-edit="${r._id}">Editar</button>` : ""}
+        ${borrable(r)   ? `<button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
         <button class="btn ghost sm" data-cid="${r.Customer_id}">Ver ficha</button></div>`:""}
     </div></div>`;
 }
@@ -5631,8 +5695,8 @@ function viewRegistros(){
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
-      ${todos.some(r => demoraHabil(r) > 1)
-        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día hábil después del contacto">Fuera de plazo</button>` : ""}
+      ${mando && todos.some(r => demoraHabil(r) > 1)
+        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después del contacto">Fuera de plazo</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -5950,7 +6014,12 @@ const COLS_PANEL = [
   { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
   { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
     val:f => f.tasa === null ? "—" : Math.round(f.tasa) + "%" },
-  { k:"puntualidad", th:"Puntualidad",      extra:true, ttl:"Gestiones registradas dentro del día hábil siguiente",
+  /* La puntualidad se mide siempre, pero no se le muestra al ejecutivo: se
+     evidencia a fin de mes y la miran el Analista y el Manager. Que el número
+     esté a la vista todos los días convierte una medición en una discusión
+     diaria, y no es lo que se acordó. */
+  { k:"puntualidad", th:"Puntualidad",      extra:true, soloMando:true,
+    ttl:"Gestiones registradas dentro del día trabajado siguiente al contacto",
     val:f => f.puntualidad === null ? "—" : Math.round(f.puntualidad) + "%" },
   { k:"retenidos",   th:"Retenidos",    cierre:"retenido" },
   { k:"recuperados", th:"Recuperados",  cierre:"recuperado" },
@@ -6011,7 +6080,8 @@ function cardPipeline(){
 function bloqueEquipo(r){
   const filas = ejecutivosPanel().map(u => filaEjecutivo(u, r));
   const todo  = !!S.verTodo;
-  const cols  = COLS_PANEL.filter(c => todo || !c.extra);
+  const cols  = COLS_PANEL.filter(c => (todo || !c.extra) && (!c.soloMando || mandoTotal()));
+  const nCols = COLS_PANEL.filter(c => !c.soloMando || mandoTotal()).length;
   const suma  = k => filas.reduce((n,f) => n + (f[k] || 0), 0);
 
   const celda = (f, c) => {
@@ -6036,7 +6106,7 @@ function bloqueEquipo(r){
   <div class="card ctrl">
     <div class="ctrl-h">
       <h3>Alcance y actividad por ejecutivo</h3>
-      <button class="btn ghost sm" id="verTodoPanel">${todo ? "Ver lo esencial" : `Ver las ${COLS_PANEL.length} columnas`}</button>
+      <button class="btn ghost sm" id="verTodoPanel">${todo ? "Ver lo esencial" : `Ver las ${nCols} columnas`}</button>
     </div>
     ${filas.length ? `<div class="ctrl-scroll">
     <table class="tbl-ctrl" id="tblEquipo">
@@ -6229,7 +6299,10 @@ function bloqueCorregir(r, regs){
   const puntos = [
     { n:sinUbi.length,   t:"Gestiones sin ubicación", d:"presenciales sin coordenada y sin exención",
       ir:`data-verges="sin_ubicacion"`, grave:true },
-    { n:tarde.length,    t:"Gestiones fuera de plazo", d:"registradas más de un día hábil después del contacto",
+    /* Solo supervisión: la puntualidad se mide y se evidencia a fin de mes, no
+       se le pone al ejecutivo como tarea del día. */
+    { n:mando ? tarde.length : 0, t:"Gestiones fuera de plazo",
+      d:"registradas más de un día trabajado después del contacto",
       ir:`data-verges="fuera_plazo"` },
     { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
       ir:`data-vercartera="sin_bbva"` },
@@ -6250,7 +6323,7 @@ function bloqueCorregir(r, regs){
         <span class="t">${p.t}</span>
         <span class="d">${p.d}</span>
       </button>`).join("")}
-    </div>` : `<div class="vacio">No hay gestiones sin ubicación, ni registros fuera de plazo, ni
+    </div>` : `<div class="vacio">No hay gestiones sin ubicación${mando ? ", ni registros fuera de plazo" : ""}, ni
       acciones vencidas${sinCanal.length ? "" : ", ni comercios sin canal BBVA"}. Todo al día.</div>`}
   </div>`;
 }
@@ -6763,14 +6836,27 @@ function resumenAuditoria(a){
   return cambios.join(" · ");
 }
 
+/* Quién hizo el cambio, que no es lo mismo que de quién es la gestión.
+   La bitácora guarda las dos cosas: `correo` es el de quien tocó el botón y
+   `ejecutivo` es el dueño del registro. Se leían como una sola, y por eso una
+   corrección hecha desde supervisión aparecía firmada por el ejecutivo al que
+   se le corrigió. En una bitácora eso no es un detalle de redacción: es
+   atribuirle a alguien un cambio que no hizo. */
+const autorCambio = a => nombrePorCorreo(a && a.correo) || (a && a.ejecutivo) || "—";
+const duenoDistinto = a => {
+  const d = String((a && a.ejecutivo) || "").trim();
+  return d && d !== autorCambio(a) ? d : "";
+};
+
 function hojaBitacora(){
   const filas = AUDITORIA.map(a => [
     String(a.creado_en||"").slice(0,10), String(a.creado_en||"").slice(11,16),
-    a.ejecutivo || "", a.correo || "",
+    autorCambio(a), a.correo || "",
     a.tabla === "clientes" ? "Comercio" : "Registro de contacto",
     a.accion === "editar" ? "Editó" : "Eliminó",
+    a.ejecutivo || "",
     a.comercio || "", a.customer_id || "", resumenAuditoria(a)]);
-  return hoja(["Fecha","Hora","Quién","Correo","Qué","Acción","Comercio","customer_id","Detalle del cambio"], filas);
+  return hoja(["Fecha","Hora","Quién hizo el cambio","Correo","Qué","Acción","Gestión de","Comercio","customer_id","Detalle del cambio"], filas);
 }
 
 function hojaUsuarios(){
@@ -7450,13 +7536,14 @@ function viewAyuda(){
       const q = (S.qBit || "").trim().toLowerCase();
       let lista = AUDITORIA;
       if (S.fBitAccion !== "todos") lista = lista.filter(a => a.accion === S.fBitAccion);
-      if (S.fBitQuien !== "todos")  lista = lista.filter(a => a.ejecutivo === S.fBitQuien);
+      if (S.fBitQuien !== "todos")  lista = lista.filter(a => autorCambio(a) === S.fBitQuien);
       if (q) lista = lista.filter(a =>
         String(a.comercio||"").toLowerCase().includes(q) ||
         String(a.customer_id||"").toLowerCase().includes(q) ||
+        String(autorCambio(a)).toLowerCase().includes(q) ||
         String(a.ejecutivo||"").toLowerCase().includes(q) ||
         resumenAuditoria(a).toLowerCase().includes(q));
-      const quienes = [...new Set(AUDITORIA.map(a => a.ejecutivo).filter(Boolean))].sort();
+      const quienes = [...new Set(AUDITORIA.map(autorCambio).filter(n => n && n !== "—"))].sort();
       const mostrar = lista.slice(0, S.limiteBit);
       const filtrando = q || S.fBitAccion !== "todos" || S.fBitQuien !== "todos";
       const op = (valor, todos, items) =>
@@ -7473,14 +7560,15 @@ function viewAyuda(){
               ["eliminar", `Eliminaciones · ${AUDITORIA.filter(a=>a.accion==="eliminar").length}`]])}</select></label>
           <label class="fsel"><span>Quién</span>
             <select data-fbit="quien">${op(S.fBitQuien, "Todo el equipo",
-              quienes.map(n => [n, `${n} · ${AUDITORIA.filter(a=>a.ejecutivo===n).length}`]))}</select></label>
+              quienes.map(n => [n, `${n} · ${AUDITORIA.filter(a=>autorCambio(a)===n).length}`]))}</select></label>
         </div>
       </div>
       ${mostrar.length ? `<div class="caja-scroll" id="cajaBit"><table class="tbl" id="tblBitacora">
         <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Comercio</th><th>Cambio</th></tr></thead>
         <tbody>${mostrar.map(a => `<tr>
           <td style="white-space:nowrap">${fmtFecha(String(a.creado_en).slice(0,10))}<div style="font-size:11px;color:var(--muted)">${String(a.creado_en).slice(11,16)}</div></td>
-          <td>${esc(a.ejecutivo||"—")}</td>
+          <td>${esc(autorCambio(a))}${duenoDistinto(a)
+            ? `<div style="font-size:11px;color:var(--muted)">gestión de ${esc(duenoDistinto(a))}</div>` : ""}</td>
           <td><span class="chip ${a.accion==="eliminar"?"crit":"warn"}">${a.accion==="eliminar"?"Eliminó":"Editó"}</span>
               <div style="font-size:11px;color:var(--muted)">${a.tabla==="clientes"?"Comercio":"Registro"}</div></td>
           <td>${esc(a.comercio||a.customer_id||"—")}</td>
@@ -7496,10 +7584,15 @@ function viewAyuda(){
       </div>
       <details class="aj-mas">
         <summary>Qué queda registrado</summary>
-        <div class="cuerpo"><p>Cada edición y cada eliminación, con quién, cuándo y qué cambió.
-        Los ejecutivos no la ven. El medio de contacto, el resultado, la fecha y la ubicación no
-        se pueden editar: para corregirlos hay que eliminar el registro y volver a crearlo, y esa
-        eliminación aparece acá con el detalle de lo que se borró.</p></div>
+        <div class="cuerpo"><p>Cada edición y cada eliminación, con quién la hizo, cuándo y qué
+        cambió. Los ejecutivos no la ven.</p>
+        <p><b>«Quién» es quien tocó el botón</b>, no de quién es la gestión. Cuando supervisión
+        corrige el registro de un ejecutivo, el cambio figura a nombre de supervisión y debajo dice
+        de quién sigue siendo la gestión —que no cambia de dueño por haber sido corregida—.</p>
+        <p>El ejecutivo puede corregir el medio y el resultado de lo suyo durante
+        ${DIAS_CORRECCION} días trabajados desde que lo registró; después, solo supervisión. La
+        <b>ubicación no se edita nunca</b>: la única salida es eliminar el registro y volver a
+        crearlo desde el local, y esa eliminación aparece acá con el detalle de lo que se borró.</p></div>
       </details>`;
     })()
       : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas. Cuando alguien
