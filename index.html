@@ -11598,10 +11598,17 @@ function cumplimientoProyecto(correo){
   const cFact = crec === null || !B.metas.facturacion_pct
               ? null : crec / B.metas.facturacion_pct * 100;
 
-  /* La venta es mensual, así que la meta del proyecto son las de los periodos
-     que ya corrieron: exigir las cinco en octubre sería medir el futuro. */
-  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo).length;
-  const pideVentas = B.metas.ventas_mes * Math.max(1, corridos.length);
+  /* La venta se mide mensual, pero acá se mira el proyecto entero: las de
+     todos los periodos contra las que pide el proyecto entero.
+
+     Es a propósito que el denominador sean los CINCO periodos y no los que ya
+     corrieron. En el mes 2 esto va a leerse bajo para todos, y está bien: van
+     por el segundo de cinco. La alternativa —dividir por los periodos
+     corridos— convierte cada mes en un veredicto parcial, que es exactamente
+     lo que se decidió no hacer. El veredicto es uno solo y es en diciembre. */
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
+                                   && ps.some(p => enVentana(c.creado_en, p))).length;
+  const pideVentas = B.metas.ventas_mes * ps.length;
   const cVenta = pideVentas ? ventas / pideVentas * 100 : null;
 
   const partes = [
