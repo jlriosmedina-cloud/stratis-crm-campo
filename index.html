@@ -2912,7 +2912,7 @@ const DB = {
   crudo: [],
   todo: [],
   todos(){ return this.visitas; },
-  bbva(){ return this.crudo.filter(r => r.Con === "BBVA"); },
+  bbva(){ return this.crudo.filter(esAlBanco); },
   /* Los dos montones se parten por DESTINATARIO y no por la columna `Con`.
      Suena a detalle y no lo es: hasta el 23/08/2026 se partían por `Con`, y
      los 183 correos que la migración 59 reclasificó —los que iban al
@@ -2950,10 +2950,19 @@ const DB = {
      que alguien asigne uno solo y las consultas por comercio dejan de
      encontrar nada, sin ruido—. Por eso no se asignan por separado en ningún
      sitio: se siembra la lista completa y las otras dos salen de ella. */
+  /* Y la población se parte igual. Hasta el 23/08/2026 `visitas` se armaba con
+     `Con !== "BBVA"`, así que los 183 correos al funcionario —destinatario
+     'bbva', con 'CLIENTE'— entraban al montón del cliente y de ahí al bono, al
+     reporte y al libro: contaban como cobertura y como gestión de campo un
+     correo que nunca salió al comercio. Del otro lado `bbva()` no los veía, así
+     que la hoja de coordinaciones traía 25 filas donde hay 244.
+
+     Es la misma corrección que ya tenían `delCliente` y `bbvaDe`, aplicada
+     donde se decide quién cobra. */
   sembrar(filas){
     this.todo    = filas;
     this.crudo   = this.todo;
-    this.visitas = this.crudo.filter(r => r.Con !== "BBVA");
+    this.visitas = this.crudo.filter(esAlCliente);
   },
   cargar(filas){ this.sembrar(filas.map(deDB)); }
 };
@@ -11176,8 +11185,32 @@ function carteraDe(correo, p){
   return { n, fuente: "crm" };
 }
 
+/* ---- Qué cuenta como trabajo del periodo --------------------------------
+
+   El bono mide TRABAJO REGISTRADO, y eso incluye la coordinación con el banco.
+   Un correo al ejecutivo de BBVA por un comercio es trabajo sobre ese
+   comercio: es lo único que se podía hacer mientras el banco no soltaba los
+   datos, y es exactamente lo que la campaña pidió hacer el primer mes.
+
+   Por eso esto NO sale de `DB.todos()`, que es el montón del cliente. Esa
+   distinción es correcta para el embudo, la efectividad y la tasa de
+   respuesta —ahí mezclar los dos lados infla un lado y vacía el otro— pero
+   aplicada al bono deja fuera media campaña: a Anibal Reyes le quitaba 106 de
+   sus 159 gestiones del periodo y le hundía la cobertura de 64% a 22%.
+
+   Lo que sí queda fuera, y no se negocia, son las RECONSTRUIDAS: las 842 filas
+   que escribió una migración a partir del canal declarado en el alta. Nadie
+   las trabajó. Contarlas convertiría el trabajo de la migración en cobertura
+   regalada, que es lo primero que encontraría un reclamo bien puesto.
+
+   Hasta el 23/08/2026 esto salía bien por accidente: los 183 correos al
+   funcionario conservaban con='CLIENTE', así que entraban por la puerta del
+   cliente, mientras las 29 coordinaciones declaradas con el medio correcto
+   quedaban fuera. Dos registros del mismo trabajo contaban distinto según cómo
+   se hubiera tecleado. Eso es lo que se cierra acá. */
 const gestionesDe = (correo, p) =>
-  DB.todos().filter(r => r.Correo_Stratis === correo && enVentana(r.Fecha_Contacto, p));
+  DB.crudo.filter(r => !esReconstruida(r) && r.Correo_Stratis === correo
+                    && enVentana(r.Fecha_Contacto, p));
 
 /* ---- La llave ----------------------------------------------------------
    Tres requisitos. Cumplir los tres habilita el cálculo; fallar uno deja
@@ -11230,7 +11263,11 @@ function llaveDe(correo, p){
        lados del flujo. Es un Set: el comercio entra una vez por más veces que
        se le haya escrito. */
     const logrados = new Set();
-    gest.filter(r => esEfectivo(r.Resultado))
+    /* Del lado del cliente cuenta la gestión efectiva; del lado del banco,
+       solo el correo, y se agrega abajo. Un chat con el funcionario marcado
+       «efectivo» no es cobertura: por eso el filtro pide además que la gestión
+       haya ido al comercio. */
+    gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
         .forEach(r => logrados.add(String(r.Customer_id)));
     /* Solo las coordinaciones DECLARADAS. Las inferidas son las que el CRM
        dedujo del histórico al migrar: sirven para leer el estado de un
@@ -11259,7 +11296,9 @@ function llaveDe(correo, p){
   const cargaCompleta = !sobreRegistrados || registrados >= cart.n;
   const faltanPorCargar = Math.max(0, cart.n - registrados);
 
-  const efectivas = gest.filter(r => r.Cumple_Visita === "SI").length;
+  /* Una visita a la agencia del banco no es una visita al comercio. El
+     requisito mide terreno con el cliente, así que se pide las dos cosas. */
+  const efectivas = gest.filter(r => esAlCliente(r) && r.Cumple_Visita === "SI").length;
   const semanas   = semanasPeriodo(p);
   /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
      de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
@@ -11428,6 +11467,23 @@ function textoFaltaFact(correo, p){
    Antes los dos últimos casos devolvían 0% cuando el cumplimiento no llegaba
    al piso, que es exactamente el escenario del primer mes de campo: cuatro
    personas que gestionaron su cartera y a las que el sistema les decía cero. */
+/* ---- El techo del periodo de marcha blanca -------------------------------
+
+   `solo_llave` es un parámetro de versión, no una excepción escrita en el
+   código: el periodo que lo trae paga la llave y nada más, pase lo que pase
+   con los objetivos.
+
+   Existe por una razón concreta y de plata. El primer periodo se liquida sin
+   la facturación de agosto —el banco entrega el dato un mes después—, y el
+   acuerdo fue que ahí se paga la llave. Si el gradual quedara abierto, cargar
+   esa facturación en septiembre movería un monto ya conversado y firmado: o se
+   le queda debiendo a alguien, o se le pagó de menos. Con el techo puesto, el
+   número del acta no puede cambiar aunque después se cargue la facturación,
+   se corrija una gestión o alguien reabra el periodo.
+
+   Es a propósito que el tope se aplique DESPUÉS de la puerta del «sin»: quien
+   no llegó a dos requisitos sigue en cero. El techo limita hacia arriba, no
+   regala hacia abajo. */
 function pagoDelPeriodo(estado, total, B){
   const esc   = escalaDe(B);
   const piso  = esc[0][1];                     // lo que paga el primer punto
@@ -11435,6 +11491,9 @@ function pagoDelPeriodo(estado, total, B){
   if (estado === "sin")
     return { bruto, pago:0, concepto:"ninguno",
              nota:"No cumplió dos o más requisitos de gestión" };
+  if (B && B.solo_llave)
+    return { bruto, pago:B.base_incumple_uno, concepto:"llave_tope", topado:true,
+             nota:"Periodo de marcha blanca: se paga la llave y el gradual no se abre" };
   if (estado === "base")
     return { bruto, pago:B.base_incumple_uno, concepto:"base",
              nota:"Incumplió un requisito: se paga solo el bono base" };
@@ -11449,10 +11508,11 @@ function pagoDelPeriodo(estado, total, B){
    haber cumplido la gestión o el gradual por haber alcanzado los objetivos.
    Son dos cosas distintas y se conversan distinto. */
 const CONCEPTO_PAGO = {
-  ninguno: "Sin incentivo",
-  base:    "Bono base por la llave de gestión",
-  llave:   "Bono base por la llave de gestión",
-  gradual: "Incentivo gradual por cumplimiento"
+  ninguno:    "Sin incentivo",
+  base:       "Bono base por la llave de gestión",
+  llave:      "Bono base por la llave de gestión",
+  llave_tope: "Bono base por la llave de gestión",
+  gradual:    "Incentivo gradual por cumplimiento"
 };
 
 function incentivoVivo(correo, p){
@@ -11919,11 +11979,27 @@ function viewBono(){
 
   ${cardSello(p, sello, ver, abierto)}
 
+  ${B.solo_llave ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+    <h3 style="margin-bottom:4px">Este periodo paga la llave y nada más</h3>
+    <div class="note" style="margin-bottom:0">
+      ${esc(nombrePeriodo(p))} se liquida con el <b>bono base del ${B.base_incumple_uno}%</b> para todo
+      el que tenga la llave, cumpla dos requisitos o los tres. El gradual <b>no se abre</b>.
+      <div style="margin-top:8px">La razón es que este periodo se cierra sin la facturación de
+      agosto —el banco entrega el dato un mes después— y así se acordó. Dejar el gradual abierto
+      significaría que cargar esa facturación en septiembre mueve un monto ya firmado: se le
+      quedaría debiendo a alguien o se le habría pagado de menos. Con el techo puesto,
+      <b>el número del acta no puede cambiar</b> por nada que se cargue o se corrija después.</div>
+      <div style="margin-top:8px">El cumplimiento se sigue mostrando abajo porque es información
+      del periodo, pero no entra al monto. Rige solo acá: los periodos siguientes calculan normal.</div>
+    </div>
+  </div>` : ""}
+
   <div class="stat-row" style="margin-top:12px">
     <div class="stat"><div class="lbl">Con la llave abierta</div><div class="val">${habilitados}</div>
       <div class="sub">de ${ejec.length} cumplen los 3 requisitos</div></div>
     <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
-      <div class="sub">llegan al ${B.piso}% de cumplimiento</div></div>
+      <div class="sub">${B.solo_llave ? `cobran la llave del ${B.base_incumple_uno}%`
+        : `llegan al ${B.piso}% de cumplimiento`}</div></div>
     <div class="stat"><div class="lbl">Cumplimiento promedio</div><div class="val">${pct1(prom)}</div>
       <div class="sub">del equipo, sobre lo medible</div></div>
     <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
@@ -13478,7 +13554,14 @@ function datosLibro(){
      convierte la lista de gestiones en el conteo de cobertura sin pedirle a
      Excel un conteo de valores únicos, que no se puede leer de un vistazo. */
   const vistos = new Set();
-  const gestiones = DB.todos()
+  /* La MISMA población que cuenta el bono, y por eso no es `DB.todos()`: el
+     libro existe para que alguien pueda rehacer el cálculo a mano y llegar al
+     mismo número. Si la hoja trajera solo las gestiones con el cliente, las
+     fórmulas de cobertura y puntualidad darían otra cosa que la pantalla, y la
+     reunión se iría en explicar la diferencia. Trabajo registrado, de los dos
+     lados, sin las filas que escribió la migración. */
+  const gestiones = DB.crudo
+    .filter(r => !esReconstruida(r))
     .slice()
     .sort((a, b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto)))
     .map(r => {
@@ -13496,9 +13579,13 @@ function datosLibro(){
         distrito: r.Distrito || "",
         fecha: String(r.Fecha_Contacto).slice(0,10),
         registro: String(r.Creado_En || "").slice(0,10),
-        medio: (tipoById(r.Tipo_Contacto) || {}).label || r.Tipo_Contacto || "",
-        respondio: esEfectivo(r.Resultado) ? 1 : 0,
-        efectiva: r.Cumple_Visita === "SI" ? 1 : 0,
+        medio: (tipoById(r.Tipo_Contacto) || {}).label
+             || nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto || "",
+        /* A quién se le escribió. Es la columna que permite filtrar la hoja y
+           ver por qué la cobertura da lo que da sin volver al sistema. */
+        destino: esAlBanco(r) ? "Ejecutivo BBVA" : "Comercio",
+        respondio: (esAlCliente(r) && esEfectivo(r.Resultado)) ? 1 : 0,
+        efectiva: (esAlCliente(r) && r.Cumple_Visita === "SI") ? 1 : 0,
         primera
       };
     });
@@ -13675,7 +13762,7 @@ const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados 
 function hojaGestiones(d, nFer){
   const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
                 "Fecha de gestión","Fecha de registro","Días trabajados de demora","A tiempo",
-                "Medio","Respondió","Visita efectiva","Primera del comercio en el periodo"];
+                "Medio","Dirigida a","Respondió","Visita efectiva","Primera del comercio en el periodo"];
   const filas = [cols];
   d.gestiones.forEach((g, i) => {
     const f = i + 2;
@@ -13684,14 +13771,14 @@ function hojaGestiones(d, nFer){
       serial(g.fecha), serial(g.registro),
       `=IF(${A1(8,f)}<=${A1(7,f)},0,NETWORKDAYS(${A1(7,f)}+1,${A1(8,f)},${RANGO_FERIADOS(nFer)}))`,
       `=IF(${A1(9,f)}<=1,1,0)`,
-      g.medio, g.respondio, g.efectiva, g.primera
+      g.medio, g.destino, g.respondio, g.efectiva, g.primera
     ]);
   });
   /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
      la que se filtra, y un encabezado pintado estorba al pegar. */
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
     fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"]],
-    anchos:[10,6,18,26,14,30,16,15,15,13,9,16,11,13,14] });
+    anchos:[10,6,18,26,14,30,16,15,15,13,9,16,15,11,13,14] });
 }
 
 /* ---- Coordinación con BBVA: la otra mitad de la cobertura --------------
@@ -13721,7 +13808,7 @@ function hojaCartera(d, nG, nCo){
        si hubo una gestión EFECTIVA con el cliente o un correo al ejecutivo de
        BBVA, dentro del periodo que manda la hoja de Parámetros. Un comercio
        con cinco gestiones sigue siendo un comercio: esta celda es 1 o 0. */
-    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$M$2:$M$${nG},1)`;
+    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$N$2:$N$${nG},1)`;
     const correo   = `COUNTIFS('Coordinación BBVA'!$E$2:$E$${nCo},${A1(2,f)},'Coordinación BBVA'!$B$2:$B$${nCo},${P_(FIL.mes)},'Coordinación BBVA'!$I$2:$I$${nCo},1)`;
     filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
       c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre,
@@ -13753,7 +13840,7 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
   const eG = `${G("D")},${correoRef}`, mG = `${G("B")},${mesRef}`;
 
   const gestiones  = `COUNTIFS(${eG},${mG})`;
-  const cubiertos  = `SUMIFS(${G("O")},${eG},${mG})`;
+  const cubiertos  = `SUMIFS(${G("P")},${eG},${mG})`;
   /* Los Customer ID que ese ejecutivo tiene cargados en el CRM. Es la otra
      forma de medir cobertura, la que rige el primer mes. */
   const registrados = `COUNTIFS(${C("B")},${correoRef})`;
@@ -13775,9 +13862,9 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
      cartera asignada, para que nadie suba su porcentaje cargando menos. */
   const cumpleCobertura = (valor, minimo, cartera) =>
     `IF(AND(${valor}>=${minimo},OR(${P_(FIL.coberturaBase)}<>"contacto",${registrados}>=${cartera})),"Sí","No")`;
-  const efectivas  = `SUMIFS(${G("N")},${eG},${mG})`;
+  const efectivas  = `SUMIFS(${G("O")},${eG},${mG})`;
   const puntuales  = `SUMIFS(${G("K")},${eG},${mG})`;
-  const respuestas = `SUMIFS(${G("M")},${eG},${mG})`;
+  const respuestas = `SUMIFS(${G("N")},${eG},${mG})`;
   const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
   const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
   const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
@@ -13937,6 +14024,7 @@ const U = {
 };
 
 function hojaEjecutivo(u, p, d, nG, nC, nN){
+  const B = paramsDe(p);
   const correoRef = `$B$3`;
   const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
   const cart = carteraDe(u.correo, p).n;
@@ -13981,9 +14069,17 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
               : "Este mes la facturación todavía no se mide: su peso sale del reparto")],
     ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23", d.esc.fila, d.esc.n)}`,
      "", "", "% del sueldo base según la escala de cumplimiento"],
+    /* El techo del periodo de marcha blanca va DENTRO de la fórmula y no en el
+       valor: quien abra el libro tiene que poder ver por qué el número no sube,
+       y tiene que seguir sin subir si toca las celdas de arriba. El MIN contra
+       el bono base es el techo; sin el techo la fórmula es la de siempre. */
     ["Incentivo del periodo",
-     `=IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0))`,
-     "", "", "La llave paga por sí sola; los objetivos deciden cuánto más"],
+     (B.solo_llave
+       ? `=MIN(${P_(FIL.base1)},IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0)))`
+       : `=IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0))`),
+     "", "", (B.solo_llave
+       ? "Periodo de marcha blanca: se paga la llave y el gradual no se abre. El tope está en la fórmula, así que cargar la facturación más adelante no mueve este número"
+       : "La llave paga por sí sola; los objetivos deciden cuánto más")],
     ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
     ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
     ["", "", "", "", ""],
@@ -14123,8 +14219,8 @@ function hojaCruce(d, nG){
       `=COUNTIFS(${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)},${G("L")},"${m}")`));
     fila.push(`=SUM(${A1(1,f)}:${A1(medios.length,f)})`);
     fila.push(`=SUMIFS(${G("K")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
-    fila.push(`=SUMIFS(${G("M")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
     fila.push(`=SUMIFS(${G("N")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("O")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
     filas.push(fila);
   });
   const pri = 5, ult = filas.length;
@@ -14245,6 +14341,25 @@ const PX = {
   ok:[10, 125, 94], okBg:[230, 247, 241], mal:[179, 52, 26], malBg:[253, 237, 234],
   warn:[179, 101, 26], warnBg:[255, 244, 227], blanco:[255, 255, 255]
 };
+
+/* ---- Quién emite el acta -------------------------------------------------
+   No es quien apretó el botón. El acta la emite la jefatura de la campaña, y
+   el Analista puede generarla un domingo sin que por eso el papel salga a su
+   nombre: la conversación de incentivos la tiene el Manager.
+
+   Sale de la lista de usuarios y no de un nombre escrito acá. Si mañana la
+   campaña cambia de jefe, cambia el rol en Equipo y las actas siguientes salen
+   solas con el nombre nuevo; nadie tiene que acordarse de publicar la app. Y
+   si no hay Manager cargado —una demo, una base a medio poblar— el acta no se
+   queda sin emisor: sale a nombre de quien la generó, que es lo honesto. */
+function emisorActa(){
+  const yo = (S.user && (S.user.nombreCompleto || S.user.nombre)) || "";
+  const m = (typeof USUARIOS !== "undefined" ? USUARIOS : [])
+    .find(u => u.rol === "Manager" && u.activo !== false);
+  if (!m) return { nombre: yo, cargo:"", propio:true };
+  const nombre = m.nombreCompleto || m.nombre;
+  return { nombre, cargo:"Manager de la campaña", propio: nombre === yo };
+}
 
 function cargarJsPDF(){
   if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
@@ -14390,8 +14505,17 @@ function actaIncentivo(doc, u, p, x){
   const esc = escalaDe(B);
   res("Cumplimiento ponderado", pdfPct(cu.total),
       cu.completo ? "" : "Calculado solo sobre los objetivos que ya se pueden medir");
-  res("Tramo que le corresponde", pdfPct(x.bruto),
-      `Del ${esc[0][0]}% al ${esc[esc.length-1][0]}% de cumplimiento`);
+  /* Con el techo del periodo puesto, poner «tramo que le corresponde: 0%»
+     junto al monto invita justo el reclamo que el techo existe para evitar:
+     «entonces si la facturación sube, me corresponde más». No corresponde
+     más. La línea se reemplaza por la que dice por qué. */
+  if (B.solo_llave)
+    res("Cómo se liquida este periodo", "Solo la llave",
+        `Acuerdo del periodo de marcha blanca: se paga el bono base del ${
+          B.base_incumple_uno}% y el gradual no se abre`);
+  else
+    res("Tramo que le corresponde", pdfPct(x.bruto),
+        `Del ${esc[0][0]}% al ${esc[esc.length-1][0]}% de cumplimiento`);
   /* El rótulo dice el CONCEPTO, no solo el número. «Incentivo del periodo:
      15%» deja abierto de dónde sale ese 15%; «Bono base por la llave de
      gestión: 15%» lo cierra. En una hoja que alguien firma, esa diferencia es
@@ -14409,6 +14533,21 @@ function actaIncentivo(doc, u, p, x){
       m + 4, y + 2.5, { size:7.5, italic:true, color:PX.gris });
   y += 16;
 
+  /* Lo que hace que este papel no se reabra. Quien lo firma tiene derecho a
+     saber, en el papel y no de palabra, que el número no depende de un dato
+     que todavía no llegó. */
+  if (B.solo_llave){
+    caja(m, y - 4, W - 2*m, 15, PX.fondo);
+    txt("Este monto es definitivo", m + 4, y, { size:8.5, bold:true, color:PX.navy });
+    y += 4.5;
+    txt("El periodo se liquida sin la facturación de agosto, que el banco entrega un mes después.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt("Cargarla más adelante no cambia lo firmado acá: en este periodo se paga la llave y el gradual no se abre.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 12;
+  }
+
   /* ---- Las firmas ------------------------------------------------------
      Es lo que convierte la hoja en evidencia. Sin esto es una impresión. */
   const firma = (x0, an, rot, nombre) => {
@@ -14418,8 +14557,9 @@ function actaIncentivo(doc, u, p, x){
     if (nombre) txt(nombre, x0, y + 8, { size:7.5, color:PX.gris2 });
   };
   const an = (W - 2*m - 12) / 2;
+  const em = emisorActa();
   firma(m, an, "Recibí conforme", u.nombre);
-  firma(m + an + 12, an, "Por Stratis", S.user.nombreCompleto || S.user.nombre);
+  firma(m + an + 12, an, `Por Stratis${em.cargo ? " · " + em.cargo : ""}`, em.nombre);
   y += 16;
 
   /* ---- El pie: de dónde salió y cuándo -------------------------------- */
@@ -14429,8 +14569,16 @@ function actaIncentivo(doc, u, p, x){
     ? `Periodo sellado el ${fmtFecha(String(x.selladoEn).slice(0,10))} — los números no cambian`
     : "Periodo abierto: los números pueden moverse hasta el cierre";
   txt(sello, m, y, { size:7.5, color: x.sellado ? PX.ok : PX.warn });
-  txt(`Generado el ${fmtFecha(hoyISO())} a las ${String(ahora.getHours()).padStart(2,"0")}:${
-      String(ahora.getMinutes()).padStart(2,"0")} por ${S.user.nombreCompleto || S.user.nombre}`,
+  /* Quién EMITE el acta no es quién apretó el botón. La emite la jefatura de
+     la campaña, y así tiene que decirlo el papel aunque lo genere el Analista
+     un domingo. Quién lo generó queda igual, una línea abajo: es trazabilidad,
+     no autoría. */
+  txt(`Emitida el ${fmtFecha(hoyISO())} por ${em.nombre}${em.cargo ? " · " + em.cargo : ""}`,
+      W - m, y, { size:7.5, color:PX.gris2, align:"right" });
+  y += 4;
+  txt(`Generada desde el CRM a las ${String(ahora.getHours()).padStart(2,"0")}:${
+      String(ahora.getMinutes()).padStart(2,"0")}${
+      em.propio ? "" : ` por ${S.user.nombreCompleto || S.user.nombre}`}`,
       W - m, y, { size:7.5, color:PX.gris2, align:"right" });
   y += 4;
   txt(`Parámetros vigentes: ${(versionDe(p) || {}).vigente_desde
