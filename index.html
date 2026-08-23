@@ -1726,7 +1726,11 @@ const rangoCita = s => {
        estaban aunque nadie anotara la coordinación. */
 function habilitadoEn(cid){
   const fechas = [];
-  DB.bbvaDe(cid).forEach(r => {
+  /* Solo coordinaciones reales. 494 comercios traían un «BBVA respondió»
+     puesto por la migración: si contara, la fecha en que el caso quedó
+     habilitado sería la fecha del alta para casi toda la cartera, y el reloj
+     de la visita arrancaría de un hecho que no ocurrió. */
+  DB.bbvaDe(cid).filter(r => !esReconstruida(r)).forEach(r => {
     if (respondioBBVA(r.Resultado) || traeDatosDelCliente(r))
       fechas.push(String(r.Fecha_Contacto).slice(0,10));
   });
@@ -2760,8 +2764,26 @@ const DB = {
 /* ---- Lo que se deriva de la coordinación con BBVA -----------------------
    Nada de esto se teclea: sale de la línea de tiempo. Si mañana alguien
    registra una insistencia, estos números cambian solos. */
+/* Lo que el banco tiene de este comercio, separando dos cosas que hasta el
+   23/08/2026 estaban juntas y no son lo mismo:
+
+     · una COORDINACIÓN, que alguien hizo y registró, y
+     · el SELLO DEL ALTA, que es el medio que el ejecutivo declaró al crear la
+       ficha y que una migración convirtió en una fila con fecha.
+
+   Contarlas juntas es lo que hacía que 645 comercios —de 843— mostraran una
+   coordinación con BBVA que nadie hizo, y que 494 dijeran «BBVA respondió»
+   cuando la respuesta la puso la migración, no el banco. Con una fila real hay
+   28. La tarjeta llegaba a decir «1er contacto: Correo a BBVA · 1 contacto sin
+   respuesta» de un comercio al que nadie le escribió nunca.
+
+   El sello no se tira: para la mayoría de las fichas es el único rastro que
+   hay del alta. Pero se muestra como lo que es —una declaración— y no suma en
+   ningún contador. */
 function bbvaDe(cid){
-  const co = DB.bbvaDe(cid);
+  const todas = DB.bbvaDe(cid);
+  const co = todas.filter(r => !esReconstruida(r));
+  const sello = todas.find(esReconstruida) || null;
   const resp = co.find(r => respondioBBVA(r.Resultado)) || null;
   const chat = co.find(r => exigeRespaldo(r.Tipo_Contacto));
   return {
@@ -2783,7 +2805,13 @@ function bbvaDe(cid){
     faltaRespaldo: !!chat && !co.some(r =>
       (r.Tipo_Contacto === "bbva_correo" || r.Tipo_Contacto === "bbva_correo_cliente")
       && ts(r) >= ts(chat)),
-    ultima: co.length ? co[co.length - 1] : null
+    ultima: co.length ? co[co.length - 1] : null,
+    /* Lo que se declaró al dar de alta, aparte y sin sumar. `selloAmbiguo` es
+       el caso que hay que preguntar: el alta dice «correo» y nadie ha dicho
+       todavía si fue al banco o al cliente con copia. */
+    sello,
+    reconstruidas: todas.filter(esReconstruida).length,
+    selloAmbiguo: !!sello && !co.length
   };
 }
 
@@ -4229,11 +4257,30 @@ function cardCoordinacionBBVA(c, mio){
            r.Inferida ? " · deducido del histórico" : ""}</div>`
       : `<span style="color:var(--muted)">—</span>`}</dd></div>`;
 
+  /* Lo que se declaró al dar de alta, dicho como declaración. Es el único
+     rastro que hay en la mayoría de las fichas, así que se muestra; pero no
+     se le pone nombre de destinatario mientras nadie lo haya confirmado. El
+     alta guardaba «CORREO», que servía para las dos cosas opuestas: pedirle
+     los datos al banco, o escribirle al cliente con copia. Decir «Correo a
+     BBVA» era elegir una de las dos por él. */
+  const selloDeclarado = () => {
+    if (!k.sello) return "";
+    const sinConfirmar = c.contacto_bbva === "CORREO" && !c.canal_confirmado_en;
+    const nombre = sinConfirmar
+      ? `Correo <span style="color:var(--warn-ink,var(--muted))">— falta confirmar a quién</span>`
+      : esc(nomContactoBBVA(c.contacto_bbva) || nomMedioBBVA(k.sello.Tipo_Contacto) || "Sin indicar");
+    return `<div class="kv"><dt>Declarado al alta</dt><dd>${nombre}
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtFecha(k.sello.Fecha_Contacto)} ·
+      el medio que se anotó al crear la ficha, sin gestión registrada detrás${
+        c.canal_confirmado_en ? ` · confirmado el ${fmtFecha(c.canal_confirmado_en)}` : ""}</div></dd></div>`;
+  };
+
   return `
   <div class="card">
     <h3>Coordinación con el ejecutivo de BBVA</h3>
-    ${linea("1er contacto", k.primero)}
-    ${linea("2do contacto", k.segundo)}
+    ${k.n ? `${linea("1er contacto", k.primero)}
+    ${linea("2do contacto", k.segundo)}` : ""}
+    ${selloDeclarado()}
     <div class="kv"><dt>¿Respondió?</dt><dd>
       ${k.respondio
         ? `<span class="chip ok">Sí</span>
@@ -4243,7 +4290,9 @@ function cardCoordinacionBBVA(c, mio){
           ? `<span class="chip warn">Todavía no</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">${k.n} contacto${k.n===1?"":"s"} sin respuesta</div>`
           : `<span class="chip warn">Sin coordinar</span>
-             <div style="font-size:12px;color:var(--muted);margin-top:3px">Este comercio todavía no se le ha pedido a BBVA</div>`}
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">${
+               k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
+                       : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
     </dd></div>
     ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
       <b>Falta el correo de respaldo.</b> Se coordinó por chat, que no deja constancia consultable.
@@ -4317,17 +4366,24 @@ function avisoPorActualizar(){
    verdad faltaba: una cosa es que el dato diga CORREO porque nadie lo revisó y
    otra que alguien lo haya mirado y dicho que está bien. */
 function correoAmbiguo(c){
-  return !!c && c.contacto_bbva === "CORREO"
-      && !c.canal_confirmado_en
-      && estadoDerivado(c) === "POR_CONTACTAR";
+  if (!c || c.contacto_bbva !== "CORREO") return false;
+  /* Alguien ya lo miró y respondió. */
+  if (c.canal_confirmado_en) return false;
+  /* Y si hay una coordinación con el banco registrada de verdad, la pregunta
+     ya está contestada por los hechos: consta que se le escribió a BBVA. Solo
+     se pregunta cuando el único rastro es el sello del alta —que era el caso
+     de la tarjeta que mostraba «1er contacto: Correo a BBVA» y debajo pedía
+     que le dijeran a quién había ido ese correo—. */
+  if (bbvaDe(c.customer_id).n > 0) return false;
+  return estadoDerivado(c) === "POR_CONTACTAR";
 }
 function avisoCorreoAmbiguo(c, k, mio){
   if (!correoAmbiguo(c)) return "";
   if (esDeCampo() && !mio) return "";
   return `<div class="note crit" style="margin-top:11px">
-    <b>¿A quién fue ese correo?</b> Este comercio quedó registrado como «correo enviado», que
-    antes servía para las dos cosas. Ahora se distinguen, y de esto depende saber si el caso
-    está trabado del lado del banco o del nuestro.
+    <b>¿A quién fue ese correo?</b> Del alta de este comercio solo quedó anotado «correo», que
+    antes servía para las dos cosas, y no hay ninguna coordinación con el banco registrada
+    detrás. De esto depende saber si el caso está trabado del lado del banco o del nuestro.
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <button class="btn sm" data-cbbva-fix="CORREO|${c.customer_id}">Fue correo a BBVA</button>
       <button class="btn sm" data-cbbva-fix="CORREO_CC|${c.customer_id}">Fue correo al cliente con copia</button>
@@ -7604,8 +7660,20 @@ function bloqueCorregir(r, regs){
 function bloqueDetalle(r, regs){
   const base = universoPanel();
   const deCarteraBBVA = base.filter(c => !esClienteNuevo(c));
-  const canalBBVA = CONTACTO_BBVA.map(x => ({ label:x.label,
-    n: deCarteraBBVA.filter(c => c.contacto_bbva === x.id).length }));
+  /* Este gráfico cuenta el SELLO DEL ALTA, no coordinaciones. Son cosas
+     distintas y hasta el 23/08/2026 se leían igual: 645 comercios tienen sello
+     y ninguna coordinación registrada con el banco. La etiqueta del CORREO
+     además afirmaba un destinatario que nadie confirmó —«correo» servía para
+     pedirle los datos al banco y para escribirle al cliente con copia—, así
+     que acá se parte en confirmados y sin confirmar. */
+  const canalBBVA = CONTACTO_BBVA.flatMap(x => {
+    const filas = deCarteraBBVA.filter(c => c.contacto_bbva === x.id);
+    if (x.id !== "CORREO") return [{ label:x.label, n:filas.length }];
+    const conf = filas.filter(c => !!c.canal_confirmado_en).length;
+    return [{ label:"Correo a BBVA · confirmado", n:conf },
+            { label:"Correo · sin confirmar a quién", n:filas.length - conf }];
+  });
+  const conCoordReal = deCarteraBBVA.filter(c => bbvaDe(c.customer_id).n > 0).length;
   const sinCanalBBVA = deCarteraBBVA.filter(c => !c.contacto_bbva).length;
   const conCanalBBVA = deCarteraBBVA.length - sinCanalBBVA;
   const maxCanal = Math.max(1, ...canalBBVA.map(x => x.n));
@@ -7667,7 +7735,11 @@ function bloqueDetalle(r, regs){
         <div class="pie">${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado
           el canal.${sinCanalBBVA ? ` Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el
           dato fuera obligatorio; se completan al editar el comercio.` : " Están todos."}
-          <b>Todo lo de este bloque pasa entre Stratis y el banco</b>, no con el cliente.</div>`
+          <b>Todo lo de este bloque pasa entre Stratis y el banco</b>, no con el cliente.</div>
+        <div class="note warn" style="margin-top:10px"><b>Esto es lo que se declaró al dar de alta,
+          no coordinaciones.</b> Con una coordinación registrada de verdad hay
+          <b>${conCoordReal}</b> de ${deCarteraBBVA.length}. El sello dice por dónde se pensaba
+          llegar; la coordinación es lo que alguien hizo y anotó.</div>`
       : `<div class="vacio">Todavía ningún comercio tiene declarado el canal.</div>`}
     </div>
 
@@ -8221,7 +8293,16 @@ function filasBase(){
     return [c.customer_id, esClienteNuevo(c) ? "Cliente nuevo" : "Cartera BBVA",
       c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
       c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
-      esClienteNuevo(c) ? "No aplica" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
+      /* El sello del alta, con su nivel de certeza. «CORREO» servía para las dos
+         cosas opuestas —pedirle los datos al banco o escribirle al cliente con
+         copia—, así que mientras nadie lo confirme la celda lo dice en vez de
+         elegir una. Son 473 fichas: escribir «Correo a BBVA» en todas ellas es
+         mandar a la reunión una afirmación que la base no sostiene. */
+      esClienteNuevo(c) ? "No aplica"
+        : !c.contacto_bbva ? "Sin indicar"
+        : (c.contacto_bbva === "CORREO" && !c.canal_confirmado_en)
+            ? "Correo — sin confirmar a quién"
+            : nomContactoBBVA(c.contacto_bbva),
       c.asignado, c.asignado_correo,
       String(c.creado_en || "").slice(0,10),
       tipoCierre(c),
