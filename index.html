@@ -1553,6 +1553,14 @@ const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label
    ve como visita, el que exige respaldo para cerrar nunca las cuenta como
    contacto logrado, y la tasa de respuesta al cliente sigue midiendo clientes.
    Nada de eso hubo que tocarlo: simplemente no coinciden. */
+/* Todo lo que no es un correo exige después un correo al ejecutivo del banco.
+   La razón es una sola y vale para los cuatro: un chat interno, un WhatsApp,
+   una llamada y una reunión en la agencia no dejan constancia que otro pueda
+   consultar. Si el banco después dice que nunca le pidieron los datos, lo
+   único que se puede poner sobre la mesa es un correo.
+
+   No es burocracia añadida: es lo que la campaña ya pedía y el CRM solo
+   reclamaba para el chat. Desde el 23/08/2026 lo reclama para los cuatro. */
 const MEDIOS_BBVA = [
   { id:"bbva_correo",     label:"Correo a BBVA",      desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos" },
   /* Escribirle al cliente con copia al banco no es pedirle nada al banco: es
@@ -1562,9 +1570,9 @@ const MEDIOS_BBVA = [
   { id:"bbva_correo_cliente", label:"Correo al cliente con copia a BBVA",
     desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA", yaHayDatos:true },
   { id:"bbva_chat",       label:"Chat BBVA",          desc:"Se coordinó por el chat interno del banco", exigeCorreo:true },
-  { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono" },
-  { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp" },
-  { id:"bbva_presencial", label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco" }
+  { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono", exigeCorreo:true },
+  { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp", exigeCorreo:true },
+  { id:"bbva_presencial", label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco", exigeCorreo:true }
 ];
 const esMedioBBVA  = id => String(id || "").startsWith("bbva_");
 
@@ -1609,8 +1617,9 @@ const esGestionCliente = r => !esReconstruida(r) && esAlCliente(r);
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
-/* El chat no deja rastro consultable, así que la campaña exige mandar después
-   un correo de respaldo. El CRM no se limita a permitirlo: lo reclama. */
+/* Chat, WhatsApp, llamada y visita a la agencia no dejan rastro consultable,
+   así que la campaña exige mandar después un correo de respaldo. El CRM no se
+   limita a permitirlo: lo reclama. */
 const exigeRespaldo = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).exigeCorreo;
 /* Escribirle al cliente prueba que sus datos ya están en nuestras manos:
    nadie manda un correo a una dirección que no tiene. */
@@ -2099,6 +2108,14 @@ const respuestaDudosa = r =>
   !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
   && (RE_HABLO_UN_TERCERO.test(textoDe(r)) || RE_QUEDO_APLAZADO.test(textoDe(r)));
 
+/* Una gestión fechada en sábado, domingo o feriado. No es una falta —hay
+   comercios que abren— pero sí algo que mirar: el sábado no entra en los días
+   trabajados con los que se calcula la meta, así que suma al numerador sin
+   sumar al denominador. Las 58 que había el 22/08/2026 eran todas del mismo
+   ejecutivo y ninguna tenía la fecha elegida a mano. */
+const gestionEnDiaNoTrabajado = r =>
+  !!r && esGestionCliente(r) && diaNoTrabajado(r.Fecha_Contacto);
+
 /* Un comercio de cartera al que nunca se le escribió, llamó ni visitó. Pedirle
    los datos al banco no es haber salido: son 159 de 800, y hasta hoy 152 de
    ellos figuraban como «Por contactar», que se lee como lo contrario. */
@@ -2550,6 +2567,33 @@ function esDiaTrabajado(iso, fer){
 }
 const esFeriado = (iso, p) => feriadosDe(p || periodoDe(iso)).has(String(iso).slice(0,10));
 
+/* ---- El día no trabajado, dicho con su nombre ---------------------------
+   Existe por lo que apareció el 22/08/2026: 58 gestiones fechadas en sábado,
+   las 58 del mismo ejecutivo, y las 58 registradas ese mismo sábado sin que
+   nadie eligiera la fecha. 57 de ellas cayeron todas en el sábado 15/08 —un
+   lote de puesta al día del trabajo de la semana— y una hoy.
+
+   Ninguna estaba back-dateada: el formulario le regalaba la fecha de hoy y él
+   la aceptaba, que es lo que cualquiera hace. El problema es que el sábado no
+   entra en los días trabajados con los que se calcula la meta, así que esas
+   gestiones sumaban al numerador sin sumar al denominador.
+
+   No se prohíbe: hay comercios que abren sábado y esa visita es trabajo real.
+   Lo que se quita es que la fecha venga puesta. */
+const diaNoTrabajado = iso => !!iso && !esDiaTrabajado(String(iso).slice(0,10), feriadosDe(periodoDe(iso)));
+
+const nombreDiaNoTrabajado = iso => {
+  if (!iso) return "";
+  const s = String(iso).slice(0,10);
+  if (esFeriado(s)) return "feriado";
+  const d = new Date(s + "T12:00:00Z").getUTCDay();
+  return d === 6 ? "sábado" : d === 0 ? "domingo" : "";
+};
+
+/* La fecha con la que arranca el formulario. En día trabajado, hoy; en sábado,
+   domingo o feriado, ninguna: que la escriba. */
+const fechaInicialContacto = () => diaNoTrabajado(hoyISO()) ? "" : hoyISO();
+
 function demoraHabil(r){
   const f = String(r.Fecha_Contacto || "").slice(0,10);
   const c = String(r.Creado_En || "").slice(0,10);
@@ -2851,7 +2895,7 @@ function bbvaDe(cid){
   const co = todas.filter(r => !esReconstruida(r));
   const sello = todas.find(esReconstruida) || null;
   const resp = co.find(r => respondioBBVA(r.Resultado)) || null;
-  const chat = co.find(r => exigeRespaldo(r.Tipo_Contacto));
+  const chat = [...co].reverse().find(r => exigeRespaldo(r.Tipo_Contacto));
   return {
     n: co.length,
     contactos: co,
@@ -2868,9 +2912,15 @@ function bbvaDe(cid){
     /* El respaldo escrito puede ser el correo al ejecutivo o el correo al
        cliente con copia al banco: los dos dejan constancia consultable, que
        es lo único que la campaña exige después de un chat. */
+    /* Se mira la ÚLTIMA coordinación que pide respaldo, no la primera. Con un
+       solo medio en la lista daba igual; con cuatro, mirar la primera dejaría
+       pasar una llamada de ayer solo porque hubo un correo la semana pasada. */
     faltaRespaldo: !!chat && !co.some(r =>
       (r.Tipo_Contacto === "bbva_correo" || r.Tipo_Contacto === "bbva_correo_cliente")
       && ts(r) >= ts(chat)),
+    /* Cuál fue, para poder nombrarla. */
+    medioSinRespaldo: chat ? (nomMedioBBVA(chat.Tipo_Contacto) || chat.Tipo_Contacto) : "",
+    fechaSinRespaldo: chat ? chat.Fecha_Contacto : "",
     ultima: co.length ? co[co.length - 1] : null,
     /* Lo que se declaró al dar de alta, aparte y sin sumar. `selloAmbiguo` es
        el caso que hay que preguntar: el alta dice «correo» y nadie ha dicho
@@ -3915,6 +3965,17 @@ function bindComunes(){
   document.querySelectorAll("[data-verges]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verGestiones(el.dataset.verges, el.dataset.verejec || "");
   });
+  /* El destrabe, en un toque. Abre el registro de contacto ya puesto en
+     «correo al cliente» y con la copia al banco marcada, que es exactamente
+     lo que el ejecutivo está a punto de escribir. Se le deja el formulario
+     lleno a medias, no se guarda por él. */
+  document.querySelectorAll("[data-destrabe]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const cid = el.dataset.destrabe;
+    go("form_visita", cid);
+    S.form = Object.assign(nuevoForm(), { Tipo_Contacto:"correo", Copia_BBVA:true });
+    render();
+  });
   document.querySelectorAll("[data-vercartera]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verCarteraPor(el.dataset.vercartera);
   });
@@ -4383,8 +4444,33 @@ function cardCoordinacionBBVA(c, mio){
                        : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
     </dd></div>
     ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
-      <b>Falta el correo de respaldo.</b> Se coordinó por chat, que no deja constancia consultable.
-      La campaña pide enviar después un correo con lo acordado y registrarlo acá.</div>` : ""}
+      <b>Falta el correo de respaldo.</b> La última coordinación fue por
+      ${esc(String(k.medioSinRespaldo).toLowerCase())}${k.fechaSinRespaldo ? ` (${esc(fmtFecha(k.fechaSinRespaldo))})` : ""},
+      que no deja constancia que otro pueda consultar. Si el banco después dice que nunca le
+      pidieron los datos, lo único que se puede poner sobre la mesa es un correo. Mándalo con lo
+      acordado y regístralo acá.
+      ${(mio || !esDeCampo()) ? `<div style="margin-top:10px">
+        <button class="btn sm" data-go="form_bbva|${c.customer_id}">Registrar el correo de respaldo</button>
+      </div>` : ""}</div>` : ""}
+
+    ${/* ---- El siguiente paso, acotado a dos ----------------------------
+          Cuando hay una coordinación registrada y el banco no ha contestado,
+          el caso solo puede ir a dos sitios: el ejecutivo de BBVA valida los
+          datos, o se le escribe igual al cliente copiando al banco. Dejarlo
+          como una pantalla en blanco es lo que tenía 178 comercios parados
+          sin que nadie supiera de quién era el turno.
+
+          Las dos salidas se registran, y por eso están las dos acá: la
+          segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
+      (k.n && !k.respondio && (mio || !esDeCampo())) ? `
+      <div class="note warn" style="margin-top:11px">
+        <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
+        se registran para que no quede la duda de quién tiene el turno.
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+          <button class="btn sm ghost" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
+        </div>
+      </div>` : ""}
     ${avisoCorreoAmbiguo(c, k, mio)}
     ${/* El jalavistas. Un comercio recién registrado que no tiene ni una
           coordinación es un caso parado: sin los datos del banco no hay a
@@ -5743,7 +5829,9 @@ async function guardarLoteBBVA(){
    ========================================================================= */
 function nuevoForm(){
   return {
-    Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
+    /* En sábado, domingo o feriado arranca vacía a propósito: ver
+       `fechaInicialContacto` en el core. */
+    Fecha_Contacto: fechaInicialContacto(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Calificacion: "",
     Comentario_Ejecutivo: "", Comentario_Cliente: "", Espera: "", Copia_BBVA: false, Motivo: "",
@@ -6106,10 +6194,20 @@ function renderFormulario(){
       <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
       <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
     </div>
-    ${fechaFutura(f.Fecha_Contacto) ? `
+    ${!f.Fecha_Contacto ? `
+    <div class="note crit" style="margin-top:8px">
+      <b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}, así que la fecha no viene puesta.</b>
+      Escribe el día en que de verdad ocurrió el contacto. Si estás poniendo al día el trabajo de
+      la semana, esa es la fecha que va — no la de hoy.
+    </div>` : fechaFutura(f.Fecha_Contacto) ? `
     <div class="note crit" style="margin-top:8px">
       <b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
       Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.
+    </div>` : diaNoTrabajado(f.Fecha_Contacto) ? `
+    <div class="note warn" style="margin-top:8px">
+      <b>Ese día fue ${esc(nombreDiaNoTrabajado(f.Fecha_Contacto))}.</b> Se puede registrar —hay comercios que
+      abren— y al guardar te lo voy a preguntar una vez. Si en realidad el contacto fue otro día,
+      cámbialo ahora.
     </div>` : diasDeAtraso(f.Fecha_Contacto) > 2 ? `
     <div class="note" style="margin-top:8px">
       Estás registrando una gestión de hace ${esc(textoDias(diasDeAtraso(f.Fecha_Contacto)))}. Se puede,
@@ -6603,6 +6701,37 @@ async function guardar(c){
     return;
   }
 
+  /* ---- La pregunta del día no trabajado ---------------------------------
+     Misma forma que la del titular y por la misma razón: se pregunta una vez,
+     no se bloquea, y quien registró decide. Un sábado puede ser una visita de
+     verdad —hay comercios que abren— o puede ser el formulario regalándole la
+     fecha de hoy, que es lo que pasó 58 veces. Preguntarlo cuesta un toque y
+     distingue las dos cosas. */
+  if (!S.editId && diaNoTrabajado(f.Fecha_Contacto)){
+    const dia = nombreDiaNoTrabajado(f.Fecha_Contacto);
+    const ok = await new Promise(res => {
+      modal(`
+        <h3>¿El contacto fue en ${esc(dia)}?</h3>
+        <p style="margin-top:0">Estás fechando esta gestión el
+        <b>${esc(fmtFecha(f.Fecha_Contacto))}</b>, que fue ${esc(dia)}.</p>
+        <div class="note">Si el comercio abrió y de verdad lo atendiste ese día, adelante: queda
+        registrado tal cual. Si estás poniendo al día trabajo de la semana, la fecha que va es la
+        del día en que ocurrió, no la de hoy.</div>
+        <div style="display:flex;gap:8px;margin-top:15px;flex-wrap:wrap">
+          <button class="btn" id="ndSi" style="flex:1 1 180px">Sí, fue ese ${esc(dia)}</button>
+          <button class="btn ghost" id="ndNo" style="flex:1 1 180px">Corregir la fecha</button>
+        </div>`);
+      $("#ndSi").onclick = () => { cerrarModal(); res(true); };
+      $("#ndNo").onclick = () => { cerrarModal(); res(false); };
+    });
+    if (!ok){
+      f.Fecha_Contacto = "";
+      render();
+      toast("Escribe el día en que ocurrió el contacto.");
+      return;
+    }
+  }
+
   /* ---- La pregunta del titular -----------------------------------------
      Se pregunta, no se bloquea, y la diferencia importa. En la base hay 20
      gestiones marcadas «el cliente respondió» donde lo transcrito lo dijo el
@@ -7074,6 +7203,7 @@ function viewRegistros(){
   else if (S.fResultado === "fuera_plazo")    lista = lista.filter(r => demoraHabil(r) > 1);
   else if (S.fResultado === "respuesta_sin_voz") lista = lista.filter(respuestaSinVoz);
   else if (S.fResultado === "respuesta_dudosa")  lista = lista.filter(respuestaDudosa);
+  else if (S.fResultado === "dia_no_trabajado")  lista = lista.filter(gestionEnDiaNoTrabajado);
   else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -7147,6 +7277,8 @@ function viewRegistros(){
         ? `<button class="${S.fResultado==="respuesta_sin_voz"?"on":""}" data-fr="respuesta_sin_voz" title="Se marcó que el cliente respondió y no quedó ninguna palabra suya">Respuesta sin transcribir</button>` : ""}
       ${todos.some(respuestaDudosa)
         ? `<button class="${S.fResultado==="respuesta_dudosa"?"on":""}" data-fr="respuesta_dudosa" title="El comentario sugiere que habló otra persona, o que quedó en volver a llamar">Respuesta por revisar</button>` : ""}
+      ${todos.some(gestionEnDiaNoTrabajado)
+        ? `<button class="${S.fResultado==="dia_no_trabajado"?"on":""}" data-fr="dia_no_trabajado" title="Fechadas en sábado, domingo o feriado">Día no trabajado</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -7206,6 +7338,7 @@ function gestionesFiltradas(){
   else if (S.fResultado === "fuera_plazo")    l = l.filter(r => demoraHabil(r) > 1);
   else if (S.fResultado === "respuesta_sin_voz") l = l.filter(respuestaSinVoz);
   else if (S.fResultado === "respuesta_dudosa")  l = l.filter(respuestaDudosa);
+  else if (S.fResultado === "dia_no_trabajado")  l = l.filter(gestionEnDiaNoTrabajado);
   else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -8309,7 +8442,10 @@ function decisionesTablero(r, regs){
       ir:`data-vercartera="sin_salir"`, tono:"crit" },
     { n:base.filter(bajaSinCierre).length, t:"De baja y sin cierre",
       d:"El banco los dio de baja y nadie marcó qué pasó",
-      ir:`data-vercartera="baja_sin_cierre"`, tono:"warn" }
+      ir:`data-vercartera="baja_sin_cierre"`, tono:"warn" },
+    { n:regs.filter(gestionEnDiaNoTrabajado).length, t:"Gestiones en día no trabajado",
+      d:"Sábado, domingo o feriado: suman a la meta sobre días que no cuentan en el denominador",
+      ir:`data-verges="dia_no_trabajado"`, tono:"warn" }
   ].filter(x => x.siempre || x.n > 0);
 
   return `
