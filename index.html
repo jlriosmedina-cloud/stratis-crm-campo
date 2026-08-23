@@ -1752,19 +1752,23 @@ const rangoCita = s => {
        estaban aunque nadie anotara la coordinación. */
 function habilitadoEn(cid){
   const fechas = [];
-  /* Solo coordinaciones reales. 494 comercios traían un «BBVA respondió»
+  /* Las mismas dos puertas de `estadoDerivado`, y por la misma razón: si
+     hubiera dos definiciones de «el caso está listo», tarde o temprano darían
+     números distintos y no habría forma de saber cuál miente.
+
+     Solo coordinaciones reales. 494 comercios traían un «BBVA respondió»
      puesto por la migración: si contara, la fecha en que el caso quedó
-     habilitado sería la fecha del alta para casi toda la cartera, y el reloj
-     de la visita arrancaría de un hecho que no ocurrió. */
+     habilitado sería la del alta para casi toda la cartera, y el reloj de la
+     visita arrancaría de un hecho que no ocurrió. */
   DB.bbvaDe(cid).filter(r => !esReconstruida(r)).forEach(r => {
     if (respondioBBVA(r.Resultado) || traeDatosDelCliente(r))
       fechas.push(String(r.Fecha_Contacto).slice(0,10));
   });
-  DB.delCliente(cid).forEach(r => {
-    /* El correo con copia al banco es una gestión al cliente, así que llega
-       por esta lista y no por la del banco. Habilita igual: nadie escribe a
-       una dirección que no tiene. */
-    if (r.Con !== "BBVA" && (esEfectivo(r.Resultado) || traeDatosDelCliente(r)))
+  DB.delCliente(cid).filter(esGestionCliente).forEach(r => {
+    /* El correo al comercio —con copia al banco o no— es el paso del
+       destrabe, y el primer contacto logrado prueba que los datos estaban
+       aunque nadie anotara la coordinación. */
+    if (r.Tipo_Contacto === "correo" || traeDatosDelCliente(r) || esEfectivo(r.Resultado))
       fechas.push(String(r.Fecha_Contacto).slice(0,10));
   });
   /* El sello del alta —«el correo fue al cliente con copia»— no trae fecha
@@ -1982,42 +1986,53 @@ function estadoDerivado(c){
   /* La excepción de supervisión, con su motivo escrito. */
   if (c.estado_fijado && estadoDerivadoById(c.estado_fijado)) return c.estado_fijado;
 
-  /* Solo lo que se le hizo AL COMERCIO. Hasta el 23/08/2026 esta línea leía
-     todas las interacciones de la ficha, y ahí caben tres cosas distintas:
-     gestiones al cliente, coordinaciones con BBVA y las 842 filas que fabricó
-     una migración. El efecto era que un comercio del que solo se sabía que se
-     le habían pedido los datos al banco figuraba como «Por contactar», es
-     decir, como si el banco ya hubiera entregado. Eran 152 comercios de
-     cartera diciendo que estaban listos para salir cuando seguían esperando a
-     BBVA — justo la pregunta que no se podía contestar en reunión. */
+  /* Solo lo que se le hizo AL COMERCIO: ni las coordinaciones con el banco ni
+     las 842 filas que fabricó una migración. */
   const gestiones = DB.delCliente(c.customer_id).filter(esGestionCliente);
+
+  /* El titular contestó. Da igual cómo se llegó hasta ahí: hay conversación
+     abierta y el caso ya no está esperando a nadie. */
   if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
 
-  /* Si alguien ya intentó contactar al comercio, el banco entregó los datos:
-     no se puede marcar un número que no se tiene. Se deduce acá, al leer, y
-     no se escribe en la base — así vale para todo lo que se registre desde
-     ahora y no depende de que un barrido haya pasado por ahí.
-
-     Esta es la diferencia entre un estado guardado y uno calculado, y es la
-     razón de haberlo hecho calculado: un barrido toma una foto y todo lo que
-     llega después se queda fuera. Esto no toma ninguna foto. */
-  if (gestiones.length > 0) return "POR_CONTACTAR";
-
   /* Un RUC que trajo Stratis no espera nada del banco: no hay validación que
-     aguardar, así que mientras no tenga gestiones el siguiente paso es salir a
-     contactarlo. Antes esto devolvía «en negociación» siempre, porque la venta
-     nacía cerrada y el estado no tenía de dónde salir. */
+     aguardar, así que el siguiente paso es salir a contactarlo. */
   if (esClienteNuevo(c)) return "POR_CONTACTAR";
 
-  /* El banco «respondió» de la forma clásica, o bien ya le escribimos al
-     cliente con copia al banco —que solo es posible si los datos llegaron—.
-     Las dos cosas significan lo mismo para el siguiente paso: salir a
-     contactar. */
+  /* ---- Las dos únicas puertas a «Por contactar» ------------------------
+     Regla del 22/08/2026, y corrige lo que hacía que el indicador no sirviera.
+
+     Antes bastaba con tener CUALQUIER gestión al comercio: una llamada, un
+     WhatsApp, lo que fuera. Y el resultado era este —Juan Torres, 313
+     comercios abiertos—:
+
+         En negociación   32      Por contactar  281      Por validar   0
+
+     Cero. De sus 315 fichas de cartera, 285 declaran «Chat BBVA» al dar de
+     alta y solo 11 tienen una coordinación registrada de verdad. Los chats
+     existen, pero están en su chat, no en el CRM; y aun así los 281 figuraban
+     como listos para salir a la calle.
+
+     El ciclo de la campaña tiene una sola forma de habilitar un caso: o el
+     ejecutivo de BBVA confirma los datos, o —si no contesta— se le escribe al
+     comercio por correo copiando al banco. Cualquier otra cosa deja el caso
+     donde estaba: esperando al banco.
+
+     Con esta regla los mismos 313 quedan 31 / 62 / 220, y esos 220 son los que
+     de verdad están parados del lado de BBVA. */
   const k = bbvaDe(c.customer_id);
+
+  /* Puerta 1 · el banco confirmó los datos. Real, no la fila del alta. */
   if (k.respondio) return "POR_CONTACTAR";
+
+  /* Puerta 2 · se le escribió al comercio. El correo es el paso del destrabe
+     y el único que deja constancia de haber salido sin el banco. */
+  if (gestiones.some(r => r.Tipo_Contacto === "correo")) return "POR_CONTACTAR";
+  if (gestiones.some(traeDatosDelCliente)) return "POR_CONTACTAR";
   if (k.contactos.some(traeDatosDelCliente)) return "POR_CONTACTAR";
-  if (DB.delCliente(c.customer_id).some(traeDatosDelCliente)) return "POR_CONTACTAR";
+
+  /* El sello del alta que declara ese mismo correo. */
   if (c.contacto_bbva === "CORREO_CC") return "POR_CONTACTAR";
+
   return "POR_VALIDAR";
 }
 const estadoFijadoAMano = c => !!(c && c.estado_fijado);
@@ -2700,15 +2715,52 @@ function reglaVisitas(req, p){
    incumplimiento. Con la regla semanal se escala por semanas corridas; con la
    del periodo, por los días trabajados que YA pasaron sobre los que tiene el
    periodo. Nunca pasa del 100%: un tramo no puede pedir más que el periodo. */
-function pideVisitasRango(req, r, personas){
+/* Los días no trabajados en los que una persona SÍ trabajó: sábados, domingos
+   o feriados dentro del tramo en los que dejó al menos una gestión real al
+   comercio.
+
+   Existe por lo que se decidió el 22/08/2026. La meta se reparte entre los
+   días trabajados del periodo, y el sábado no es uno; así que una gestión
+   fechada en sábado sumaba arriba sin sumar abajo, y un sábado de trabajo
+   bajaba la exigencia del resto del periodo. Eran 58 gestiones, todas del
+   mismo ejecutivo.
+
+   La salida no es descontarle el sábado —salir un sábado porque el comercio
+   abría es trabajo real— sino contarlo de los dos lados: la gestión cuenta y
+   el día entra en SU calendario. Cada persona lleva el suyo. */
+function diasExtraTrabajados(correo, r, fer){
+  if (!correo || !r || !r.ini) return 0;
+  const hasta = r.fin > hoyISO() ? hoyISO() : r.fin;
+  const dias = new Set();
+  DB.todos().forEach(x => {
+    if (x.Correo_Stratis !== correo) return;
+    if (!esGestionCliente(x)) return;
+    const d = String(x.Fecha_Contacto || "").slice(0,10);
+    if (!d || d < r.ini || d > hasta) return;
+    if (!esDiaTrabajado(d, fer)) dias.add(d);
+  });
+  return dias.size;
+}
+
+function pideVisitasRango(req, r, personas, correos){
   const p  = (r && r.periodo) || periodoHoy();
   const rv = reglaVisitas(req, p);
   const n  = Math.max(1, personas || 1);
   if (!rv.porPeriodo) return Math.round(rv.meta * semanasRango(r) * n);
   if (!r || !r.ini || !rv.dias) return rv.pide * n;
   const hasta = r.fin > hoyISO() ? hoyISO() : r.fin;
-  const corridos = diasTrabajadosEntre(r.ini, hasta, feriadosDe(p));
-  return Math.round(rv.pide * Math.min(1, corridos / rv.dias) * n);
+  const fer = feriadosDe(p);
+  const corridos = diasTrabajadosEntre(r.ini, hasta, fer);
+  /* Sin lista de personas se prorratea con el calendario, como siempre. Es lo
+     que corresponde cuando no se sabe de quién se está hablando. */
+  if (!Array.isArray(correos) || !correos.length)
+    return Math.round(rv.pide * Math.min(1, corridos / rv.dias) * n);
+  /* Con lista, cada uno lleva su propio calendario: el que trabajó el sábado
+     tiene un día más corrido y por tanto se le pide un poco más, en la misma
+     proporción. Nunca pasa del mínimo del periodo: los 40 son los 40, y un
+     sábado no los convierte en 42. */
+  return Math.round(correos.reduce((tot, correo) =>
+    tot + rv.pide * Math.min(1, (corridos + diasExtraTrabajados(correo, r, fer)) / rv.dias), 0));
 }
 
 const factDe = (correo, p) =>
@@ -4549,7 +4601,16 @@ function correoAmbiguo(c){
      de la tarjeta que mostraba «1er contacto: Correo a BBVA» y debajo pedía
      que le dijeran a quién había ido ese correo—. */
   if (bbvaDe(c.customer_id).n > 0) return false;
-  return estadoDerivado(c) === "POR_CONTACTAR";
+  /* Y se pregunta donde la respuesta cambia algo: en un caso que hoy figura
+     esperando al banco. Si el correo fue al cliente con copia, el caso estaba
+     habilitado y nadie lo sabía; si fue al banco, sigue esperando y al menos
+     queda dicho. En un caso que ya está por contactar o en negociación la
+     respuesta no mueve nada, y preguntar por preguntar es ruido.
+
+     Hasta el 22/08/2026 esto exigía justo lo contrario —POR_CONTACTAR— y tenía
+     sentido con la regla vieja, donde casi todo lo tocado caía ahí. Con la
+     regla nueva ahí ya no hay nada que aclarar. */
+  return estadoDerivado(c) === "POR_VALIDAR";
 }
 function avisoCorreoAmbiguo(c, k, mio){
   if (!correoAmbiguo(c)) return "";
@@ -8137,7 +8198,10 @@ function cifrasTablero(r, regs){
      rige en cada periodo. */
   const sem = semanasRango(r);
   const rv  = reglaVisitas(req, p);
-  const pideVisitas = pideVisitasRango(req, r, ejec.length || 1);
+  /* Se le pasan los correos y no solo cuántos son: desde el 22/08/2026 cada
+     ejecutivo lleva su propio calendario y el que trabajó un sábado tiene un
+     día más corrido. Ver `diasExtraTrabajados` en el core. */
+  const pideVisitas = pideVisitasRango(req, r, ejec.length || 1, ejec.map(u => u.correo));
 
   return {
     filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, rv, pideVisitas,
