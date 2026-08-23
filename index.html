@@ -9159,12 +9159,29 @@ const estadoContacto = (intentos, respuestas) =>
    se separa de las dos porque el comercio nunca estuvo en la cartera del banco,
    que es justo lo que hay que poder ver sin cruzar columnas.
 
-     · Lead de retención       comercio que BBVA ya tiene; se trabaja para que se quede
-     · Lead de venta           RUC que trae Stratis, todavía en negociación
-     · Venta fuera de cartera  RUC que cerró; nunca estuvo en la base del banco */
+     · Lead de retención   comercio que BBVA ya tiene; se trabaja para que se quede
+     · Lead de venta       RUC que trae Stratis; el banco todavía no lo tiene afiliado
+
+   Dos valores, y los decide el identificador: 8 dígitos es un Customer ID de
+   BBVA, 11 es un RUC. Nada más entra en la cuenta.
+
+   Hasta el 23/08/2026 había un tercero —«Venta fuera de cartera»— y el defecto
+   no era el nombre: era que se calculaba con el CIERRE. Un lead de venta
+   dejaba de ser lead de venta en el momento en que se vendía, así que la misma
+   ficha cambiaba de tipo al avanzar, y volvía a cambiar hacia atrás si alguien
+   corregía ese cierre.
+
+   Lo que eso rompía es justo lo que la columna existe para hacer. Filtrar
+   «Lead de venta» devolvía solo los abiertos —48 de 56—, porque los 8 que
+   habían cerrado ya estaban en otra categoría: el embudo de ese tipo de lead
+   se quedaba sin cierres y no se podía ver su recorrido completo ni su
+   conversión. Con dos valores, el filtro devuelve los 56 de punta a punta.
+
+   Los que cerraron sin haber estado nunca en la cartera del banco se siguen
+   viendo, y con las dos columnas que ya están:
+       Tipo_Registro = Lead de venta  +  Estado_Gestion_Tipo = Venta nueva */
 function tipoRegistro(c){
-  if (!esClienteNuevo(c)) return "Lead de retención";
-  return c.resultado_gestion === "VENTA" ? "Venta fuera de cartera" : "Lead de venta";
+  return esClienteNuevo(c) ? "Lead de venta" : "Lead de retención";
 }
 
 /* Lo que el ejecutivo eligió al dar de alta el comercio, tal cual quedó
