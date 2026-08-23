@@ -1540,6 +1540,47 @@ const MEDIOS_BBVA = [
   { id:"bbva_presencial", label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco" }
 ];
 const esMedioBBVA  = id => String(id || "").startsWith("bbva_");
+
+/* ---- Qué cuenta como gestión, y de quién --------------------------------
+   Dos filtros que van juntos y que hasta el 23/08/2026 no existían. Sin ellos
+   ninguna cifra del embudo era defendible, y el CRM las mostraba igual.
+
+   PRIMERO: una fila RECONSTRUIDA no es una gestión. La escribió una migración
+   a partir del canal que el ejecutivo había declarado en el alta —842 de las
+   1943 que hay— poniéndole la fecha del alta porque el CRM guardaba el medio y
+   no la fecha. En 507 de ellas además quedó escrito que el banco respondió,
+   cosa que no consta en ninguna parte; una de las tres plantillas lo dice con
+   todas sus letras: «consta el envío, no la respuesta».
+
+   No se borran: son el rastro de que alguien declaró un canal, y borrarlas
+   sería perder eso. Pero no cuentan como trabajo ni miden a nadie.
+
+   SEGUNDO: el DESTINATARIO real. El medio dice el canal, no a quién se le
+   escribió. En 186 gestiones anotadas como «correo» al cliente el comentario
+   dice que el correo fue al funcionario de BBVA —«se envió correo al
+   funcionario, de no tener respuesta se enviará al cliente»—, que es el paso
+   de coordinación con el banco, no el contacto con el comercio. Contarlas del
+   lado del cliente infla un lado del embudo y vacía el otro a la vez.
+
+   La base guarda el destinatario corregido en su propia columna desde la
+   migración 59. Acá se recalcula igual como respaldo, para que la aplicación
+   diga lo mismo aunque le toque una fila vieja. */
+const esReconstruida = r => r.Inferida === true;
+
+const RE_AL_FUNCIONARIO = /correo\s+a(?:l)?\s+funcionario/i;
+function destinatarioDe(r){
+  if (r.Destinatario === "cliente" || r.Destinatario === "bbva") return r.Destinatario;
+  if (esMedioBBVA(r.Tipo_Contacto)) return "bbva";
+  return RE_AL_FUNCIONARIO.test(r.Comentario_Ejecutivo || "") ? "bbva" : "cliente";
+}
+const esAlCliente = r => destinatarioDe(r) === "cliente";
+const esAlBanco   = r => destinatarioDe(r) === "bbva";
+
+/* Una gestión de campo: la escribió un ejecutivo Y fue dirigida al comercio.
+   Es la unidad con la que se cuenta cobertura, efectividad y visitas. */
+const esGestionCliente = r => !esReconstruida(r) && esAlCliente(r);
+/* Coordinación con el banco, registrada por alguien. */
+const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
 /* El chat no deja rastro consultable, así que la campaña exige mandar después
    un correo de respaldo. El CRM no se limita a permitirlo: lo reclama. */
@@ -2672,6 +2713,11 @@ function deDB(f){
     /* Las coordinaciones que el CRM dedujo del histórico al migrar, no las que
        alguien registró. Se marcan para que nunca se lean como declaradas. */
     Inferida: f.inferida === true,
+    /* A quién fue dirigida de verdad. Lo corrige la migración 59 para las 186
+       gestiones anotadas como correo al cliente cuyo comentario dice que el
+       correo fue al funcionario del banco. Si la fila todavía no lo trae,
+       `destinatarioDe` lo recalcula con la misma regla. */
+    Destinatario: f.destinatario || "",
     Tipo_Contacto: f.tipo_contacto,
     Resultado: f.resultado || "efectivo",
     Visita_Presencial: f.visita_presencial, Visita_virtual: f.visita_virtual,
@@ -2769,18 +2815,32 @@ const RULES = {
     const c = byId[String(cid)];
     if (!c) return null;
     const regs = DB.delCliente(cid);
+    /* Lo que se cuenta es lo que un ejecutivo le hizo AL COMERCIO. Las filas
+       reconstruidas y las coordinaciones con el banco viajan aparte: siguen
+       disponibles, pero no engordan el contador de gestiones ni la cobertura. */
+    const gest = regs.filter(esGestionCliente);
     const b = {
       Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
       Fecha_Visita_Actualizada:"",
       Comentario_Ejecutivo:"", Comentario_Cliente:"",
-      _n: regs.length,
-      _intentos: regs.length,
-      _efectivos: regs.filter(r => esEfectivo(r.Resultado)).length,
+      _n: gest.length,
+      _intentos: gest.length,
+      _efectivos: gest.filter(r => esEfectivo(r.Resultado)).length,
+      /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
+      _banco: regs.filter(esGestionBanco).length,
+      _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
+      _reconstruidas: regs.filter(esReconstruida).length,
+      _todas: regs.length,
       _ultimo:null
     };
-    if (!regs.length){ c._base = b; return b; }
+    if (!gest.length){
+      /* Sin gestiones al comercio no hay nada que resumir de él, pero sí puede
+         haber última coordinación con el banco: se guarda para la ficha. */
+      b._ultimo = regs.filter(r => !esReconstruida(r))[0] || null;
+      c._base = b; return b;
+    }
 
-    const ult = regs[0];
+    const ult = gest[0];
     b._ultimo = ult;
     b.Contactado = b._efectivos > 0 ? "Si" : "Intentado";
     b.Visita_Presencial = ult.Visita_Presencial || "No";
@@ -2788,7 +2848,7 @@ const RULES = {
     b.Comentario_Ejecutivo = ult.Comentario_Ejecutivo || "";
     b.Comentario_Cliente   = ult.Comentario_Cliente   || "";
 
-    const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
+    const cumplidas = gest.filter(r => r.Cumple_Visita === "SI");
     if (CONFIG.cumpleVisitaHistorico){
       b.Cumple_Visita = cumplidas.length ? "SI" : "No";
       b.Fecha_Visita_Actualizada = cumplidas.length ? cumplidas[0].Fecha_Contacto : "";
