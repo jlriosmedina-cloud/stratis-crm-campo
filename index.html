@@ -1971,7 +1971,7 @@ const ESTADOS_DERIVADOS = [
     hacer:"Seguir el caso hasta cerrarlo", chip:"neg" },
   { id:"RETENIDO",      label:"Retenido",       corto:"Retenido",   desc:"Ya operaba y se quedó",        hacer:"", chip:"ok" },
   { id:"RECUPERADO",    label:"Recuperado",     corto:"Recuperado", desc:"Estaba de baja y volvió",      hacer:"", chip:"ok" },
-  { id:"VENTA",         label:"Venta nueva",    corto:"Venta",      desc:"RUC que trajo Stratis",        hacer:"", chip:"ok" },
+  { id:"VENTA",         label:"Venta",          corto:"Venta",      desc:"Lead de venta que cerró",      hacer:"", chip:"ok" },
   { id:"PERDIDO",       label:"Perdido",        corto:"Perdido",    desc:"Se fue o cerró",               hacer:"", chip:"crit" }
 ];
 const estadoDerivadoById = id => ESTADOS_DERIVADOS.find(e => e.id === id) || null;
@@ -2214,7 +2214,11 @@ function tipoCierre(c){
   if (!c) return "";
   const g = c.resultado_gestion || "PENDIENTE";
   if (g === "RETENIDO") return "Retenido";
-  if (g === "VENTA")    return esClienteNuevo(c) ? "Venta nueva" : "Recuperado";
+  /* «Venta» a secas. Antes decía «Venta nueva», y el adjetivo abría la puerta
+     a una tercera categoría —«venta fuera de cartera»— que no era un tipo de
+     comercio sino el resultado de compararlo contra la base del banco. Esa
+     comparación se hace en el archivo de BBVA, no acá. */
+  if (g === "VENTA")    return esClienteNuevo(c) ? "Venta" : "Recuperado";
   if (g === "PERDIDO")  return "Perdido";
   return "Pendiente";
 }
@@ -4298,7 +4302,7 @@ function cardCliente(c){
         <span class="chip info">${esc(rubroLabel(c))}</span>
         <span class="chip ${st.chip}">${st.label}</span>
         ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
-        ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span><span class="chip ok">Derivado a BBVA</span>` : ""}
+        ${esClienteNuevo(c) ? `<span class="chip info">Lead de venta</span><span class="chip ok">Derivado a BBVA</span>` : ""}
         ${!esClienteNuevo(c) && gestionCumplida(c) ? `<span class="chip ok">${c.resultado_gestion === "VENTA" ? "Venta" : "Retenido"}</span>` : ""}
         ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
       </div>
@@ -4342,7 +4346,7 @@ function viewFicha(c){
               estadoFijadoAMano(c) ? " ·  fijado" : ""}</span>`; })() : ""}
           <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
           ${c.estado ? `<span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>` : ""}
-          ${esClienteNuevo(c) ? `<span class="chip info">Cliente nuevo</span>` : ""}
+          ${esClienteNuevo(c) ? `<span class="chip info">Lead de venta</span>` : ""}
         </div>
       </div>
     </div>
@@ -8685,7 +8689,9 @@ const nomResultado = id => (resultadoById(id) || {}).label || id || "";
 function filasBase(){
   return cartera().map(c => {
     const b = RULES.recomputarBase(c.customer_id);
-    return [c.customer_id, esClienteNuevo(c) ? "Cliente nuevo" : "Cartera BBVA",
+    /* El mismo par de nombres que usa Tipo_Registro en la hoja del banco: dos
+       poblaciones, dos objetivos, un solo vocabulario en todo el archivo. */
+    return [c.customer_id, tipoRegistro(c),
       c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
       c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
       /* El sello del alta, con su nivel de certeza. «CORREO» servía para las dos
@@ -8728,7 +8734,7 @@ function filasBase(){
    decide en un solo sitio y estas no se pueden correr. */
 function coordBBVA(c){
   if (esClienteNuevo(c)) return {
-    Punto_del_Caso:"Venta nueva", Coordinaciones_BBVA:0,
+    Punto_del_Caso:"Venta", Coordinaciones_BBVA:0,
     BBVA_1er_Contacto:"", BBVA_1er_Medio:"No aplica",
     BBVA_2do_Contacto:"", BBVA_2do_Medio:"No aplica",
     BBVA_Respondio:"No aplica", BBVA_Fecha_Respuesta:"",
@@ -9109,7 +9115,7 @@ const COLS_DETALLE = [
      identificador de 11 dígitos es un RUC y por lo tanto una venta que trae
      Stratis; que esté cerrada o todavía en trabajo lo dice su cierre. Nadie
      puede marcarla mal, y no se puede desincronizar del resultado. */
-  "Tipo_Registro","En_Cartera_BBVA","Venta_Fuera_De_Lead","Origen_Marcado",
+  "Tipo_Registro","Origen_Marcado",
 
   /* --- Quién es el comercio y en qué punto está ------------------------- */
   "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
@@ -9202,40 +9208,20 @@ const origenMarcado = c =>
 /* Y en una columna aparte, sin ambigüedad, si el comercio estuvo alguna vez en
    la base que entregó el banco. Es la pregunta que se hace primero al armar
    cualquier dinámica. */
-/* ---- ¿El banco ya tiene este comercio? ----------------------------------
-   Hasta el 23/08/2026 esta columna decía «No» para todo RUC, y lo decía por
-   una razón circular: es un RUC, luego no está en la cartera. Nunca verificó
-   nada, y era falso — de los 16 RUC que aparecieron con gestiones sueltas,
-   todos estaban en la plataforma de BBVA; lo que no estaban es en la cartera
-   que nos asignaron, que es otra cosa.
+/* Acá vivían dos columnas que se retiraron el 23/08/2026: `En_Cartera_BBVA`,
+   que repetía Tipo_Registro con otras palabras, y `Venta_Fuera_De_Lead`, que
+   intentaba resolver dentro del CRM algo que el CRM no puede saber.
 
-   Ahora se resuelve contra un hecho que se puede comprobar: la lista de RUC
-   de la plataforma del banco, que se pega en la hoja «RUC_de_BBVA». La
-   columna es una FÓRMULA, no un valor, por lo mismo que ya vale para
-   Tasa_Respuesta: se recalcula sola cuando esa lista cambia, y se ve de dónde
-   sale.
+   Determinar si una venta salió de un lead encargado o la trajo el equipo por
+   su cuenta se resuelve comparando el RUC contra la base del banco, y esa
+   comparación se hace donde está la base: en el archivo de BBVA, al pegar esta
+   hoja. Traerla acá obligaba a mantener una lista pegada a mano dentro de un
+   libro que se regenera cada vez, para contestar una pregunta que del otro
+   lado se contesta con un BUSCARV.
 
-   Tres respuestas posibles, y las tres significan algo distinto:
-
-     Sí              el banco lo tiene. Un lead de retención siempre; un lead
-                     de venta, cuando su RUC aparece en la lista pegada.
-     No              el banco no lo tiene: es una venta nueva de verdad.
-     Sin verificar   todavía no se pegó la lista. No es «No»: es que nadie
-                     miró, y confundir las dos cosas es lo que se está
-                     corrigiendo.
-
-   El valor que se escribe acá es solo el respaldo por si alguien abre el
-   archivo sin recalcular; la fórmula lo pisa al generar la hoja. */
-const enCarteraBBVA = c => esClienteNuevo(c) ? "Sin verificar" : "Si";
-
-/* Una venta que el banco nunca tuvo. Es el cruce de dos hechos —cerró como
-   venta, y su RUC no está en la plataforma— y por eso también va como
-   fórmula: si mañana se corrige el cierre o se actualiza la lista del banco,
-   la celda se corrige sola. Es lo que antes se intentaba decir con un tercer
-   valor de Tipo_Registro, que tenía el defecto de cambiar el TIPO del
-   comercio según su cierre. */
-const ventaFueraDeLead = c =>
-  (esClienteNuevo(c) && c.resultado_gestion === "VENTA") ? "Por verificar" : "No";
+   Lo que queda es lo único que el CRM sí sabe de primera mano: qué se
+   registró —Tipo_Registro—, qué se hizo —la línea de tiempo— y en qué quedó
+   —Tipo_Cierre—. Dos tipos de lead, un solo recorrido. */
 
 /* ¿Lo que se marcó contradice al identificador? */
 const origenNoCuadra = c =>
@@ -9405,8 +9391,6 @@ function filaComercio(c, soloEntrega){
        buscan por su nombre. Reordenar es mover una línea. */
     const det = {
       Tipo_Registro:   tipoRegistro(c),
-      En_Cartera_BBVA:     enCarteraBBVA(c),
-      Venta_Fuera_De_Lead: ventaFueraDeLead(c),
       Origen_Marcado:  origenMarcado(c),
       Nombre_Comercio: titulo(c.nombre_comercio || ""),
       Rubro:           rubroLabel(c),
@@ -9527,63 +9511,7 @@ function hojaBBVA(){
   columnaFormula(ws, cols, filas, "Sin_Respuesta",
     (L, f) => `${L("Intentos_Totales")}${f}-${L("Respuestas_del_Cliente")}${f}`);
 
-  /* ---- El cruce contra la plataforma del banco -------------------------
-     La columna A trae la llave de cada fila: el Customer ID cuando el banco ya
-     tiene al comercio, y el RUC cuando todavía no. Así que para un lead de
-     venta, buscar la columna A dentro de la lista pegada es exactamente la
-     pregunta que hay que hacer.
-
-     El rango va hasta la fila 20000 y no a la columna entera a propósito:
-     COUNTIF sobre A:A entera es lento con veinte mil filas y algunas versiones
-     lo recalculan en cada scroll. */
-  const LISTA = "RUC_de_BBVA!$A$2:$A$20000";
-  columnaFormula(ws, cols, filas, "En_Cartera_BBVA", (L, f) =>
-    `IF(${L("Tipo_Registro")}${f}="Lead de retención","Si",`
-    + `IF(COUNTA(${LISTA})=0,"Sin verificar",`
-    + `IF(COUNTIF(${LISTA},$A${f})>0,"Si","No")))`, "s");
-
-  /* Una venta que el banco nunca tuvo: cerró como venta Y su RUC no está en la
-     lista. Mientras la lista no se pegue queda «Por verificar», que es la
-     verdad —no «No»—. */
-  columnaFormula(ws, cols, filas, "Venta_Fuera_De_Lead", (L, f) =>
-    `IF(${L("Tipo_Cierre")}${f}<>"Venta nueva","No",`
-    + `IF(${L("En_Cartera_BBVA")}${f}="Sin verificar","Por verificar",`
-    + `IF(${L("En_Cartera_BBVA")}${f}="No","Si","No")))`, "s");
-
   formatoPorcentaje(ws, cols, filas, ["Tasa_Respuesta"]);
-  return ws;
-}
-
-/* ---- La hoja donde se pega lo que dice el banco -------------------------
-   Una sola columna y nada más. Se abre la plataforma de BBVA, se exporta la
-   lista de RUC y se pega acá debajo del encabezado; la columna
-   En_Cartera_BBVA de la hoja Base se recalcula sola.
-
-   Va vacía a propósito. Rellenarla con lo que el CRM cree saber sería volver a
-   la deducción circular que esta hoja existe para reemplazar: el CRM no tiene
-   la base del banco, y decir «No está» sin haberla mirado es inventar. */
-function hojaListaBBVA(){
-  /* La columna A queda VACÍA de la fila 2 hacia abajo, y no es descuido: es el
-     sitio donde se pega, y el COUNTA que decide si la lista ya está cargada
-     mira justo ese rango. Un instructivo escrito ahí haría creer a la hoja
-     Base que la lista está pegada cuando no lo está, y todos los leads de
-     venta pasarían de «Sin verificar» a «No» sin que nadie hubiera mirado la
-     plataforma. Por eso las instrucciones viven en la columna C. */
-  const filas = [
-    ["RUC en la plataforma de BBVA", "", "Cómo se usa esta hoja"],
-    ["", "", "1 · Exporta de la plataforma de BBVA la lista de RUC que el banco tiene hoy."],
-    ["", "", "2 · Pégala en la columna A, desde la fila 2, sin encabezado. Solo los números."],
-    ["", "", "3 · Vuelve a la hoja Base. En_Cartera_BBVA y Venta_Fuera_De_Lead se recalculan solas."],
-    ["", "", ""],
-    ["", "", "Mientras la columna A esté vacía, los leads de venta salen «Sin verificar»."],
-    ["", "", "No es lo mismo que «No»: quiere decir que nadie miró la plataforma todavía."],
-    ["", "", ""],
-    ["", "", "Un lead de venta cuyo RUC SÍ aparece acá es un comercio que el banco ya tiene,"],
-    ["", "", "solo que no estaba en la cartera que nos asignaron."],
-    ["", "", "Uno cuyo RUC no aparece es una venta nueva de verdad: nunca estuvo en su base."]
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(filas);
-  ws["!cols"] = [{ wch: 30 }, { wch: 3 }, { wch: 88 }];
   return ws;
 }
 
@@ -9592,15 +9520,15 @@ async function exportarBBVA(btn){
   if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
   try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
   const wb = XLSX.utils.book_new();
-  /* Dos hojas, nada más. La hoja Base trae primero lo que se entrega al banco
-     y a continuación el resto de la gestión, para que sea un solo pegado. */
-  XLSX.utils.book_append_sheet(wb, hojaBBVA(),      "Base");
-  XLSX.utils.book_append_sheet(wb, hojaListaBBVA(), "RUC_de_BBVA");
+  /* Una sola hoja. La Base trae primero lo que se entrega al banco y a
+     continuación el resto de la gestión, para que sea un solo pegado: es en el
+     archivo de BBVA donde se cruza contra su base y se arman las dinámicas. */
+  XLSX.utils.book_append_sheet(wb, hojaBBVA(), "Base");
   XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
-  const nCartera = cartera().filter(c => !esClienteNuevo(c)).length;
-  const nNuevos  = cartera().filter(esClienteNuevo).length;
-  toast(`Base generada · ${nCartera} de cartera y ${nNuevos} nuevo${nNuevos===1?"":"s"}`);
+  const nRet   = cartera().filter(c => !esClienteNuevo(c)).length;
+  const nVenta = cartera().filter(esClienteNuevo).length;
+  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta`);
 }
 
 function hojaReporte(admin){
@@ -9918,7 +9846,7 @@ function viewAyuda(){
   const reglas = [
     ["Registrar", "Solo los ejecutivos dan de alta comercios y registran gestiones; el Analista y el Manager supervisan"],
     ["Alta de comercios", "La hace el ejecutivo en campo; el customer_id es único en toda la campaña"],
-    ["Venta nueva", "Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual"],
+    ["Venta", "Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual"],
     ["Gestión = SI", "Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó"],
     ["Cumple_Visita", "SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar"],
     ["Intentos", "Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio"],
