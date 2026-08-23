@@ -618,6 +618,16 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .opt.on .rd:after{content:"";width:9px;height:9px;border-radius:50%;background:var(--brand-2)}
 .opt b{font-size:14px;font-weight:620;display:block}
 .opt span{font-size:12px;color:var(--muted);display:block;margin-top:1px}
+/* Una casilla, no un radio: se marca o no se marca, y la fila entera es
+   zona de toque para que sirva con el pulgar. Los 44px son los mismos de
+   las opciones; abajo de eso el dedo no acierta. */
+.cbx{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;min-height:44px;
+     border:1px solid var(--line);border-radius:10px;cursor:pointer;background:var(--surface-1)}
+.cbx:has(input:checked){border-color:var(--brand-2);background:var(--info-bg);box-shadow:0 0 0 2px rgba(42,120,214,.14)}
+.cbx input{width:20px;height:20px;flex:none;margin:1px 0 0;accent-color:var(--brand-2)}
+.cbx b{font-size:14px;font-weight:620;display:block}
+.cbx .hint{font-size:12px;color:var(--muted);display:block;margin-top:2px;font-weight:400;line-height:1.45}
+
 /* El recuadro azul queda para la guía que hace falta AHORA, una por tarjeta
    como mucho. Lo demás es .pie, .vacio o va plegado en un details. */
 .note{background:var(--info-bg);border-radius:10px;padding:11px 12px;font-size:12.8px;color:var(--ink-2);line-height:1.5}
@@ -1589,6 +1599,14 @@ const exigeRespaldo = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).exigeCo
    nadie manda un correo a una dirección que no tiene. */
 const yaHayDatosDelCliente = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).yaHayDatos;
 
+/* Lo mismo, pero preguntándoselo al registro completo y no solo al medio.
+   El correo del destrabe se marca con Copia_BBVA sobre un correo al cliente,
+   así que el medio por sí solo no alcanza para reconocerlo. Se sigue mirando
+   el medio antiguo porque la opción existe en la lista del banco desde julio;
+   hoy no la usa nadie, y esta función es el único lugar donde eso importa. */
+const traeDatosDelCliente = r =>
+  r.Copia_BBVA === true || yaHayDatosDelCliente(r.Tipo_Contacto);
+
 const RESULTADOS_BBVA = [
   { id:"bbva_respondio",     label:"Respondió",     desc:"El ejecutivo de BBVA contestó y confirmó los datos del comercio", ok:true },
   { id:"bbva_sin_respuesta", label:"Sin respuesta", desc:"Todavía no ha contestado", ok:false }
@@ -1709,11 +1727,14 @@ const rangoCita = s => {
 function habilitadoEn(cid){
   const fechas = [];
   DB.bbvaDe(cid).forEach(r => {
-    if (respondioBBVA(r.Resultado) || yaHayDatosDelCliente(r.Tipo_Contacto))
+    if (respondioBBVA(r.Resultado) || traeDatosDelCliente(r))
       fechas.push(String(r.Fecha_Contacto).slice(0,10));
   });
   DB.delCliente(cid).forEach(r => {
-    if (r.Con !== "BBVA" && esEfectivo(r.Resultado))
+    /* El correo con copia al banco es una gestión al cliente, así que llega
+       por esta lista y no por la del banco. Habilita igual: nadie escribe a
+       una dirección que no tiene. */
+    if (r.Con !== "BBVA" && (esEfectivo(r.Resultado) || traeDatosDelCliente(r)))
       fechas.push(String(r.Fecha_Contacto).slice(0,10));
   });
   /* El sello del alta —«el correo fue al cliente con copia»— no trae fecha
@@ -1931,7 +1952,15 @@ function estadoDerivado(c){
   /* La excepción de supervisión, con su motivo escrito. */
   if (c.estado_fijado && estadoDerivadoById(c.estado_fijado)) return c.estado_fijado;
 
-  const gestiones = DB.delCliente(c.customer_id);
+  /* Solo lo que se le hizo AL COMERCIO. Hasta el 23/08/2026 esta línea leía
+     todas las interacciones de la ficha, y ahí caben tres cosas distintas:
+     gestiones al cliente, coordinaciones con BBVA y las 842 filas que fabricó
+     una migración. El efecto era que un comercio del que solo se sabía que se
+     le habían pedido los datos al banco figuraba como «Por contactar», es
+     decir, como si el banco ya hubiera entregado. Eran 152 comercios de
+     cartera diciendo que estaban listos para salir cuando seguían esperando a
+     BBVA — justo la pregunta que no se podía contestar en reunión. */
+  const gestiones = DB.delCliente(c.customer_id).filter(esGestionCliente);
   if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
 
   /* Si alguien ya intentó contactar al comercio, el banco entregó los datos:
@@ -1956,11 +1985,70 @@ function estadoDerivado(c){
      contactar. */
   const k = bbvaDe(c.customer_id);
   if (k.respondio) return "POR_CONTACTAR";
-  if (k.contactos.some(r => yaHayDatosDelCliente(r.Tipo_Contacto))) return "POR_CONTACTAR";
+  if (k.contactos.some(traeDatosDelCliente)) return "POR_CONTACTAR";
+  if (DB.delCliente(c.customer_id).some(traeDatosDelCliente)) return "POR_CONTACTAR";
   if (c.contacto_bbva === "CORREO_CC") return "POR_CONTACTAR";
   return "POR_VALIDAR";
 }
 const estadoFijadoAMano = c => !!(c && c.estado_fijado);
+
+/* ---- En qué punto del recorrido está el comercio ------------------------
+   Nueve escalones, en el orden real de la campaña: se registra el comercio,
+   se le piden los datos a BBVA, el banco contesta, se sale a contactar al
+   cliente, el cliente responde, y el caso cierra —retenido, vendido o
+   perdido—.
+
+   Sustituye a las dos columnas que se venían llevando en el Excel, que eran
+   «Contactado Si/No» y el conteo de gestiones. Ninguna de las dos contestaba
+   la pregunta de la reunión. «Contactado = Si» era verdad para un comercio
+   que recibió un correo sin respuesta y para uno que ya está en negociación,
+   y el contador de gestiones subía igual mandando ocho correos al vacío que
+   consiguiendo una reunión.
+
+   Es la misma escalera que calcula la vista v_linea_tiempo en la base. Las
+   dos se escribieron juntas y a propósito: si un día dan resultados
+   distintos, es que alguien cambió una sola.
+
+   Un comercio NO llega a «Perdido» por cálculo. Solo si el ejecutivo lo
+   marcó: mientras nadie lo marque, el caso sigue vivo. */
+const ETAPAS = [
+  { id:1, label:"1 Registrado sin tocar",      desc:"Está en el CRM y nadie lo ha tocado todavía" },
+  { id:2, label:"2 Con actividad",             desc:"Tiene alguna gestión, sin destinatario claro" },
+  { id:3, label:"3 Esperando a BBVA",          desc:"Se le pidieron los datos al banco y no ha contestado" },
+  { id:4, label:"4 Habilitado por el banco",   desc:"BBVA contestó; falta salir a contactar al comercio" },
+  { id:5, label:"5 En contacto",               desc:"Se le escribió, llamó o visitó, y todavía no responde" },
+  { id:6, label:"6 Respondió",                 desc:"El titular contestó: hay conversación abierta" },
+  { id:7, label:"7 Retenido",                  desc:"Cerrado con retención" },
+  { id:8, label:"8 Venta",                     desc:"Cerrado con venta" },
+  { id:9, label:"9 Perdido",                   desc:"El ejecutivo lo marcó como perdido" }
+];
+const nomEtapa = id => (ETAPAS.find(e => e.id === id) || {}).label || "";
+
+function etapaDe(c){
+  if (!c) return 1;
+  if (c.resultado_gestion === "VENTA")    return 8;
+  if (c.resultado_gestion === "RETENIDO") return 7;
+  if (c.resultado_gestion === "PERDIDO")  return 9;
+  const regs = DB.delCliente(c.customer_id);
+  const gest = regs.filter(esGestionCliente);
+  if (gest.some(r => esEfectivo(r.Resultado))) return 6;
+  if (gest.length) return 5;
+  const banco = regs.filter(esGestionBanco);
+  if (banco.some(r => respondioBBVA(r.Resultado))) return 4;
+  if (banco.length) return 3;
+  if (regs.some(r => !esReconstruida(r))) return 2;
+  return 1;
+}
+
+/* Efectividad del contacto: de cada diez veces que se le escribió, llamó o
+   visitó, en cuántas contestó el titular. Es lo que el conteo de gestiones no
+   decía. Sin gestiones no es 0%: es que todavía no se midió, y devuelve null
+   para que ningún promedio lo arrastre hacia abajo. */
+function efectividadDe(c){
+  const gest = DB.delCliente(c.customer_id).filter(esGestionCliente);
+  if (!gest.length) return null;
+  return Math.round(gest.filter(r => esEfectivo(r.Resultado)).length * 100 / gest.length);
+}
 
 /* Los cuatro cierres que de verdad se miran, cada uno con su nombre propio.
    «Venta» en la base cubre dos cosas distintas —un comercio de cartera que
@@ -2731,6 +2819,17 @@ function deDB(f){
     Evidencia_Path: f.evidencia_path || "",
     Calificacion: f.calificacion || "",
     Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
+    /* «En qué quedó» vive aparte desde la migración 63. Antes 174 gestiones
+       guardaban ahí «A la espera de respuesta» y el CRM lo mostraba como
+       «Lo que dijo el cliente», en gestiones donde el cliente no había dicho
+       nada. Comentario_Cliente es ahora solo la voz del cliente. */
+    Espera: f.espera || "",
+    /* El correo del destrabe: se le escribió al cliente y se copió al
+       ejecutivo de BBVA. Es una gestión AL CLIENTE —llega al cliente— que
+       además deja rastro del lado del banco. Por eso es una marca sobre el
+       correo y no un medio aparte: como medio «bbva_» habría contado como
+       coordinación con el banco y habría dejado de contar como contacto. */
+    Copia_BBVA: f.copia_bbva === true,
     /* Cuándo se grabó, que no es lo mismo que cuándo se gestionó: la distancia
        entre ambas fechas dice si el CRM se usa en campo o se llena después. */
     Creado_En: f.creado_en || "",
@@ -2758,7 +2857,9 @@ function aDB(f, c){
     evidencia_path: f.Evidencia_Path || null,
     calificacion: f.Calificacion || null,
     comentario_ejecutivo: f.Comentario_Ejecutivo,
-    comentario_cliente: f.Comentario_Cliente || null
+    comentario_cliente: f.Comentario_Cliente || null,
+    espera: f.Espera || null,
+    copia_bbva: !!f.Copia_BBVA
   };
   return base;
 }
@@ -2822,7 +2923,7 @@ const RULES = {
     const b = {
       Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
       Fecha_Visita_Actualizada:"",
-      Comentario_Ejecutivo:"", Comentario_Cliente:"",
+      Comentario_Ejecutivo:"", Comentario_Cliente:"", Espera:"",
       _n: gest.length,
       _intentos: gest.length,
       _efectivos: gest.filter(r => esEfectivo(r.Resultado)).length,
@@ -2847,6 +2948,10 @@ const RULES = {
     b.Visita_Virtual    = ult.Visita_virtual    || "No";
     b.Comentario_Ejecutivo = ult.Comentario_Ejecutivo || "";
     b.Comentario_Cliente   = ult.Comentario_Cliente   || "";
+    b.Espera               = ult.Espera               || "";
+    /* Cuántas veces se destrabó el caso escribiéndole al cliente con copia
+       al banco. Es el paso que antes no dejaba rastro. */
+    b._destrabes = gest.filter(traeDatosDelCliente).length;
 
     const cumplidas = gest.filter(r => r.Cumple_Visita === "SI");
     if (CONFIG.cumpleVisitaHistorico){
@@ -3673,13 +3778,21 @@ function bindComunes(){
   document.querySelectorAll("[data-cbbva-fix]").forEach(el => el.onclick = async e => {
     e.stopPropagation();
     const [valor, cid] = el.dataset.cbbvaFix.split("|");
+    const txtBoton = el.textContent;
     el.disabled = true; el.textContent = "Guardando…";
     /* El `.select()` otra vez: sin él, un rechazo por permisos vuelve sin
        error y sin filas, y la pantalla diría que se guardó algo que no. */
+    /* Se guardan las tres cosas juntas. La confirmación es la que hace que el
+       aviso desaparezca, incluso cuando el canal no cambia. */
     const { data, error } = await sb.from("clientes")
-      .update({ contacto_bbva: valor }).eq("customer_id", cid).select("customer_id");
-    if (error) return toast("No se pudo guardar: " + error.message);
-    if (!(data || []).length) return toast("La base no dejó guardar el cambio en este comercio.");
+      .update({ contacto_bbva: valor,
+                canal_confirmado_en: new Date().toISOString(),
+                canal_confirmado_por: S.user.correo })
+      .eq("customer_id", cid).select("customer_id");
+    if (error){ el.disabled = false; el.textContent = txtBoton;
+      return toast("No se pudo guardar: " + error.message); }
+    if (!(data || []).length){ el.disabled = false; el.textContent = txtBoton;
+      return toast("La base no dejó guardar el cambio en este comercio."); }
     await recargarCartera(); await cargarAuditoria(); render();
     toast(valor === "CORREO" ? "Anotado: el correo fue al ejecutivo de BBVA"
                              : "Anotado: el correo fue al cliente, con copia a BBVA");
@@ -3785,6 +3898,7 @@ function viewCartera(){
     if (S.fContacto === "sin_comentario"){
       const rs = DB.delCliente(c.customer_id);
       return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                         || String(x.Espera || "").trim()
                                          || String(x.Comentario_Ejecutivo || "").trim());
     }
     /* Los dos que llegan desde el Panel. Dejan fuera las ventas nuevas a
@@ -4192,8 +4306,20 @@ function avisoPorActualizar(){
   </div>`;
 }
 
+/* El aviso se va cuando una PERSONA responde, no cuando el dato cambia.
+   Antes se iba solo si la respuesta era «fue al cliente con copia», porque esa
+   sí cambiaba el valor guardado. Responder «fue a BBVA» escribía el mismo
+   CORREO que ya estaba: la base no tenía nada que registrar, la pantalla se
+   redibujaba igual y el aviso seguía ahí. Desde fuera se veía como un botón
+   que no hace nada, y en realidad hacía exactamente lo que se le pidió.
+
+   Ahora la confirmación se guarda con su fecha y su autor, que es lo que de
+   verdad faltaba: una cosa es que el dato diga CORREO porque nadie lo revisó y
+   otra que alguien lo haya mirado y dicho que está bien. */
 function correoAmbiguo(c){
-  return !!c && c.contacto_bbva === "CORREO" && estadoDerivado(c) === "POR_CONTACTAR";
+  return !!c && c.contacto_bbva === "CORREO"
+      && !c.canal_confirmado_en
+      && estadoDerivado(c) === "POR_CONTACTAR";
 }
 function avisoCorreoAmbiguo(c, k, mio){
   if (!correoAmbiguo(c)) return "";
@@ -4273,6 +4399,7 @@ function avisoComentario(c, regs){
      suyo aunque el cliente no haya dicho nada, eso ya viaja al banco con su
      nombre y no hay nada que reclamarle. */
   if (regs.some(r => String(r.Comentario_Cliente || "").trim()
+                  || String(r.Espera || "").trim()
                   || String(r.Comentario_Ejecutivo || "").trim())) return "";
   const efectivos = regs.filter(r => esEfectivo(r.Resultado));
   return `<div class="note" style="margin-bottom:12px">
@@ -4333,7 +4460,9 @@ function itemTimeline(r){
           ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación</span></div>` : ""}
       ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
-      ${r.Comentario_Cliente ? `<div class="quote"><b>Sentir del cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+      ${r.Comentario_Cliente ? `<div class="quote"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+      ${r.Espera ? `<div class="quote"><b>En qué quedó</b>${esc(r.Espera)}</div>` : ""}
+      ${traeDatosDelCliente(r) ? `<div style="margin-top:7px"><span class="chip ok">Con copia al ejecutivo BBVA</span></div>` : ""}
       ${editable && (corregible(r) || borrable(r)) ? `<div style="display:flex;gap:7px;margin-top:11px">
         ${corregible(r) ? `<button class="btn ghost sm" data-edit="${r._id}">Editar</button>` : ""}
         ${borrable(r)   ? `<button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
@@ -5473,7 +5602,7 @@ function nuevoForm(){
     Fecha_Contacto: hoyISO(), Hora_Contacto: horaISO(),
     Tipo_Contacto: "", Resultado: "efectivo",
     Ubicacion: "", Ubicacion_Verificada: false, Calificacion: "",
-    Comentario_Ejecutivo: "", Comentario_Cliente: "", Motivo: "",
+    Comentario_Ejecutivo: "", Comentario_Cliente: "", Espera: "", Copia_BBVA: false, Motivo: "",
     Cierre: null            // resultado_gestion del comercio, se define acá mismo
   };
 }
@@ -5926,6 +6055,7 @@ function renderFormulario(){
         </div>`).join("")}
     </div>
     <div id="derivado" style="margin-top:11px"></div>
+    <div id="boxCopia"></div>
   </div>
 
   <div class="card">
@@ -5962,12 +6092,7 @@ function renderFormulario(){
     </div>
     <div class="field"><label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— cómo calificas al cliente</span></label>
       <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
-    <div class="field" style="margin-bottom:0"><label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''} <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
-      <textarea data-f="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
-      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note crit" style="margin-top:8px">
-        Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
-        es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
-        es <b>No respondió</b>.</div>` : ""}</div>
+    <div id="boxVoz"></div>
   </div>
 
   <div id="errBox"></div>
@@ -5989,15 +6114,15 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
     f.Tipo_Contacto = el.dataset.tipo;
     $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
-    pintarDerivado(); pintarGps(); pintarCierre(c); pintarSeguimiento();
+    pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c); pintarSeguimiento();
   });
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
     $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
-    pintarDerivado(); pintarCierre(c); pintarSeguimiento();
+    pintarDerivado(); pintarVoz(); pintarCierre(c); pintarSeguimiento();
   });
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarGps(); pintarCierre(c); pintarSeguimiento();
+  pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c); pintarSeguimiento();
 }
 
 /* -------------------------------------------------------------------------
@@ -6100,6 +6225,71 @@ function pintarDerivado(){
         <span class="chip ${cumple==="SI"?"ok":"no"}">Cumple_Visita: ${cumple}</span>
       </div>
     </div>`;
+}
+
+/* ---- El correo del destrabe ---------------------------------------------
+   La secuencia de la campaña es: se le piden los datos del comercio a BBVA y,
+   si el banco no contesta, se le escribe igual al cliente copiando al
+   ejecutivo del banco. Ese segundo correo es el que destraba el caso, y hasta
+   hoy no dejaba ninguna huella: entraba como un correo más, idéntico al
+   primero. Con 178 comercios esperando al banco, no había forma de contestar
+   en reunión si el caso estaba trabado del lado de BBVA o del nuestro.
+
+   Se pregunta solo en el correo porque copiar a alguien solo existe ahí, y es
+   una casilla y no un medio aparte porque el correo LLEGA AL CLIENTE: como
+   medio del banco habría dejado de contar como contacto con el comercio. */
+function pintarCopia(){
+  const f = S.form, box = $("#boxCopia");
+  if (!box) return;
+  if (f.Tipo_Contacto !== "correo"){ box.innerHTML = ""; f.Copia_BBVA = false; return; }
+  box.innerHTML = `
+    <label class="cbx" style="margin-top:11px">
+      <input type="checkbox" data-fb="Copia_BBVA" ${f.Copia_BBVA ? "checked" : ""}>
+      <span><b>Copié al ejecutivo de BBVA en este correo</b>
+      <span class="hint">Márcalo si escribiste al cliente poniendo en copia al ejecutivo del banco.
+      Es lo que deja constancia de que el caso ya no está esperando a BBVA.</span></span>
+    </label>`;
+  const el = box.querySelector('[data-fb]');
+  if (el) el.onchange = () => { f.Copia_BBVA = el.checked; };
+}
+
+/* ---- Qué dijo el cliente, o en qué quedó --------------------------------
+   Una sola caja que cambia de pregunta según el resultado, y no dos cajas
+   siempre visibles. El motivo está en la base: 174 gestiones guardaban «A la
+   espera de respuesta» en el campo del comentario del cliente, y el CRM lo
+   mostraba como «Lo que dijo el cliente» en gestiones donde el cliente no
+   había dicho nada. La migración 63 movió esos textos a «En qué quedó»; esto
+   es lo que evita que vuelvan a entrar mal.
+
+   Si el cliente respondió, se pide su voz. Si no respondió, nadie habló:
+   preguntar por su comentario es invitar a inventarlo. */
+function pintarVoz(){
+  const f = S.form, box = $("#boxVoz");
+  if (!box) return;
+  const hablo = esEfectivo(f.Resultado);
+  /* Las dos cajas no pueden llenarse a la vez. Si el ejecutivo escribe la
+     respuesta del cliente y después corrige el resultado a «no respondió»,
+     ese texto ya no describe nada: se limpia acá y no llega a la base. Es
+     exactamente lo que produjo las 174 gestiones que hubo que mover. */
+  if (hablo) f.Espera = ""; else f.Comentario_Cliente = "";
+  box.innerHTML = hablo ? `
+    <div class="field" style="margin-bottom:0">
+      <label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''}
+        <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
+      <textarea data-fv="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
+      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note crit" style="margin-top:8px">
+        Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
+        es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
+        es <b>No respondió</b>.</div>` : ""}
+    </div>` : `
+    <div class="field" style="margin-bottom:0">
+      <label>¿En qué quedó? <span class="hint">— qué sigue, no lo que dijo el cliente</span></label>
+      <textarea data-fv="Espera" placeholder="Ej.: Quedó en revisarlo con el contador y responder el viernes. Si no contesta, se le escribe con copia al ejecutivo BBVA.">${esc(f.Espera)}</textarea>
+      <div class="pie" style="margin-top:7px">El cliente no respondió en esta gestión, así que acá no va su comentario.
+      Escribir “a la espera de respuesta” no agrega nada: eso ya lo dice el resultado. Puedes dejarlo vacío.</div>
+    </div>`;
+  const el = box.querySelector('[data-fv]');
+  if (el) el.oninput = () => { f[el.dataset.fv] = el.value; };
 }
 
 function pintarGps(){
@@ -6620,6 +6810,7 @@ function tarjetaGestion(r){
         <div class="ges-texto">
           ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
           ${r.Comentario_Cliente?`<div class="quote cli"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>`:""}
+          ${r.Espera?`<div class="quote"><b>En qué quedó</b>${esc(r.Espera)}</div>`:""}
           <div class="ges-chips">
             ${/* En qué terminó ese comercio: la gestión sola no lo dice, y era
                  lo que impedía ver «de qué comercios estamos hablando». */
@@ -6674,7 +6865,8 @@ function viewRegistros(){
         || String(c.distrito||"").toLowerCase().includes(q)
         || String(r.Ejecutivo||"").toLowerCase().includes(q)
         || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
-        || String(r.Comentario_Cliente||"").toLowerCase().includes(q);
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q)
+        || String(r.Espera||"").toLowerCase().includes(q);
   });
   if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
@@ -6801,7 +6993,8 @@ function gestionesFiltradas(){
         || String(c.distrito||"").toLowerCase().includes(q)
         || String(r.Ejecutivo||"").toLowerCase().includes(q)
         || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
-        || String(r.Comentario_Cliente||"").toLowerCase().includes(q);
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q)
+        || String(r.Espera||"").toLowerCase().includes(q);
   });
   if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
@@ -7823,6 +8016,7 @@ function decisionesTablero(r, regs){
   const sinComentario = base.filter(c => {
     const rs = DB.delCliente(c.customer_id);
     return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                       || String(x.Espera || "").trim()
                                        || String(x.Comentario_Ejecutivo || "").trim());
   });
 
@@ -7976,7 +8170,15 @@ const COLS_BBVA_RESUMEN = [
 const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
   "Estado_Gestion","Contacto_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
   "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
-  "Intentos","Respuestas_del_Cliente","Visitas_Validas","Contactado (Si/No)",
+  /* Antes acá iban «Intentos» y «Contactado (Si/No)». Las dos se retiraron en
+     agosto de 2026 y no por espacio: ninguna contestaba lo que se pregunta en
+     la reunión. «Contactado = Si» valía igual para un comercio que recibió un
+     correo sin respuesta que para uno en negociación, y el conteo de gestiones
+     subía lo mismo mandando ocho correos al vacío que consiguiendo una
+     reunión. En su lugar van la etapa —en qué punto del recorrido está— y la
+     efectividad —de cada diez toques, cuántos contestó—. Los intentos y las
+     respuestas siguen enteros en la hoja de gestiones, una fila por gestión. */
+  "Etapa","Efectividad_del_Contacto","Respuestas_del_Cliente","Visitas_Validas",
   "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
   "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion",
   /* El escalón que faltaba. Estas ocho columnas son lo que hoy se seguía a
@@ -7989,6 +8191,12 @@ const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Strat
   "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
   "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
   "Ubicacion_Verificada","Calificacion","Comentario_Ejecutivo","Comentario_Cliente",
+  /* Dos columnas que hasta agosto de 2026 no existían y estaban aplastadas
+     dentro de «Comentario_Cliente». «En_Que_Quedo» es el ejecutivo diciendo
+     qué falta; «Comentario_Cliente» es el titular hablando. Confundirlas hacía
+     que 174 gestiones donde nadie contestó apareciesen con una frase atribuida
+     al comercio. «Con_Copia_A_BBVA» marca el correo del destrabe. */
+  "En_Que_Quedo","Con_Copia_A_BBVA",
   /* Cuándo se grabó, que no es cuándo se gestionó. Sin esta columna la
      puntualidad no se puede recalcular fuera del CRM, y es justo el número
      que se discute en la reunión de cierre. */
@@ -8019,9 +8227,10 @@ function filasBase(){
       tipoCierre(c),
       c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "",
       c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : ""]
-      .concat([b._intentos, b._efectivos,
+      .concat([nomEtapa(etapaDe(c)),
+        efectividadDe(c) === null ? "Sin gestiones" : efectividadDe(c) + "%",
+        b._efectivos,
         DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
-        b._efectivos > 0 ? "Si" : "No",
         b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
         b._ultimo ? b._ultimo.Fecha_Contacto : "",
         /* Misma regla que en la hoja que va al banco: ninguna de las dos
@@ -8149,6 +8358,7 @@ function filasVisitas(){
     r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
     r.Ubicacion, marcaUbicacion(r), r.Calificacion,
     r.Comentario_Ejecutivo, r.Comentario_Cliente,
+    r.Espera || "", traeDatosDelCliente(r) ? "SI" : "NO",
     String(r.Creado_En || "").slice(0,10), demoraHabil(r), aTiempo(r) ? "SI" : "NO", r._id]);
 }
 
