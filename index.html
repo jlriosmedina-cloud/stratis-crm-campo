@@ -3962,7 +3962,12 @@ function viewFicha(c){
   /* Con el flujo nuevo la ficha muestra UNA historia: la coordinación con el
      banco y las gestiones con el cliente en el mismo orden en que ocurrieron.
      Antes del corte sigue mostrando solo las gestiones, igual que siempre. */
-  const regs = flujoBbva() ? DB.historiaDe(c.customer_id) : DB.delCliente(c.customer_id);
+  /* Al ejecutivo no se le muestran las filas reconstruidas: no las escribió
+     él, y en su línea de tiempo se leen como gestiones suyas con un texto que
+     nunca tecleó. Supervisión sí las ve, para poder rastrear de dónde salió
+     el histórico. */
+  const regs = (flujoBbva() ? DB.historiaDe(c.customer_id) : DB.delCliente(c.customer_id))
+                 .filter(r => !vistaDeCampo() || !esReconstruida(r));
   const mio = esMiCliente(c);
 
   return `
@@ -6646,7 +6651,15 @@ function viewRegistros(){
      `correoObservado` devuelve el suyo cuando quien mira es ejecutivo, y el
      elegido cuando supervisión pidió mirar como uno. */
   const mio = correoObservado();
-  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === mio))
+  /* Las filas reconstruidas no entran al historial del ejecutivo. No son
+     gestiones suyas: las escribió una migración a partir del canal que él
+     declaró al dar de alta, y llevan un texto que él nunca tecleó. Verlas
+     mezcladas con su trabajo es leer palabras ajenas con su firma, y además
+     le infla el contador de su propia bitácora.
+
+     Supervisión sí las ve, marcadas: hacen falta para entender de dónde salió
+     el histórico y para no volver a contarlas por error. */
+  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === mio && !esReconstruida(r)))
                   .filter(r => enPeriodo(r, S.fPeriodoReg))
                   .sort((a,b) => ts(b) - ts(a));
 
