@@ -8792,7 +8792,13 @@ function coordBBVA(c){
     Coordinaciones_BBVA: k.n,
     BBVA_1er_Contacto: f(k.primero), BBVA_1er_Medio: m(k.primero),
     BBVA_2do_Contacto: f(k.segundo), BBVA_2do_Medio: m(k.segundo),
-    BBVA_Respondio: k.respondio ? "SI" : "NO",
+    /* Tres respuestas, no dos. «NO» a secas metía en la misma bolsa dos cosas
+       que no se parecen: el comercio al que se le pidieron los datos y el
+       banco no contestó, y el comercio al que nadie le pidió nada. El primero
+       está trabado del lado de BBVA; el segundo, del nuestro. Con dos valores
+       la dinámica no podía separarlos y el cuello de botella se leía más
+       grande de lo que es. */
+    BBVA_Respondio: k.respondio ? "SI" : (k.n > 0 ? "NO" : "Sin pedir"),
     BBVA_Fecha_Respuesta: k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
     BBVA_Intentos_Hasta_Respuesta: k.respondio ? k.intentosHasta : "",
     BBVA_Dias_Hasta_Respuesta: demora,
