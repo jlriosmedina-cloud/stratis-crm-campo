@@ -618,6 +618,12 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .opt.on .rd:after{content:"";width:9px;height:9px;border-radius:50%;background:var(--brand-2)}
 .opt b{font-size:14px;font-weight:620;display:block}
 .opt span{font-size:12px;color:var(--muted);display:block;margin-top:1px}
+/* La cita de un comentario del ejecutivo dentro de un modal: se lee como
+   texto ajeno y no como parte de lo que dice el CRM. */
+.cita{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.4px;
+      background:var(--surface-2,var(--info-bg));border-radius:8px;padding:11px 13px;
+      color:var(--ink-2);line-height:1.5;overflow-wrap:anywhere}
+
 /* Una casilla, no un radio: se marca o no se marca, y la fila entera es
    zona de toque para que sirva con el pulgar. Los 44px son los mismos de
    las opciones; abajo de eso el dedo no acierta. */
@@ -1432,8 +1438,19 @@ const esEfectivo = id => id === "efectivo";
    que el cliente respondió obliga a transcribir su respuesta: si respondió,
    hay algo que citar. La base aplica la misma regla. */
 const MEDIOS_ASINCRONICOS = ["correo", "whatsapp"];
-const pruebaDeRespuesta = f =>
-  esEfectivo(f.Resultado) && MEDIOS_ASINCRONICOS.includes(f.Tipo_Contacto);
+/* Desde el 23/08/2026 esto se pide en CUALQUIER medio, y no solo donde el
+   mensaje sale sin que nadie lo conteste.
+
+   El razonamiento viejo era bueno y la conclusión se quedó corta: en una
+   llamada o una visita pasa exactamente lo mismo —decir que el cliente
+   respondió obliga a poder citar algo—, y por ese hueco entraron 43 gestiones
+   que dicen que respondió sin una sola palabra suya. 30 son del mismo
+   ejecutivo, así que no es despiste: es una forma de registrar que se aprendió
+   porque el CRM la permitía.
+
+   Las 43 ya registradas no se tocan. Están en «Respuestas sin transcribir»,
+   en el tablero, para que las mire quien las registró. */
+const pruebaDeRespuesta = f => esEfectivo(f.Resultado);
 
 /* Una gestión se registra el día que ocurrió o después —nunca antes—. Hacia
    atrás no hay tope: sirve para poner al día lo que se quedó sin registrar. */
@@ -2977,9 +2994,24 @@ const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())
    Las autoritativas viven en Postgres. Estas son el espejo en pantalla.
    ========================================================================= */
 const RULES = {
-  cumpleVisita(id, resultado){
+  /* Espejo de fn_reglas_interaccion. La visita PRESENCIAL cumple solo si queda
+     respaldada —GPS, o exención escrita por supervisión con su motivo—, porque
+     la visita cumplida es justamente lo que se le evidencia al banco y una sin
+     respaldo no se puede defender. La VIRTUAL no entra: no hay a dónde ir, y
+     pedirle coordenadas a una videollamada es pedir un dato que no significa
+     nada.
+
+     Sin respaldo la gestión igual se guarda: queda como intento. El trabajo se
+     registra; lo que no queda es la visita.
+
+     `r` es opcional para no romper a quien solo pregunta por el medio y el
+     resultado; cuando no llega, se responde como antes. */
+  cumpleVisita(id, resultado, r){
     const t = tipoById(id);
-    return (t && t.cumple && esEfectivo(resultado || "efectivo")) ? "SI" : "No";
+    if (!(t && t.cumple && esEfectivo(resultado || "efectivo"))) return "No";
+    if (!r || t.modo !== "presencial") return "SI";
+    const respaldada = r.Ubicacion_Verificada === true || r.Ubicacion_Exenta === true;
+    return respaldada ? "SI" : "No";
   },
   visitaPresencial(id){ const t = tipoById(id); return (t && t.modo === "presencial") ? "SI" : "No"; },
   visitaVirtual(id){ const t = tipoById(id); return (t && t.modo === "virtual") ? "SI" : "No"; },
@@ -6320,7 +6352,10 @@ function pintarDerivado(){
   const f = S.form, box = $("#derivado");
   if (!box) return;
   if (!f.Tipo_Contacto){ box.innerHTML = `<div class="pie" style="margin-top:0">Elige el medio para saber si esta gestión cuenta como visita.</div>`; return; }
-  const cumple = RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado);
+  /* Se le pasa el registro entero para que la visita presencial sin respaldo
+     se vea como lo que va a quedar: un intento. Antes el recuadro decía
+     «Cumple_Visita = SI» y la base guardaba otra cosa. */
+  const cumple = RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado, f);
   const efectivo = esEfectivo(f.Resultado);
   box.innerHTML = `
     <div class="note ${cumple === "SI" ? "ok" : "warn"}">
@@ -6336,6 +6371,12 @@ function pintarDerivado(){
         <span class="chip ${efectivo?"ok":"serious"}">${efectivo ? "El cliente respondió" : "Sin respuesta"}</span>
         <span class="chip ${cumple==="SI"?"ok":"no"}">Cumple_Visita: ${cumple}</span>
       </div>
+      ${(RULES.visitaPresencial(f.Tipo_Contacto)==="SI" && efectivo && cumple !== "SI") ? `
+        <div style="margin-top:9px;padding-top:9px;border-top:1px solid var(--line)">
+          <b>Falta el respaldo de la ubicación.</b> Sin coordenada verificada —o una exención de
+          supervisión con su motivo— esta gestión se guarda como <b>intento</b>, no como visita.
+          La visita cumplida es lo que se le evidencia al banco, y una sin respaldo no se puede
+          defender. Toca «Usar donde estoy ahora» más abajo, estando en el local.</div>` : ""}
     </div>`;
 }
 
@@ -6561,6 +6602,51 @@ async function guardar(c){
     $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
     return;
   }
+
+  /* ---- La pregunta del titular -----------------------------------------
+     Se pregunta, no se bloquea, y la diferencia importa. En la base hay 20
+     gestiones marcadas «el cliente respondió» donde lo transcrito lo dijo el
+     encargado, el administrador o el cajero —«Encargado indica que volvamos a
+     comunicarnos»—, o es un aplazamiento y no una respuesta. Una dice
+     directamente «Comercio indica que no puede atendernos», que es un rechazo.
+
+     Para el primer caso ya existe «Titular ausente», que es un resultado
+     distinto y no cuenta como contacto logrado.
+
+     Ningún patrón de texto acierta siempre: hay comentarios legítimos que
+     nombran al encargado. Por eso el CRM pregunta y ofrece el arreglo en el
+     mismo sitio, y quien registró decide. Es la misma regla de «Perdido»: el
+     CRM no asume por nadie. */
+  if (respuestaDudosa(f)){
+    const eleccion = await new Promise(res => {
+      modal(`
+        <h3>¿Habló el titular?</h3>
+        <p style="margin-top:0">Marcaste <b>«El cliente respondió»</b>, y en el comentario aparece
+        alguien que suele no ser el titular —o un «vuelvan a llamar», que es un aplazamiento y no
+        una respuesta.</p>
+        <div class="cita" style="margin:12px 0">${esc(String(f.Comentario_Cliente || f.Comentario_Ejecutivo || "").slice(0,220))}</div>
+        <div class="note">Si atendió otra persona, el resultado es <b>«Titular ausente»</b>. Si de
+        verdad hablaste con el titular, guárdalo como está: nadie va a cambiarlo por ti.</div>
+        <div style="display:flex;gap:8px;margin-top:15px;flex-wrap:wrap">
+          <button class="btn" id="dudSi" style="flex:1 1 180px">Sí, hablé con el titular</button>
+          <button class="btn ghost" id="dudNo" style="flex:1 1 180px">Atendió otra persona</button>
+        </div>
+        <button class="btn ghost sm" id="dudCancel" style="width:100%;margin-top:8px">Volver a editarlo</button>`);
+      $("#dudSi").onclick     = () => { cerrarModal(); res("titular"); };
+      $("#dudNo").onclick     = () => { cerrarModal(); res("tercero"); };
+      $("#dudCancel").onclick = () => { cerrarModal(); res("volver"); };
+    });
+    if (eleccion === "volver") return;
+    if (eleccion === "tercero"){
+      /* No se guarda a sus espaldas: se le deja el formulario con el resultado
+         correcto puesto y decide él si lo manda. */
+      f.Resultado = "titular_ausente";
+      render();
+      toast("Cambiado a «Titular ausente». Revísalo y guarda.");
+      return;
+    }
+  }
+
   const btn = $("#guardar");
   btn.disabled = true; btn.textContent = "Guardando…";
   try {
