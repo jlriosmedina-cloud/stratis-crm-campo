@@ -1994,9 +1994,23 @@ function estadoDerivado(c){
      abierta y el caso ya no está esperando a nadie. */
   if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
 
-  /* Un RUC que trajo Stratis no espera nada del banco: no hay validación que
-     aguardar, así que el siguiente paso es salir a contactarlo. */
-  if (esClienteNuevo(c)) return "POR_CONTACTAR";
+  /* Acá había un atajo: «un RUC que trajo Stratis no espera nada del banco»,
+     así que todo lead de venta abierto salía directo a «Por contactar».
+     Retirado el 23/08/2026, y era falso en los dos sentidos.
+
+     Un RUC que no está en la cartera hay que darlo de alta con el banco antes
+     de venderlo, y los números lo decían: de los 56 leads de venta, 35 tienen
+     coordinación con BBVA registrada —proporcionalmente MÁS que la cartera— y
+     el banco respondió en 8. El atajo hacía que esos 35 figuraran como listos
+     para salir mientras esperaban al banco igual que cualquier otro caso.
+
+     Y del otro lado, la venta salía del recorrido apenas se marcaba: nunca se
+     podía ver por dónde había pasado antes de cerrar. El cierre sigue siendo
+     el cierre —lo marca el ejecutivo, y manda sobre todo lo demás—, pero
+     ahora es el final de un camino y no un atajo que lo saltea.
+
+     El flujo es el mismo para los dos tipos de lead. Lo que cambia es a qué se
+     juega: uno cierra en Retenido y el otro en Venta. */
 
   /* ---- Las dos únicas puertas a «Por contactar» ------------------------
      Regla del 22/08/2026, y corrige lo que hacía que el indicador no sirviera.
