@@ -2395,17 +2395,26 @@ const BONO_DEF = {
      evalúa una vez, al cierre del proyecto, y se duplica si se cumplió la
      condición.
 
-     `periodos_con_llave` es cuántos de los cinco periodos tienen que haber
-     tenido la llave abierta —los tres requisitos de gestión— para que la
-     bolsa se duplique. Quedó en 5, o sea todos, por decisión del 22/08/2026.
+     `criterio` dice CONTRA QUÉ se evalúa, y cambió el 23/08/2026. La primera
+     versión contaba periodos con la llave abierta y quedó en 5 de 5; con el
+     periodo 1 cerrado en 2 de 3 para los cuatro, eso dejaba la duplicación
+     fuera del alcance de todo el equipo desde el primer mes.
 
-     Vale decir en voz alta lo que eso significa, porque el CRM lo va a
-     mostrar y conviene que no sorprenda: el periodo 1 cerró en 2 de 3 para
-     los cuatro ejecutivos, así que con la condición en 5 la duplicación ya
-     no es alcanzable para nadie. No es un error de cálculo ni un dato que
-     falte: es la regla acordada aplicada a lo que pasó. Se cambia acá y en
-     Ajustes, por versión, sin tocar el código. */
-  bolsa: { factor:2, periodos_con_llave:5 }
+     Dirección lo resolvió al revés: «cumplimiento como un todo, sin importar
+     el mes a mes». Así que lo que se mira es el logro ACUMULADO contra la
+     meta final del proyecto, con los mismos pesos, y un mes flojo al
+     principio —cuando el banco todavía no soltaba los datos— no deja a nadie
+     fuera. El equipo sigue optando a la duplicación.
+
+     `cumplimiento_pct` es el umbral con el que la bolsa se duplica, y todavía
+     no está fijado: en null el CRM muestra en cuánto va cada uno y no emite
+     veredicto, en vez de inventar un número. Se carga en Ajustes cuando
+     dirección lo defina.
+
+     `periodos_con_llave` se deja escrito para poder releer lo que se conversó
+     con la regla vieja puesta. No rige mientras `criterio` diga otra cosa. */
+  bolsa: { factor:2, criterio:"cumplimiento", cumplimiento_pct:null,
+           periodos_con_llave:5 }
 };
 /* Los parámetros no son uno solo: son una lista de versiones, cada una
    vigente desde un periodo del bono. Un periodo se calcula con la versión que
@@ -11553,12 +11562,73 @@ function incentivoDe(correo, p){
        carrera»; si un periodo corrido ya se perdió y la condición pide
        todos, se dice que no alcanza, y se dice cuál fue.
    ========================================================================= */
+/* ---- El cumplimiento del PROYECTO, no el promedio de los meses ------------
+
+   «Cumplimiento como un todo, sin importar el mes a mes», que fue la última
+   palabra de dirección el 23/08/2026. No es lo mismo que promediar los cinco
+   cumplimientos mensuales: se mide el logro ACUMULADO contra la meta FINAL del
+   proyecto —20 p.p. de reactivación, +15% de facturación, 7 ventas por periodo
+   por los periodos que van—, con los mismos pesos.
+
+   La diferencia importa y no es cosmética: un mes malo al principio, cuando el
+   banco todavía no soltaba los datos, hunde para siempre un promedio de meses
+   pero no impide llegar a la meta del proyecto. Que es exactamente lo que pasó
+   en el primer periodo y exactamente por qué se decidió medirlo así.
+
+   Lo que no se puede medir sale del reparto, igual que en el mes: mientras la
+   facturación no esté cargada no se puntúa con un cero. */
+function cumplimientoProyecto(correo){
+  const B    = paramsDe(periodoHoy());
+  const ps   = periodosProyecto();
+  const ult  = ps[ps.length - 1];
+  const cart = carteraDe(correo, ult);
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const hoy  = hoyISO();
+  const corridos = ps.filter(p => ventanaPeriodo(p).fin <= hoy);
+
+  const logrados = mios.filter(c => esRetencion(c) || esRecuperado(c)).length;
+  const pp     = cart.n ? logrados / cart.n * 100 : 0;
+  const cReact = B.metas.reactivacion_pp ? pp / B.metas.reactivacion_pp * 100 : null;
+
+  /* La facturación ya venía acumulada contra la base congelada, así que el
+     último dato cargado ES el avance del proyecto. */
+  let crec = null;
+  for (let i = corridos.length - 1; i >= 0 && crec === null; i--)
+    crec = crecimientoFact(correo, corridos[i]);
+  const cFact = crec === null || !B.metas.facturacion_pct
+              ? null : crec / B.metas.facturacion_pct * 100;
+
+  /* La venta es mensual, así que la meta del proyecto son las de los periodos
+     que ya corrieron: exigir las cinco en octubre sería medir el futuro. */
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo).length;
+  const pideVentas = B.metas.ventas_mes * Math.max(1, corridos.length);
+  const cVenta = pideVentas ? ventas / pideVentas * 100 : null;
+
+  const partes = [
+    { id:"react", peso:B.pesos.reactivacion, cumpl:cReact, logro:pp, meta:B.metas.reactivacion_pp },
+    { id:"fact",  peso:B.pesos.facturacion,  cumpl:cFact,  logro:crec, meta:B.metas.facturacion_pct },
+    { id:"venta", peso:B.pesos.venta,        cumpl:cVenta, logro:ventas, meta:pideVentas }
+  ];
+  const medibles = partes.filter(o => o.cumpl !== null);
+  const peso  = medibles.reduce((n,o) => n + o.peso, 0);
+  const total = peso ? medibles.reduce((n,o) => n + o.cumpl * o.peso, 0) / peso : 0;
+  return { total, partes, completo: medibles.length === partes.length, pesoMedido:peso,
+           periodosCorridos: corridos.length, periodos: ps.length };
+}
+
 function bolsaRetenida(correo){
   const B    = paramsDe(periodoHoy());
   const cfg  = B.bolsa || BONO_DEF.bolsa;
-  const pide = Number(cfg.periodos_con_llave) || 0;
   const fac  = Number(cfg.factor) || 1;
   const hoy  = hoyISO();
+  /* Dos criterios conviven. El viejo contaba periodos con la llave abierta; el
+     que rige desde el 23/08/2026 mira el cumplimiento del proyecto entero. Se
+     deja el viejo leíble para no reescribir lo que se conversó con la otra
+     regla puesta. */
+  const criterio = cfg.criterio || (cfg.periodos_con_llave ? "periodos_con_llave" : "cumplimiento");
+  const pide = Number(cfg.periodos_con_llave) || 0;
+  const pidePct = cfg.cumplimiento_pct === null || cfg.cumplimiento_pct === undefined
+                ? null : Number(cfg.cumplimiento_pct);
 
   const detalle = periodosProyecto().map(p => {
     const v = ventanaPeriodo(p);
@@ -11575,14 +11645,22 @@ function bolsaRetenida(correo){
   const faltan    = detalle.length - corridos.length;
   const acumulada = corridos.reduce((n,d) => n + d.retenido, 0);
 
-  /* El máximo que todavía se puede alcanzar: lo que ya tiene con llave más
-     todo lo que queda por correr. Si ni así llega, la condición está perdida. */
-  const techo = conLlave + faltan;
-  const estado = conLlave >= pide ? "cumple"
-               : techo   <  pide  ? "perdida"
-               : "en_carrera";
+  let estado, proyecto = null;
+  if (criterio === "cumplimiento"){
+    proyecto = cumplimientoProyecto(correo);
+    /* Mientras el proyecto no termine nadie está fuera: por eso se mide el
+       acumulado y no los meses. Solo al cerrar hay veredicto, y si el umbral
+       todavía no está fijado se dice eso y no un número inventado. */
+    estado = faltan > 0 ? "en_carrera"
+           : pidePct === null ? "por_definir"
+           : proyecto.total >= pidePct ? "cumple" : "no_alcanza";
+  } else {
+    const techo = conLlave + faltan;
+    estado = conLlave >= pide ? "cumple" : techo < pide ? "perdida" : "en_carrera";
+  }
 
-  return { detalle, corridos:corridos.length, faltan, conLlave, perdidos, pide, factor:fac,
+  return { detalle, corridos:corridos.length, faltan, conLlave, perdidos, pide, pidePct,
+           criterio, proyecto, factor:fac,
            acumulada, alCierre: estado === "cumple" ? acumulada * fac : acumulada, estado };
 }
 
@@ -11891,13 +11969,16 @@ function bloqueBolsa(){
   const cfg  = B.bolsa || BONO_DEF.bolsa;
   const filas = ejec.map(u => ({ u, b:bolsaRetenida(u.correo) }));
   const ref   = filas[0].b;
+  const porCumpl = ref.criterio === "cumplimiento";
   const nadie = filas.every(x => x.b.estado === "perdida");
   const alguno= filas.some(x => x.b.estado === "perdida");
 
   /* Los mismos tres colores que la llave en el Panel, para que «no alcanza»
      se lea igual acá y allá. `chip` ya existe y es el que usa la tabla de la
      llave; no se inventa un badge nuevo. */
-  const sem = { cumple:["ok","Duplica"], en_carrera:["warn","En carrera"], perdida:["crit","No alcanza"] };
+  const sem = { cumple:["ok","Duplica"], en_carrera:["warn","En carrera"],
+                perdida:["crit","No alcanza"], no_alcanza:["crit","No alcanza"],
+                por_definir:["warn","Falta el umbral"] };
 
   return `
   <div class="card ctrl" style="margin-top:12px">
@@ -11907,7 +11988,17 @@ function bloqueBolsa(){
         al cierre del proyecto, no mes a mes</span>
     </div>
 
-    ${nadie ? `<div class="note crit" style="margin:0 0 12px">
+    ${porCumpl ? `<div class="note" style="margin:0 0 12px">
+      <b>Se mide el cumplimiento del proyecto entero, no el mes a mes.</b> Es la decisión de dirección
+      del 23/08/2026: lo que se compara con la meta final —${B.metas.reactivacion_pp} p.p. de
+      reactivación, +${B.metas.facturacion_pct}% de facturación y ${B.metas.ventas_mes} ventas por
+      periodo— es el logro acumulado, no el promedio de los meses. Un mes flojo al principio no deja
+      a nadie fuera; por eso el equipo sigue optando a la duplicación.
+      ${ref.pidePct === null ? `<div style="margin-top:8px"><b>Falta fijar el umbral</b> de
+        cumplimiento acumulado con el que la bolsa se duplica. Mientras no esté cargado, el CRM
+        muestra en cuánto va cada uno y no emite veredicto: se carga en
+        <b>Ajustes → Parámetros del incentivo</b>.</div>` : ""}</div>`
+    : nadie ? `<div class="note crit" style="margin:0 0 12px">
       <b>Con la condición acordada, hoy nadie duplica.</b> Se pide la llave abierta en
       ${cfg.periodos_con_llave} de ${ref.detalle.length} periodos, y el primero cerró sin llave
       para todo el equipo. No es un dato que falte ni un cálculo a medias: es la regla aplicada a
@@ -11923,18 +12014,24 @@ function bloqueBolsa(){
       <thead><tr>
         <th>Ejecutivo</th>
         <th title="Suma de lo retenido en los periodos que ya cerraron">Bolsa acumulada</th>
-        <th title="En cuántos de los periodos ya corridos tuvo los tres requisitos">Periodos con llave</th>
+        <th title="${porCumpl
+          ? "Logro acumulado contra la meta final del proyecto, con los mismos pesos"
+          : "En cuántos de los periodos ya corridos tuvo los tres requisitos"}"
+          >${porCumpl ? "Cumplimiento del proyecto" : "Periodos con llave"}</th>
         <th title="Periodos del proyecto que todavía no terminan">Por correr</th>
         <th title="Si la condición se cumple, la bolsa se multiplica por el factor acordado">Al cierre</th>
         <th>Duplicación</th>
       </tr></thead>
       <tbody>
       ${filas.map(({u, b}) => {
-        const [cls, txt] = sem[b.estado];
+        const [cls, txt] = sem[b.estado] || ["warn", "En carrera"];
         return `<tr>
           <td class="nom">${esc(u.nombre)}</td>
           <td class="num fuerte">${pct1(b.acumulada)}</td>
-          <td class="num ${b.estado === "perdida" ? "alerta" : ""}">${b.conLlave} de ${b.corridos}</td>
+          <td class="num ${b.estado === "perdida" || b.estado === "no_alcanza" ? "alerta" : ""}">${
+            porCumpl ? pct1(b.proyecto.total) + (b.proyecto.completo ? ""
+              : ` <span class="tenue">sobre el ${b.proyecto.pesoMedido}%</span>`)
+            : `${b.conLlave} de ${b.corridos}`}</td>
           <td class="num tenue">${b.faltan || "—"}</td>
           <td class="num fuerte">${pct1(b.alCierre)}</td>
           <td class="num"><span class="chip ${cls}">${txt}</span></td>
@@ -11945,10 +12042,18 @@ function bloqueBolsa(){
     </div>
 
     <p class="pie">Todo en <b>porcentaje del sueldo base</b>: las remuneraciones no viven en el CRM.
-      La columna <b>Periodos con llave</b> cuenta solo los periodos que ya cerraron — un periodo que
-      todavía no termina no se cuenta como perdido, porque no lo está. La condición vigente pide la
-      llave abierta en <b>${cfg.periodos_con_llave} de ${ref.detalle.length}</b> periodos y el factor
-      de duplicación es <b>×${cfg.factor}</b>.</p>
+      ${porCumpl
+        ? `El <b>cumplimiento del proyecto</b> mira el logro acumulado contra la meta final, con los
+           pesos de siempre; lo que todavía no se puede medir —la facturación, mientras el banco no
+           entregue el dato— sale del reparto en vez de puntuarse con un cero, y por eso la columna
+           dice sobre qué porcentaje del peso está calculada. El veredicto se emite una sola vez, al
+           cerrar el proyecto: hasta entonces todos figuran <b>en carrera</b>, porque lo están.
+           ${ref.pidePct === null ? "El umbral de duplicación todavía no está cargado."
+             : `El umbral acordado es <b>${ref.pidePct}%</b>.`}`
+        : `La columna <b>Periodos con llave</b> cuenta solo los periodos que ya cerraron — un periodo
+           que todavía no termina no se cuenta como perdido, porque no lo está. La condición vigente
+           pide la llave abierta en <b>${cfg.periodos_con_llave} de ${ref.detalle.length}</b> periodos.`}
+      El factor de duplicación es <b>×${cfg.factor}</b>.</p>
   </div>`;
 }
 
@@ -12064,9 +12169,9 @@ function viewBono(){
       <div class="kv"><dt>Visitas efectivas</dt><dd>Las que el CRM marca como <b>cumple visita</b>: presencial o virtual
         <b>y</b> con el cliente respondiendo. El mínimo del periodo es de <b>${esc(reglaVisitas(B.requisitos, p).largo)}</b>.</dd></div>
       <div class="kv"><dt>La bolsa retenida</dt><dd>Cada periodo se paga el ${B.pago_mensual}% y se retiene el ${
-        100 - B.pago_mensual}%. Las retenciones forman una sola bolsa que se evalúa al cierre del proyecto,
-        no mes a mes, y se duplica solo con la llave abierta en ${
-        (B.bolsa || BONO_DEF.bolsa).periodos_con_llave} de ${periodosProyecto().length} periodos.</dd></div>
+        100 - B.pago_mensual}%. Las retenciones forman una sola bolsa que se evalúa <b>una sola vez, al cierre
+        del proyecto</b>, contra el cumplimiento acumulado y no mes a mes: un periodo flojo no deja a nadie
+        fuera de la duplicación.</dd></div>
       <div class="kv"><dt>Sin sueldos</dt><dd>Todo se expresa en porcentaje del sueldo base. Las remuneraciones
         no viven en el CRM y no tienen por qué.</dd></div>
     </div>
@@ -12222,6 +12327,7 @@ const CAMPOS_BONO = [
   /* La bolsa retenida: en cuántos periodos hace falta la llave abierta para
      que se duplique, y por cuánto se multiplica. Se editan acá y viajan con
      la versión, como todo lo demás. */
+  ["bolsa.cumplimiento_pct",     "Bolsa: umbral de cumplimiento","%"],
   ["bolsa.periodos_con_llave",   "Bolsa: periodos con llave",   ""],
   ["bolsa.factor",               "Bolsa: factor al cierre",     "×"]
 ];
@@ -12382,8 +12488,12 @@ function cardParametrosBono(){
         Con los 3, gradual desde ${esc2[0][0]}% de cumplimiento (${esc2[0][1]}% del sueldo) hasta
         ${esc2[esc2.length-1][0]}% (${esc2[esc2.length-1][1]}%, el tope)</dd></div>
       <div class="kv"><dt>Cuándo se paga</dt><dd>${val.pago_mensual}% con la remuneración del mes y
-        ${100 - val.pago_mensual}% a la bolsa retenida, que se duplica (×${bol.factor}) solo con la
-        llave abierta en ${bol.periodos_con_llave} de ${periodosProyecto().length} periodos</dd></div>
+        ${100 - val.pago_mensual}% a la bolsa retenida, que se duplica (×${bol.factor}) ${
+        (bol.criterio || (bol.periodos_con_llave ? "periodos_con_llave" : "cumplimiento")) === "cumplimiento"
+          ? (bol.cumplimiento_pct == null
+              ? "según el cumplimiento acumulado del proyecto — falta cargar el umbral"
+              : `si el cumplimiento acumulado del proyecto llega al ${bol.cumplimiento_pct}%`)
+          : `solo con la llave abierta en ${bol.periodos_con_llave} de ${periodosProyecto().length} periodos`}</dd></div>
     </div>`;
 
   return `
