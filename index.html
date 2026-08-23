@@ -2088,7 +2088,10 @@ function etapaDe(c){
   if (c.resultado_gestion === "VENTA")    return 8;
   if (c.resultado_gestion === "RETENIDO") return 7;
   if (c.resultado_gestion === "PERDIDO")  return 9;
-  const regs = DB.delCliente(c.customer_id);
+  /* La historia completa: la etapa mira los dos lados del caso, y desde que
+     `delCliente` devuelve solo lo dirigido al comercio, las coordinaciones con
+     el banco hay que ir a buscarlas a la historia. */
+  const regs = DB.historiaDe(c.customer_id);
   const gest = regs.filter(esGestionCliente);
   if (gest.some(r => esEfectivo(r.Resultado))) return 6;
   if (gest.length) return 5;
@@ -2910,15 +2913,29 @@ const DB = {
   todo: [],
   todos(){ return this.visitas; },
   bbva(){ return this.crudo.filter(r => r.Con === "BBVA"); },
+  /* Los dos montones se parten por DESTINATARIO y no por la columna `Con`.
+     Suena a detalle y no lo es: hasta el 23/08/2026 se partían por `Con`, y
+     los 183 correos que la migración 59 reclasificó —los que iban al
+     funcionario de BBVA anotados como correo al cliente— llevan
+     destinatario='bbva' pero conservaron con='CLIENTE'.
+
+     El efecto era que esas 183 gestiones se caían de los DOS lados: llegaban
+     por `delCliente` pero `esGestionCliente` las descartaba por su
+     destinatario, y `bbvaDe` no las veía porque miraba `Con`. Desaparecían.
+     En la descarga se veía así: 19 comercios con coordinación registrada
+     cuando hay 170.
+
+     `destinatarioDe` es la única definición de a quién fue cada gestión.
+     Partir por otra cosa era tener dos, y dos definiciones dan dos números. */
   delCliente(cid){
-    return this.todo.filter(r => r.Con !== "BBVA" && String(r.Customer_id) === String(cid))
+    return this.todo.filter(r => esAlCliente(r) && String(r.Customer_id) === String(cid))
                     .sort((a,b) => ts(b) - ts(a));
   },
   /* Las coordinaciones de un comercio, de la más vieja a la más nueva: acá el
      orden importa al revés que en las gestiones, porque «primer contacto» y
      «segundo contacto» son posiciones en el tiempo. */
   bbvaDe(cid){
-    return this.todo.filter(r => r.Con === "BBVA" && String(r.Customer_id) === String(cid))
+    return this.todo.filter(r => esAlBanco(r) && String(r.Customer_id) === String(cid))
                     .sort((a,b) => ts(a) - ts(b));
   },
   /* La ficha del comercio muestra una sola historia, con las dos clases
@@ -3144,7 +3161,11 @@ const RULES = {
   recomputarBase(cid){
     const c = byId[String(cid)];
     if (!c) return null;
-    const regs = DB.delCliente(cid);
+    /* La historia entera: de acá salen los tres montones —lo que se le hizo al
+       comercio, lo que se coordinó con el banco y lo que fabricó la migración—
+       y cada uno se cuenta aparte. Tomar solo `delCliente` dejaría los
+       contadores del banco en cero. */
+    const regs = DB.historiaDe(cid);
     /* Lo que se cuenta es lo que un ejecutivo le hizo AL COMERCIO. Las filas
        reconstruidas y las coordinaciones con el banco viajan aparte: siguen
        disponibles, pero no engordan el contador de gestiones ni la cobertura. */
@@ -4327,6 +4348,10 @@ function viewFicha(c){
      él, y en su línea de tiempo se leen como gestiones suyas con un texto que
      nunca tecleó. Supervisión sí las ve, para poder rastrear de dónde salió
      el histórico. */
+  /* Con el flujo BBVA encendido la línea de tiempo es una sola historia con las
+     dos clases de gestión; apagado, el concepto de coordinación todavía no
+     existe y no se muestra a nadie. Y en los dos casos, el ejecutivo no ve las
+     filas que fabricó la migración: no son trabajo suyo ni de nadie. */
   const regs = (flujoBbva() ? DB.historiaDe(c.customer_id) : DB.delCliente(c.customer_id))
                  .filter(r => !vistaDeCampo() || !esReconstruida(r));
   const mio = esMiCliente(c);
@@ -8732,16 +8757,21 @@ function filasBase(){
    interno y el detalle del archivo de análisis—, y devuelve un objeto con
    nombres en vez de una lista posicional: así el orden de las columnas se
    decide en un solo sitio y estas no se pueden correr. */
+/* Acá había un atajo que partía la hoja en dos: si el comercio era un lead de
+   venta, se devolvía un bloque fijo —«Venta» como punto del caso, cero
+   coordinaciones, «No aplica» en la respuesta del banco— con la idea de que
+   una venta nueva no pasa por BBVA.
+
+   Es falso, y los números lo dicen: de los 56 leads de venta, 35 tienen
+   coordinación con el banco registrada —proporcionalmente MÁS que la cartera—
+   y el banco respondió en 8. Un RUC que no está en la cartera hay que darlo de
+   alta con el banco antes de venderlo.
+
+   Lo que el atajo rompía era justo lo que se quiere mirar: los 56 salían todos
+   como «Venta» en la dinámica aunque solo 8 hubieran cerrado, así que el
+   recorrido de ese tipo de lead no se podía ver. Retirado el 23/08/2026: un
+   solo camino, y las columnas del banco se calculan igual para los dos. */
 function coordBBVA(c){
-  if (esClienteNuevo(c)) return {
-    Punto_del_Caso:"Venta", Coordinaciones_BBVA:0,
-    BBVA_1er_Contacto:"", BBVA_1er_Medio:"No aplica",
-    BBVA_2do_Contacto:"", BBVA_2do_Medio:"No aplica",
-    BBVA_Respondio:"No aplica", BBVA_Fecha_Respuesta:"",
-    BBVA_Intentos_Hasta_Respuesta:"", BBVA_Dias_Hasta_Respuesta:"",
-    BBVA_Contactos_En_Negociacion:0, BBVA_Ultimo_Contacto:"",
-    BBVA_Falta_Correo_De_Respaldo:"No"
-  };
   const k = bbvaDe(c.customer_id);
   const e = estadoDerivadoById(estadoDerivado(c)) || {};
   const m = r => r ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : "";
