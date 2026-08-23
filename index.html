@@ -2044,6 +2044,55 @@ function etapaDe(c){
   return 1;
 }
 
+/* ---- Lo que hay que revisar, no lo que hay que corregir -----------------
+   Tres comprobaciones que salieron de leer la base comercio por comercio el
+   23/08/2026. Ninguna cambia nada por su cuenta: marcan la gestión para que
+   la mire quien la registró. Es la misma regla que rige toda la limpieza —el
+   CRM no decide por el ejecutivo—, y acá pesa más que en ningún otro sitio,
+   porque «el cliente respondió» es lo que separa una conversación de un
+   mensaje enviado y de ahí cuelga el embudo entero.
+
+   1 · Dijo que respondió y no escribió qué respondió.
+       43 gestiones. 30 son del mismo ejecutivo, así que no es despiste
+       general: es una forma de registrar que se aprendió y se repite.
+
+   2 · Lo que se transcribe lo dijo otra persona, no el titular.
+       «Encargado indica que volvamos a comunicarnos», «Administrador indico
+       llamar por la tarde». Para eso está «Titular ausente», que es un
+       resultado distinto y no cuenta como contacto logrado.
+
+   3 · Lo que se transcribe es un aplazamiento, no una respuesta.
+       «Cliente indico que volvamos a comunicarnos», «Comercio indica que no
+       puede atendernos». Eso último es un rechazo con todas las letras. */
+const RE_HABLO_UN_TERCERO =
+  /encargad|administrador|recepci|personal del local|cajer|vendedor|secretari/i;
+const RE_QUEDO_APLAZADO =
+  /volvamos a comunicar|volver a llamar|llamar (por la|m[aá]s) tarde|no puede atender|no se encuentra|no est[aá] el|indic[oó] que llame/i;
+
+const textoDe = r => `${r.Comentario_Ejecutivo || ""} ${r.Comentario_Cliente || ""} ${r.Espera || ""}`;
+
+/* Una respuesta que nadie puede verificar: se marcó que el cliente contestó y
+   no quedó ni una palabra suya. */
+const respuestaSinVoz = r =>
+  !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
+  && !String(r.Comentario_Cliente || "").trim();
+
+/* Una respuesta que, leída, no parece del titular o no parece una respuesta. */
+const respuestaDudosa = r =>
+  !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
+  && (RE_HABLO_UN_TERCERO.test(textoDe(r)) || RE_QUEDO_APLAZADO.test(textoDe(r)));
+
+/* Un comercio de cartera al que nunca se le escribió, llamó ni visitó. Pedirle
+   los datos al banco no es haber salido: son 159 de 800, y hasta hoy 152 de
+   ellos figuraban como «Por contactar», que se lee como lo contrario. */
+const carteraSinSalir = c =>
+  !!c && !esClienteNuevo(c) && DB.delCliente(c.customer_id).filter(esGestionCliente).length === 0;
+
+/* Dado de baja por el banco y sin ningún cierre marcado. No se cierra solo:
+   se le muestra a quien lo tiene asignado. */
+const bajaSinCierre = c =>
+  !!c && c.estado === "DE BAJA" && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE";
+
 /* Efectividad del contacto: de cada diez veces que se le escribió, llamó o
    visitó, en cuántas contestó el titular. Es lo que el conteo de gestiones no
    decía. Sin gestiones no es 0%: es que todavía no se midió, y devuelve null
@@ -3919,6 +3968,13 @@ function viewCartera(){
     /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
        de análisis: existe para vaciarse. */
     if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
+    /* Cartera a la que nunca se salió. Distinto de «sin gestión»: acá puede
+       haber coordinación con el banco —de hecho en 152 de 159 la hay—, y esa
+       es justo la confusión que hacía que figuraran como «Por contactar». */
+    if (S.fContacto === "sin_salir")       return carteraSinSalir(c);
+    /* Dados de baja por el banco y sin cierre marcado. Nadie los cierra solo:
+       el CRM no asume perdido, se lo muestra a quien lo tiene asignado. */
+    if (S.fContacto === "baja_sin_cierre") return bajaSinCierre(c);
     /* Trabajados y sin una sola palabra escrita. No es lo mismo que «sin
        gestión»: a estos ya se les dedicó tiempo, y la celda de comentario que
        BBVA lee se va a llenar sola con lo deducido. Vale la pena pedir la de
@@ -6930,6 +6986,8 @@ function viewRegistros(){
   /* El Panel avisa cuántas se registraron tarde; sin este filtro el número
      llevaba a la lista completa, que es lo mismo que no llevar a ninguna. */
   else if (S.fResultado === "fuera_plazo")    lista = lista.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "respuesta_sin_voz") lista = lista.filter(respuestaSinVoz);
+  else if (S.fResultado === "respuesta_dudosa")  lista = lista.filter(respuestaDudosa);
   else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -6999,6 +7057,10 @@ function viewRegistros(){
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
       ${mando && todos.some(r => demoraHabil(r) > 1)
         ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después del contacto">Fuera de plazo</button>` : ""}
+      ${todos.some(respuestaSinVoz)
+        ? `<button class="${S.fResultado==="respuesta_sin_voz"?"on":""}" data-fr="respuesta_sin_voz" title="Se marcó que el cliente respondió y no quedó ninguna palabra suya">Respuesta sin transcribir</button>` : ""}
+      ${todos.some(respuestaDudosa)
+        ? `<button class="${S.fResultado==="respuesta_dudosa"?"on":""}" data-fr="respuesta_dudosa" title="El comentario sugiere que habló otra persona, o que quedó en volver a llamar">Respuesta por revisar</button>` : ""}
     </div>
 
     <div class="sel-row">
@@ -7056,6 +7118,8 @@ function gestionesFiltradas(){
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
   else if (S.fResultado === "fuera_plazo")    l = l.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "respuesta_sin_voz") l = l.filter(respuestaSinVoz);
+  else if (S.fResultado === "respuesta_dudosa")  l = l.filter(respuestaDudosa);
   else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
   if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
   if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
@@ -7637,7 +7701,23 @@ function bloqueCorregir(r, regs){
     { n:vencidas.length, t:"Acciones vencidas", d:"pasó la fecha comprometida y nadie retomó",
       ir:`data-go="agenda"`, grave:true },
     { n:huerfanos.length,t:"Comercios sin próxima acción", d:"trabajados, abiertos y sin nada agendado",
-      ir:`data-go="agenda"` }
+      ir:`data-go="agenda"` },
+    /* Las tres que salieron de leer la base comercio por comercio. No corrigen
+       nada solas: llevan a la lista para que la mire quien la registró. */
+    { n:regs.filter(respuestaSinVoz).length, t:"Respuestas sin transcribir",
+      d:"se marcó que el cliente respondió y no quedó ninguna palabra suya",
+      ir:`data-verges="respuesta_sin_voz"`, grave:true },
+    { n:regs.filter(respuestaDudosa).length, t:"Respuestas por revisar",
+      d:"el comentario suena a que habló otra persona, o a que quedó en volver a llamar",
+      ir:`data-verges="respuesta_dudosa"` },
+    /* `base` ya viene acotado a la cartera del ejecutivo cuando mira un
+       ejecutivo: no hay que volver a filtrar acá. */
+    { n:base.filter(carteraSinSalir).length,
+      t:"Cartera sin una sola salida", d:"pedirle los datos al banco no es haber contactado al comercio",
+      ir:`data-vercartera="sin_salir"` },
+    { n:base.filter(bajaSinCierre).length, t:"De baja y sin cierre",
+      d:"el banco los dio de baja y nadie marcó qué pasó",
+      ir:`data-vercartera="baja_sin_cierre"` }
   ].filter(x => x.n > 0);
 
   return `
@@ -8128,7 +8208,22 @@ function decisionesTablero(r, regs){
       ir:`data-vercartera="sin_bbva"`, tono:"warn" },
     { n:habilitadosSinCita.length, t:"Habilitados sin visita",
       d:"BBVA confirmó o el cliente respondió, y no hay cita puesta",
-      ir:`data-go="agenda"`, tono:"crit" }
+      ir:`data-go="agenda"`, tono:"crit" },
+    /* Las cuatro que salieron de leer la base comercio por comercio el
+       23/08/2026. Ninguna corrige nada: llevan a la lista para que la mire
+       quien la registró, igual que «Perdido» solo lo marca el ejecutivo. */
+    { n:regs.filter(respuestaSinVoz).length, t:"Respuestas sin transcribir",
+      d:"Se marcó que el cliente respondió y no quedó ninguna palabra suya",
+      ir:`data-verges="respuesta_sin_voz"`, tono:"crit" },
+    { n:regs.filter(respuestaDudosa).length, t:"Respuestas por revisar",
+      d:"El comentario suena a que habló otra persona, o a que quedó en volver a llamar",
+      ir:`data-verges="respuesta_dudosa"`, tono:"warn" },
+    { n:base.filter(carteraSinSalir).length, t:"Cartera sin una sola salida",
+      d:"Pedirle los datos al banco no es haber contactado al comercio",
+      ir:`data-vercartera="sin_salir"`, tono:"crit" },
+    { n:base.filter(bajaSinCierre).length, t:"De baja y sin cierre",
+      d:"El banco los dio de baja y nadie marcó qué pasó",
+      ir:`data-vercartera="baja_sin_cierre"`, tono:"warn" }
   ].filter(x => x.siempre || x.n > 0);
 
   return `
