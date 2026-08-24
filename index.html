@@ -464,6 +464,18 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cola-x .cola-d{grid-column:2;grid-row:1;font-size:11px;font-weight:700;white-space:nowrap}
 .cola-x .cola-d.tarde{color:var(--crit-ink)}
+/* La fila de la cola lleva dos acciones: abrir la ficha y agendar. El botón de
+   agendar se mantiene con el tamaño de toque completo —44px— aunque el ícono
+   sea chico: en el celular esta columna se usa con el pulgar. */
+.cola-f{display:flex;align-items:stretch;gap:2px}
+.cola-f .cola-x{flex:1;min-width:0}
+.cola-ag{flex:none;width:44px;min-height:44px;display:grid;place-items:center;font-size:15px;
+  border-radius:var(--r-sm);background:none;border:1px solid transparent;cursor:pointer;
+  color:inherit;line-height:1}
+.cola-ag:hover{background:var(--brand-bg,var(--plane));border-color:var(--grid)}
+.cola-ag:focus-visible{outline:2px solid var(--brand-2);outline-offset:1px}
+.dia-cab{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
+.dia-cab .btn{text-transform:none;letter-spacing:0}
 
 .cal-res{display:flex;gap:12px;align-items:flex-start;margin-bottom:9px}
 .cal-res-f{flex:none;width:96px;padding-top:14px;text-align:right}
@@ -1653,7 +1665,13 @@ const PROPOSITOS_BBVA = [
      una interacción y no como una casilla del primer contacto. */
   { id:"respuesta",       label:"Respuesta del banco", desc:"El ejecutivo contestó un contacto anterior y entregó los datos" },
   { id:"respaldo_chat",   label:"Respaldo del chat",  desc:"El correo que deja constancia de lo coordinado por chat" },
-  { id:"insistencia",     label:"Insistencia",        desc:"Se vuelve a escribir porque no ha respondido" },
+  /* Se llamaba «Insistencia». El nombre describía bien el hecho y mal la
+     pantalla: el ejecutivo que acababa de registrar un correo veía la ficha
+     con el mismo botón y el mismo rótulo de antes, y lo leía como que no se
+     había guardado nada. «Reintento de contacto» dice las dos cosas a la vez
+     —que el anterior quedó registrado y que este es uno más—, que es
+     justamente lo que faltaba decir. */
+  { id:"insistencia",     label:"Reintento de contacto", desc:"Se vuelve a escribir porque no ha respondido" },
   { id:"negociacion",     label:"Negociación",        desc:"Consulta al banco por tasa, POS, equipos o comisión" }
 ];
 const nomProposito = id => (PROPOSITOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -4516,6 +4534,7 @@ function viewFicha(c){
       </div>
     </div>` : ""}
     ${flujoBbva() ? cardCoordinacionBBVA(c, mio) : ""}
+    ${cardProximaVisita(c, mio)}
     <div class="card">
       <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
       <div class="stat-row" style="margin-bottom:0">
@@ -4538,8 +4557,91 @@ function viewFicha(c){
         con trabajo de campo del ejecutivo, y como el Analista y el Manager no
         entran en el bono, tampoco mueve ningún cumplimiento. */ ""}
   ${(mio || !esDeCampo()) ? `<div class="sticky-actions">
-    <button class="btn" data-go="form_visita|${c.customer_id}">＋ Registrar contacto</button>
+    <button class="btn" data-go="form_visita|${c.customer_id}">${
+      rotuloContacto(b._intentos, b._efectivos > 0, "＋ Registrar contacto")}</button>
+    ${mio ? botonAgenda(c) : ""}
   </div>` : ""}`;
+}
+
+/* ---- «El botón no hizo nada» --------------------------------------------
+
+   Un ejecutivo manda el correo al ejecutivo de BBVA, lo registra, vuelve a la
+   ficha y encuentra exactamente el mismo botón que tocó hace un minuto:
+   «＋ Registrar coordinación con BBVA». Nada en la pantalla le dice que su
+   registro entró; el rótulo es el de un comercio en el que nadie hizo nada
+   todavía. Lo mismo del lado del cliente. Y como el banco tampoco contesta al
+   instante, la conclusión razonable —la que se sacó en campo— es que el botón
+   no guardó.
+
+   El arreglo no es un aviso más: es que el rótulo cuente lo que ya pasó. Si
+   hay contactos registrados y todavía no hay respuesta, lo que sigue no es
+   «registrar», es un REINTENTO, y así se lee. El «＋» se vuelve «↻» por la
+   misma razón: son dos gestos distintos y se ven distintos.
+
+   Vale para los dos lados —al banco y al cliente— porque el malentendido es el
+   mismo en los dos. */
+function rotuloContacto(n, respondio, base){
+  return (Number(n) > 0 && !respondio) ? "↻ Reintento de contacto" : base;
+}
+
+/* ---- La reunión, agendada desde la ficha --------------------------------
+
+   Hasta hoy una cita solo podía nacer DENTRO del formulario de gestión: había
+   que registrar un contacto y, al final del formulario, elegir «volver a
+   visitar». Eso calza cuando la visita se pacta durante la llamada que se está
+   registrando, y no calza en el caso más común de la campaña: el cliente
+   escribe por WhatsApp el martes por la tarde y cuadra para el jueves. No hay
+   ninguna gestión nueva que registrar —ese mensaje no es un contacto del
+   ejecutivo— y el compromiso existe igual. El calendario no se enteraba.
+
+   Ahora la ficha tiene el botón y la tarjeta: se agenda día y hora en dos
+   toques, y lo agendado se ve donde se trabaja el comercio, no solo en la
+   pantalla del calendario. */
+function botonAgenda(c){
+  const s = citaDe(c.customer_id);
+  return s
+    ? `<button class="btn ghost" data-reag="${esc(s.id)}">Reagendar la reunión</button>`
+    : `<button class="btn ghost" data-agendar="${esc(c.customer_id)}">📅 Agendar reunión</button>`;
+}
+
+function cardProximaVisita(c, mio){
+  const s = citaDe(c.customer_id);
+  if (!s){
+    if (!mio) return "";
+    /* Sin cita, la tarjeta solo aparece donde ya se puede agendar: cuando el
+       banco confirmó o el cliente respondió. Antes de eso no hay a quién
+       visitar, y ofrecerlo sería mandar al ejecutivo a un callejón. */
+    if (!habilitadoEn(c.customer_id)) return "";
+    const d = habilesDesde(habilitadoEn(c.customer_id));
+    return `<div class="card">
+      <h3>Próxima reunión</h3>
+      <div class="note warn" style="margin:0">
+        <b>Este comercio ya se puede visitar y no tiene reunión puesta.</b>
+        ${d ? `Quedó habilitado hace ${esc(textoDias(d))}.` : "Quedó habilitado hoy."}
+        Agéndala con día y hora: sin hora no ocupa franja y nadie puede saber si estás ocupado.
+        <div style="margin-top:10px">
+          <button class="btn sm" data-agendar="${esc(c.customer_id)}">📅 Agendar reunión</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  const e = estadoCita(s), meta = ESTADO_CITA[e] || {};
+  return `<div class="card">
+    <h3>Próxima reunión</h3>
+    <div class="kv"><dt>Cuándo</dt><dd>
+      <b>${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))} · ${esc(rangoCita(s))}</b>
+      <span class="chip ${meta.tono || "no"}" style="margin-left:6px">${esc(meta.label || "")}</span>
+    </dd></div>
+    <div class="kv"><dt>Modalidad</dt><dd>${esc(nomModalidad(s.modalidad))}</dd></div>
+    ${vistaDeCampo() ? "" : `<div class="kv"><dt>Con</dt><dd>${esc(s.ejecutivo || "")}</dd></div>`}
+    ${s.comentario ? `<div class="quote" style="margin-top:8px">${esc(s.comentario)}</div>` : ""}
+    ${movida(s)}
+    ${(mio || !esDeCampo()) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+      <button class="btn ghost sm" data-reag="${esc(s.id)}">Reagendar</button>
+      <button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
+        title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>
+    </div>` : ""}
+  </div>`;
 }
 
 /* El escalón que faltaba, dicho en una tarjeta.
@@ -4638,7 +4740,8 @@ function cardCoordinacionBBVA(c, mio){
         <button class="btn" data-go="form_bbva|${c.customer_id}">Coordinar ahora</button>
       </div>`
       : ((mio || !esDeCampo()) ? `<button class="btn ghost sm block" style="margin-top:11px"
-          data-go="form_bbva|${c.customer_id}">＋ Registrar coordinación con BBVA</button>` : "")}
+          data-go="form_bbva|${c.customer_id}">${
+            rotuloContacto(k.n, k.respondio, "＋ Registrar coordinación")} con BBVA</button>` : "")}
   </div>`;
 }
 
@@ -9008,10 +9111,18 @@ function descargarGestiones(){
   if (vistaDeCampo()) return toast("Las descargas son de supervisión. Pídeselas a tu supervisor.");
   const regs = typeof gestionesFiltradas === "function" ? gestionesFiltradas() : DB.todos();
   if (!regs.length) return toast("No hay gestiones que descargar con estos filtros");
+  /* La puntualidad viaja con el detalle desde el 24/08/2026. Antes esta hoja
+     traía «Registrada_El» y nada más, así que para saber si una gestión entró
+     dentro del plazo había que restar días a mano descontando sábados,
+     domingos y feriados. Ahora van las tres columnas que producen el
+     requisito: cuándo empieza a correr el plazo —el alta de la ficha, si el
+     comercio entró al CRM después de la gestión—, cuántos días trabajados
+     pasaron, y si quedó a tiempo. */
   const cols = ["Fecha","Hora","Ejecutivo","Customer_id","Nombre_Comercio","Distrito",
                 "Medio","Resultado","El_Cliente_Respondio","Cumple_Visita",
                 "Ubicacion_Verificada","Calificacion",
-                "Comentario_Ejecutivo","Lo_Que_Dijo_El_Cliente","Registrada_El","ID_Registro"];
+                "Alta_De_La_Ficha","Registrada_El","Dias_Trabajados","A_Tiempo",
+                "Comentario_Ejecutivo","Lo_Que_Dijo_El_Cliente","ID_Registro"];
   const filas = regs.map(r => {
     const c = byId[String(r.Customer_id)] || {};
     return [
@@ -9022,14 +9133,138 @@ function descargarGestiones(){
       r.Cumple_Visita === "SI" ? "SI" : "NO",
       marcaUbicacion(r),
       r.Calificacion || "",
+      String(c.creado_en || "").slice(0,10),
+      String(r.Creado_En || "").slice(0,10),
+      demoraHabil(r),
+      aTiempo(r) ? "Sí" : "No",
       r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
-      String(r.Creado_En || "").slice(0,10), r._id
+      r._id
     ];
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hoja(cols, filas), "Gestiones");
   XLSX.writeFile(wb, `Gestiones_${hoyISO().replace(/-/g,"")}.xlsx`);
   toast(`${filas.length} gestiones descargadas`);
+}
+
+/* =========================================================================
+   Toda la gestión de un ejecutivo, con lo que decide cada requisito al lado
+
+   El caso que lo pidió: Vanessa aparecía cumpliendo en los registros del CRM y
+   no en la puntualidad, y la pantalla decía «2 de 3» sin decir CUÁLES de sus
+   gestiones se cayeron ni por qué. Discutir eso en una reunión de liquidación
+   con una cifra y ningún renglón no se puede.
+
+   Lo que baja es el detalle fila por fila, con las tres columnas que producen
+   los tres números de la llave —a tiempo, cuenta para cobertura, visita
+   efectiva— y una hoja de resumen que los suma. Si la suma de una columna no
+   da el número de la pantalla, hay un error y se ve sin buscarlo.
+
+   Tres decisiones de forma que no son cosméticas:
+
+     · Van las gestiones de LOS DOS LADOS —al comercio y al ejecutivo de BBVA—
+       porque el bono cuenta las dos, y una descarga que trajera solo el lado
+       del cliente diría que faltan gestiones que sí existen.
+     · NO van las filas que escribió la migración. No las trabajó nadie, no
+       cuentan para el bono, y verlas acá invitaría a discutir sobre trabajo
+       que no ocurrió.
+     · El plazo de puntualidad arranca en el más tardío entre la fecha de la
+       gestión y el alta de la ficha, y las dos fechas van en columnas
+       separadas. Es lo que permite ver de un vistazo que un «fuera de plazo»
+       era en realidad una ficha creada después.
+   ========================================================================= */
+function descargarGestionesDe(correo, p){
+  if (vistaDeCampo()) return toast("Las descargas son de supervisión. Pídeselas a tu supervisor.");
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return toast("No encuentro a ese ejecutivo");
+  const periodo = p || periodoActivo();
+  const ll = llaveDe(correo, periodo);
+
+  /* El mismo conjunto que cuenta el bono: los dos lados, sin las filas
+     reconstruidas. Se pide por la misma función, no por una copia. */
+  const gest = gestionesDe(correo, periodo)
+    .slice().sort((a,b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto))
+                        || String(a.Hora_Contacto || "").localeCompare(String(b.Hora_Contacto || "")));
+  if (!gest.length) return toast(`${u.nombre} no tiene gestiones registradas en ${nombreMes(periodo)}`);
+
+  /* «Cuenta para cobertura» se marca en la PRIMERA gestión de cada comercio
+     cubierto: es lo que hace que cinco gestiones sobre la misma bodega sean un
+     comercio y no cinco, y deja la columna sumable. */
+  const cubiertos = ll.cobertura.idsCubiertos || new Set();
+  const yaMarcado = new Set();
+
+  const cols = ["Fecha de gestión","Hora","Dirigida a","Alta de la ficha","Fecha de registro",
+                "Días trabajados","A tiempo","Customer ID","Comercio","Distrito",
+                "Medio","Resultado","¿Respondió?","Visita efectiva","Cuenta para cobertura",
+                "Ubicación","Comentario del ejecutivo","Lo que respondió","ID del registro"];
+
+  const filas = gest.map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const alBanco = esAlBanco(r);
+    const cid = String(r.Customer_id);
+    let cobertura = "";
+    if (cubiertos.has(cid) && !yaMarcado.has(cid)){ cobertura = "Sí"; yaMarcado.add(cid); }
+    return [
+      String(r.Fecha_Contacto || "").slice(0,10),
+      r.Hora_Contacto || "",
+      alBanco ? "Ejecutivo de BBVA" : "Comercio",
+      String((c.creado_en || "")).slice(0,10),
+      String(r.Creado_En || "").slice(0,10),
+      demoraHabil(r),
+      aTiempo(r) ? "Sí" : "No",
+      cid,
+      titulo(c.nombre_comercio || r.Nombre_Comercio || ""),
+      titulo(c.distrito || r.Distrito || ""),
+      alBanco ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : nomTipo(r.Tipo_Contacto),
+      alBanco ? (nomResultadoBBVA(r.Resultado) || r.Resultado) : nomResultado(r.Resultado),
+      alBanco ? (respondioBBVA(r.Resultado) ? "SI" : "NO") : (esEfectivo(r.Resultado) ? "SI" : "NO"),
+      (!alBanco && r.Cumple_Visita === "SI") ? "SI" : "NO",
+      cobertura,
+      marcaUbicacion(r),
+      r.Comentario_Ejecutivo || "",
+      r.Comentario_Cliente || "",
+      r._id
+    ];
+  });
+
+  const co = ll.cobertura, vi = ll.visitas, pu = ll.puntualidad;
+  const si = ok => ok ? "CUMPLE" : "NO CUMPLE";
+  const resumen = [
+    ["Ejecutivo", u.nombre],
+    ["Correo", correo],
+    ["Periodo", nombreMes(periodo)],
+    ["Descargado el", fmtFecha(hoyISO())],
+    [],
+    ["Requisito", "Va en", "Mínimo", "Estado", "Cómo se lee en el detalle"],
+    ["Cobertura de cartera", `${co.cubiertos} de ${co.denom}`, co.meta + "%", si(co.ok),
+     'Suma de «Cuenta para cobertura» = ' + co.cubiertos],
+    ["Visitas efectivas", vi.efectivas, vi.pide, si(vi.ok),
+     'Suma de «Visita efectiva» = SI'],
+    ["Puntualidad del registro", `${gest.filter(aTiempo).length} de ${gest.length}`, pu.meta + "%", si(pu.ok),
+     'Suma de «A tiempo» = Sí'],
+    [],
+    ["Gestiones del periodo", gest.length, "", "",
+     "Registradas por él, al comercio y al ejecutivo de BBVA"],
+    ["Al comercio", gest.filter(esAlCliente).length],
+    ["Al ejecutivo de BBVA", gest.filter(esAlBanco).length],
+    ["Fuera de plazo", gest.filter(r => !aTiempo(r)).length, "", "",
+     "Registradas más de un día trabajado después de la gestión"],
+    /* El dato que explicaba el caso de Vanessa: registros que parecían tardíos
+       y en realidad se hicieron el mismo día en que la ficha entró al CRM. */
+    ["De ellas, cargadas junto con la ficha", gest.filter(cargadaConLaFicha).length, "", "",
+     "El comercio no existía en el CRM el día de la gestión: el plazo arranca en el alta"],
+    ["Llave de acceso", `${ll.cumplidos} de 3 requisitos`],
+    [],
+    ["No entran acá las filas que escribió la migración al reconstruir el histórico: no las trabajó nadie y no cuentan para el bono."]
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), "Resumen");
+  XLSX.utils.book_append_sheet(wb, hoja(cols, filas), "Gestiones");
+  const slug = String(u.nombre).normalize("NFD").replace(/[̀-ͯ]/g, "")
+                 .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  XLSX.writeFile(wb, `Gestiones_${slug}_${periodo.replace("-","")}.xlsx`);
+  toast(`${filas.length} gestiones de ${u.nombre} descargadas`);
 }
 
 const hoja = (cols, filas) => {
@@ -10914,10 +11149,16 @@ function panelDelDia(){
     String(a.hora_inicio||"").localeCompare(String(b.hora_inicio||"")));
   const hay = del.length;
   return `
-  <div class="sec-title">${esc(titulo(fechaLarga(iso)))} · ${hay} ${hay === 1 ? "cita" : "citas"}</div>
+  <div class="sec-title dia-cab">
+    <span>${esc(titulo(fechaLarga(iso)))} · ${hay} ${hay === 1 ? "cita" : "citas"}</span>
+    ${esDeCampo() && iso >= hoyISO()
+      ? `<button class="btn sm" data-agendar-dia="${esc(iso)}">📅 Agendar reunión</button>` : ""}
+  </div>
   ${hay ? del.map(tarjetaCita).join("")
-        : `<div class="card"><div class="vacio">No hay visitas agendadas para este día.
-           Toca otro día en el calendario, o busca un comercio arriba.</div></div>`}`;
+        : `<div class="card"><div class="vacio">No hay visitas agendadas para este día.${
+            esDeCampo() && iso >= hoyISO()
+              ? " Ponle día y hora a una desde el botón de arriba."
+              : " Toca otro día en el calendario, o busca un comercio arriba."}</div></div>`}`;
 }
 
 /* Los resultados de la búsqueda, con su fecha delante: buscar un RUC y que la
@@ -10938,6 +11179,190 @@ function resultadosBusqueda(){
     </div>`).join("")
    : `<div class="card"><div class="vacio">Ningún comercio con cita coincide con esa búsqueda.
       Se busca por Customer ID, RUC, razón social, nombre del comercio o distrito.</div></div>`}`;
+}
+
+/* ---- Agendar una reunión, directo ---------------------------------------
+
+   El calendario ya sabía mostrar citas, moverlas y contrastarlas contra lo que
+   de verdad pasó. Lo único que no tenía era la puerta de entrada: una cita solo
+   podía nacer dentro del formulario de gestión, al final, eligiendo «volver a
+   visitar». Así que agendar exigía registrar antes un contacto que muchas veces
+   no había ocurrido, y el ejecutivo que cuadraba la reunión por WhatsApp
+   simplemente no la ponía. El hueco no se veía como un hueco: se veía como
+   ejecutivos que no agendan.
+
+   Esta es la misma fila de `seguimientos` que escribe el formulario —misma
+   acción, misma modalidad, misma duración—, así que el cumplimiento de citas,
+   la demora en agendar y la ocupación del día siguen midiendo exactamente lo
+   mismo. Lo único que cambia es desde dónde se puede crear. */
+
+/* La hora que se ofrece por defecto: el siguiente cuarto de hora, y nunca
+   antes de las 9 ni después de las 18. Un valor por defecto que hay que
+   corregir siempre es peor que ninguno. */
+function horaSugerida(fecha){
+  const ahora = new Date();
+  if (fecha && fecha !== hoyISO()) return "10:00";
+  let m = Math.ceil((ahora.getHours() * 60 + ahora.getMinutes() + 30) / 15) * 15;
+  if (m < 9 * 60) m = 9 * 60;
+  if (m > 18 * 60) m = 10 * 60;      // ya es tarde: se ofrece mañana temprano
+  return String(Math.floor(m / 60)).padStart(2,"0") + ":" + String(m % 60).padStart(2,"0");
+}
+
+async function agendarCita(cid, fechaSugerida){
+  const c = byId[String(cid)];
+  if (!c) return toast("No encuentro ese comercio");
+
+  /* Una cita abierta por comercio: la base lo garantiza con un índice único, y
+     si se intentara insertar la segunda el rechazo llegaría como un error de
+     base de datos. Se resuelve antes y donde se entiende: lo que se quiere
+     hacer es mover la que ya está. */
+  const abierta = citaDe(cid);
+  if (abierta){
+    toast("Este comercio ya tiene una reunión puesta: se mueve, no se duplica");
+    return reagendarCita(abierta.id);
+  }
+
+  const hoy = hoyISO();
+  const fIni = (fechaSugerida && fechaSugerida >= hoy) ? fechaSugerida : hoy;
+
+  const datos = await new Promise(res => {
+    modal(`<h3>Agendar reunión</h3>
+      <p style="margin-top:0"><b>${esc(titulo(nombreCliente(c)))}</b><br>
+      <span class="tenue">${esc(esClienteNuevo(c) ? "RUC " + (c.ruc || "") : "Customer ID " + c.customer_id)}${
+        c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</span></p>
+
+      <div class="field"><label>¿Cómo va a ser?</label>
+        <div class="opts" id="agMod">
+          ${MODALIDADES.map((m,i) => `
+            <div class="opt ${i === 0 ? "on" : ""}" data-agmod="${m.id}">
+              <span class="rd"></span><span><b>${m.ic} ${m.label}</b><span>${m.min} minutos por defecto</span></span>
+            </div>`).join("")}
+        </div></div>
+
+      <div class="row2">
+        <div class="field"><label>Día</label>
+          <input type="date" id="agFecha" value="${esc(fIni)}" min="${esc(hoy)}"></div>
+        <div class="field"><label>Hora</label>
+          <input type="time" id="agHora" value="${esc(horaSugerida(fIni))}" step="900"></div>
+      </div>
+      <div class="field campo-corto"><label>Cuánto dura</label>
+        <select id="agDur">${[30,45,60,90,120].map(n =>
+          `<option value="${n}"${n === MODALIDADES[0].min ? " selected" : ""}>${n} minutos</option>`).join("")}</select></div>
+      <div class="field"><label>Qué se acordó — opcional</label>
+        <input type="text" id="agCom" maxlength="180"
+               placeholder="Ej.: lo confirmó por WhatsApp, pide que vaya el dueño"></div>
+
+      <div id="agAviso"></div>
+      <div class="note">La reunión entra al calendario con día y hora, ocupa esa franja y se
+      contrasta después contra la visita registrada. Si no llega a ocurrir, se cierra como
+      no concretada: mover la fecha no la borra.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="agOk" style="flex:1">Agendar</button>
+        <button class="btn ghost" id="agNo" style="flex:1">Cancelar</button>
+      </div>`);
+
+    let modalidad = MODALIDADES[0].id;
+
+    /* El choque se avisa mientras se elige, no al guardar: descubrir que te
+       pisaste una visita después de darle a Agendar obliga a volver a empezar. */
+    const revisar = () => {
+      const f = $("#agFecha").value, h = $("#agHora").value, d = Number($("#agDur").value);
+      const av = $("#agAviso"); if (!av) return;
+      const desde = minutosDe(h);
+      if (!f || desde === null){ av.innerHTML = ""; return; }
+      const choques = ocupacionDe(S.user.correo, f).filter(o => chocaCon(o, desde, desde + d));
+      av.innerHTML = choques.length ? `<div class="note crit" style="margin-bottom:11px">
+        <b>Ya tienes algo a esa hora.</b> ${choques.map(o => {
+          const cc = byId[String(o.customer_id)];
+          return `${esc(rangoCita(o))} · ${esc(titulo(cc ? nombreCliente(cc) : o.customer_id))}`;
+        }).join(" · ")}<div style="margin-top:5px">Se puede agendar igual, pero va a quedar cruzado.</div></div>` : "";
+    };
+
+    document.querySelectorAll("[data-agmod]").forEach(el => el.onclick = () => {
+      modalidad = el.dataset.agmod;
+      document.querySelectorAll("[data-agmod]").forEach(x => x.classList.toggle("on", x === el));
+      /* Cambiar de modalidad reajusta la duración por defecto: una visita al
+         local y una videollamada no duran lo mismo. */
+      const sel = $("#agDur"); if (sel) sel.value = String(duracionDe(modalidad));
+      revisar();
+    });
+    ["agFecha","agHora","agDur"].forEach(k => { const el = $("#"+k); if (el) el.onchange = revisar; });
+    revisar();
+
+    $("#agOk").onclick = () => {
+      const f = $("#agFecha").value, h = $("#agHora").value, d = Number($("#agDur").value);
+      /* Todo se lee ANTES de cerrar el modal: cerrarlo destruye los nodos y
+         el comentario se perdería sin que nadie se entere. */
+      const com = String(($("#agCom") || {}).value || "").trim();
+      if (!f || !h) return toast("Falta el día o la hora");
+      if (f < hoyISO()) return toast("La reunión no puede quedar en una fecha que ya pasó");
+      cerrarModal();
+      res({ fecha:f, hora:h, dur:d, modalidad, comentario:com });
+    };
+    $("#agNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!datos) return;
+
+  /* El `.select()`, igual que en el resto del CRM: sin él un rechazo por
+     permisos vuelve sin error y sin filas, y la pantalla diría que se agendó
+     algo que no se agendó. */
+  const { data, error } = await sb.from("seguimientos").insert({
+    customer_id: String(c.customer_id),
+    accion: "VISITAR",
+    fecha_objetivo: datos.fecha,
+    hora_inicio: datos.hora,
+    duracion_min: datos.dur,
+    modalidad: datos.modalidad,
+    comentario: datos.comentario || null,
+    correo_stratis: S.user.correo,
+    ejecutivo: S.user.nombre
+  }).select("id");
+  if (error) return toast("No se pudo agendar: " + error.message);
+  if (!(data || []).length)
+    return toast("La base no dejó agendar esta reunión. El comercio no está asignado a tu usuario.");
+
+  await cargarSeguimientos();
+  S.calDia = datos.fecha; S.calMes = mesDe(datos.fecha);
+  render();
+  toast(`Reunión agendada para el ${fmtFecha(datos.fecha)} a las ${datos.hora}`);
+}
+
+/* Agendar desde el calendario, donde todavía no hay un comercio elegido.
+   Se ofrece primero la cola que el calendario ya calcula —habilitados sin
+   visita puesta—, que es de donde sale casi siempre la respuesta. */
+async function agendarDesdeCalendario(fecha){
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  /* Solo los propios: la fila la escribe el usuario que está mirando, así que
+     ofrecerle comercios de otro sería ofrecerle un rechazo de la base. */
+  const mios = cartera().filter(c => esMiCliente(c)
+    && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" && !conCita.has(String(c.customer_id)));
+  if (!mios.length) return toast("No te queda ningún comercio abierto sin reunión puesta");
+
+  const habilitados = mios.filter(c => habilitadoEn(c.customer_id));
+  const resto = mios.filter(c => !habilitadoEn(c.customer_id));
+  const op = c => `<option value="${esc(c.customer_id)}">${esc(titulo(nombreCliente(c)))}${
+    c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</option>`;
+
+  const cid = await new Promise(res => {
+    modal(`<h3>¿Con qué comercio?</h3>
+      <div class="field"><label>Comercio</label>
+        <select id="agCid">
+          ${habilitados.length ? `<optgroup label="Ya se pueden visitar · ${habilitados.length}">${
+            habilitados.map(op).join("")}</optgroup>` : ""}
+          ${resto.length ? `<optgroup label="Todavía esperan a BBVA o al cliente · ${resto.length}">${
+            resto.map(op).join("")}</optgroup>` : ""}
+        </select></div>
+      <div class="note">Los de arriba son los que el banco ya confirmó o que ya respondieron: ahí
+      es donde una reunión se puede pactar hoy mismo.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="agcOk" style="flex:1">Continuar</button>
+        <button class="btn ghost" id="agcNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#agcOk").onclick = () => { const v = $("#agCid").value; cerrarModal(); res(v); };
+    $("#agcNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!cid) return;
+  return agendarCita(cid, fecha);
 }
 
 /* ---- Reagendar ----------------------------------------------------------
@@ -11123,12 +11548,21 @@ function columnaSinAgendar(lista, mando){
     <div class="cola-lista">
       ${lista.slice(0, 40).map(c => {
         const dias = habilesDesde(habilitadoEn(c.customer_id));
-        return `<button class="cola-x" data-cid="${esc(c.customer_id)}">
-          <b>${esc(titulo(nombreCliente(c)))}</b>
-          <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
-          <span class="cola-d ${dias > 5 ? "tarde" : ""}">${
-            dias ? "hace " + textoDias(dias) : "hoy"}</span>
-        </button>`;
+        /* La fila lleva a la ficha; el botón agenda sin salir de acá. Son dos
+           acciones distintas sobre la misma línea, así que son dos botones
+           hermanos y no uno dentro de otro —anidar botones no es HTML válido y
+           el de adentro deja de responder en la mitad de los navegadores. */
+        return `<div class="cola-f">
+          <button class="cola-x" data-cid="${esc(c.customer_id)}">
+            <b>${esc(titulo(nombreCliente(c)))}</b>
+            <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
+            <span class="cola-d ${dias > 5 ? "tarde" : ""}">${
+              dias ? "hace " + textoDias(dias) : "hoy"}</span>
+          </button>
+          ${esMiCliente(c) ? `<button class="cola-ag" data-agendar="${esc(c.customer_id)}"
+            title="Agendar la reunión con día y hora" aria-label="Agendar reunión con ${
+              esc(titulo(nombreCliente(c)))}">📅</button>` : ""}
+        </div>`;
       }).join("")}
     </div>
     ${lista.length > 40 ? `<p class="pie" style="margin-top:9px">…y ${lista.length - 40} más.</p>` : ""}`
@@ -11365,9 +11799,15 @@ function llaveDe(correo, p){
   const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
   const registrados = mios.length;
 
-  let cubiertos;
+  /* `idsCubiertos` es el mismo conjunto que produce el número, expuesto. No es
+     un extra: la descarga por ejecutivo tiene que marcar EXACTAMENTE los
+     comercios que el requisito contó, y calcularlo por su cuenta sería tener
+     dos veces la misma regla en dos sitios que se van a separar el día que
+     alguien cambie una de las dos. */
+  let cubiertos, idsCubiertos;
   if (base === "registro"){
     cubiertos = registrados;
+    idsCubiertos = new Set(mios.map(c => String(c.customer_id)));
   } else if (base === "contacto"){
     /* Los comercios con un contacto logrado dentro del periodo, de los dos
        lados del flujo. Es un Set: el comercio entra una vez por más veces que
@@ -11392,10 +11832,14 @@ function llaveDe(correo, p){
                 && r.Inferida !== true
                 && enVentana(r.Fecha_Contacto, p))
       .forEach(r => logrados.add(String(r.Customer_id)));
-    cubiertos = mios.filter(c => logrados.has(String(c.customer_id))).length;
+    idsCubiertos = new Set(mios.filter(c => logrados.has(String(c.customer_id)))
+                               .map(c => String(c.customer_id)));
+    cubiertos = idsCubiertos.size;
   } else {
     const tocados = new Set(gest.map(r => String(r.Customer_id)));
-    cubiertos = mios.filter(c => tocados.has(String(c.customer_id))).length;
+    idsCubiertos = new Set(mios.filter(c => tocados.has(String(c.customer_id)))
+                               .map(c => String(c.customer_id)));
+    cubiertos = idsCubiertos.size;
   }
 
   /* El denominador es parte de la regla, no un detalle aparte: «registro» y
@@ -11423,7 +11867,7 @@ function llaveDe(correo, p){
                ok: cobertura >= req.cobertura_pct && cargaCompleta,
                detalle: `${cubiertos} de ${denom} comercios${
                  cargaCompleta ? "" : ` · faltan ${faltanPorCargar} por cargar`}`,
-               base, cubiertos, denom, registrados, cargaCompleta, faltanPorCargar,
+               base, cubiertos, idsCubiertos, denom, registrados, cargaCompleta, faltanPorCargar,
                /* Cuántos comercios más hacen falta para llegar al mínimo. Es el
                   número que el ejecutivo necesita para reaccionar antes del 18,
                   y no lo tenía en ninguna pantalla. */
@@ -11856,6 +12300,11 @@ function tarjetaEjecutivo(u, p){
         <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
         <button class="btn ghost sm" data-pdfejec="${esc(u.correo)}"
           title="El acta de este periodo en PDF, para firmar en la reunión">Acta en PDF</button>
+        ${/* La pantalla dice «2 de 3»; esto dice cuáles filas lo produjeron.
+              Es la diferencia entre afirmar un incumplimiento y poder
+              sostenerlo delante de la persona a la que se le está descontando. */ ""}
+        ${vistaDeCampo() ? "" : `<button class="btn ghost sm" data-xlsejec="${esc(u.correo)}"
+          title="Todas sus gestiones del periodo, con las columnas que producen los tres requisitos">Sus gestiones</button>`}
       </div>
     </div>
 
@@ -15049,6 +15498,10 @@ function bindPdfIncentivo(){
     const u = ejecutivosDelBono().find(x => x.correo === el.dataset.pdfejec);
     if (u) pdfIncentivo(u, periodoBono(), el);
   });
+  document.querySelectorAll("[data-xlsejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    descargarGestionesDe(el.dataset.xlsejec, periodoBono());
+  });
   const todos = document.querySelector("#pdfTodos");
   if (todos) todos.onclick = () => pdfIncentivoTodos(todos);
 }
@@ -15330,6 +15783,15 @@ function bindExtras(){
   });
   document.querySelectorAll("[data-reag]").forEach(b => b.onclick = e => {
     e.stopPropagation(); reagendarCita(b.dataset.reag);
+  });
+  /* Agendar. `stopPropagation` porque el botón vive dentro de filas y tarjetas
+     que ya tienen su propio clic —abrir la ficha—: sin esto, agendar abriría
+     además el comercio por detrás del modal. */
+  document.querySelectorAll("[data-agendar]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); agendarCita(b.dataset.agendar);
+  });
+  document.querySelectorAll("[data-agendar-dia]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); agendarDesdeCalendario(b.dataset.agendarDia);
   });
   if ($("#qCal")){
     const cajaCal = $("#qCal");
