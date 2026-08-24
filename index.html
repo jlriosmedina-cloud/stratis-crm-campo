@@ -2639,8 +2639,46 @@ const nombreDiaNoTrabajado = iso => {
    domingo o feriado, ninguna: que la escriba. */
 const fechaInicialContacto = () => diaNoTrabajado(hoyISO()) ? "" : hoyISO();
 
-function demoraHabil(r){
+/* ---- Cuándo empieza a correr el plazo de registro ------------------------
+
+   No cuando ocurrió el contacto: cuando el contacto SE PUDO REGISTRAR.
+
+   Es una distinción que costó ver y que estaba dando un número falso. La
+   puntualidad medía los días entre la fecha del contacto y la fecha en que se
+   tecleó, y castigaba por igual dos cosas muy distintas: al que gestionó el
+   lunes y registró el jueves, y al que gestionó un comercio que todavía no
+   estaba cargado en el CRM. El segundo no llegó tarde a nada — no tenía dónde
+   escribir.
+
+   El caso que lo destapó: las 45 gestiones «fuera de plazo» de Anibal Reyes en
+   el primer periodo. LAS 45 se registraron el mismo día en que se creó la
+   ficha del comercio, algunas dos minutos después. No hay una sola en la que
+   la ficha existiera y él tardara. Lo mismo con los otros tres: descontando el
+   alta, los cuatro pasan de 74–98% a 96,5–100%.
+
+   Así que el reloj arranca en el más tardío de los dos: la fecha del contacto,
+   o la fecha en que el comercio entró al CRM. Lo que se mide es la disciplina
+   de registro, que es lo que el requisito dice medir.
+
+   Y la demora en CARGAR la cartera no queda sin medir, que sería el hueco
+   evidente: eso ya lo mira la cobertura, que en la regla de régimen exige
+   tener cargada toda la cartera asignada antes de dar el requisito por
+   cumplido. Cada cosa en su métrica y ninguna contada dos veces. */
+function inicioPlazo(r){
   const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const alta = String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10);
+  return alta && alta > f ? alta : f;
+}
+/* Si la gestión se registró junto con el alta de la ficha, el plazo no fue el
+   que parece. Se expone para poder decirlo donde se muestre el número. */
+const cargadaConLaFicha = r => {
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const alta = String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10);
+  return !!alta && alta > f;
+};
+
+function demoraHabil(r){
+  const f = inicioPlazo(r);
   const c = String(r.Creado_En || "").slice(0,10);
   if (!f || !c || c <= f) return 0;
   const fer = feriadosDe(periodoDe(f));
@@ -4763,20 +4801,65 @@ function avisoComentario(c, regs){
     </div></div>`;
 }
 
+/* ---- El sello del alta, que no es una gestión ----------------------------
+
+   Una fila RECONSTRUIDA no la registró nadie: la escribió una migración a
+   partir del medio que el ejecutivo declaró al crear la ficha, y le puso la
+   fecha del alta porque el CRM guardaba el medio y no la fecha.
+
+   Se mostraba como cualquier otra coordinación, con su chip de «Respondió» y
+   sus dos recuadros de comentario. Los dos mentían. El chip afirmaba una
+   respuesta del banco que no consta en ninguna parte, y los recuadros citaban
+   como palabras de alguien un texto que había escrito la migración —
+   «Coordinacion deducida al migrar la base…», «Se deduce que el ejecutivo de
+   BBVA respondio porque…»—. En la misma ficha, el recuadro de la derecha decía
+   «Sin coordinar» y la línea de tiempo decía «Respondió».
+
+   Acá se muestra por lo que es: una línea que dice qué medio se declaró y
+   nada más. El texto de la migración sigue en la base como rastro de lo que
+   hizo, pero no se le pone delante a nadie ni se lo hace pasar por una
+   gestión. */
+function selloDelAlta(r){
+  return `
+  <div class="tl-item tl-bbva">
+    <div class="card" style="margin-bottom:0;opacity:.82">
+      <div class="tl-h">
+        <div>
+          <div class="who">Medio declarado al alta${
+            nomMedioBBVA(r.Tipo_Contacto) ? " · " + esc(nomMedioBBVA(r.Tipo_Contacto)) : ""}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}${
+            r.Ejecutivo ? " · " + esc(r.Ejecutivo) : ""}</div>
+        </div>
+        <span class="chip">Sin gestión detrás</span>
+      </div>
+      <div class="pie" style="margin-top:6px">Es el canal que se anotó al crear la ficha, con la
+        fecha del alta. No hay ninguna coordinación registrada detrás, así que no dice si el banco
+        respondió ni qué se conversó.</div>
+    </div>
+  </div>`;
+}
+
 function itemTimelineBBVA(r){
+  if (esReconstruida(r)) return selloDelAlta(r);
   const resp = respondioBBVA(r.Resultado);
+  /* Los 183 correos al funcionario que la migración reclasificó llegan acá con
+     un medio del catálogo del cliente —«correo»—, no con uno de la lista del
+     banco. El rótulo sale del que corresponda, y lo que no puede faltar es a
+     quién se le escribió. */
+  const medio = nomMedioBBVA(r.Tipo_Contacto)
+             || ((tipoById(r.Tipo_Contacto) || {}).label)
+             || r.Tipo_Contacto;
   return `
   <div class="tl-item tl-bbva">
     <div class="card" style="margin-bottom:0">
       <div class="tl-h">
         <div>
-          <div class="who">Ejecutivo BBVA · ${esc(nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto)}</div>
+          <div class="who">Ejecutivo BBVA · ${esc(medio)}</div>
           <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
         </div>
         <span class="chip ${resp ? "ok" : "warn"}">${resp ? "Respondió" : "Sin respuesta"}</span>
       </div>
       ${r.Proposito ? `<div style="margin-top:7px"><span class="chip info">${esc(nomProposito(r.Proposito))}</span></div>` : ""}
-      ${r.Inferida ? `<div class="pie" style="margin-top:6px">Deducida del histórico al migrar la base — nadie la registró en su momento</div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Qué se coordinó</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Qué respondió BBVA</b>${esc(r.Comentario_Cliente)}</div>` : ""}
     </div>
@@ -4784,7 +4867,11 @@ function itemTimelineBBVA(r){
 }
 
 function itemTimeline(r){
-  if (r.Con === "BBVA") return itemTimelineBBVA(r);
+  /* Por DESTINATARIO, no por la columna `Con`. Es el mismo arreglo que ya
+     tienen las consultas y el bono: los correos al funcionario reclasificados
+     conservan con='CLIENTE', así que acá se pintaban como gestiones con el
+     comercio y decían «No respondió» — de un cliente al que nadie escribió. */
+  if (esAlBanco(r)) return itemTimelineBBVA(r);
   const t = tipoById(r.Tipo_Contacto);
   const res = resultadoById(r.Resultado);
   const editable = puedeEditar(r);
@@ -7323,6 +7410,7 @@ function viewRegistros(){
   /* El Panel avisa cuántas se registraron tarde; sin este filtro el número
      llevaba a la lista completa, que es lo mismo que no llevar a ninguna. */
   else if (S.fResultado === "fuera_plazo")    lista = lista.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "con_el_alta")    lista = lista.filter(cargadaConLaFicha);
   else if (S.fResultado === "respuesta_sin_voz") lista = lista.filter(respuestaSinVoz);
   else if (S.fResultado === "respuesta_dudosa")  lista = lista.filter(respuestaDudosa);
   else if (S.fResultado === "dia_no_trabajado")  lista = lista.filter(gestionEnDiaNoTrabajado);
@@ -7394,7 +7482,8 @@ function viewRegistros(){
       ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
       ${mando && todos.some(r => demoraHabil(r) > 1)
-        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después del contacto">Fuera de plazo</button>` : ""}
+        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después de que el comercio estuviera cargado">Fuera de plazo</button>
+           <button class="${S.fResultado==="con_el_alta"?"on":""}" data-fr="con_el_alta" title="El comercio entró al CRM después de trabajarse: se registraron junto con su ficha">Cargadas con el alta</button>` : ""}
       ${todos.some(respuestaSinVoz)
         ? `<button class="${S.fResultado==="respuesta_sin_voz"?"on":""}" data-fr="respuesta_sin_voz" title="Se marcó que el cliente respondió y no quedó ninguna palabra suya">Respuesta sin transcribir</button>` : ""}
       ${todos.some(respuestaDudosa)
@@ -7458,6 +7547,7 @@ function gestionesFiltradas(){
   else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
   else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
   else if (S.fResultado === "fuera_plazo")    l = l.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "con_el_alta")    l = l.filter(cargadaConLaFicha);
   else if (S.fResultado === "respuesta_sin_voz") l = l.filter(respuestaSinVoz);
   else if (S.fResultado === "respuesta_dudosa")  l = l.filter(respuestaDudosa);
   else if (S.fResultado === "dia_no_trabajado")  l = l.filter(gestionEnDiaNoTrabajado);
@@ -8507,6 +8597,13 @@ function decisionesTablero(r, regs){
   const base = universoPanel();
   const sinUbi   = regs.filter(sinUbicacion);
   const tarde    = regs.filter(x => demoraHabil(x) > 1);
+  /* La otra demora, la que la puntualidad dejó de castigar el 24/08: gestiones
+     que se cargaron junto con el alta del comercio. No son un registro tardío
+     —no había dónde escribir— pero sí dicen que el comercio entró al CRM
+     después de trabajarse, y eso conviene verlo. Va en gris: es para mirar,
+     no para corregir. */
+  const conElAlta = regs.filter(x => typeof cargadaConLaFicha === "function"
+                                  && cargadaConLaFicha(x));
   const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
   const ambiguos = base.filter(c => typeof correoAmbiguo === "function" && correoAmbiguo(c));
   const sinComentario = base.filter(c => {
@@ -8544,8 +8641,12 @@ function decisionesTablero(r, regs){
       ir:`data-verges="sin_ubicacion"`, tono:"crit" },
     { n:vencidas.length, t:"Citas no concretadas", d:"Pasó el día pactado y no hay visita registrada",
       ir:`data-go="agenda"`, tono:"crit" },
-    { n:tarde.length, t:"Gestiones fuera de plazo", d:"Registradas más de un día trabajado después",
+    { n:tarde.length, t:"Gestiones fuera de plazo",
+      d:"Más de un día trabajado después, con la ficha ya cargada",
       ir:`data-verges="fuera_plazo"`, tono:"warn" },
+    { n:conElAlta.length, t:"Gestiones cargadas con el alta",
+      d:"El comercio entró al CRM después de trabajarse: el registro no llegó tarde, la ficha sí",
+      ir:`data-verges="con_el_alta"`, tono:"warn" },
     { n:sinComentario.length, t:"Comercios sin comentario", d:"Ninguna gestión dejó nota del cliente",
       ir:`data-vercartera="sin_comentario"`, tono:"warn" },
     { n:sinCanal.length, t:"Fichas sin coordinar con BBVA", d:"El caso no puede avanzar sin el dato",
@@ -13695,6 +13796,11 @@ function datosLibro(){
         comercio: r.Nombre_Comercio || "",
         distrito: r.Distrito || "",
         fecha: String(r.Fecha_Contacto).slice(0,10),
+        /* El alta del comercio, porque el plazo de registro no arranca antes
+           de que el comercio exista en el CRM. Sin esta columna el libro no
+           puede reproducir la puntualidad que muestra la pantalla, y un libro
+           que da otro número no sirve para lo único que existe. */
+        alta: String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10),
         registro: String(r.Creado_En || "").slice(0,10),
         medio: (tipoById(r.Tipo_Contacto) || {}).label
              || nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto || "",
@@ -13878,24 +13984,31 @@ const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados 
    cuenta en la celda. */
 function hojaGestiones(d, nFer){
   const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
-                "Fecha de gestión","Fecha de registro","Días trabajados de demora","A tiempo",
+                "Fecha de gestión","Alta de la ficha","Fecha de registro",
+                "Días trabajados de demora","A tiempo",
                 "Medio","Dirigida a","Respondió","Visita efectiva","Primera del comercio en el periodo"];
   const filas = [cols];
   d.gestiones.forEach((g, i) => {
     const f = i + 2;
+    /* El plazo arranca en el más tardío de los dos: la fecha de la gestión o
+       el día en que el comercio entró al CRM. Nadie puede registrar en una
+       ficha que todavía no existe. El MAX está a la vista para que se pueda
+       discutir sin volver al sistema. */
+    const desde = `MAX(${A1(7,f)},${A1(8,f)})`;
     filas.push([
       g.periodo, g.mes, g.nombre, g.correo, g.cid, g.comercio, g.distrito,
-      serial(g.fecha), serial(g.registro),
-      `=IF(${A1(8,f)}<=${A1(7,f)},0,NETWORKDAYS(${A1(7,f)}+1,${A1(8,f)},${RANGO_FERIADOS(nFer)}))`,
-      `=IF(${A1(9,f)}<=1,1,0)`,
+      serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
+      `=IF(${A1(9,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(9,f)},${RANGO_FERIADOS(nFer)}))`,
+      `=IF(${A1(10,f)}<=1,1,0)`,
       g.medio, g.destino, g.respondio, g.efectiva, g.primera
     ]);
   });
   /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
      la que se filtra, y un encabezado pintado estorba al pegar. */
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
-    fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"]],
-    anchos:[10,6,18,26,14,30,16,15,15,13,9,16,15,11,13,14] });
+    fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"],
+         [10, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[10,6,18,26,14,30,16,15,15,15,13,9,16,15,11,13,14] });
 }
 
 /* ---- Coordinación con BBVA: la otra mitad de la cobertura --------------
@@ -13925,7 +14038,7 @@ function hojaCartera(d, nG, nCo){
        si hubo una gestión EFECTIVA con el cliente o un correo al ejecutivo de
        BBVA, dentro del periodo que manda la hoja de Parámetros. Un comercio
        con cinco gestiones sigue siendo un comercio: esta celda es 1 o 0. */
-    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$N$2:$N$${nG},1)`;
+    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$O$2:$O$${nG},1)`;
     const correo   = `COUNTIFS('Coordinación BBVA'!$E$2:$E$${nCo},${A1(2,f)},'Coordinación BBVA'!$B$2:$B$${nCo},${P_(FIL.mes)},'Coordinación BBVA'!$I$2:$I$${nCo},1)`;
     filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
       c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre,
@@ -13957,7 +14070,7 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
   const eG = `${G("D")},${correoRef}`, mG = `${G("B")},${mesRef}`;
 
   const gestiones  = `COUNTIFS(${eG},${mG})`;
-  const cubiertos  = `SUMIFS(${G("P")},${eG},${mG})`;
+  const cubiertos  = `SUMIFS(${G("Q")},${eG},${mG})`;
   /* Los Customer ID que ese ejecutivo tiene cargados en el CRM. Es la otra
      forma de medir cobertura, la que rige el primer mes. */
   const registrados = `COUNTIFS(${C("B")},${correoRef})`;
@@ -13979,9 +14092,9 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
      cartera asignada, para que nadie suba su porcentaje cargando menos. */
   const cumpleCobertura = (valor, minimo, cartera) =>
     `IF(AND(${valor}>=${minimo},OR(${P_(FIL.coberturaBase)}<>"contacto",${registrados}>=${cartera})),"Sí","No")`;
-  const efectivas  = `SUMIFS(${G("O")},${eG},${mG})`;
-  const puntuales  = `SUMIFS(${G("K")},${eG},${mG})`;
-  const respuestas = `SUMIFS(${G("N")},${eG},${mG})`;
+  const efectivas  = `SUMIFS(${G("P")},${eG},${mG})`;
+  const puntuales  = `SUMIFS(${G("L")},${eG},${mG})`;
+  const respuestas = `SUMIFS(${G("O")},${eG},${mG})`;
   const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
   const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
   const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
@@ -14201,14 +14314,18 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
     ["", "", "", "", ""],
     ["SUS GESTIONES DEL PERIODO", "", "", "", ""],
-    ["Fecha de gestión","Fecha de registro","Días trabajados","A tiempo","Comercio"]
+    ["Fecha de gestión","Alta de la ficha","Fecha de registro","Días trabajados","A tiempo"]
   ];
   const inicio = filas.length + 1;
   suyas.forEach((g, i) => {
     const f = inicio + i;
-    filas.push([serial(g.fecha), serial(g.registro),
-      `=IF(${A1(1,f)}<=${A1(0,f)},0,NETWORKDAYS(${A1(0,f)}+1,${A1(1,f)},${RANGO_FERIADOS(d.nFer)}))`,
-      `=IF(${A1(2,f)}<=1,"Sí","No")`, g.comercio]);
+    /* El plazo arranca en el más tardío de los dos: la gestión o el alta del
+       comercio. Con el MAX a la vista, la fila entera se puede leer y
+       discutir sin volver al sistema. */
+    const desde = `MAX(${A1(0,f)},${A1(1,f)})`;
+    filas.push([serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
+      `=IF(${A1(2,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(2,f)},${RANGO_FERIADOS(d.nFer)}))`,
+      `=IF(${A1(3,f)}<=1,"Sí","No")`]);
   });
   const bandas = [];
   filas.forEach((fila, i) => {
@@ -14223,13 +14340,14 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
   const etiquetas = filas.map((x, i) => x[0] && !bandas.includes(i + 1)
     && i > 1 && (i + 1) < fCab ? i + 1 : 0).filter(Boolean);
   return hojaLibro(filas, {
-    titulo:1, sub:2, anchos:[34, 16, 16, 14, 60],
+    titulo:1, sub:2, anchos:[34, 16, 16, 16, 14, 58],
     secciones:bandas,
     etiquetas,
     notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
     destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
     fmt:[
       [1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"],
+      [3, inicio, filas.length, "dd/mm/yyyy"],
       /* La llave */
       [2, 4, 4, U.comercios],                        // cartera asignada
       [2, 7, 7, U.pct],  [3, 7, 7, U.pctEntero],     // cobertura
@@ -14333,11 +14451,11 @@ function hojaCruce(d, nG){
     const f = filas.length + 1;
     const fila = [u.nombre];
     medios.forEach((m, k) => fila.push(
-      `=COUNTIFS(${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)},${G("L")},"${m}")`));
+      `=COUNTIFS(${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)},${G("M")},"${m}")`));
     fila.push(`=SUM(${A1(1,f)}:${A1(medios.length,f)})`);
-    fila.push(`=SUMIFS(${G("K")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
-    fila.push(`=SUMIFS(${G("N")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("L")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
     fila.push(`=SUMIFS(${G("O")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("P")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
     filas.push(fila);
   });
   const pri = 5, ult = filas.length;
