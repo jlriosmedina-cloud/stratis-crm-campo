@@ -4789,7 +4789,7 @@ function cardCoordinacionBBVA(c, mio){
 
           Las dos salidas se registran, y por eso están las dos acá: la
           segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
-      (k.n && !k.respondio && (mio || !esDeCampo())) ? `
+      (k.n === 1 && !k.respondio && (mio || !esDeCampo())) ? `
       <div class="note warn" style="margin-top:11px">
         <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
         se registran para que no quede la duda de quién tiene el turno.
@@ -4797,6 +4797,18 @@ function cardCoordinacionBBVA(c, mio){
           <button class="btn sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
           <button class="btn sm ghost" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
         </div>
+      </div>`
+      /* A partir del segundo contacto el recuadro grande sale sobrando: quien
+         ya insistió una vez conoce las dos salidas, y un aviso que aparece
+         siempre deja de leerse y empieza a estorbar. Las dos salidas siguen
+         estando —el caso tiene que poder destrabarse en el contacto quince
+         igual que en el primero— pero como una línea de botones, no como una
+         advertencia repetida. */
+      : (k.n > 1 && !k.respondio && (mio || !esDeCampo())) ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;align-items:center">
+        <span class="pie" style="margin:0;flex:1 1 160px">${k.n} contactos sin respuesta.</span>
+        <button class="btn ghost sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+        <button class="btn ghost sm" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
       </div>` : ""}
     ${avisoCorreoAmbiguo(c, k, mio)}
     ${/* El jalavistas. Un comercio recién registrado que no tiene ni una
@@ -15012,7 +15024,13 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Requisitos cumplidos", `=COUNTIF($D$7:$D$9,"Sí")`, 3, "", "Los tres habilitan el cálculo, dos dejan solo el bono base"],
     ["Estado de la llave", `=IF($B$10=3,"Habilitado",IF($B$10=2,"Solo bono base","Sin incentivo"))`, "", "", ""],
     ["Gestiones del periodo", `=${F.gestiones}`, "", "", "Todas las registradas en la ventana del bono"],
-    ["Gestiones a tiempo", `=${F.puntuales}`, "", "", "Con demora de cero o un día trabajado"],
+    /* El porcentaje al lado del recuento. Son el mismo dato dicho de dos
+       maneras y hacen falta las dos: el recuento es lo que se puede contar en
+       el detalle de abajo, el porcentaje es contra lo que se mide el
+       requisito. Se calcula sobre las dos celdas de arriba, no sobre la
+       fórmula original, para que quien mueva una vea moverse la otra. */
+    ["Gestiones a tiempo", `=${F.puntuales}`, `=IF($B$12=0,0,$B$13/$B$12*100)`, "",
+     "Con demora de cero o un día trabajado · el porcentaje es sobre las gestiones del periodo"],
     ["Comercios con respuesta", `=${F.respuestas}`, "", "", "El cliente contestó"],
     ["", "", "", "", ""],
     ["OBJETIVOS", "VA EN", "META DEL MES", "CUMPLIMIENTO", "PESO"],
@@ -15170,6 +15188,7 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
       [2, 8, 8, U.visitas], [3, 8, 8, U.visitas],    // visitas efectivas
       [2, 9, 9, U.pct],  [3, 9, 9, U.pctEntero],     // puntualidad
       [2, 12, 12, U.gestiones], [2, 13, 13, U.gestiones],
+      [3, 13, 13, U.pct],                            // el % de puntualidad, al lado del recuento
       [2, 14, 14, U.comercios],
       /* Los objetivos: cada uno con SU unidad, que es justo lo que se
          confundía al leer tres filas seguidas de números pelados. */
