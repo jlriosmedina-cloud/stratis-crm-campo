@@ -2682,13 +2682,39 @@ const fechaInicialContacto = () => diaNoTrabajado(hoyISO()) ? "" : hoyISO();
    evidente: eso ya lo mira la cobertura, que en la regla de régimen exige
    tener cargada toda la cartera asignada antes de dar el requisito por
    cumplido. Cada cosa en su métrica y ninguna contada dos veces. */
+/* ---- Desde cuándo corre el plazo de registro ----------------------------
+
+   Desde la fecha de la gestión. Punto.
+
+   Entre el 24/08/2026 y esta línea, el plazo arrancaba en el más tardío entre
+   la gestión y el ALTA DE LA FICHA, con el argumento de que nadie puede
+   registrar en una ficha que todavía no existe. El argumento es cierto y la
+   regla estaba mal, porque el alta la crea el mismo ejecutivo: bastaba con no
+   cargar la ficha para que el plazo no empezara a correr nunca. No es una
+   hipótesis —así salió—:
+
+     · las 800 fichas de cartera no entraron de golpe. Entraron de a pocas
+       desde el 07/08 y después 324 el 17 y 137 el 18, los dos últimos días
+       del periodo que cerraba el 18;
+     · con el alta como arranque, esas 461 gestiones daban «0 días · Sí»
+       automáticamente, y los cuatro ejecutivos terminaban con 100%, 100%,
+       100% y 96,5% de puntualidad;
+     · un requisito que nadie puede fallar no es un requisito.
+
+   Medido desde la gestión, que es lo que pidió la campaña —«máximo 1 día útil
+   entre la última interacción registrada y la fecha de registro real»—, el
+   número vuelve a distinguir: 97,6 · 73,8 · 84,5 · 94,7.
+
+   Lo que sí es cierto del argumento viejo se conserva en otro lado: la fecha
+   del alta sigue viajando en su propia columna en el libro y en la descarga,
+   y `cargadaConLaFicha` sigue marcando el caso. Explica una demora; ya no la
+   borra. */
 function inicioPlazo(r){
-  const f = String(r.Fecha_Contacto || "").slice(0,10);
-  const alta = String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10);
-  return alta && alta > f ? alta : f;
+  return String(r.Fecha_Contacto || "").slice(0,10);
 }
-/* Si la gestión se registró junto con el alta de la ficha, el plazo no fue el
-   que parece. Se expone para poder decirlo donde se muestre el número. */
+/* La gestión se registró el mismo día en que se creó la ficha, después de que
+   ocurriera. No cambia el plazo —el alta también la hace el ejecutivo— pero
+   explica la demora, y por eso se expone donde se muestra el número. */
 const cargadaConLaFicha = r => {
   const f = String(r.Fecha_Contacto || "").slice(0,10);
   const alta = String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10);
@@ -9252,7 +9278,7 @@ function descargarGestionesDe(correo, p){
     /* El dato que explicaba el caso de Vanessa: registros que parecían tardíos
        y en realidad se hicieron el mismo día en que la ficha entró al CRM. */
     ["De ellas, cargadas junto con la ficha", gest.filter(cargadaConLaFicha).length, "", "",
-     "El comercio no existía en el CRM el día de la gestión: el plazo arranca en el alta"],
+     "El comercio entró al CRM después de trabajarse. Explica la demora; no la descuenta, porque el alta la crea el propio ejecutivo"],
     ["Llave de acceso", `${ll.cumplidos} de 3 requisitos`],
     [],
     ["No entran acá las filas que escribió la migración al reconstruir el histórico: no las trabajó nadie y no cuentan para el bono."]
@@ -14844,11 +14870,17 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
   const inicio = filas.length + 1;
   suyas.forEach((g, i) => {
     const f = inicio + i;
-    /* El plazo arranca en el más tardío de los dos: la fecha de la gestión o
-       el día en que el comercio entró al CRM. Nadie registra en una ficha que
-       todavía no existe, y el MAX lo deja a la vista para que la fila se pueda
-       leer y discutir sin volver al sistema. */
-    const desde = `MAX(${A1(0,f)},${A1(1,f)})`;
+    /* El plazo arranca en la fecha de la GESTIÓN, no en el alta de la ficha.
+       Llegó a arrancar en el alta —«nadie registra en una ficha que todavía
+       no existe»— hasta que se vio lo que eso producía: como la ficha la crea
+       el mismo ejecutivo, no cargarla congelaba el plazo, y 461 de las 800
+       fichas entraron el 17 y el 18, los dos últimos días del periodo. Los
+       cuatro salían con puntualidad perfecta.
+
+       El alta se queda en su columna, al lado, porque explica muchas de las
+       demoras y quien lea la fila tiene que poder verlo. Explicar no es
+       descontar. */
+    const desde = A1(0,f);
     filas.push([
       serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
       `=IF(${A1(2,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(2,f)},${RANGO_FERIADOS(d.nFer)}))`,
