@@ -13868,7 +13868,9 @@ function datosLibro(){
 
 /* ---- La hoja de parámetros ---------------------------------------------
    El corazón editable del libro. Todo lo demás la mira. */
-const P_ = r => `'Parámetros'!$B$${r}`;
+/* Una celda de la hoja de Parámetros. La columna es B salvo cuando se pide la
+   D, que es donde viven las metas de antes del reajuste. */
+const P_ = (r, col) => `'Parámetros'!$${col ? L(col - 1) : "B"}$${r}`;
 const FIL = {                 // fila de cada parámetro en la hoja
   periodo:2, mes:3, ini:4, fin:5, semanas:6,
   metaReact:9, metaFact:10, metaVenta:11,
@@ -14184,6 +14186,11 @@ function hojaResumen(p, d, nG, nC, nN){
                 "Ventas del periodo","Meta del mes","Cumple venta",
                 "Cumplimiento ponderado","Tramo","Incentivo del periodo",
                 "Se paga ahora","Se retiene"];
+  /* Cuando el periodo trae los mínimos de antes del reajuste, el resumen del
+     equipo dice las dos cosas: lo que se paga y lo que se habría pagado. Es la
+     lámina 3 del reajuste, verificable celda por celda. */
+  const prevR = paramsDe(p).requisitos_previos || null;
+  if (prevR) cols.push("Requisitos con la meta original", "Incentivo con la meta original");
   const filas = [
     [`Resumen del equipo · periodo ${nombrePeriodo(p)}`],
     ["Cada celda es una fórmula sobre las hojas de datos. Solo la facturación se toma del CRM: ese dato no lo genera el sistema."],
@@ -14232,7 +14239,12 @@ function hojaResumen(p, d, nG, nC, nN){
          objetivos. Menos de dos: nada. */
       `=IF($N${f}=3,MAX($Z${f},${CELDA_PISO(d.esc.fila)}),IF($N${f}=2,${P_(FIL.base1)},0))`,
       `=$AA${f}*${P_(FIL.mensual)}/100`,
-      `=$AA${f}*(100-${P_(FIL.mensual)})/100`
+      `=$AA${f}*(100-${P_(FIL.mensual)})/100`,
+      ...(prevR ? [
+        `=IF($E${f}>=${P_(FIL.cobertura, 4)},1,0)+IF($H${f}>=ROUND(${P_(FIL.visitas, 4)}*${
+          P_(FIL.semanas)},0),1,0)+IF(AND($D${f}>0,$K${f}>=${P_(FIL.puntualidad, 4)}),1,0)`,
+        `=IF($AD${f}>=2,${P_(FIL.base1)},0)`
+      ] : [])
     ]);
   });
   const ult = 4 + d.ejec.length;
@@ -14260,7 +14272,7 @@ function hojaResumen(p, d, nG, nC, nN){
       [`${L(cols.indexOf("Llave"))}5:${L(cols.indexOf("Llave"))}${ult}`, ["Habilitado"], ["Sin incentivo"]],
       [`${L(cols.indexOf("¿Cobertura?"))}5:${L(cols.indexOf("¿Puntualidad?"))}${ult}`, ["Sí"], ["No"]]
     ],
-    anchos:[18,26,10,12,10,8,10,10,9,9,11,8,11,11,15,14,11,13,14,11,13,10,11,12,13,9,12,11,10] });
+    anchos:[18,26,10,12,10,8,10,10,9,9,11,8,11,11,15,14,11,13,14,11,13,10,11,12,13,9,12,11,10,15,16] });
 }
 
 /* ---- Una hoja por ejecutivo --------------------------------------------
@@ -14295,6 +14307,8 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
   const cart = carteraDe(u.correo, p).n;
   const crec = crecimientoFact(u.correo, p);
   const suyas = d.gestiones.filter(g => g.correo === u.correo && g.periodo === p);
+  /* Los mínimos que regían antes del reajuste, si este periodo los guarda. */
+  const prev = B.requisitos_previos || null;
 
   const filas = [
     [u.nombre, "", "", "", ""],
@@ -14302,14 +14316,18 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Correo", u.correo, "", "", ""],
     ["Cartera asignada", cart, "", "", ""],
     ["", "", "", "", ""],
-    ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE"],
+    ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE",
+     ...(prev ? ["META ORIGINAL", "¿CUMPLÍA?"] : [])],
     ["Cobertura de cartera", `=${F.coberturaPct("$B$4")}`, `=${P_(FIL.cobertura)}`,
      `=${F.cumpleCobertura("$B$7", "$C$7", "$B$4")}`,
-     "Según la regla del periodo: la ficha cargada, el comercio con algún intento, o el comercio con contacto logrado sobre lo registrado"],
+     "Según la regla del periodo: la ficha cargada, el comercio con algún intento, o el comercio con contacto logrado sobre lo registrado",
+     ...(prev ? [`=${P_(FIL.cobertura, 4)}`, `=IF($B$7>=$F$7,"Sí","No")`] : [])],
     ["Visitas efectivas", `=${F.efectivas}`, `=${pideVisitasFormula(p)}`,
-     `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar"],
+     `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar",
+     ...(prev ? [`=ROUND(${P_(FIL.visitas, 4)}*${P_(FIL.semanas)},0)`, `=IF($B$8>=$F$8,"Sí","No")`] : [])],
     ["Puntualidad del registro", `=IF($B$12=0,0,${F.puntuales}/$B$12*100)`, `=${P_(FIL.puntualidad)}`,
-     `=IF(AND($B$12>0,$B$9>=$C$9),"Sí","No")`, "Registradas el mismo día trabajado o el siguiente"],
+     `=IF(AND($B$12>0,$B$9>=$C$9),"Sí","No")`, "Registradas el mismo día trabajado o el siguiente",
+     ...(prev ? [`=${P_(FIL.puntualidad, 4)}`, `=IF(AND($B$12>0,$B$9>=$F$9),"Sí","No")`] : [])],
     ["Requisitos cumplidos", `=COUNTIF($D$7:$D$9,"Sí")`, 3, "", "Los tres habilitan el cálculo, dos dejan solo el bono base"],
     ["Estado de la llave", `=IF($B$10=3,"Habilitado",IF($B$10=2,"Solo bono base","Sin incentivo"))`, "", "", ""],
     ["Gestiones del periodo", `=${F.gestiones}`, "", "", "Todas las registradas en la ventana del bono"],
@@ -14348,6 +14366,18 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
     ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
     ["", "", "", "", ""],
+    /* ---- Qué habría pasado con las metas originales ----------------------
+       El acta y el libro dicen «15%» y eso solo no es evidencia: hay que poder
+       ver contra qué se llegó a ese 15%. Cuando el periodo trae las metas
+       anteriores, acá queda escrito el resultado con las dos varas. */
+    ...(prev ? [
+      ["CON LAS METAS ORIGINALES", "", "", "", ""],
+      ["Requisitos cumplidos", `=COUNTIF($G$7:$G$9,"Sí")`, 3, "",
+       "Contra los mínimos que regían antes del reajuste de este periodo"],
+      ["Incentivo que habría correspondido", `=IF($B$30>=2,${P_(FIL.base1)},0)`, "", "",
+       "La diferencia con la línea 25 es lo que aportó el reajuste"],
+      ["", "", "", "", ""]
+    ] : []),
     /* ---- La evidencia, debajo del resumen -------------------------------
        Los tres requisitos de arriba son tres números, y tres números no se
        pueden conversar con la persona a la que le tocan. Acá va, fila por
