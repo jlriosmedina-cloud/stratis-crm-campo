@@ -14439,6 +14439,7 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
         `${huerfanas} ${huerfanas === 1 ? "gestión es" : "gestiones son"} de comercios sin ficha en el CRM: `
         + `el trabajo existe y no se ve en ninguna ficha.`]);
   }
+  const ultimaGestion = inicio + suyas.length - 1;
   const bandas = [];
   filas.forEach((fila, i) => {
     const t = String(fila[0] || "");
@@ -14464,8 +14465,11 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
     destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
     fmt:[
-      [1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"],
-      [3, inicio, filas.length, "dd/mm/yyyy"],
+      /* Hasta la última gestión, no hasta el final de la hoja: la fila de
+         totales cae dentro del rango y su «332» se pintaba como fecha —salía
+         27/11/1900, que es el serial 332 leído como día—. */
+      [1, inicio, ultimaGestion, "dd/mm/yyyy"], [2, inicio, ultimaGestion, "dd/mm/yyyy"],
+      [3, inicio, ultimaGestion, "dd/mm/yyyy"],
       /* La llave */
       [2, 4, 4, U.comercios],                        // cartera asignada
       [2, 7, 7, U.pct],  [3, 7, 7, U.pctEntero],     // cobertura
@@ -14483,7 +14487,7 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
       [2, 20, 20, U.comercios],
       /* El resultado, todo en % del sueldo base */
       [2, 23, 27, U.pct],
-      [4, inicio, filas.length, "0"]
+      [4, inicio, ultimaGestion, "0"]
     ],
     /* Valor, mínimo y cumple, centrados en toda la hoja. El peso solo en el
        bloque de objetivos: en la llave esa columna es texto explicativo y
