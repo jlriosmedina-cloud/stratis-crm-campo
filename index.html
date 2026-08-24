@@ -2477,6 +2477,38 @@ const enVentana = (fecha, p) => {
   const f = String(fecha || "").slice(0,10), v = ventanaPeriodo(p);
   return !!f && !!v.ini && f >= v.ini && f <= v.fin;
 };
+/* ---- El corte de registro del periodo ------------------------------------
+
+   Una gestión entra al periodo si se hicieron DOS cosas dentro de él: ocurrir
+   y quedar registrada. `enVentana` mira lo primero; esto mira lo segundo.
+
+   Sin esta segunda condición, el periodo nunca terminaba de cerrarse. En el
+   primer cierre había 52 gestiones fechadas dentro de la ventana —del 20/07 al
+   18/08— que entraron al CRM el 19 y el 21 de agosto, con el periodo ya
+   vencido, y estaban contando. Todas ellas, por definición, fuera de plazo:
+   hundían la puntualidad de un periodo que ya había cerrado, y la seguirían
+   hundiendo con cada carga tardía que apareciera después. Aníbal Reyes pasaba
+   de 90,7% a 73,8% por trabajo que cargó tres días tarde.
+
+   La consecuencia hay que decirla completa, porque es dura y es a propósito:
+   lo que no está cargado el día del cierre NO CUENTA EN NINGÚN PERIODO. No se
+   arrastra al siguiente —su fecha de gestión pertenece a este— ni vuelve más
+   tarde. Registrar a tiempo deja de ser un porcentaje y pasa a ser la puerta.
+
+   Para el periodo en curso esto no cambia nada: el cierre todavía no llegó, así
+   que todo lo que se registra hoy pasa. Solo congela los periodos vencidos, que
+   es justamente lo que un cierre firmado necesita. */
+function registradaEnPeriodo(r, p){
+  const v = ventanaPeriodo(p);
+  const c = String((r && r.Creado_En) || "").slice(0,10);
+  /* Sin sello de creación no se puede afirmar que llegó tarde. Se deja pasar:
+     la duda no puede convertirse en un descuento. */
+  return !c || !v.fin || c <= v.fin;
+}
+/* Las dos condiciones juntas, que es como se debe preguntar siempre. */
+const gestionDelPeriodo = (r, p) =>
+  enVentana(r && r.Fecha_Contacto, p) && registradaEnPeriodo(r, p);
+
 /* A qué periodo pertenece un día: hasta el 18 cierra este mes, del 19 en
    adelante ya cuenta para el siguiente. */
 function periodoDe(iso){
@@ -11884,9 +11916,15 @@ function carteraDe(correo, p){
    cliente, mientras las 29 coordinaciones declaradas con el medio correcto
    quedaban fuera. Dos registros del mismo trabajo contaban distinto según cómo
    se hubiera tecleado. Eso es lo que se cierra acá. */
+/* Y desde el 24/08, la segunda condición: además de OCURRIR en la ventana, la
+   gestión tiene que haber quedado REGISTRADA antes del cierre. Ver
+   `gestionDelPeriodo` en el core: 52 gestiones del primer periodo entraron al
+   CRM el 19 y el 21 de agosto, con el periodo ya vencido, y estaban contando.
+   Todas fuera de plazo, claro: hundían la puntualidad de un cierre que ya
+   estaba firmado. */
 const gestionesDe = (correo, p) =>
   DB.crudo.filter(r => !esReconstruida(r) && r.Correo_Stratis === correo
-                    && enVentana(r.Fecha_Contacto, p));
+                    && gestionDelPeriodo(r, p));
 
 /* ---- La llave ----------------------------------------------------------
    Tres requisitos. Cumplir los tres habilita el cálculo; fallar uno deja
@@ -11962,7 +12000,7 @@ function llaveDe(correo, p){
       .filter(r => r.Correo_Stratis === correo
                 && r.Tipo_Contacto === "bbva_correo"
                 && r.Inferida !== true
-                && enVentana(r.Fecha_Contacto, p))
+                && gestionDelPeriodo(r, p))
       .forEach(r => logrados.add(String(r.Customer_id)));
     idsCubiertos = new Set(mios.filter(c => logrados.has(String(c.customer_id)))
                                .map(c => String(c.customer_id)));
@@ -14394,7 +14432,14 @@ function datosLibro(){
      reunión se iría en explicar la diferencia. Trabajo registrado, de los dos
      lados, sin las filas que escribió la migración. */
   const gestiones = DB.crudo
-    .filter(r => !esReconstruida(r))
+    /* Y la misma segunda condición que el bono desde el 24/08: además de
+       ocurrir en la ventana, la gestión tiene que haber quedado registrada
+       antes del cierre. Una cargada con el periodo ya vencido no entra a ese
+       periodo —52 lo hacían en el primer cierre— y tampoco pasa al siguiente,
+       porque su fecha de gestión pertenece a este. Se marca con su periodo
+       real para poder verla, y se excluye de las cuentas. */
+    .filter(r => !esReconstruida(r)
+              && registradaEnPeriodo(r, periodoDe(String(r.Fecha_Contacto).slice(0,10))))
     .slice()
     .sort((a, b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto)))
     .map(r => {
