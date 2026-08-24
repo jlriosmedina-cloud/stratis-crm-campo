@@ -2645,6 +2645,22 @@ const esFeriado = (iso, p) => feriadosDe(p || periodoDe(iso)).has(String(iso).sl
    Lo que se quita es que la fecha venga puesta. */
 const diaNoTrabajado = iso => !!iso && !esDiaTrabajado(String(iso).slice(0,10), feriadosDe(periodoDe(iso)));
 
+/* El día trabajado anterior a una fecha. Es la respuesta a «¿qué vence hoy?»:
+   el plazo de registro es un día trabajado, así que lo que se hizo el día
+   trabajado anterior tiene que estar cargado antes de que termine este. */
+function diaTrabajadoAnterior(iso){
+  const s = String(iso || "").slice(0,10);
+  if (!s) return "";
+  const fer = feriadosDe(periodoDe(s));
+  let d = new Date(s + "T12:00:00Z");
+  for (let i = 0; i < 14; i++){
+    d = new Date(d.getTime() - 86400000);
+    const x = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(x, fer)) return x;
+  }
+  return "";
+}
+
 const nombreDiaNoTrabajado = iso => {
   if (!iso) return "";
   const s = String(iso).slice(0,10);
@@ -7610,9 +7626,9 @@ function viewRegistros(){
         .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
       ${todos.some(sinUbicacion)
         ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
-      ${mando && todos.some(r => demoraHabil(r) > 1)
-        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después de que el comercio estuviera cargado">Fuera de plazo</button>
-           <button class="${S.fResultado==="con_el_alta"?"on":""}" data-fr="con_el_alta" title="El comercio entró al CRM después de trabajarse: se registraron junto con su ficha">Cargadas con el alta</button>` : ""}
+      ${todos.some(r => demoraHabil(r) > 1)
+        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después de la fecha de la gestión">Fuera de plazo</button>
+           ${mando ? `<button class="${S.fResultado==="con_el_alta"?"on":""}" data-fr="con_el_alta" title="El comercio entró al CRM después de trabajarse: se registraron junto con su ficha. Explica la demora, no la descuenta">Cargadas con el alta</button>` : ""}` : ""}
       ${todos.some(respuestaSinVoz)
         ? `<button class="${S.fResultado==="respuesta_sin_voz"?"on":""}" data-fr="respuesta_sin_voz" title="Se marcó que el cliente respondió y no quedó ninguna palabra suya">Respuesta sin transcribir</button>` : ""}
       ${todos.some(respuestaDudosa)
@@ -7966,11 +7982,10 @@ const COLS_PANEL = [
   { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
   { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
     val:f => f.tasa === null ? "—" : Math.round(f.tasa) + "%" },
-  /* La puntualidad se mide siempre, pero no se le muestra al ejecutivo: se
-     evidencia a fin de mes y la miran el Analista y el Manager. Que el número
-     esté a la vista todos los días convierte una medición en una discusión
-     diaria, y no es lo que se acordó. */
-  { k:"puntualidad", th:"Puntualidad",      extra:true, soloMando:true,
+  /* Estuvo oculta al ejecutivo hasta el 24/08, con el argumento de no
+     convertir una medición en una discusión diaria. Resultó al revés: uno de
+     los cuatro perdió la llave por un requisito que no podía ver. */
+  { k:"puntualidad", th:"Puntualidad",      extra:true,
     ttl:"Gestiones registradas dentro del día trabajado siguiente al contacto",
     val:f => f.puntualidad === null ? "—" : Math.round(f.puntualidad) + "%" },
   { k:"retenidos",   th:"Retenidos",    cierre:"retenido" },
@@ -8251,9 +8266,9 @@ function bloqueCorregir(r, regs){
   const puntos = [
     { n:sinUbi.length,   t:"Gestiones sin ubicación", d:"presenciales sin coordenada y sin exención",
       ir:`data-verges="sin_ubicacion"`, grave:true },
-    /* Solo supervisión: la puntualidad se mide y se evidencia a fin de mes, no
-       se le pone al ejecutivo como tarea del día. */
-    { n:mando ? tarde.length : 0, t:"Gestiones fuera de plazo",
+    /* También para el ejecutivo desde el 24/08: es lo único de la llave que
+       puede corregir mientras el periodo sigue abierto. */
+    { n:tarde.length, t:"Gestiones fuera de plazo",
       d:"registradas más de un día trabajado después del contacto",
       ir:`data-verges="fuera_plazo"` },
     { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
@@ -8407,6 +8422,96 @@ function bloqueDetalle(r, regs){
   </div>`;
 }
 
+/* ---- Tu registro al día -------------------------------------------------
+
+   La puntualidad del registro estuvo oculta al ejecutivo hasta el 24/08. La
+   razón escrita era buena —«que el número esté a la vista todos los días
+   convierte una medición en una discusión diaria»— y resultó ser exactamente
+   al revés: uno de los cuatro cerró el primer periodo en 73,8% y perdió la
+   llave por un requisito que no podía ver. Nadie corrige lo que no mira.
+
+   Así que acá está, con las tres cosas que lo hacen accionable y no solo
+   informativo:
+
+     · el porcentaje contra su mínimo, que es el veredicto;
+     · CUÁNTAS gestiones a tiempo le faltan, porque «te faltan 11» se puede
+       hacer hoy y «te falta 6,2 puntos» no;
+     · qué vence HOY. El plazo es un día trabajado: lo que se hizo el día
+       trabajado anterior deja de estar a tiempo cuando termine este. Esa es
+       la única frase de toda la pantalla que puede evitar el incumplimiento
+       en vez de contarlo.
+
+   No se muestra a supervisión: ellos tienen la tabla completa en el bloque de
+   la llave y en Incentivos. */
+function bloqueMiRegistro(){
+  if (!vistaDeCampo()) return "";
+  const correo = correoObservado() || (S.user && S.user.correo);
+  if (!correo) return "";
+  const p  = periodoHoy();
+  const ll = llaveDe(correo, p);
+  const q  = ll.puntualidad;
+  if (!ll.gestiones) return "";
+
+  const hoy = hoyISO();
+  const ayer = diaTrabajadoAnterior(hoy);
+  /* Lo que se registró hoy, mirando el sello del servidor y no la fecha que se
+     tecleó: la pregunta es cuánto entró al CRM hoy. */
+  const hoyN = DB.crudo.filter(r => r.Correo_Stratis === correo
+    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)).length;
+  /* Y de eso, cuánto era trabajo de días anteriores: es el hábito que hay que
+     ver, no el total. */
+  const arrastre = DB.crudo.filter(r => r.Correo_Stratis === correo
+    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)
+    && String(r.Fecha_Contacto || "").slice(0,10) < hoy).length;
+
+  const ok = q.ok && !q.porExcepcion;
+  const margen = q.puntuales - Math.ceil(ll.gestiones * q.meta / 100);
+  const fuera = ll.gestiones - q.puntuales;
+
+  return `
+  <div class="card">
+    <div class="ctrl-h">
+      <h3>Tu registro al día</h3>
+      <span class="chip ${ok ? "ok" : "crit"}">${pct1(q.valor)}% · mínimo ${q.meta}%</span>
+    </div>
+    <div class="stat-row" style="margin-bottom:0">
+      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">Puntualidad del periodo</div>
+        <div class="val">${pct1(q.valor)}%</div>
+        <div class="sub">${q.puntuales} de ${ll.gestiones} registradas dentro del plazo</div></div>
+      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">${ok ? "Margen" : "Te faltan"}</div>
+        <div class="val">${ok ? margen : q.faltan}</div>
+        <div class="sub">${ok
+          ? `gestiones a tiempo de margen antes de bajar del ${q.meta}%`
+          : `gestiones a tiempo más para llegar al ${q.meta}%`}</div></div>
+      <div class="stat"><div class="lbl">Registradas hoy</div><div class="val">${hoyN}</div>
+        <div class="sub">${arrastre
+          ? `${arrastre} ${arrastre === 1 ? "era" : "eran"} de días anteriores`
+          : "todas del día de hoy"}</div></div>
+    </div>
+
+    ${ayer ? `<div class="note ${fuera ? "warn" : ""}" style="margin-top:12px">
+      <b>Lo que hiciste el ${esc(fmtFecha(ayer))} vence hoy.</b>
+      El plazo es un día trabajado: si lo registras mañana, esas gestiones cuentan fuera de plazo
+      y ya no se pueden recuperar.
+    </div>` : ""}
+
+    ${fuera ? `<div style="margin-top:11px">
+      <button class="btn ghost sm" data-verges="fuera_plazo">Ver tus ${fuera} fuera de plazo</button>
+    </div>` : ""}
+
+    <details class="explica" style="margin-top:11px"><summary>Cómo se cuenta el plazo</summary>
+      <div class="cuerpo">
+        <p>Se cuentan los <b>días trabajados</b> entre la fecha que pones como fecha de la gestión y
+        el momento en que el CRM recibe el formulario. Sábados, domingos y feriados no cuentan.
+        Registrar el mismo día o el día trabajado siguiente está dentro del plazo.</p>
+        <p>Crear la ficha del comercio también es trabajo tuyo, así que cargarla tarde no corre el
+        plazo: si atendiste un comercio el lunes y recién lo das de alta el viernes, esa gestión
+        entra fuera de plazo aunque la registres el mismo minuto del alta.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
 function viewPanel(){
   /* Supervisión tiene su propio tablero: mismas cuentas, otro orden de lectura.
      El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
@@ -8422,6 +8527,7 @@ function viewPanel(){
   return `
   ${bannerComoEjec()}
   ${selectorPanel(r)}
+  ${bloqueMiRegistro()}
   ${bloqueProyecto()}
   ${bloqueActividad(r, regs)}
   ${bloqueEquipo(r)}
@@ -11906,10 +12012,44 @@ function llaveDe(correo, p){
                ok: efectivas >= pide, efectivas, pide, porSemana,
                detalle:`${efectivas} efectivas, se piden ${pide}` };
   const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
+               puntuales,
+               /* Cuántas gestiones a tiempo más hacen falta para llegar al
+                  mínimo. Es el número que convierte un porcentaje en algo que
+                  se puede hacer hoy, y el que el ejecutivo no tenía. */
+               faltan: Math.max(0, Math.ceil(gest.length * req.puntualidad_pct / 100) - puntuales),
                detalle: gest.length ? `${puntuales} de ${gest.length} a tiempo` : "sin gestiones en el periodo" };
+
+  /* ---- Excepciones autorizadas -----------------------------------------
+
+     Una excepción es una persona con nombre y apellido decidiendo dar por
+     cumplido un requisito que no se cumplió. Existe porque a veces es lo
+     correcto —el primer periodo de una campaña arranca torcido y castigarlo
+     entero no arregla nada— y es peligrosa por lo mismo: si el CRM la aplicara
+     en silencio, en tres meses nadie sabría que el 80% no se alcanzó.
+
+     Así que la excepción NO toca el número. `valor` sigue diciendo 73,8%,
+     `detalle` sigue diciendo 127 de 172, y lo único que cambia es `ok`, con la
+     autorización colgada al lado para que el acta, el libro y la pantalla
+     puedan decir las dos cosas a la vez.
+
+     Vive en la versión de parámetros del periodo, como el techo y las metas
+     previas: el periodo que no la traiga no la hereda, y un mes siguiente
+     calcula normal sin que nadie tenga que acordarse de retirarla. */
+  const exc = (paramsDe(p).excepciones || []).filter(e => e && e.correo === correo);
+  const conExcepcion = (r, clave) => {
+    const e = exc.find(x => x.requisito === clave);
+    /* Solo hacia arriba, y solo si de verdad no llegaba: una excepción sobre
+       un requisito ya cumplido no es una excepción, es ruido en el acta. */
+    if (!e || r.ok) return r;
+    return Object.assign(r, { ok:true, porExcepcion:e });
+  };
+  conExcepcion(r1, "cobertura");
+  conExcepcion(r2, "visitas");
+  conExcepcion(r3, "puntualidad");
 
   const cumplidos = [r1,r2,r3].filter(x => x.ok).length;
   return { cobertura:r1, visitas:r2, puntualidad:r3, cumplidos, gestiones:gest.length,
+           excepciones: [r1,r2,r3].filter(x => x.porExcepcion).map(x => x.porExcepcion),
            cartera:cart, registrados, efectivas, semanas, pide,
            estado: cumplidos === 3 ? "activo" : cumplidos === 2 ? "base" : "sin" };
 }
@@ -15326,18 +15466,31 @@ function actaIncentivo(doc, u, p, x){
   const xOrig = 134;
   const xMeta = prev ? 168 : 152;
 
-  const fila = (rot, valor, meta, ok, pie, orig, okOrig) => {
+  /* Una excepción autorizada da por cumplido un requisito que no se cumplió.
+     El acta tiene que decir las DOS cosas: el número real —que no llegó— y
+     quién decidió darlo por cumplido. Un acta que solo muestre el visto verde
+     deja de ser evidencia de lo que pasó, que es para lo único que existe. */
+  const fila = (rot, valor, meta, ok, pie, orig, okOrig, exc) => {
     txt(rot, m, y, { size:9, bold:true, color:PX.navy });
     txt(valor, xVal, y, { size:9, color:PX.gris, align:"right" });
     if (prev && orig !== undefined)
       txt(orig, xOrig, y, { size:9, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
     txt(meta, xMeta, y, { size:9, bold:!!prev, color:PX.gris2, align:"right" });
     if (ok !== null){
-      const c = ok ? PX.ok : PX.mal;
-      caja(W - m - 16, y - 3.4, 16, 5, ok ? PX.okBg : PX.malBg);
-      txt(ok ? "Cumple" : "No cumple", W - m - 8, y, { size:7.5, bold:true, color:c, align:"center" });
+      /* Con excepción el sello no dice «Cumple»: dice que se dio por cumplido.
+         Es una palabra distinta porque es una cosa distinta. */
+      const c = exc ? PX.warn : (ok ? PX.ok : PX.mal);
+      caja(W - m - 22, y - 3.4, 22, 5, exc ? PX.fondo : (ok ? PX.okBg : PX.malBg));
+      txt(exc ? "Por excepción" : (ok ? "Cumple" : "No cumple"), W - m - 11, y,
+          { size: exc ? 6.8 : 7.5, bold:true, color:c, align:"center" });
     }
     if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    if (exc){
+      y += 4;
+      txt(`No alcanzó el mínimo. Requisito dado por cumplido por excepción autorizada por ${
+          exc.autoriza || "la dirección"}${exc.motivo ? " · " + exc.motivo : ""}.`,
+          m, y, { size:7.5, bold:true, color:PX.warn });
+    }
     if (prev && orig !== undefined)
       txt(okOrig ? "con la meta original, cumple" : "con la meta original, no alcanza",
           W - m, y, { size:7.5, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
@@ -15349,7 +15502,9 @@ function actaIncentivo(doc, u, p, x){
   const okPunOrig = !prev || (ll.gestiones > 0 && ll.puntualidad.valor >= prev.puntualidad_pct);
   const conLaOriginal = [okCobOrig, okVisOrig, okPunOrig].filter(Boolean).length;
 
-  seccion(prev ? `LLAVE DE ACCESO · ${ll.cumplidos} DE 3 CON LAS METAS REAJUSTADAS`
+  const nExc = (ll.excepciones || []).length;
+  seccion(prev ? `LLAVE DE ACCESO · ${ll.cumplidos} DE 3 CON LAS METAS REAJUSTADAS${
+                   nExc ? " Y UNA EXCEPCIÓN AUTORIZADA" : ""}`
                : "LLAVE DE ACCESO");
   txt(prev ? "LOGRADO" : "VALOR", xVal, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
   if (prev) txt("META ORIGINAL", xOrig, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
@@ -15357,14 +15512,14 @@ function actaIncentivo(doc, u, p, x){
       { size:6.5, bold:true, color:PX.gris2, align:"right" });
   fila("Cobertura de cartera", pdfPct(ll.cobertura.valor), pdfPct(ll.cobertura.meta),
        ll.cobertura.ok, ll.cobertura.detalle,
-       prev ? pdfPct(prev.cobertura_pct) : undefined, okCobOrig);
+       prev ? pdfPct(prev.cobertura_pct) : undefined, okCobOrig, ll.cobertura.porExcepcion);
   fila("Visitas efectivas", pdfNum(ll.efectivas, "visitas"), pdfNum(ll.pide, "visitas"),
        ll.visitas.ok, `El periodo tiene ${ll.semanas.toFixed(1).replace(".", ",")} semanas${
          prev ? " · este mínimo no se reajustó" : ""}`,
-       prev ? pdfNum(pideOrig, "visitas") : undefined, okVisOrig);
+       prev ? pdfNum(pideOrig, "visitas") : undefined, okVisOrig, ll.visitas.porExcepcion);
   fila("Puntualidad del registro", pdfPct(ll.puntualidad.valor), pdfPct(ll.puntualidad.meta),
        ll.puntualidad.ok, ll.puntualidad.detalle,
-       prev ? pdfPct(prev.puntualidad_pct) : undefined, okPunOrig);
+       prev ? pdfPct(prev.puntualidad_pct) : undefined, okPunOrig, ll.puntualidad.porExcepcion);
   y += 2;
 
   /* ---- Los objetivos --------------------------------------------------- */
