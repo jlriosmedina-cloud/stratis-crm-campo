@@ -13815,6 +13815,10 @@ function datosLibro(){
         /* A quién se le escribió. Es la columna que permite filtrar la hoja y
            ver por qué la cobertura da lo que da sin volver al sistema. */
         destino: esAlBanco(r) ? "Ejecutivo BBVA" : "Comercio",
+        /* El veredicto de puntualidad viaja con la fila: la hoja del ejecutivo
+           lo agrupa por comercio y no puede recalcularlo con una fórmula sin
+           repetir la regla del alta en cuarenta sitios. */
+        aTiempo: aTiempo(r),
         respondio: (esAlCliente(r) && esEfectivo(r.Resultado)) ? 1 : 0,
         efectiva: (esAlCliente(r) && r.Cumple_Visita === "SI") ? 1 : 0,
         primera
@@ -14292,6 +14296,29 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
   const crec = crecimientoFact(u.correo, p);
   const suyas = d.gestiones.filter(g => g.correo === u.correo && g.periodo === p);
 
+  /* ---- La evidencia, por COMERCIO y no por gestión ----------------------
+     La tabla de gestiones dejaba 332 filas debajo del resumen y no se podía
+     leer: para saber si un comercio se trabajó había que buscarlo entre las
+     repetidas. Acá va una línea por comercio de su cartera —los 315 que le
+     asignó BBVA, estén trabajados o no— que es como se conversa el
+     cumplimiento: cuántos de los asignados se gestionaron, cuándo se
+     registró el primer contacto y si ese registro llegó a tiempo.
+
+     Las columnas de conteo están para que las sumas cierren contra la llave:
+     «Gestiones» suma el total del periodo y «Fuera de plazo» suma lo que
+     descuenta la puntualidad. Un Sí/No por comercio no podría hacerlo, porque
+     la puntualidad se mide por gestión y un comercio puede tener cinco.
+
+     El detalle fila por fila sigue estando, en la hoja «Gestiones». */
+  const suyosCart = d.cartera.filter(c => c.correo === u.correo);
+  const porComercio = suyosCart.map(c => {
+    const gs = suyas.filter(g => g.cid === c.cid);
+    const primera = gs.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))[0] || null;
+    return { comercio:c.comercio, n:gs.length, primera,
+             tarde: gs.filter(g => !g.aTiempo).length,
+             cubre: gs.some(g => g.primera) };
+  }).sort((a, b) => (b.n - a.n) || String(a.comercio).localeCompare(String(b.comercio)));
+
   const filas = [
     [u.nombre, "", "", "", ""],
     [`Periodo ${nombrePeriodo(p)} · ${textoPeriodo(p)}`, "", "", "", ""],
@@ -14354,34 +14381,37 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
        Las tres últimas columnas son las que cierran la cuenta: sumadas dan
        exactamente los números de la llave. Quien quiera comprobar el 96,5% de
        puntualidad puede filtrar «A tiempo = No» y contar las filas. */
-    ["SUS GESTIONES DEL PERIODO · LA EVIDENCIA DE LOS TRES REQUISITOS", "", "", "", "", "", "", "", "", ""],
-    ["Fecha de gestión","Alta de la ficha","Fecha de registro","Días trabajados","A tiempo",
-     "Comercio","Medio","Dirigida a","Cuenta para cobertura","Visita efectiva"]
+    ["SU CARTERA, COMERCIO POR COMERCIO", "", "", "", "", "", ""],
+    ["Comercio","Gestiones","Primer contacto","Se registró el","¿A tiempo?",
+     "Fuera de plazo","¿Gestionado?"]
   ];
   const inicio = filas.length + 1;
-  suyas.forEach((g, i) => {
-    const f = inicio + i;
-    /* El plazo arranca en el más tardío de los dos: la gestión o el alta del
-       comercio. Con el MAX a la vista, la fila entera se puede leer y
-       discutir sin volver al sistema. */
-    const desde = `MAX(${A1(0,f)},${A1(1,f)})`;
-    filas.push([serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
-      `=IF(${A1(2,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(2,f)},${RANGO_FERIADOS(d.nFer)}))`,
-      `=IF(${A1(3,f)}<=1,"Sí","No")`,
-      g.comercio, g.medio, g.destino,
-      /* «Cuenta para cobertura» es la primera gestión de ese comercio en el
-         periodo: es lo que hace que cinco gestiones sobre la misma bodega sean
-         un comercio cubierto y no cinco. */
-      g.primera ? "Sí" : "", g.efectiva ? "Sí" : ""]);
+  porComercio.forEach(c => {
+    filas.push([
+      c.comercio,
+      c.n || "",
+      c.primera ? serial(c.primera.fecha) : "",
+      c.primera ? serial(c.primera.registro) : "",
+      /* Sí solo si NINGUNA de sus gestiones llegó tarde. Con una que llegue
+         tarde el comercio no está limpio, y decir que sí sería taparlo. */
+      c.n ? (c.tarde ? "No" : "Sí") : "",
+      c.tarde || "",
+      c.cubre ? "Sí" : "No"
+    ]);
   });
-  /* Y la línea que cierra: las tres sumas tienen que dar los tres números de
-     arriba. Si no dan, hay un error en alguno de los dos y se ve acá. */
-  if (suyas.length){
-    const fin = inicio + suyas.length - 1;
-    filas.push(["", "", "", "", `=COUNTIF(${A1(4,inicio)}:${A1(4,fin)},"Sí")`,
-      "gestiones a tiempo · comercios cubiertos · visitas efectivas", "", "",
-      `=COUNTIF(${A1(8,inicio)}:${A1(8,fin)},"Sí")`,
-      `=COUNTIF(${A1(9,inicio)}:${A1(9,fin)},"Sí")`]);
+  /* La línea que cierra. Las tres sumas dan los tres números del resumen de
+     arriba, y por eso están puestas debajo de la columna que las produce: si
+     alguna no cuadra, se ve sin buscarla. */
+  if (porComercio.length){
+    const fin = inicio + porComercio.length - 1;
+    filas.push([
+      `=COUNTA(${A1(0,inicio)}:${A1(0,fin)})&" comercios asignados"`,
+      `=SUM(${A1(1,inicio)}:${A1(1,fin)})`, "", "",
+      `=COUNTIF(${A1(4,inicio)}:${A1(4,fin)},"No")&" con registro tardío"`,
+      `=SUM(${A1(5,inicio)}:${A1(5,fin)})`,
+      `=COUNTIF(${A1(6,inicio)}:${A1(6,fin)},"Sí")`
+    ]);
+    filas.push(["", "gestiones del periodo", "", "", "", "fuera de plazo", "gestionados"]);
   }
   const bandas = [];
   filas.forEach((fila, i) => {
@@ -14389,27 +14419,26 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     if (t && t === t.toUpperCase() && t.length > 3 && !/^\d/.test(t)) bandas.push(i + 1);
   });
   const fIncentivo = filas.findIndex(x => x[0] === "Incentivo del periodo") + 1;
-  const fCab = filas.findIndex(x => x[0] === "Fecha de gestión") + 1;
+  const fCab = filas.findIndex(x => x[0] === "Comercio") + 1;
   /* Las etiquetas son solo los rótulos de la parte de arriba. Incluir el
      encabezado de la tabla pintaba texto azul marino sobre fondo azul marino
      —invisible— y las filas de fechas salían en negrita sin razón. */
   const etiquetas = filas.map((x, i) => x[0] && !bandas.includes(i + 1)
     && i > 1 && (i + 1) < fCab ? i + 1 : 0).filter(Boolean);
   return hojaLibro(filas, {
-    titulo:1, sub:2, anchos:[34, 16, 16, 16, 14, 34, 20, 16, 15, 13],
+    titulo:1, sub:2, anchos:[40, 12, 16, 16, 12, 14, 14, 62],
     secciones:bandas,
     /* La cabecera de la evidencia se pinta como cabecera de tabla, y la fila
        de sumas se marca: es la que cierra la cuenta contra los tres números
        del resumen. */
     cabeceraSimple: fCab || 0,
     filtro: fCab || 0,
-    zebra: suyas.length ? [inicio + suyas.length] : [],
+    zebra: porComercio.length ? [inicio + porComercio.length] : [],
     etiquetas,
     notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
     destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
     fmt:[
-      [1, inicio, filas.length, "dd/mm/yyyy"], [2, inicio, filas.length, "dd/mm/yyyy"],
-      [3, inicio, filas.length, "dd/mm/yyyy"],
+      [3, inicio, filas.length, "dd/mm/yyyy"], [4, inicio, filas.length, "dd/mm/yyyy"],
       /* La llave */
       [2, 4, 4, U.comercios],                        // cartera asignada
       [2, 7, 7, U.pct],  [3, 7, 7, U.pctEntero],     // cobertura
@@ -14427,17 +14456,15 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
       [2, 20, 20, U.comercios],
       /* El resultado, todo en % del sueldo base */
       [2, 23, 27, U.pct],
-      /* «Días trabajados» pasó a la columna 4 cuando entró el alta de la ficha;
-         esta regla seguía puesta en la 3 y le borraba el formato de fecha a la
-         fecha de registro, que salía como 46254. */
-      [4, inicio, filas.length, "0"]
+      [2, inicio, filas.length, U.gestiones]
     ],
     /* Valor, mínimo y cumple, centrados en toda la hoja. El peso solo en el
        bloque de objetivos: en la llave esa columna es texto explicativo y
        centrarlo lo vuelve ilegible. Y la fecha de gestión, para que la tabla
        de abajo no quede con la primera columna suelta a la izquierda. */
     centrar:[[2, 4, filas.length], [3, 4, filas.length], [4, 4, filas.length],
-             [5, 16, 19], [1, fCab, filas.length]],
+             [5, 16, 19], [5, fCab, filas.length], [6, fCab, filas.length],
+             [7, fCab, filas.length]],
     cabecera: fCab,
     semaforo: [[`D${bandas[0] + 1}:D${bandas[0] + 3}`, ["Sí"], ["No"]]] });
 }
