@@ -13785,7 +13785,15 @@ function datosLibro(){
     .map(r => {
       const p = periodoDe(String(r.Fecha_Contacto).slice(0,10));
       const clave = p + "|" + r.Correo_Stratis + "|" + r.Customer_id;
-      const primera = vistos.has(clave) ? 0 : 1;
+      /* «Primera del comercio en el periodo» es la columna con la que el Excel
+         calcula la cobertura, así que tiene que contar lo MISMO que la
+         cobertura: comercios de la cartera de esa persona. Un comercio
+         trabajado que no está en su cartera —o un Customer ID sin ficha— es
+         trabajo, y por eso está en la hoja; pero no es cobertura de cartera, y
+         sumarlo hacía que el libro diera 312 donde la pantalla decía 311. */
+      const c = byId[String(r.Customer_id)];
+      const suyo = !!c && !esClienteNuevo(c) && c.asignado_correo === r.Correo_Stratis;
+      const primera = (vistos.has(clave) || !suyo) ? 0 : 1;
       vistos.add(clave);
       const u = ejec.find(x => x.correo === r.Correo_Stratis);
       return {
@@ -13946,15 +13954,38 @@ function hojaParametros(p, d){
   for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + i, 2]);
   for (let i = 0; i < esc.length; i++){ editables.push([filaEsc + i, 1]); editables.push([filaEsc + i, 2]); }
 
+  /* ---- Las metas de antes del reajuste ---------------------------------
+     Cuando el periodo trae `requisitos_previos`, el libro muestra las dos
+     columnas: contra qué se midió y contra qué se debía medir. Van en la
+     columna D y no en filas nuevas, porque todo el libro apunta a estas filas
+     por número y correrlas lo rompería entero. */
+  const prevL = B.requisitos_previos || null;
+  const extra = [];
+  if (prevL){
+    extra.push([FIL.cobertura - 1, 4, "META ORIGINAL"]);
+    extra.push([FIL.cobertura,     4, prevL.cobertura_pct]);
+    extra.push([FIL.visitas,       4, prevL.visitas_semana]);
+    extra.push([FIL.puntualidad,   4, prevL.puntualidad_pct]);
+    extra.forEach(([f, c, v]) => { filas[f-1] = filas[f-1] || ["", "", ""];
+      while (filas[f-1].length < c) filas[f-1].push("");
+      filas[f-1][c-1] = v; });
+    filas[FIL.cobertura-1][4]   = "Se bajó por única vez para este periodo";
+    filas[FIL.visitas-1][4]     = "No se reajustó: es el mínimo que no se alcanzó";
+    filas[FIL.puntualidad-1][4] = "Se bajó por única vez para este periodo";
+  }
+
   const ws = hojaLibro(filas, {
-    titulo:1, anchos:[38, 16, 62],
+    titulo:1, anchos: prevL ? [38, 16, 54, 15, 40] : [38, 16, 62],
     secciones:[8, 16, 22, 31, filaEscTit],
     /* Las etiquetas son los rótulos de la columna A. Las filas de la escala no
        llevan rótulo sino un número, así que quedan fuera. */
     etiquetas:filas.map((_, i) => i + 1)
       .filter(f => ![1, 8, 16, 22, 31, filaEscTit].includes(f) && f < filaEsc),
-    notas:filas.map((_, i) => [i + 1, 3]),
+    notas:filas.map((_, i) => [i + 1, 3])
+      .concat(prevL ? filas.map((_, i) => [i + 1, 5]) : []),
     editables,
+    destacar: prevL ? [[FIL.cobertura, 4, LX.rojoTx], [FIL.visitas, 4, LX.rojoTx],
+                       [FIL.puntualidad, 4, LX.rojoTx]] : [],
     /* Cada meta y cada mínimo se muestran con su unidad. La celda sigue siendo
        un número editable: el formato pinta el «%» o el «p.p.», no lo escribe
        dentro del valor, así que quien la cambie sigue tecleando 8 y no «8 p.p.». */
@@ -14313,8 +14344,19 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
     ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
     ["", "", "", "", ""],
-    ["SUS GESTIONES DEL PERIODO", "", "", "", ""],
-    ["Fecha de gestión","Alta de la ficha","Fecha de registro","Días trabajados","A tiempo"]
+    /* ---- La evidencia, debajo del resumen -------------------------------
+       Los tres requisitos de arriba son tres números, y tres números no se
+       pueden conversar con la persona a la que le tocan. Acá va, fila por
+       fila, el trabajo del que salen: qué comercio, por qué medio, a quién se
+       le escribió, cuándo se hizo, cuándo entró el comercio al CRM, cuándo se
+       registró, y en qué columna cuenta cada gestión.
+
+       Las tres últimas columnas son las que cierran la cuenta: sumadas dan
+       exactamente los números de la llave. Quien quiera comprobar el 96,5% de
+       puntualidad puede filtrar «A tiempo = No» y contar las filas. */
+    ["SUS GESTIONES DEL PERIODO · LA EVIDENCIA DE LOS TRES REQUISITOS", "", "", "", "", "", "", "", "", ""],
+    ["Fecha de gestión","Alta de la ficha","Fecha de registro","Días trabajados","A tiempo",
+     "Comercio","Medio","Dirigida a","Cuenta para cobertura","Visita efectiva"]
   ];
   const inicio = filas.length + 1;
   suyas.forEach((g, i) => {
@@ -14325,8 +14367,22 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
     const desde = `MAX(${A1(0,f)},${A1(1,f)})`;
     filas.push([serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
       `=IF(${A1(2,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(2,f)},${RANGO_FERIADOS(d.nFer)}))`,
-      `=IF(${A1(3,f)}<=1,"Sí","No")`]);
+      `=IF(${A1(3,f)}<=1,"Sí","No")`,
+      g.comercio, g.medio, g.destino,
+      /* «Cuenta para cobertura» es la primera gestión de ese comercio en el
+         periodo: es lo que hace que cinco gestiones sobre la misma bodega sean
+         un comercio cubierto y no cinco. */
+      g.primera ? "Sí" : "", g.efectiva ? "Sí" : ""]);
   });
+  /* Y la línea que cierra: las tres sumas tienen que dar los tres números de
+     arriba. Si no dan, hay un error en alguno de los dos y se ve acá. */
+  if (suyas.length){
+    const fin = inicio + suyas.length - 1;
+    filas.push(["", "", "", "", `=COUNTIF(${A1(4,inicio)}:${A1(4,fin)},"Sí")`,
+      "gestiones a tiempo · comercios cubiertos · visitas efectivas", "", "",
+      `=COUNTIF(${A1(8,inicio)}:${A1(8,fin)},"Sí")`,
+      `=COUNTIF(${A1(9,inicio)}:${A1(9,fin)},"Sí")`]);
+  }
   const bandas = [];
   filas.forEach((fila, i) => {
     const t = String(fila[0] || "");
@@ -14340,8 +14396,14 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
   const etiquetas = filas.map((x, i) => x[0] && !bandas.includes(i + 1)
     && i > 1 && (i + 1) < fCab ? i + 1 : 0).filter(Boolean);
   return hojaLibro(filas, {
-    titulo:1, sub:2, anchos:[34, 16, 16, 16, 14, 58],
+    titulo:1, sub:2, anchos:[34, 16, 16, 16, 14, 34, 20, 16, 15, 13],
     secciones:bandas,
+    /* La cabecera de la evidencia se pinta como cabecera de tabla, y la fila
+       de sumas se marca: es la que cierra la cuenta contra los tres números
+       del resumen. */
+    cabeceraSimple: fCab || 0,
+    filtro: fCab || 0,
+    zebra: suyas.length ? [inicio + suyas.length] : [],
     etiquetas,
     notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
     destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
@@ -14365,7 +14427,10 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
       [2, 20, 20, U.comercios],
       /* El resultado, todo en % del sueldo base */
       [2, 23, 27, U.pct],
-      [3, inicio, filas.length, "0"]
+      /* «Días trabajados» pasó a la columna 4 cuando entró el alta de la ficha;
+         esta regla seguía puesta en la 3 y le borraba el formato de fecha a la
+         fecha de registro, que salía como 46254. */
+      [4, inicio, filas.length, "0"]
     ],
     /* Valor, mínimo y cumple, centrados en toda la hoja. El peso solo en el
        bloque de objetivos: en la llave esa columna es texto explicativo y
@@ -14680,28 +14745,59 @@ function actaIncentivo(doc, u, p, x){
     txt(t, m, y, { size:9, bold:true, color:PX.navy });
     y += 2; linea(y); y += 5;
   };
-  const fila = (rot, valor, meta, ok, pie) => {
+  /* ---- Las metas de antes del reajuste ---------------------------------
+     Cuando el periodo trae `requisitos_previos`, el acta muestra DOS columnas
+     de meta: contra qué se midió y contra qué se debía medir. Sin eso el papel
+     dice «15%» y no dice que hubo una excepción, que es exactamente lo que un
+     acta tiene que dejar por escrito.
+
+     El periodo que no los traiga se ve como siempre: una sola columna. La
+     excepción vive en la versión de parámetros, no acá. */
+  const prev = B.requisitos_previos || null;
+  const pideOrig = prev ? Math.round((prev.visitas_semana || 0) * ll.semanas) : 0;
+  const xVal  = prev ? 104 : 118;
+  const xOrig = 134;
+  const xMeta = prev ? 168 : 152;
+
+  const fila = (rot, valor, meta, ok, pie, orig, okOrig) => {
     txt(rot, m, y, { size:9, bold:true, color:PX.navy });
-    txt(valor, 118, y, { size:9, color:PX.gris, align:"right" });
-    txt(meta,  152, y, { size:9, color:PX.gris2, align:"right" });
+    txt(valor, xVal, y, { size:9, color:PX.gris, align:"right" });
+    if (prev && orig !== undefined)
+      txt(orig, xOrig, y, { size:9, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
+    txt(meta, xMeta, y, { size:9, bold:!!prev, color:PX.gris2, align:"right" });
     if (ok !== null){
       const c = ok ? PX.ok : PX.mal;
       caja(W - m - 16, y - 3.4, 16, 5, ok ? PX.okBg : PX.malBg);
       txt(ok ? "Cumple" : "No cumple", W - m - 8, y, { size:7.5, bold:true, color:c, align:"center" });
     }
     if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    if (prev && orig !== undefined)
+      txt(okOrig ? "con la meta original, cumple" : "con la meta original, no alcanza",
+          W - m, y, { size:7.5, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
     y += 7;
   };
 
-  seccion("LLAVE DE ACCESO");
-  txt("VALOR", 118, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
-  txt("MÍNIMO", 152, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  const okCobOrig = !prev || ll.cobertura.valor >= prev.cobertura_pct;
+  const okVisOrig = !prev || ll.efectivas >= pideOrig;
+  const okPunOrig = !prev || (ll.gestiones > 0 && ll.puntualidad.valor >= prev.puntualidad_pct);
+  const conLaOriginal = [okCobOrig, okVisOrig, okPunOrig].filter(Boolean).length;
+
+  seccion(prev ? `LLAVE DE ACCESO · ${ll.cumplidos} DE 3 CON LAS METAS REAJUSTADAS`
+               : "LLAVE DE ACCESO");
+  txt(prev ? "LOGRADO" : "VALOR", xVal, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  if (prev) txt("META ORIGINAL", xOrig, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt(prev ? "META DEL REAJUSTE" : "MÍNIMO", xMeta, y - 3,
+      { size:6.5, bold:true, color:PX.gris2, align:"right" });
   fila("Cobertura de cartera", pdfPct(ll.cobertura.valor), pdfPct(ll.cobertura.meta),
-       ll.cobertura.ok, ll.cobertura.detalle);
+       ll.cobertura.ok, ll.cobertura.detalle,
+       prev ? pdfPct(prev.cobertura_pct) : undefined, okCobOrig);
   fila("Visitas efectivas", pdfNum(ll.efectivas, "visitas"), pdfNum(ll.pide, "visitas"),
-       ll.visitas.ok, `El periodo tiene ${ll.semanas.toFixed(1).replace(".", ",")} semanas`);
+       ll.visitas.ok, `El periodo tiene ${ll.semanas.toFixed(1).replace(".", ",")} semanas${
+         prev ? " · este mínimo no se reajustó" : ""}`,
+       prev ? pdfNum(pideOrig, "visitas") : undefined, okVisOrig);
   fila("Puntualidad del registro", pdfPct(ll.puntualidad.valor), pdfPct(ll.puntualidad.meta),
-       ll.puntualidad.ok, ll.puntualidad.detalle);
+       ll.puntualidad.ok, ll.puntualidad.detalle,
+       prev ? pdfPct(prev.puntualidad_pct) : undefined, okPunOrig);
   y += 2;
 
   /* ---- Los objetivos --------------------------------------------------- */
@@ -14767,6 +14863,31 @@ function actaIncentivo(doc, u, p, x){
   txt("Todos los porcentajes son sobre el sueldo base. El monto lo calcula Recursos Humanos.",
       m + 4, y + 2.5, { size:7.5, italic:true, color:PX.gris });
   y += 16;
+
+  /* La excepción, dicha con todas sus letras. Sin esto el acta deja constancia
+     de un 15% y no de por qué: lo que se está pagando no es haber llegado a la
+     meta, es haber llegado a la meta reajustada. */
+  if (prev){
+    const pagoOrig = conLaOriginal >= 2 ? B.base_incumple_uno : 0;
+    caja(m, y - 4, W - 2*m, 24, PX.fondo);
+    txt("Este periodo se midió con metas reajustadas, por única vez", m + 4, y,
+        { size:8.5, bold:true, color:PX.navy });
+    y += 4.5;
+    txt(`La dirección aprobó bajar la cobertura de ${pdfPct(prev.cobertura_pct)} a ${
+        pdfPct(ll.cobertura.meta)} y la calidad del registro de ${pdfPct(prev.puntualidad_pct)} a ${
+        pdfPct(ll.puntualidad.meta)} solo para este periodo.`, m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt(`El mínimo de visitas efectivas no se movió, y es el que no se alcanzó: ${
+        pdfNum(ll.efectivas, "")} de ${pdfNum(ll.pide, "")}.`, m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt(`Con las metas originales el resultado habría sido ${conLaOriginal} de 3 requisitos, y le habría `
+      + `correspondido ${pdfPct(pagoOrig)}.`, m + 4, y,
+        { size:7.5, bold:true, color: pagoOrig < x.pago ? PX.mal : PX.gris });
+    y += 4;
+    txt("El reajuste no cambia los objetivos del proyecto ni los mínimos de los periodos siguientes.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 11;
+  }
 
   /* Lo que hace que este papel no se reabra. Quien lo firma tiene derecho a
      saber, en el papel y no de palabra, que el número no depende de un dato
