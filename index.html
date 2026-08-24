@@ -14404,14 +14404,26 @@ function hojaEjecutivo(u, p, d, nG, nC, nN){
      alguna no cuadra, se ve sin buscarla. */
   if (porComercio.length){
     const fin = inicio + porComercio.length - 1;
+    /* «Cargados de N asignados» y no «asignados» a secas: esta lista son los
+       comercios que están en el CRM, y no siempre son todos los que BBVA
+       asignó. Alfredo Arrascue tiene 144 asignados y 105 cargados; llamar
+       «asignados» a los 105 escondería justo el dato que hay que ver. */
     filas.push([
-      `=COUNTA(${A1(0,inicio)}:${A1(0,fin)})&" comercios asignados"`,
+      `=COUNTA(${A1(0,inicio)}:${A1(0,fin)})&" cargados de "&$B$4&" asignados"`,
       `=SUM(${A1(1,inicio)}:${A1(1,fin)})`, "", "",
       `=COUNTIF(${A1(4,inicio)}:${A1(4,fin)},"No")&" con registro tardío"`,
       `=SUM(${A1(5,inicio)}:${A1(5,fin)})`,
       `=COUNTIF(${A1(6,inicio)}:${A1(6,fin)},"Sí")`
     ]);
     filas.push(["", "gestiones del periodo", "", "", "", "fuera de plazo", "gestionados"]);
+    /* Y si hay trabajo sobre comercios que no están en esta lista, se dice:
+       la suma de la columna «Gestiones» no llegaría al total del periodo y
+       alguien tendría que salir a buscar la diferencia. */
+    const fuera = suyas.length - porComercio.reduce((n, c) => n + c.n, 0);
+    if (fuera > 0)
+      filas.push(["", "", "", "", "", "",
+        `Además, ${fuera} ${fuera === 1 ? "gestión" : "gestiones"} sobre comercios que no están en esta lista: `
+        + `de otra cartera, o Customer ID sin ficha cargada. Entran en el total del periodo pero no en la cobertura.`]);
   }
   const bandas = [];
   filas.forEach((fila, i) => {
