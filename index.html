@@ -2582,7 +2582,11 @@ const nombrePeriodo = p => nombreMes(p);
    selector y tres relojes declarados, y toda métrica dice contra cuál se midió.
    ========================================================================= */
 const VENTANAS_PANEL = [
-  { id:"bono",     label:"Periodo del bono" },
+  /* El rótulo se adapta a quién mira. Para BBVA es la ventana de medición de
+     la campaña y nada más: la palabra «bono» nombra la retribución del equipo
+     de Stratis, que no es asunto del banco ni aparece en ninguna otra parte de
+     su vista. La ventana es la misma; lo que cambia es cómo se llama. */
+  { id:"bono",     get label(){ return esBBVA() ? "Periodo de campaña" : "Periodo del bono"; } },
   { id:"mes",      label:"Mes calendario" },
   { id:"proyecto", label:"Todo el proyecto" }
 ];
@@ -3464,6 +3468,38 @@ function esDeCampo(){
   return !!(S.user && S.user.rol === "Ejecutivo");
 }
 
+/* ---- El perfil de BBVA --------------------------------------------------
+
+   Un cuarto rol, y el primero que no es de Stratis. El banco entra a ver el
+   trabajo del equipo —la cartera, las fichas, las gestiones, el calendario y
+   el tablero— y nada más. Tres cosas quedan fuera y por motivos distintos:
+
+     · INCENTIVOS, porque es la retribución de personas de otra empresa. No es
+       asunto del cliente y no hay ninguna versión de esto en la que deba
+       serlo.
+     · REPORTE, porque es material que se prepara PARA el banco, con un corte
+       y una narrativa decididos. Que lo vea a medio armar no ayuda a nadie.
+     · AJUSTES, porque ahí viven los parámetros, el equipo y las descargas.
+
+   Y no escribe NADA. Ni una gestión, ni una ficha, ni una cita, ni una
+   corrección. La razón no es desconfianza: es que el CRM mide el trabajo de
+   Stratis, y un dato escrito por el cliente dentro de esa medición la vuelve
+   indefendible ante el propio cliente. Lo que el banco ve, lo escribió el
+   equipo.
+
+   `soloLectura()` se pregunta en el render de cada botón que escribe, y la
+   base lo repite con sus propias políticas: la pantalla puede equivocarse, la
+   política no. */
+function esBBVA(){
+  return !!(S.user && S.user.rol === "BBVA");
+}
+const soloLectura = () => esBBVA();
+
+/* Las pestañas que este perfil no abre, ni desde el menú ni a mano. */
+const VEDADAS_BBVA = ["bono", "reporte", "ayuda"];
+const puedeVerTab = tab =>
+  !(esBBVA() && (VEDADAS_BBVA.includes(tab) || /^form_/.test(String(tab))));
+
 /* =========================================================================
    Acceso con enlace mágico y carga de datos desde Supabase
    ========================================================================= */
@@ -3950,8 +3986,12 @@ const NAV = [
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
 ];
 /* El seguimiento del incentivo lo miran el Analista y el Manager; al ejecutivo
-   ni siquiera se le ofrece la pestaña. */
-const navVisible = () => NAV.filter(n => !n.soloMando || (S.user && S.user.rol !== "Ejecutivo"));
+   ni siquiera se le ofrece la pestaña. Y a BBVA se le retiran tres: incentivos
+   —retribución de otra empresa—, reporte —material que se prepara para él— y
+   ajustes, donde viven los parámetros y las descargas. */
+const navVisible = () => NAV
+  .filter(n => !n.soloMando || (S.user && S.user.rol !== "Ejecutivo"))
+  .filter(n => puedeVerTab(n.id));
 
 function renderNav(){
   $("#nav").innerHTML = navVisible().map(n => `
@@ -4093,6 +4133,13 @@ function verCarteraPor(filtro){
 }
 
 function go(tab, cid){
+  /* La puerta, y va acá porque acá pasa TODO: el menú, los botones de la
+     ficha, los enlaces internos y cualquier llamada suelta. Filtrar solo la
+     navegación dejaría abiertas las otras tres. */
+  if (!puedeVerTab(tab)){
+    toast("Este perfil no tiene acceso a esa sección");
+    tab = "cartera"; cid = null;
+  }
   S.tab = tab; S.cid = cid || null;
   S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
   /* Los formularios de BBVA se sueltan al salir, como los demás: un borrador a
@@ -4144,7 +4191,8 @@ function render(){
 
 function renderInterno(){
   if (!S.user) return renderLogin();
-  $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`;
+  $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`
+    + (soloLectura() ? " · solo lectura" : "");
   renderNav();
   const v = $("#view");
   /* Ajustes ya no fluye en columnas automáticas: cada bloque decide su ancho.
@@ -4237,6 +4285,24 @@ function bindComunes(){
   const lote = document.querySelector("#loteBbva");
   if (lote) lote.onclick = () => abrirLoteBBVA();
   if (typeof bindExtras === "function") bindExtras();
+
+  /* ---- La red de abajo -------------------------------------------------
+     Las guardas de arriba deciden qué BOTÓN se dibuja. Esto decide qué botón
+     RESPONDE, y existe porque son dos fallas distintas: una pantalla nueva que
+     olvide su guarda dibuja el botón, y sin esto además funcionaría. Con esto,
+     lo peor que pasa es un botón visible que no hace nada y avisa por qué.
+
+     No reemplaza a las políticas de la base, que son las que de verdad
+     impiden escribir: esto es la aplicación siendo coherente consigo misma. */
+  if (soloLectura()){
+    ["data-del","data-edit","data-editcli","data-delcli","data-segdel","data-fixid",
+     "data-cbbva-fix","data-destrabe","data-agendar","data-agendar-dia","data-reag",
+     "data-editmeta","data-verges-fix"].forEach(attr =>
+      document.querySelectorAll(`[${attr}]`).forEach(el => {
+        el.onclick = e => { e.stopPropagation(); toast("Este perfil es de solo lectura"); };
+      }));
+  }
+
 }
 
 /* =========================================================================
@@ -4536,7 +4602,7 @@ function viewFicha(c){
             · eliminar sigue siendo solo del dueño. Borrar una ficha se lleva
               sus gestiones por delante, y esa no es una corrección: es una
               pérdida. Para lo demás está Editar. */ ""}
-    ${(mio || !esDeCampo()) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+    ${(mio || mandoTotal()) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       ${(mio || mandoTotal()) ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>` : ""}
       ${mio ? `<button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
       ${(!esDeCampo() || (edicionLibre() && esMiCliente(c)))
@@ -4566,7 +4632,7 @@ function viewFicha(c){
             se queda, porque ahí sí es literal. */ ""}
       <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
              ${!esClienteNuevo(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>` : ""}
-             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>` : ""}
+             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? (soloLectura() ? "" : `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>`) : ""}
              ${esVentaNueva(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div>` : ""}</dd></div>
       ${(() => {
         const sg = seguimientoDe(c.customer_id);
@@ -4630,7 +4696,7 @@ function viewFicha(c){
         —en la línea de tiempo aparece con su nombre— así que nunca se confunde
         con trabajo de campo del ejecutivo, y como el Analista y el Manager no
         entran en el bono, tampoco mueve ningún cumplimiento. */ ""}
-  ${(mio || !esDeCampo()) ? `<div class="sticky-actions">
+  ${(mio || mandoTotal()) ? `<div class="sticky-actions">
     <button class="btn" data-go="form_visita|${c.customer_id}">${
       rotuloContacto(b._intentos, b._efectivos > 0, "＋ Registrar contacto")}</button>
     ${mio ? botonAgenda(c) : ""}
@@ -4710,7 +4776,7 @@ function cardProximaVisita(c, mio){
     ${vistaDeCampo() ? "" : `<div class="kv"><dt>Con</dt><dd>${esc(s.ejecutivo || "")}</dd></div>`}
     ${s.comentario ? `<div class="quote" style="margin-top:8px">${esc(s.comentario)}</div>` : ""}
     ${movida(s)}
-    ${(mio || !esDeCampo()) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+    ${(mio || mandoTotal()) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
       <button class="btn ghost sm" data-reag="${esc(s.id)}">Reagendar</button>
       <button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
         title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>
@@ -4776,7 +4842,7 @@ function cardCoordinacionBBVA(c, mio){
       que no deja constancia que otro pueda consultar. Si el banco después dice que nunca le
       pidieron los datos, lo único que se puede poner sobre la mesa es un correo. Mándalo con lo
       acordado y regístralo acá.
-      ${(mio || !esDeCampo()) ? `<div style="margin-top:10px">
+      ${(mio || mandoTotal()) ? `<div style="margin-top:10px">
         <button class="btn sm" data-go="form_bbva|${c.customer_id}">Registrar el correo de respaldo</button>
       </div>` : ""}</div>` : ""}
 
@@ -4789,7 +4855,7 @@ function cardCoordinacionBBVA(c, mio){
 
           Las dos salidas se registran, y por eso están las dos acá: la
           segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
-      (k.n === 1 && !k.respondio && (mio || !esDeCampo())) ? `
+      (k.n === 1 && !k.respondio && (mio || mandoTotal())) ? `
       <div class="note warn" style="margin-top:11px">
         <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
         se registran para que no quede la duda de quién tiene el turno.
@@ -4804,7 +4870,7 @@ function cardCoordinacionBBVA(c, mio){
          estando —el caso tiene que poder destrabarse en el contacto quince
          igual que en el primero— pero como una línea de botones, no como una
          advertencia repetida. */
-      : (k.n > 1 && !k.respondio && (mio || !esDeCampo())) ? `
+      : (k.n > 1 && !k.respondio && (mio || mandoTotal())) ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;align-items:center">
         <span class="pie" style="margin:0;flex:1 1 160px">${k.n} contactos sin respuesta.</span>
         <button class="btn ghost sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
@@ -4816,7 +4882,7 @@ function cardCoordinacionBBVA(c, mio){
           quién llamar. Antes eso se leía como un guion en una fila y se
           quedaba ahí semanas. Ahora el siguiente paso es el elemento más
           visible de la tarjeta, y dice qué pasa si no se da. */
-      (!k.n && (mio || !esDeCampo())) ? `
+      (!k.n && (mio || mandoTotal())) ? `
       <div class="cta-bbva">
         <div class="cta-bbva-txt">
           <b>El caso está parado hasta coordinar con BBVA</b>
@@ -4825,7 +4891,7 @@ function cardCoordinacionBBVA(c, mio){
         </div>
         <button class="btn" data-go="form_bbva|${c.customer_id}">Coordinar ahora</button>
       </div>`
-      : ((mio || !esDeCampo()) ? `<button class="btn ghost sm block" style="margin-top:11px"
+      : ((mio || mandoTotal()) ? `<button class="btn ghost sm block" style="margin-top:11px"
           data-go="form_bbva|${c.customer_id}">${
             rotuloContacto(k.n, k.respondio, "＋ Registrar coordinación")} con BBVA</button>` : "")}
   </div>`;
@@ -5556,7 +5622,7 @@ async function guardarCliente(){
   /* Dar de alta es trabajo de campo. Se avisa acá con todas las letras en vez
      de dejar que la base responda con un error de permisos que no le dice a
      nadie qué hacer. */
-  if (!editando && !esDeCampo())
+  if (!editando && !esDeCampo() && !soloLectura())
     errores.push("El alta de comercios la hacen los ejecutivos en campo. Desde supervisión se corrigen fichas, no se crean.");
   if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
   if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
@@ -6256,7 +6322,10 @@ const DIAS_CORRECCION = 2;
 /* El Analista y el Manager corrigen cualquier gestión, sin plazo: son los que
    responden por el dato frente al banco y no deberían depender de nadie para
    arreglar un dedazo. Las coordenadas siguen fuera del alcance de todos. */
-const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo");
+/* Supervisión con permiso de escritura: el Analista y el Manager.
+   BBVA queda fuera aunque tampoco sea de campo — es el único rol que mira sin
+   tocar, y este es el punto por el que se colaba a todos los formularios. */
+const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo" && !esBBVA());
 
 /* La ubicación no se reescribe nunca. Lo único que se puede hacer con una
    equivocada es anularla, y solo mientras la ventana de corrección esté
@@ -7814,7 +7883,7 @@ function selectorPanel(r, conTitulo){
         `<option value="${esc(v)}"${v === r.periodo ? " selected" : ""}>${esc(l)}</option>`).join("")}
       </select></label>` : ""}
     <div class="pnl-per-txt">Del <b>${esc(r.detalle)}</b>${
-      r.id === "bono" ? " · el mes del bono corta el 18" : ""}</div>
+      r.id === "bono" ? (esBBVA() ? " · el periodo corta el 18" : " · el mes del bono corta el 18") : ""}</div>
   </div>`;
 }
 
@@ -8577,10 +8646,10 @@ function viewPanel(){
   ${bloqueEquipo(r)}
   ${/* El seguimiento del incentivo lo miran el Analista y el Manager; al
        ejecutivo no se le ofrece la pestaña y tampoco se le filtra por acá. */
-    !vistaDeCampo() ? bloqueLlave(r) : ""}
+    (!vistaDeCampo() && !esBBVA()) ? bloqueLlave(r) : ""}
   ${bloqueCorregir(r, regs)}
   ${bloqueDetalle(r, regs)}
-  ${!vistaDeCampo()
+  ${(!vistaDeCampo() && !esBBVA())
     ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
         <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
     : ""}`;
@@ -8666,7 +8735,7 @@ function kpisTablero(x, r){
              <div class="sub">${x.gestionados} de ${x.asignada} gestionados · mínimo ${x.req.cobertura_pct}%</div>
              ${medidor(x.cobertura, cobOk ? "" : tonoContra(x.cobertura, x.req.cobertura_pct))}`
           : `<div class="val num">${x.gestionados}</div>
-             <div class="sub">comercios gestionados · falta cargar la cartera asignada en Ajustes</div>
+             <div class="sub">comercios gestionados${esBBVA() ? "" : " · falta cargar la cartera asignada en Ajustes"}</div>
              ${medidor(0, "ojo")}`}
     </button>
 
@@ -8849,7 +8918,7 @@ function lineaDiaria(r, regs){
       ritmo !== null
         ? `Quedan ${quedan} día${quedan === 1 ? "" : "s"} trabajado${quedan === 1 ? "" : "s"}: el ritmo necesario es ${ritmo} al día y el promedio de estos ${vistos.length} es ${prom.toFixed(0)}.`
         : !asignada
-          ? `El ritmo necesario no se puede calcular sin la cartera asignada, que se carga en <b>Ajustes</b>.`
+          ? `El ritmo necesario no se puede calcular sin la cartera asignada.${esBBVA() ? "" : " Se carga en <b>Ajustes</b>."}`
           : "El periodo ya cerró: la línea es el registro de lo que pasó."}</p>
   </div>`;
 }
@@ -9027,7 +9096,7 @@ function viewTablero(){
     </div>
     <div>
       ${decisionesTablero(r, regs)}
-      ${minimosTablero(x)}
+      ${esBBVA() ? "" : minimosTablero(x)}
     </div>
   </div>
 
@@ -9037,13 +9106,13 @@ function viewTablero(){
       ${bloqueProyecto()}
       ${bloqueActividad(r, regs)}
       ${bloqueEquipo(r)}
-      ${bloqueLlave(r)}
+      ${esBBVA() ? "" : bloqueLlave(r)}
       ${bloqueDetalle(r, regs)}
     </div>
   </details>
 
-  <div class="pie" style="margin:14px 2px 0">Las descargas viven en
-    <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`;
+  ${esBBVA() ? "" : `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
+    <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`}`;
 }
 
 /* =========================================================================
