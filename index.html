@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 20:18", huella:"aee109" };
+const BUILD = { sello:"26/08/2026 20:34", huella:"95ecd7" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14801,13 +14801,22 @@ function armarDirectorio(pptx, fondos){
   T(g, `${f.portafolio} · portafolio completo`,
     { x:XG, y:py(f.portafolio || 0) - 0.28, w:4.0, h:0.24, fontSize:9.5, color:H("gris2") });
 
-  /* Un tramo de recta entre dos puntos. pptxgenjs no dibuja líneas sueltas:
-     se hace con un rectángulo fino rotado, que para esto alcanza. */
+  /* Un tramo de recta entre dos puntos. pptxgenjs no dibuja líneas sueltas: se
+     hace con un rectángulo fino rotado.
+     El detalle que costó una versión: PowerPoint rota una forma sobre SU
+     CENTRO, no sobre su esquina. Colocando el rectángulo en el punto de
+     partida y rotándolo, el resultado queda corrido —y el corrimiento crece
+     con la pendiente, así que con datos suaves de prueba casi no se nota y con
+     los reales la curva se rompe—. Por eso se coloca centrado en el punto
+     medio del tramo: ahí la rotación lo deja justo donde tiene que estar. */
   const tramo = (x1, y1, x2, y2, color, grosor) => {
     const dx = x2 - x1, dy = y2 - y1;
     const largo = Math.sqrt(dx*dx + dy*dy);
     if (largo < 0.001) return;
-    g.addShape(pptx.ShapeType.rect, { x:x1, y:y1 - grosor/2, w:largo, h:grosor,
+    g.addShape(pptx.ShapeType.rect, {
+      x: (x1 + x2) / 2 - largo / 2,
+      y: (y1 + y2) / 2 - grosor / 2,
+      w: largo, h: grosor,
       fill:{ color:H(color) }, line:{ type:"none" },
       rotate: Math.atan2(dy, dx) * 180 / Math.PI });
   };
