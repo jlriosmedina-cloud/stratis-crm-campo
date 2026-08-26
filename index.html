@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 20:49", huella:"1d3c4d" };
+const BUILD = { sello:"26/08/2026 21:16", huella:"2b86f9" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14243,81 +14243,125 @@ function repEvolutivo(f){
    discrepan es porque alguien calculó dos veces, y acá se calcula una.
    ========================================================================= */
 
-/* Dónde termina el proyecto si el ritmo de hoy se sostiene. No es un
-   pronóstico sofisticado y no pretende serlo: es la aritmética que cualquiera
-   en la sala haría en una servilleta, hecha a la vista para que se pueda
-   discutir el supuesto en vez de discutir la cuenta. */
-function repProyeccion(f){
-  /* El ritmo se mide sobre las semanas que el proyecto lleva EN CAMPO, no
-     sobre las corridas desde la firma. Las dos primeras semanas fueron de
-     coordinación con los ejecutivos del banco y no de calle: contarlas como
-     semanas flojas de campo diluiría el ritmo real hacia abajo. */
-  const semCampo = Math.max(1, f.diasDeCampo / 7);
-  const semRest  = Math.max(0, f.restante / 7);
 
-  const linea = (nombre, hecho, meta, unidad, techo) => {
-    const ritmo = hecho / semCampo;
-    /* El contacto no puede proyectarse por encima del portafolio: no hay a
-       quién más contactar. Un «proyectado 1020 sobre una meta de 841» es
-       aritméticamente cierto y en una lámina de comité se lee como un error. */
-    const crudo = hecho + ritmo * semRest;
-    const proyectado = Math.round(techo ? Math.min(crudo, techo) : crudo);
-    const pedido = meta > hecho && semRest > 0 ? (meta - hecho) / semRest : 0;
-    return { nombre, hecho, meta, unidad, ritmo, proyectado,
-      llega: meta > 0 && proyectado >= meta,
-      brecha: Math.max(0, meta - proyectado),
-      pedido,
-      /* Cuánto habría que multiplicar el ritmo actual para llegar. Es el
-         número que convierte «vamos atrasados» en una decisión: duplicar el
-         equipo, correr la meta, o aceptar el resultado. */
-      factor: ritmo > 0 ? pedido / ritmo : null };
+/* ---- El corte de la semana cumplida ------------------------------------
+   El comité no se reúne para ver una foto: se reúne para ver si la foto se
+   movió. Todo lo que sigue existe para poder decir «esto era el jueves, esto
+   es hoy», que es la única forma de que un número acumulado signifique algo.
+
+   La semana cierra los JUEVES, que es como lo mira el equipo. El corte es el
+   último jueves ya cumplido; lo que va del viernes a hoy es la semana en
+   curso, y se muestra aparte porque todavía no terminó. */
+function repJueves(hoy){
+  const d = new Date(hoy + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() !== 4) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/* El embudo tal como estaba a una fecha. Cada escalón cuenta comercios, no
+   gestiones, igual que el embudo de siempre: si acá contara gestiones, el
+   avance de la semana saldría inflado y las dos láminas no cerrarían. */
+function repEmbudoAl(fecha){
+  const ges = DB.todos().filter(esGestionCliente)
+    .filter(g => repDia(g.Fecha_Contacto) <= fecha);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
+  const idsDe = f => new Set(ges.filter(f).map(g => String(g.Customer_id)));
+
+  const cerradoAl = c => {
+    /* Sin fecha de cierre no se puede decir cuándo pasó. Se cuenta en el
+       acumulado —el hecho es cierto— y se deja fuera del corte anterior, así
+       aparece como avance de la semana en vez de desaparecer. */
+    const d = c.cerrado_en ? String(c.cerrado_en).slice(0, 10) : null;
+    return d !== null && d <= fecha;
   };
-
   return {
-    semCampo, semRest,
-    contacto: linea("Portafolio contactado", f.contacto, f.portafolio, "comercios", f.portafolio),
-    objetivo: linea("Reactivación", f.objetivo, f.metaR, "comercios"),
-    venta:    linea("Afiliaciones nuevas", f.ventasNuevas, f.metaV, "afiliaciones")
+    contacto: enCartera(idsDe(() => true)),
+    gestion:  enCartera(idsDe(g => esEfectivo(g.Resultado))),
+    visita:   enCartera(idsDe(g => g.Cumple_Visita === "SI")),
+    objetivo: cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
   };
 }
 
-/* La curva del proyecto: cuántos comercios del portafolio quedaron
-   contactados, acumulado, semana a semana. Es la única serie que cuenta el
-   desarrollo sin necesitar una explicación al lado. */
-function repCurva(f){
+/* Las tres series que mira el comité, semana a semana. Semanas de viernes a
+   jueves; la última, la que va corriendo, se marca como incompleta para que
+   nadie lea una caída donde solo faltan días. */
+function repSemanal(f){
+  const corte = repJueves(f.hoy);
   const ges = DB.todos().filter(esGestionCliente);
-  const enCartera = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
-  const primera = new Map();
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = new Set(cart.map(c => String(c.customer_id)));
+
+  const primeraDe = new Map();
   ges.forEach(g => {
     const cid = String(g.Customer_id);
     if (!enCartera.has(cid)) return;
     let d = repDia(g.Fecha_Contacto);
     if (!d) return;
-    /* Una fecha anterior al arranque se lleva a la primera semana en vez de
-       descartarse. El comercio FUE contactado —eso no está en duda—; lo que no
-       merece confianza es la fecha. Descartarlo dejaría la curva terminando en
-       un número distinto al del embudo dos láminas antes, y dos cifras que no
-       cuadran en la misma presentación valen menos que las dos por separado. */
     if (d < f.ini) d = f.ini;
     if (d > f.hoy) return;
-    if (!primera.has(cid) || d < primera.get(cid)) primera.set(cid, d);
+    if (!primeraDe.has(cid) || d < primeraDe.get(cid)) primeraDe.set(cid, d);
   });
 
   const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
-  const largo = Math.max(1, dias(f.ini, f.hoy) + 1);
-  const puntos = [];
-  let acum = 0;
-  for (let i = 0; i * 7 < largo; i++){
-    const desde = new Date(new Date(f.ini).getTime() + i * 7 * 86400000).toISOString().slice(0,10);
-    const hastaBruto = new Date(new Date(f.ini).getTime() + (i * 7 + 6) * 86400000).toISOString().slice(0,10);
-    const hasta = hastaBruto < f.hoy ? hastaBruto : f.hoy;
-    let nuevos = 0;
-    primera.forEach(d => { if (d >= desde && d <= hasta) nuevos++; });
-    acum += nuevos;
-    puntos.push({ n: i + 1, desde, hasta, nuevos, acum });
+  const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
+
+  /* Se arma hacia atrás desde el corte y se corta en el arranque: así el
+     último jueves siempre cae en el borde de una semana y la comparación
+     contra la anterior es contra un periodo del mismo largo. */
+  const bordes = [];
+  for (let d = corte; d >= f.ini; d = mas(d, -7)) bordes.unshift(d);
+
+  const semanas = bordes.map((fin, i) => {
+    const desde = i === 0 ? f.ini : mas(bordes[i - 1], 1);
+    const enRango = d => d && d >= desde && d <= fin;
+    let contactos = 0;
+    primeraDe.forEach(d => { if (enRango(d)) contactos++; });
+    return {
+      desde, hasta: fin, completa: true,
+      contactos,
+      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
+        && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
+    };
+  });
+
+  /* La semana en curso: del viernes siguiente al corte hasta hoy. */
+  const desdeC = mas(corte, 1);
+  if (desdeC <= f.hoy){
+    const enRango = d => d && d >= desdeC && d <= f.hoy;
+    let contactos = 0;
+    primeraDe.forEach(d => { if (enRango(d)) contactos++; });
+    semanas.push({
+      desde: desdeC, hasta: f.hoy, completa: false,
+      dias: dias(desdeC, f.hoy) + 1,
+      contactos,
+      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
+        && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
+    });
   }
-  return { puntos, total: acum };
+
+  const cerradas = semanas.filter(x => x.completa);
+  const ultima = cerradas[cerradas.length - 1] || null;
+  const previa = cerradas[cerradas.length - 2] || null;
+  const curso  = semanas.find(x => !x.completa) || null;
+
+  const dif = k => (previa && ultima && previa[k])
+    ? (ultima[k] - previa[k]) / previa[k] * 100
+    : (ultima && ultima[k] ? null : null);
+
+  return { corte, semanas, ultima, previa, curso,
+    series: [
+      { k:"contactos",   nombre:"Comercios contactados", color:"azul" },
+      { k:"retenciones", nombre:"Retenciones concretadas", color:"naranja" },
+      { k:"visitas",     nombre:"Visitas efectivas", color:"verde" }
+    ],
+    variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
+                 visitas: dif("visitas") } };
 }
+
 
 const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
 const repPct = n => repNum(n, n < 10 ? 1 : 0) + "%";
@@ -14653,7 +14697,22 @@ function repLaminaEmbudo(X, f){
     X.T(e, p.label, { x:X_LBL, y, w:W_LBL, h:ALTO, fontSize:11.5, bold:true, align:"right",
       color: (i === 0 || i === f.embudo.length - 1) ? X.H("navy") : X.H("gris") });
     const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
-    e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
+    /* Con un corte anterior, la barra se parte en dos: el tono pleno es lo que
+       ya estaba el jueves y el claro es lo que se ganó desde entonces. Es la
+       misma barra de siempre —el largo total no cambia— y responde la pregunta
+       que un acumulado nunca responde solo: ¿esto se movió esta semana? */
+    const antes = X.corte ? (X.corte[p.k] !== undefined ? X.corte[p.k] : p.n) : null;
+    if (antes === null || antes >= p.n){
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
+    } else {
+      const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w:wa, h:ALTO,
+        fill:{ color:col }, line:{ type:"none" } });
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR + wa, y, w:Math.max(0.03, w - wa), h:ALTO,
+        fill:{ color:col, transparency:55 }, line:{ type:"none" } });
+      X.T(e, "+" + (p.n - antes), { x:X_BAR + w + 0.06, y, w:0.52, h:ALTO,
+        fontSize:9.5, bold:true, color:X.H("gris2") });
+    }
     X.T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
     X.T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:X.H("gris2") });
     if (i > 0) X.T(e, repPct(p.conv) + " " + p.texto,
@@ -14664,6 +14723,11 @@ function repLaminaEmbudo(X, f){
   X.caja(e, X_BAR, yc, 7.25, 0.32, "FBDDCF");
   X.T(e, "Además: " + repAparte(f),
     { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:X.H("naranja") });
+
+  if (X.corte){
+    X.T(e, `Tono pleno: como estaba al cierre del ${repFecha(X.corteFecha)}. Tono claro: lo ganado desde entonces.`,
+      { x:X_LBL, y:yc + 0.40, w:9.0, h:0.24, fontSize:9.5, color:X.H("gris2") });
+  }
 
   const LEC = ((REPORTE.lecturas || {}).embudo) || [];
   const YC = 5.46, HC = 1.34, WC = 6.04;
@@ -14732,8 +14796,6 @@ function armarDirectorio(pptx, fondos){
   const f = fotoReporte();
   const D = repDatos(f);
   const P = repProyecto();
-  const PR = repProyeccion(f);
-  const CU = repCurva(f);
   const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
   const H = repHex;
 
@@ -14755,9 +14817,11 @@ function armarDirectorio(pptx, fondos){
     T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
     T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
   };
-  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true };
+  const SEM = repSemanal(f);
+  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
+              corte: repEmbudoAl(SEM.corte), corteFecha: SEM.corte };
 
-  /* ---- D1 · Carátula --------------------------------------------------- */
+  /* ---- 1 · Carátula ---------------------------------------------------- */
   const c = lamina(fondos.caratula);
   T(c, P.cliente, { x:0.82, y:5.02, w:8.6, h:0.52, fontSize:21, bold:true, fontFace:NEG, color:"FFFFFF" });
   T(c, "Comité de dirección · desarrollo del proyecto",
@@ -14765,188 +14829,129 @@ function armarDirectorio(pptx, fondos){
   T(c, "Corte al " + repFechaLarga(f.hoy),
     { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
 
-  /* ---- D3 · Cómo se construyó ------------------------------------------ */
-  const h = lamina(fondos.contenido);
-  titulo(h, "Cómo se ha construido el proyecto",
-    `Del arranque el ${repFechaLarga(f.ini)} al cierre el ${repFechaLarga(f.fin)}`);
-  const HI = REPORTE.hitos || [];
-  const YL = 3.60;
-  h.addShape(pptx.ShapeType.rect, { x:1.20, y:YL - 0.018, w:11.20, h:0.036,
-    fill:{ color:"C6D0E6" }, line:{ type:"none" } });
-  if (HI.length > 1){
-    const X0 = 1.90, X1 = 11.55, pasoX = (X1 - X0) / (HI.length - 1), W = 3.30;
-    HI.forEach((x, i) => {
-      const cx = X0 + i * pasoX, col = H(x.color), arriba = (i % 2 === 0);
-      h.addShape(pptx.ShapeType.ellipse, { x:cx - 0.105, y:YL - 0.105, w:0.21, h:0.21,
-        fill:{ color:col }, line:{ color:"FFFFFF", width:2 } });
-      h.addShape(pptx.ShapeType.rect, { x:cx - 0.012, y: arriba ? YL - 0.34 : YL + 0.08,
-        w:0.024, h:0.26, fill:{ color:col }, line:{ type:"none" } });
-      const yt = arriba ? 2.06 : 3.94;
-      T(h, x.fecha,   { x:cx - W/2, y:yt,        w:W, h:0.22, fontSize:10.5, bold:true, color:col, align:"center" });
-      T(h, x.titulo,  { x:cx - W/2, y:yt + 0.28, w:W, h:0.46, fontSize:11.5, bold:true, color:H("navy"), align:"center" });
-      T(h, x.detalle, { x:cx - W/2, y:yt + 0.80, w:W, h:0.42, fontSize:9.5,  color:H("gris"), align:"center" });
-    });
-  }
-  const relatoD = (REPORTE.relato || {}).hitos || "";
-  if (relatoD){
-    caja(h, 0.57, 5.62, 12.38, 1.16, REP_BANDA);
-    T(h, relatoD, { x:0.80, y:5.74, w:11.92, h:0.94, fontSize:11, color:H("gris") });
-  }
+  /* ---- 2 · Los indicadores acumulados al día de hoy ---------------------
+     Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
+     ocho segundos y salir sabiendo si el proyecto va bien. */
+  const a = lamina(fondos.contenido);
+  titulo(a, "Dónde está el proyecto hoy",
+    `Acumulado al ${repFechaLarga(f.hoy)} · día ${f.corrido} de ${f.total}, quedan ${f.restante}`);
 
-  /* ---- D3 · El embudo y los tres objetivos ------------------------------
-     Las dos láminas que José dio por buenas el 26/08. Son exactamente las
-     mismas que las del reporte largo —misma función, mismo dibujo— y no una
-     copia parecida: el comité y la gestión tienen que estar mirando la misma
+  const CIF = [
+    { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
+      pie: `${f.restante} días hasta el cierre`, color:"gris" },
+    { n: String(f.contacto), et:"comercios contactados",
+      pie: `${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`,
+      color:"azul", mas: SEM.curso ? SEM.curso.contactos : 0 },
+    { n: String(f.objetivo), et:"con el objetivo cumplido",
+      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja",
+      mas: SEM.curso ? SEM.curso.retenciones : 0 },
+    { n: String(f.visita), et:"comercios visitados",
+      pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
+      color:"verde", mas: SEM.curso ? SEM.curso.visitas : 0 }
+  ];
+  const WC2 = 2.95, GC2 = 0.19;
+  CIF.forEach((x, i2) => {
+    const px = 0.57 + i2 * (WC2 + GC2);
+    caja(a, px, 1.90, WC2, 2.24, "FFFFFF", REP_LINEA);
+    a.addShape(pptx.ShapeType.rect, { x:px, y:1.90, w:WC2, h:0.09,
+      fill:{ color:H(x.color) }, line:{ type:"none" } });
+    T(a, x.n,   { x:px + 0.22, y:2.16, w:WC2 - 0.44, h:0.80, fontSize:40, bold:true,
+      fontFace:NEG, color:H("navy") });
+    /* Lo que se sumó desde el jueves, al lado de la cifra. Un acumulado sin el
+       movimiento de la semana obliga a preguntarlo, y esta lámina existe para
+       que no haya que preguntar nada. */
+    if (x.mas) T(a, "+" + x.mas + " esta semana",
+      { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold:true, color:H(x.color) });
+    T(a, x.et,  { x:px + 0.22, y: x.mas ? 3.24 : 3.00, w:WC2 - 0.44, h:0.30, fontSize:11.5, color:H("gris") });
+    T(a, x.pie, { x:px + 0.22, y: x.mas ? 3.54 : 3.34, w:WC2 - 0.44, h:0.44, fontSize:10, color:H("gris2") });
+  });
+
+  T(a, "Avance del calendario", { x:0.57, y:4.42, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.74, w:12.38, h:0.20, fill:{ color:"D3DBEB" }, line:{ type:"none" } });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.74, w:12.38 * f.corrido / f.total, h:0.20,
+    fill:{ color:H("navy") }, line:{ type:"none" } });
+  T(a, repFecha(f.ini), { x:0.57, y:5.02, w:4.0, h:0.24, fontSize:10, color:H("gris2") });
+  T(a, repFecha(f.fin), { x:8.95, y:5.02, w:4.0, h:0.24, fontSize:10, color:H("gris2"), align:"right" });
+
+  caja(a, 0.57, 5.60, 12.38, 1.34, REP_BANDA);
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.60, w:0.10, h:1.34,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(a, "La lectura", { x:0.86, y:5.72, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
+  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, el portafolio va ${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} contactado. `
+     + `El tramo que define el resultado no es el contacto sino lo que sigue: de los comercios contactados, ${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} recibió una visita y ${repPct(f.contacto ? f.objetivo / f.contacto * 100 : 0)} cerró con el objetivo cumplido. `
+     + `Ahí es donde se decide el número de diciembre.`,
+    { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
+
+  /* ---- 3 · El desarrollo semanal ----------------------------------------
+     Tres series y su comparación contra la semana anterior. No es la misma
+     lámina que el acumulado: el acumulado nunca baja y por eso nunca alarma.
+     Esta puede bajar, y esa es exactamente su utilidad. */
+  const g = lamina(fondos.contenido);
+  titulo(g, "El desarrollo, semana a semana",
+    `Semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
+
+  const SW = 3.95, SG = 0.28, SY = 1.80, SH = 3.30;
+  SEM.series.forEach((serie, i2) => {
+    const px = 0.57 + i2 * (SW + SG);
+    caja(g, px, SY, SW, SH, "FFFFFF", REP_LINEA);
+    g.addShape(pptx.ShapeType.rect, { x:px, y:SY, w:SW, h:0.09,
+      fill:{ color:H(serie.color) }, line:{ type:"none" } });
+    T(g, serie.nombre, { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
+      bold:true, fontFace:NEG, color:H("navy") });
+
+    const ult = SEM.ultima ? SEM.ultima[serie.k] : 0;
+    const pre = SEM.previa ? SEM.previa[serie.k] : null;
+    T(g, String(ult), { x:px + 0.22, y:SY + 0.58, w:1.60, h:0.62, fontSize:32, bold:true,
+      fontFace:NEG, color:H(serie.color) });
+    const v = SEM.variacion[serie.k];
+    T(g, v === null ? "sin semana previa"
+       : Math.round(v) === 0 ? "igual que la anterior"
+       : (v > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(v), 0) + "% vs. la anterior",
+      { x:px + 1.86, y:SY + 0.76, w:SW - 2.08, h:0.28, fontSize:10.5, bold:true,
+        color: v === null || Math.round(v) === 0 ? H("gris2") : H(v > 0 ? "verde" : "naranja") });
+    T(g, "en la última semana cerrada", { x:px + 0.22, y:SY + 1.20, w:SW - 0.44, h:0.24,
+      fontSize:9.5, color:H("gris2") });
+
+    /* La tendencia: una barra por semana. Con seis semanas de proyecto no hay
+       espacio ni motivo para una curva; lo que importa es la silueta. */
+    const YB2 = SY + 1.50, HB2 = 1.02, n = SEM.semanas.length;
+    const maxS = Math.max(1, ...SEM.semanas.map(x => x[serie.k]));
+    const bw = Math.min(0.56, (SW - 0.56) / Math.max(1, n) - 0.10);
+    SEM.semanas.forEach((sem, k2) => {
+      const bx = px + 0.28 + k2 * ((SW - 0.56) / Math.max(1, n));
+      const bh = Math.max(0.03, HB2 * sem[serie.k] / maxS);
+      g.addShape(pptx.ShapeType.rect, { x:bx, y:YB2 + HB2 - bh, w:bw, h:bh,
+        fill:{ color:H(serie.color), transparency: sem.completa ? 0 : 55 },
+        line:{ type:"none" } });
+      T(g, String(sem[serie.k]), { x:bx - 0.22, y:YB2 + HB2 + 0.04, w:bw + 0.44, h:0.22,
+        fontSize:8.5, color:H("gris2"), align:"center" });
+    });
+    T(g, SEM.curso ? "La última barra, en claro, es la semana en curso" : "Semanas cerradas",
+      { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:9, color:H("gris2") });
+  });
+
+  caja(g, 0.57, 5.36, 12.38, 1.52, REP_BANDA);
+  g.addShape(pptx.ShapeType.rect, { x:0.57, y:5.36, w:0.10, h:1.52,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(g, SEM.curso
+      ? `La semana en curso, del ${repFecha(SEM.curso.desde)} al ${repFecha(f.hoy)} — ${SEM.curso.dias} días`
+      : "La semana en curso",
+    { x:0.86, y:5.48, w:6.5, h:0.28, fontSize:11, bold:true, color:H("navy") });
+  T(g, SEM.curso
+      ? `${SEM.curso.contactos} comercios contactados · ${SEM.curso.retenciones} retenciones concretadas · ${SEM.curso.visitas} visitas efectivas. `
+        + `Va por la mitad de la semana, así que estas tres cifras todavía no se comparan contra una semana entera: se muestran en tono claro para no leerlas como una caída.`
+      : "Todavía no hay días corridos en la semana en curso.",
+    { x:0.86, y:5.78, w:11.8, h:0.98, fontSize:11.5, color:H("gris") });
+
+  /* ---- 4 y 5 · El embudo con el corte, y los tres objetivos --------------
+     Las dos láminas que José dio por buenas. Son exactamente las mismas que
+     las del reporte largo —misma función, mismo dibujo— y no una copia
+     parecida: el comité y la gestión tienen que estar mirando la misma
      figura, o la conversación se vuelve sobre cuál de las dos está bien. */
   repLaminaEmbudo(X, f);
   repLaminaObjetivos(X, f);
 
-  /* ---- D5 · El desarrollo, semana a semana ------------------------------
-     Una sola serie acumulada. Un comité no necesita ver cuánto se hizo cada
-     semana; necesita ver la pendiente y hacia dónde apunta. */
-  const g = lamina(fondos.contenido);
-  titulo(g, "El desarrollo, semana a semana",
-    `Comercios del portafolio contactados, acumulado desde el arranque`);
-
-  const XG = 0.90, YG = 1.94, WG = 11.6, HG = 3.66;
-  /* El eje horizontal cubre el proyecto ENTERO, no solo lo transcurrido. Una
-     curva dibujada solo sobre las semanas corridas siempre llena la lámina y
-     siempre parece que va bien; extendida hasta diciembre, la distancia que
-     falta se ve sola y no hay que explicarla. */
-  const semTot = Math.max(2, Math.ceil(f.total / 7));
-  const techo  = Math.max(f.portafolio || 1, CU.total);
-  const px = i => XG + WG * Math.min(i, semTot - 1) / (semTot - 1);
-  const py = v => YG + HG * (1 - v / techo);
-
-  g.addShape(pptx.ShapeType.rect, { x:XG, y:YG + HG, w:WG, h:0.02,
-    fill:{ color:"C6D0E6" }, line:{ type:"none" } });
-  /* La línea del portafolio completo: sin ella la curva sube y parece que
-     todo va bien, cuando lo que importa es cuánto le falta para el techo. */
-  g.addShape(pptx.ShapeType.rect, { x:XG, y:py(f.portafolio || 0), w:WG, h:0.02,
-    fill:{ color:H("gris2") }, line:{ type:"none" } });
-  T(g, `${f.portafolio} · portafolio completo`,
-    { x:XG, y:py(f.portafolio || 0) - 0.28, w:4.0, h:0.24, fontSize:9.5, color:H("gris2") });
-
-  /* Un tramo de recta entre dos puntos. pptxgenjs no dibuja líneas sueltas: se
-     hace con un rectángulo fino rotado.
-     El detalle que costó una versión: PowerPoint rota una forma sobre SU
-     CENTRO, no sobre su esquina. Colocando el rectángulo en el punto de
-     partida y rotándolo, el resultado queda corrido —y el corrimiento crece
-     con la pendiente, así que con datos suaves de prueba casi no se nota y con
-     los reales la curva se rompe—. Por eso se coloca centrado en el punto
-     medio del tramo: ahí la rotación lo deja justo donde tiene que estar. */
-  const tramo = (x1, y1, x2, y2, color, grosor) => {
-    const dx = x2 - x1, dy = y2 - y1;
-    const largo = Math.sqrt(dx*dx + dy*dy);
-    if (largo < 0.001) return;
-    g.addShape(pptx.ShapeType.rect, {
-      x: (x1 + x2) / 2 - largo / 2,
-      y: (y1 + y2) / 2 - grosor / 2,
-      w: largo, h: grosor,
-      fill:{ color:H(color) }, line:{ type:"none" },
-      rotate: Math.atan2(dy, dx) * 180 / Math.PI });
-  };
-
-  if (CU.puntos.length){
-    CU.puntos.forEach((pt, k2) => {
-      if (k2 > 0){
-        const ant = CU.puntos[k2 - 1];
-        tramo(px(k2 - 1), py(ant.acum), px(k2), py(pt.acum), "azul", 0.05);
-      }
-      g.addShape(pptx.ShapeType.ellipse, { x:px(k2) - 0.06, y:py(pt.acum) - 0.06, w:0.12, h:0.12,
-        fill:{ color:H("azul") }, line:{ color:"FFFFFF", width:1.2 } });
-    });
-    const ult = CU.puntos[CU.puntos.length - 1], iUlt = CU.puntos.length - 1;
-    T(g, `${ult.acum} hoy`, { x:px(iUlt) - 1.10, y:py(ult.acum) - 0.36, w:1.00, h:0.26,
-      fontSize:11, bold:true, color:H("azul"), align:"right" });
-
-    /* La proyección: la misma pendiente, hasta el cierre. Va en naranja y
-       punteada de hecho —una sucesión de tramos cortos— para que nadie la
-       confunda con lo que ya pasó. */
-    const proy = Math.min(techo, PR.contacto.proyectado);
-    const pasos = 22;
-    for (let t = 0; t < pasos; t += 2){
-      const a1 = t / pasos, a2 = Math.min(1, (t + 1) / pasos);
-      const x1 = px(iUlt) + (px(semTot - 1) - px(iUlt)) * a1;
-      const x2 = px(iUlt) + (px(semTot - 1) - px(iUlt)) * a2;
-      const y1 = py(ult.acum + (proy - ult.acum) * a1);
-      const y2 = py(ult.acum + (proy - ult.acum) * a2);
-      tramo(x1, y1, x2, y2, "naranja", 0.045);
-    }
-    g.addShape(pptx.ShapeType.ellipse, { x:px(semTot - 1) - 0.075, y:py(proy) - 0.075, w:0.15, h:0.15,
-      fill:{ color:H("naranja") }, line:{ color:"FFFFFF", width:1.5 } });
-    T(g, `${proy} proyectado`, { x:px(semTot - 1) - 2.30, y:py(proy) - 0.36, w:2.20, h:0.26,
-      fontSize:11, bold:true, color:H("naranja"), align:"right" });
-  }
-  T(g, repFecha(f.ini), { x:XG - 0.40, y:YG + HG + 0.12, w:1.60, h:0.22,
-    fontSize:9.5, color:H("gris2"), align:"center" });
-  T(g, repFecha(f.fin), { x:XG + WG - 1.20, y:YG + HG + 0.12, w:1.60, h:0.22,
-    fontSize:9.5, color:H("gris2"), align:"center" });
-  T(g, "Azul, lo contactado semana a semana · naranja, la proyección al ritmo actual",
-    { x:XG, y:YG + HG + 0.40, w:11.6, h:0.22, fontSize:9.5, color:H("gris2") });
-
-  caja(g, 0.57, 6.24, 12.38, 0.90, REP_BANDA);
-  g.addShape(pptx.ShapeType.rect, { x:0.57, y:6.24, w:0.10, h:0.90,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(g, `Ritmo actual: ${repNum(PR.contacto.ritmo, 1)} comercios por semana`,
-    { x:0.86, y:6.34, w:5.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
-  T(g, PR.contacto.llega
-      ? `A este ritmo el portafolio queda contactado antes del cierre.`
-      : `A este ritmo el proyecto cierra con ${PR.contacto.proyectado} de ${f.portafolio} comercios contactados. Para cubrirlo completo harían falta ${repNum(PR.contacto.pedido, 1)} por semana, ${PR.contacto.factor ? repNum(PR.contacto.factor, 1) + " veces el ritmo de hoy" : "un ritmo que hoy no existe"}.`,
-    { x:0.86, y:6.62, w:11.8, h:0.44, fontSize:11, color:H("gris") });
-
-  /* ---- D6 · Dónde termina el proyecto ----------------------------------- */
-  const k = lamina(fondos.contenido);
-  titulo(k, "Dónde termina el proyecto si el ritmo se sostiene",
-    `Proyección al ${repFechaLarga(f.fin)} sobre el ritmo de las últimas ${repNum(PR.semCampo, 0)} semanas de campo`);
-
-  const LIN = [PR.contacto, PR.objetivo, PR.venta];
-  const WK = 3.95, GK = 0.28;
-  LIN.forEach((x, i) => {
-    const px = 0.57 + i * (WK + GK);
-    caja(k, px, 1.86, WK, 3.55, "FFFFFF", REP_LINEA);
-    k.addShape(pptx.ShapeType.rect, { x:px, y:1.86, w:WK, h:0.09,
-      fill:{ color:H(x.llega ? "verde" : "naranja") }, line:{ type:"none" } });
-    T(k, x.nombre, { x:px + 0.22, y:2.08, w:WK - 0.44, h:0.32, fontSize:13, bold:true,
-      fontFace:NEG, color:H("navy") });
-    T(k, x.llega ? "Llega a la meta" : "No llega al ritmo actual",
-      { x:px + 0.22, y:2.42, w:WK - 0.44, h:0.24, fontSize:10, bold:true,
-        color:H(x.llega ? "verde" : "naranja") });
-
-    const filas = [
-      ["Hoy", String(x.hecho)],
-      ["Ritmo por semana", repNum(x.ritmo, 1)],
-      ["Proyectado al cierre", String(x.proyectado)],
-      ["Meta", String(x.meta)]
-    ];
-    filas.forEach(([et, val], j) => {
-      const yy = 2.80 + j * 0.42;
-      T(k, et,  { x:px + 0.24, y:yy, w:WK - 1.30, h:0.34, fontSize:11, color:H("gris") });
-      T(k, val, { x:px + WK - 1.10, y:yy, w:0.90, h:0.34, fontSize:12, bold:true,
-        color: j === 2 ? H(x.llega ? "verde" : "naranja") : H("navy"), align:"right" });
-    });
-    caja(k, px + 0.16, 4.62, WK - 0.32, 0.66, REP_BANDA);
-    T(k, x.llega
-        ? "Sin acción adicional"
-        : `Faltan ${x.brecha} ${x.unidad}. Harían falta ${repNum(x.pedido, 1)} por semana` + (x.factor ? `, ${repNum(x.factor, 1)}× el ritmo de hoy.` : "."),
-      { x:px + 0.28, y:4.70, w:WK - 0.56, h:0.52, fontSize:10, bold:true,
-        color:H(x.llega ? "verde" : "navy") });
-  });
-
-  caja(k, 0.57, 5.62, 12.38, 1.24, REP_BANDA);
-  k.addShape(pptx.ShapeType.rect, { x:0.57, y:5.62, w:0.10, h:1.24,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(k, "Lo que hay que decidir", { x:0.86, y:5.74, w:4.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
-  const noLlegan = LIN.filter(x => !x.llega);
-  T(k, noLlegan.length === 0
-      ? "Los tres objetivos llegan al ritmo actual. La decisión es sostenerlo."
-      : `${noLlegan.length === 1 ? "Un objetivo no llega" : noLlegan.length + " objetivos no llegan"} al ritmo actual: ${noLlegan.map(x => x.nombre.toLowerCase())
-            .reduce((t, x, i, arr) => t + (i === 0 ? "" : i === arr.length - 1 ? " y " : ", ") + x, "")}. `
-        + `Hay tres caminos y son excluyentes: subir el ritmo —lo que significa más gente en calle o más días—, correr la meta con el banco, o aceptar el resultado proyectado. `
-        + `La facturación, que pesa la mitad del plan, todavía no se puede medir: el banco entrega el dato un mes después del cierre de cada periodo.`,
-    { x:0.86, y:6.02, w:11.8, h:0.76, fontSize:11.5, color:H("gris") });
-
-  /* ---- D7 · Cierre ------------------------------------------------------ */
+  /* ---- 6 · Lámina de cierre --------------------------------------------- */
   lamina(fondos.cierre);
 
   pptx.writeFile({ fileName: `Directorio_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
