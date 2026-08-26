@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 20:34", huella:"95ecd7" };
+const BUILD = { sello:"26/08/2026 20:49", huella:"1d3c4d" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -13887,10 +13887,25 @@ function fotoReporte(){
      actividad, no sobre los días corridos del proyecto. Dividir entre los
      corridos castiga las dos primeras semanas, que fueron de coordinación
      con los ejecutivos de BBVA y no de calle. */
-  const fechas = [...new Set(ges.map(g => String(g.Fecha_Contacto).slice(0,10)).filter(Boolean))].sort();
+  /* Las fechas de campo se recortan al periodo del proyecto. Una sola gestión
+     con la fecha mal tecleada —el 26/08 había una del 13 de febrero, cinco
+     meses antes del arranque— estiraba «días de campo» de 38 a 195 y dividía
+     por cinco todos los ritmos: el reporte decía 3,3 comercios por día donde
+     el equipo venía haciendo 17, y la proyección al cierre salía por el piso.
+     Un dedazo en una fila no puede mover el ritmo de la campaña.
+     El dato mal tecleado no se toca ni se esconde: se corrige en su ficha. Acá
+     solo se deja de usar para medir un periodo al que no pertenece. */
+  const fechas = [...new Set(ges.map(g => String(g.Fecha_Contacto).slice(0,10))
+    .filter(d => d && d >= ini && d <= hoy))].sort();
   const diasActivos = fechas.length;
   const primera = fechas[0] || "";
   const diasDeCampo = primera ? Math.max(1, dias(primera, hoy)) : 0;
+  /* Cuántas quedaron fuera del periodo: se declara en el reporte en vez de
+     descartarlas en silencio. */
+  const fueraDePeriodo = ges.filter(g => {
+    const d = String(g.Fecha_Contacto).slice(0,10);
+    return d && (d < ini || d > hoy);
+  }).length;
   const porDia = diasDeCampo ? contacto / diasDeCampo : 0;
   const faltanContactar = Math.max(0, portafolio - contacto);
   const diasParaCubrir = porDia > 0 ? Math.ceil(faltanContactar / porDia) : null;
@@ -13988,7 +14003,7 @@ function fotoReporte(){
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, visita, objetivo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
-    diasDeCampo, porDia, faltanContactar, fechaCobertura,
+    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
 
@@ -14240,9 +14255,13 @@ function repProyeccion(f){
   const semCampo = Math.max(1, f.diasDeCampo / 7);
   const semRest  = Math.max(0, f.restante / 7);
 
-  const linea = (nombre, hecho, meta, unidad) => {
+  const linea = (nombre, hecho, meta, unidad, techo) => {
     const ritmo = hecho / semCampo;
-    const proyectado = Math.round(hecho + ritmo * semRest);
+    /* El contacto no puede proyectarse por encima del portafolio: no hay a
+       quién más contactar. Un «proyectado 1020 sobre una meta de 841» es
+       aritméticamente cierto y en una lámina de comité se lee como un error. */
+    const crudo = hecho + ritmo * semRest;
+    const proyectado = Math.round(techo ? Math.min(crudo, techo) : crudo);
     const pedido = meta > hecho && semRest > 0 ? (meta - hecho) / semRest : 0;
     return { nombre, hecho, meta, unidad, ritmo, proyectado,
       llega: meta > 0 && proyectado >= meta,
@@ -14256,7 +14275,7 @@ function repProyeccion(f){
 
   return {
     semCampo, semRest,
-    contacto: linea("Portafolio contactado", f.contacto, f.portafolio, "comercios"),
+    contacto: linea("Portafolio contactado", f.contacto, f.portafolio, "comercios", f.portafolio),
     objetivo: linea("Reactivación", f.objetivo, f.metaR, "comercios"),
     venta:    linea("Afiliaciones nuevas", f.ventasNuevas, f.metaV, "afiliaciones")
   };
@@ -14272,8 +14291,15 @@ function repCurva(f){
   ges.forEach(g => {
     const cid = String(g.Customer_id);
     if (!enCartera.has(cid)) return;
-    const d = repDia(g.Fecha_Contacto);
+    let d = repDia(g.Fecha_Contacto);
     if (!d) return;
+    /* Una fecha anterior al arranque se lleva a la primera semana en vez de
+       descartarse. El comercio FUE contactado —eso no está en duda—; lo que no
+       merece confianza es la fecha. Descartarlo dejaría la curva terminando en
+       un número distinto al del embudo dos láminas antes, y dos cifras que no
+       cuadran en la misma presentación valen menos que las dos por separado. */
+    if (d < f.ini) d = f.ini;
+    if (d > f.hoy) return;
     if (!primera.has(cid) || d < primera.get(cid)) primera.set(cid, d);
   });
 
