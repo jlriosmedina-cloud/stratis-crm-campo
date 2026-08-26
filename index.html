@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 08:29", huella:"4c673e" };
+const BUILD = { sello:"26/08/2026 17:17", huella:"83479f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -5861,7 +5861,13 @@ function confirmarEliminarCliente(cid){
   const c = byId[String(cid)];
   if (!c) return;
   if (!esMiCliente(c)) return toast("Solo puedes eliminar los comercios que tú registraste");
-  const n = DB.delCliente(cid).length;
+  /* TODAS las filas que cuelgan del Customer ID, no solo las dirigidas al
+     comercio. La función de la base mueve `interacciones` entera, así que
+     contar solo las del cliente hacía que el diálogo dijera «todavía no tiene
+     gestiones» en una ficha con dos coordinaciones con el banco — y después la
+     base abortaba diciendo «2 de 2 gestiones no siguieron al comercio». Dos
+     mensajes del mismo sistema contándose historias distintas. */
+  const n = DB.historiaDe(cid).length;
   modal(`
     <h3>Eliminar comercio</h3>
     <p>Se eliminará <b>${esc(titulo(nombreCliente(c)))}</b> (ID ${esc(c.customer_id)})
@@ -5923,8 +5929,9 @@ function modalCorregirId(cid){
              placeholder="${esc(actual)}" value="">
     </div>
     <div class="note" style="margin-bottom:12px">
-      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} se mueven con él; no se pierde nada. `
-          : "El comercio todavía no tiene gestiones. "}
+      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} —con el comercio y con el banco—
+             se mueven con él; no se pierde nada. `
+          : "El comercio todavía no tiene ninguna gestión registrada. "}
       La corrección queda en la bitácora con tu nombre.
     </div>
     <div id="fixMsg"></div>
