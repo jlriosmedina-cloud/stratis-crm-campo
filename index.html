@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 20:04", huella:"0d032a" };
+const BUILD = { sello:"26/08/2026 20:18", huella:"aee109" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3990,14 +3990,37 @@ async function cargarReporte(){
   try {
     const { data, error } = await sb.from("reporte_config").select("*");
     if (error || !data || !data.length) return;
-    const base = JSON.parse(JSON.stringify(REPORTE_DEF));
-    data.forEach(f => {
-      const v = typeof f.valor === "string" ? JSON.parse(f.valor) : f.valor;
+    REPORTE = aplicarReporte(data);
+  } catch (e){ /* sin relato nuevo, pero con reporte */ }
+}
+
+/* La lectura de las filas vive aparte de la consulta, para que se pueda probar
+   sin una base delante. No es una separación de adorno: el error que motivó
+   esto —una fila que apagaba a las otras seis— era exactamente de esta parte,
+   y no había forma de escribirle una prueba mientras estuviera pegada al
+   `await sb.from(...)`. */
+function aplicarReporte(data){
+  const base = JSON.parse(JSON.stringify(REPORTE_DEF));
+  (data || []).forEach(f => {
+    /* Una fila mal formada no puede apagar a las otras seis.
+       El 26/08 se agregó `cierre_acuerdos`, que guarda una frase suelta. La
+       columna es jsonb y devuelve esa frase como texto plano; el `JSON.parse`
+       de antes reventaba con ella, la excepción salía del forEach, y `REPORTE`
+       se quedaba sin asignar: el reporte perdió los hitos, las lecturas, las
+       notas y la base de 841 comercios de golpe. Todo por una fila que no era
+       ninguna de esas, y sin un solo error a la vista.
+       Ahora cada fila se lee sola, y un texto que no es JSON se guarda como lo
+       que es en vez de tumbar el relato entero. */
+    try {
+      let v = f.valor;
+      if (typeof v === "string"){
+        try { v = JSON.parse(v); } catch (e){ /* era una frase, y así queda */ }
+      }
       if (v !== null && v !== undefined) base[f.clave] = v;
       base["_" + f.clave] = { por:f.actualizado_por, cuando:f.actualizado_en, nota:f.nota };
-    });
-    REPORTE = base;
-  } catch (e){ /* sin relato nuevo, pero con reporte */ }
+    } catch (e){ /* esta fila se pierde; las demás no */ }
+  });
+  return base;
 }
 
 async function cargarMetas(){
