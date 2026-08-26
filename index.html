@@ -10,6 +10,14 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stratis CRM">
+<!-- Las dos familias del rediseño. `display=swap` para que el texto se lea
+     desde el primer cuadro: esto se abre en la calle, con la señal que haya, y
+     una pantalla en blanco esperando una fuente es peor que una fuente fea.
+     Las dos pilas de respaldo terminan en la del sistema, así que si Google no
+     responde la aplicación se ve exactamente como se veía antes. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap">
 <link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
 <link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%20%22Stratis%20CRM%20%E2%80%94%20BBVA%20Adquirencia%22%2C%20%22short_name%22%3A%20%22Stratis%20CRM%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22scope%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%230b2545%22%2C%20%22theme_color%22%3A%20%22%230b2545%22%2C%20%22orientation%22%3A%20%22portrait%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%3Bcharset%3Dutf-8%2C%253Csvg%2520xmlns%253D%2527http%253A//www.w3.org/2000/svg%2527%2520width%253D%2527512%2527%2520height%253D%2527512%2527%253E%253Crect%2520width%253D%2527512%2527%2520height%253D%2527512%2527%2520rx%253D%252796%2527%2520fill%253D%2527%25230b2545%2527/%253E%253Ctext%2520x%253D%2527256%2527%2520y%253D%2527340%2527%2520font-family%253D%2527system-ui%252Csans-serif%2527%2520font-size%253D%2527280%2527%2520font-weight%253D%2527800%2527%2520fill%253D%2527%2523ffffff%2527%2520text-anchor%253D%2527middle%2527%253ES%253C/text%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22512x512%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%2C%20%22purpose%22%3A%20%22any%20maskable%22%7D%5D%7D">
@@ -17,28 +25,38 @@
 <style>
 :root{
   color-scheme: light;
-  --surface-1:#fcfcfb; --plane:#f3f4f1; --card:#ffffff;
-  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --line:#c3c2b7; --ring:rgba(11,11,11,.10);
-  --brand:#0b2545; --brand-2:#2a78d6;
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
-  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
-  --good-ink:#006300; --crit-ink:#a32626; --warn-ink:#8a6100; --serious-ink:#9c4a25;
-  --good-bg:#e8f6e8; --warn-bg:#fef3d9; --serious-bg:#fdeade; --crit-bg:#fbe6e6; --info-bg:#e7f0fc;
-  --r:14px; --r-sm:9px;
-  --sh:0 1px 2px rgba(11,11,11,.05), 0 4px 14px rgba(11,11,11,.05);
+  /* Los neutros dejan de ser cálidos y pasan a un gris azulado. Es el cambio
+     que más se nota sin mover una sola caja de sitio: el papel oliva hacía que
+     el azul de la marca se viera apagado al lado. */
+  --surface-1:#ffffff; --surface-2:#eef1f6; --plane:#f4f6f9; --card:#ffffff;
+  --ink:#0d1b2a; --ink-2:#4a5768; --muted:#7d8898;
+  --grid:#e6eaf1; --line:#dee4ec; --ring:rgba(13,27,42,.10);
+  --brand:#0b2545; --brand-2:#2f6fd0; --brand-bg:#e8f0fc;
+  --s1:#2f6fd0; --s2:#e0662f; --s3:#12805a; --s4:#cf9400;
+  --good:#12805a; --warn:#cf9400; --serious:#e0662f; --crit:#bd2b2b;
+  --good-ink:#0c6144; --crit-ink:#98211f; --warn-ink:#8a6100; --serious-ink:#9c4a25;
+  --ok-ink:#0c6144; --warn-tx:#8a6100;
+  --good-bg:#e4f4ed; --warn-bg:#fdf2d8; --serious-bg:#fdeade; --crit-bg:#fbe8e8; --info-bg:#e8f0fc;
+  --r:12px; --r-sm:8px;
+  --sh:0 1px 2px rgba(13,27,42,.06), 0 6px 16px rgba(13,27,42,.05);
   --nav-h:62px;
+  /* Archivo para los títulos y los números; Public Sans para leer. Se declaran
+     como variables para que un cambio de familia sea una línea y no cuarenta. */
+  --f-disp:"Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-body:"Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
-  --surface-1:#1a1a19; --plane:#0d0d0d; --card:#1a1a19;
-  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --line:#383835; --ring:rgba(255,255,255,.10);
-  --brand:#0f1c2e; --brand-2:#3987e5;
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-  --good-ink:#0ca30c; --crit-ink:#e66767; --warn-ink:#fab219; --serious-ink:#ec835a;
-  --good-bg:#122b12; --warn-bg:#33280a; --serious-bg:#33200f; --crit-bg:#331414; --info-bg:#0f2137;
-  --sh:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+  --surface-1:#141d29; --surface-2:#1a2432; --plane:#0d151f; --card:#141d29;
+  --ink:#eef3f9; --ink-2:#aab8c8; --muted:#7f8ea1;
+  --grid:#1d2733; --line:#26313f; --ring:rgba(255,255,255,.10);
+  --brand:#08111f; --brand-2:#5a8fe8; --brand-bg:#16243a;
+  --s1:#5a8fe8; --s2:#e0803f; --s3:#26a074; --s4:#cf9f2a;
+  --good:#26a074; --warn:#cf9f2a; --serious:#e0803f; --crit:#d5544a;
+  --good-ink:#4cc79a; --crit-ink:#e88178; --warn-ink:#e0b552; --serious-ink:#eda07a;
+  --ok-ink:#4cc79a; --warn-tx:#e0b552;
+  --good-bg:#10281f; --warn-bg:#2b2311; --serious-bg:#2b1d11; --crit-bg:#2c1615; --info-bg:#16243a;
+  --sh:0 1px 2px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
@@ -47,10 +65,17 @@ html,body{margin:0;padding:0;height:100%}
 html{overflow-x:hidden}
 main{min-width:0;overflow-x:clip}
 body{
-  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-family:var(--f-body);
   background:var(--plane); color:var(--ink);
   font-size:15px; line-height:1.45; overscroll-behavior-y:none;
 }
+/* Los títulos y los números en la familia de despliegue. Los números van con
+   cifras de ancho fijo: en una columna de cantidades, que no bailen de una
+   fila a la siguiente es la diferencia entre poder compararlas de un vistazo y
+   tener que leerlas una por una. */
+h1,h2,h3,h4{font-family:var(--f-disp);letter-spacing:-.01em;text-wrap:balance}
+.stat .val,.kpi .val,.cuenta,.cola-n{font-family:var(--f-disp);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--brand-2)}
 .hidden{display:none !important}
@@ -273,7 +298,14 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .chip.neg{background:#EEF0FF;color:#3B43FB;border:1px solid #D8DCFF}
 /* La coordinación con el banco, en la misma línea de tiempo pero distinguible
    de un vistazo: mismo hilo, otro interlocutor. */
+.rl-build{display:block;width:100%;margin:8px 0 0;padding:6px 8px;border:0;border-radius:7px;
+  background:transparent;color:var(--muted);font:inherit;font-size:10.5px;letter-spacing:.02em;
+  text-align:left;cursor:pointer;opacity:.75}
+.rl-build:hover{background:rgba(255,255,255,.07);opacity:1}
 .tl-bbva>.card{border-left:3px solid var(--brand-2)}
+/* El cierre cierra la línea: barra al costado y fondo tenue, para que se
+   distinga de un contacto más sin gritar. */
+.tl-cierre>.card{border-left:3px solid var(--ok-ink,#0A7D5E);background:var(--surface-2)}
 .lote-lista{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:11px}
 .lote-item{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;cursor:pointer;
   border-bottom:1px solid var(--line)}
@@ -1392,6 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
+const BUILD = { sello:"26/08/2026 08:29", huella:"4c673e" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -2327,6 +2360,25 @@ const cerroEn = (c, periodo) => !!c.cerrado_en && mesDelCierre(c) === periodo;
 /* Lo que suma a la meta: el comercio activo que se quedó, y el que estaba de
    baja y volvió. Los dos salían de la cartera asignada. La venta nueva por RUC
    no: esa nunca estuvo en la cartera de nadie. */
+/* UN CASO CERRADO NO RECIBE INSTRUCCIONES.
+ *
+ * La ficha de un comercio que ya vendió mostraba, en el elemento más visible
+ * de la pantalla, «El caso está parado hasta coordinar con BBVA · sin los
+ * datos que entrega el banco no hay a quién llamar ni dónde ir». Abajo, en la
+ * misma pantalla, decía Venta, Visita cumplida y dos intentos con respuesta.
+ *
+ * El aviso no estaba mal escrito: estaba mal condicionado. Se dispara cuando
+ * no hay coordinación registrada con el banco, y eso es cierto en ese caso —y
+ * da igual, porque el caso terminó—. Un aviso que aparece donde no hay nada
+ * que hacer entrena a la gente a no leer los avisos, y entonces tampoco lee el
+ * que sí importaba.
+ *
+ * Cerrado es lo que decidió una persona: retenido, recuperado, venta o
+ * perdido. Mientras el resultado sea PENDIENTE el caso sigue abierto y los
+ * avisos corresponden. */
+const CERRADOS = ["RETENIDO", "RECUPERADO", "VENTA", "PERDIDO"];
+const casoCerrado = c => !!c && CERRADOS.includes(estadoDerivado(c));
+
 const esRetencion  = c => !esClienteNuevo(c) && c.resultado_gestion === "RETENIDO";
 const esRecuperado = c => !esClienteNuevo(c) && c.resultado_gestion === "VENTA";
 /* =========================================================================
@@ -4054,9 +4106,22 @@ function renderRail(){
     <div class="rl-como">${selectorComoEjec()}</div>
     <div class="rl-yo"><i>${esc(iniciales || "··")}</i>
       <div><b>${esc(S.user.nombreCompleto || S.user.nombre || "")}</b>
-        <span>${esc(S.user.rol || "")}</span></div></div>`;
+        <span>${esc(S.user.rol || "")}</span></div></div>
+    ${/* La versión cargada, para que caché y bug dejen de parecerse. Si dos
+          personas ven cosas distintas, se comparan estos seis caracteres. */""}
+    <button class="rl-build" data-recargar="1"
+      title="Versión cargada en este navegador. Clic para traer la última.">
+      v ${esc(BUILD.sello)} · ${esc(BUILD.huella)}</button>`;
 
   el.querySelectorAll("button[data-tab]").forEach(b => b.onclick = () => go(b.dataset.tab));
+  /* Recargar salteando el caché del navegador. Con `max-age=600` en el
+     servidor, una pestaña abierta desde antes del pase sigue con el archivo
+     viejo aunque se le dé F5. El parámetro obliga a pedirlo de nuevo. */
+  el.querySelectorAll("[data-recargar]").forEach(b => b.onclick = () => {
+    const u = new URL(location.href);
+    u.searchParams.set("v", Date.now());
+    location.replace(u.toString());
+  });
   el.querySelectorAll(".selComoEjec").forEach(sel => { sel.onchange = () => mirarComo(sel.value); });
 }
 /* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
@@ -4327,7 +4392,11 @@ function avisoVentana(){
       gestión tuya, el Customer ID de los comercios que registraste, y la ubicación de tus gestiones.
       <b>A partir de mañana vuelve a estar cerrado.</b>
       ${(() => {
-        const faltan = cartera().filter(c => !esClienteNuevo(c) && !c.contacto_bbva).length;
+        /* Solo los que siguen abiertos. A un comercio que ya vendió, se retuvo
+           o se perdió no se le pide completar cómo se contactó al banco: el
+           dato ya no cambia nada y la lista se vuelve una tarea eterna. */
+        const faltan = cartera().filter(c =>
+          !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c)).length;
         return faltan ? `<div style="margin-top:8px"><b>Te faltan ${faltan} comercio${faltan===1?"":"s"}</b>
           por indicar cómo se contactó al ejecutivo de BBVA. Se completa entrando al comercio y
           tocando <b>Editar comercio</b>.
@@ -4362,7 +4431,11 @@ function viewCartera(){
     if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
-    if (S.fContacto === "sin_bbva") return !esClienteNuevo(c) && !c.contacto_bbva;
+    /* La misma regla que el contador que lleva hasta acá: si el filtro trajera
+       también los cerrados, el número del aviso y el largo de la lista no
+       coincidirían, y quien la abre pensaría que el CRM le miente. */
+    if (S.fContacto === "sin_bbva")
+      return !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c);
     /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
        de análisis: existe para vaciarse. */
     if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
@@ -4685,7 +4758,8 @@ function viewFicha(c){
     <div class="card">
       <h3>Línea de tiempo</h3>
       ${avisoComentario(c, regs)}
-      ${regs.length ? `<div class="tl">${regs.map(itemTimeline).join("")}</div>`
+      ${(regs.length || casoCerrado(c))
+        ? `<div class="tl">${itemCierre(c)}${regs.map(itemTimeline).join("")}</div>`
         : `<div class="empty" style="padding:26px 10px"><div class="big">◷</div>Aún no hay contactos registrados para este comercio.</div>`}
     </div>
    </div>
@@ -4752,6 +4826,9 @@ function cardProximaVisita(c, mio){
        banco confirmó o el cliente respondió. Antes de eso no hay a quién
        visitar, y ofrecerlo sería mandar al ejecutivo a un callejón. */
     if (!habilitadoEn(c.customer_id)) return "";
+    /* Y no se le pide una reunión a un caso que ya cerró. Un comercio que
+       vendió no «se puede visitar y no tiene reunión puesta»: terminó. */
+    if (casoCerrado(c)) return "";
     const d = habilesDesde(habilitadoEn(c.customer_id));
     return `<div class="card">
       <h3>Próxima reunión</h3>
@@ -4792,6 +4869,14 @@ function cardProximaVisita(c, mio){
    en un campo de texto sin fecha. */
 function cardCoordinacionBBVA(c, mio){
   const k = bbvaDe(c.customer_id);
+  /* Los dos casos donde el siguiente paso NO es coordinar con el banco:
+       · el caso ya cerró —vendió, se retuvo o se perdió—, y
+       · es un cliente nuevo que trajo Stratis, que no espera ningún dato del
+         banco porque no salió de su base.
+     En los dos, todo lo que sigue se muestra como historia y no como tarea. */
+  const cerrado = casoCerrado(c);
+  const propio  = esClienteNuevo(c);
+  const pide    = (mio || mandoTotal()) && !cerrado;
   const linea = (rot, r) => `<div class="kv"><dt>${rot}</dt><dd>${
     r ? `${esc(nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto)}
          <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtFecha(r.Fecha_Contacto)}${
@@ -4831,10 +4916,13 @@ function cardCoordinacionBBVA(c, mio){
         : k.n
           ? `<span class="chip warn">Todavía no</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">${k.n} contacto${k.n===1?"":"s"} sin respuesta</div>`
-          : `<span class="chip warn">Sin coordinar</span>
+          : `<span class="chip ${cerrado ? "" : "warn"}">${
+               cerrado ? "No se registró" : "Sin coordinar"}</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">${
-               k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
-                       : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
+               cerrado
+                 ? "El caso cerró sin ninguna coordinación registrada con el banco"
+                 : k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
+                           : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
     </dd></div>
     ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
       <b>Falta el correo de respaldo.</b> La última coordinación fue por
@@ -4855,7 +4943,7 @@ function cardCoordinacionBBVA(c, mio){
 
           Las dos salidas se registran, y por eso están las dos acá: la
           segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
-      (k.n === 1 && !k.respondio && (mio || mandoTotal())) ? `
+      (k.n === 1 && !k.respondio && pide) ? `
       <div class="note warn" style="margin-top:11px">
         <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
         se registran para que no quede la duda de quién tiene el turno.
@@ -4870,7 +4958,7 @@ function cardCoordinacionBBVA(c, mio){
          estando —el caso tiene que poder destrabarse en el contacto quince
          igual que en el primero— pero como una línea de botones, no como una
          advertencia repetida. */
-      : (k.n > 1 && !k.respondio && (mio || mandoTotal())) ? `
+      : (k.n > 1 && !k.respondio && pide) ? `
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;align-items:center">
         <span class="pie" style="margin:0;flex:1 1 160px">${k.n} contactos sin respuesta.</span>
         <button class="btn ghost sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
@@ -4882,7 +4970,7 @@ function cardCoordinacionBBVA(c, mio){
           quién llamar. Antes eso se leía como un guion en una fila y se
           quedaba ahí semanas. Ahora el siguiente paso es el elemento más
           visible de la tarjeta, y dice qué pasa si no se da. */
-      (!k.n && (mio || mandoTotal())) ? `
+      (!k.n && pide && !propio) ? `
       <div class="cta-bbva">
         <div class="cta-bbva-txt">
           <b>El caso está parado hasta coordinar con BBVA</b>
@@ -4890,6 +4978,16 @@ function cardCoordinacionBBVA(c, mio){
           Es el primer paso del ciclo y hoy este comercio no lo tiene.</span>
         </div>
         <button class="btn" data-go="form_bbva|${c.customer_id}">Coordinar ahora</button>
+      </div>`
+      /* Un cliente nuevo sin coordinación no está parado: la trajo Stratis y
+         se puede trabajar. Al banco se le avisa para el alta, que es otra
+         cosa y no bloquea. */
+      : (!k.n && pide && propio) ? `
+      <div class="note" style="margin-top:11px">
+        <b>Este comercio lo trajo Stratis.</b> No espera datos del banco para trabajarse; la
+        coordinación con BBVA es para el alta de la afiliación.
+        <div style="margin-top:9px"><button class="btn ghost sm"
+          data-go="form_bbva|${c.customer_id}">Registrar la coordinación</button></div>
       </div>`
       : ((mio || mandoTotal()) ? `<button class="btn ghost sm block" style="margin-top:11px"
           data-go="form_bbva|${c.customer_id}">${
@@ -5117,6 +5215,46 @@ function itemTimelineBBVA(r){
       ${r.Proposito ? `<div style="margin-top:7px"><span class="chip info">${esc(nomProposito(r.Proposito))}</span></div>` : ""}
       ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Qué se coordinó</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
       ${r.Comentario_Cliente ? `<div class="quote"><b>Qué respondió BBVA</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+/* EL CIERRE, EN LA LÍNEA DE TIEMPO.
+ *
+ * La línea contaba los contactos y se detenía ahí. Un comercio que vendió
+ * terminaba su historia en «visita presencial» y el resultado —lo único que de
+ * verdad pasó— vivía en otra tarjeta, arriba, como un chip suelto. Quien
+ * bajaba a leer la historia no encontraba el final.
+ *
+ * Va primero porque la línea está ordenada de lo nuevo a lo viejo, y el cierre
+ * es lo último que ocurrió. */
+const CIERRE_TL = {
+  RETENIDO:  { rot:"Cliente retenido",   tono:"ok",
+               por:"El comercio se queda. Cuenta para la reactivación del portafolio." },
+  VENTA:     { rot:"Venta cerrada",      tono:"ok",
+               por:"La afiliación la confirma BBVA; se ve en la cartera del siguiente corte." },
+  RECUPERADO:{ rot:"Venta cerrada",      tono:"ok",
+               por:"La afiliación la confirma BBVA; se ve en la cartera del siguiente corte." },
+  PERDIDO:   { rot:"Comercio perdido",   tono:"no",
+               por:"Se fue o cerró. Deja de contar para la cobertura del portafolio." }
+};
+function itemCierre(c){
+  if (!casoCerrado(c)) return "";
+  const m = CIERRE_TL[estadoDerivado(c)];
+  if (!m) return "";
+  const f = String(c.cerrado_en || "").slice(0,10);
+  return `
+  <div class="tl-item tl-cierre">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">${esc(m.rot)}</div>
+          <div class="dt">${f ? esc(fmtFecha(f)) : "sin fecha de cierre registrada"}${
+            c.asignado ? " · " + esc(c.asignado) : ""}</div>
+        </div>
+        <span class="chip ${m.tono}">Caso cerrado</span>
+      </div>
+      <div class="pie" style="margin:7px 0 0">${esc(m.por)}</div>
     </div>
   </div>`;
 }
@@ -8365,7 +8503,11 @@ function bloqueCorregir(r, regs){
 
   const sinUbi   = regs.filter(sinUbicacion);
   const tarde    = regs.filter(x => demoraHabil(x) > 1);
-  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
 
   const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en
     && (mando ? true : x.correo_stratis === S.user.correo));
@@ -8952,7 +9094,11 @@ function decisionesTablero(r, regs){
      no para corregir. */
   const conElAlta = regs.filter(x => typeof cargadaConLaFicha === "function"
                                   && cargadaConLaFicha(x));
-  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
   const ambiguos = base.filter(c => typeof correoAmbiguo === "function" && correoAmbiguo(c));
   const sinComentario = base.filter(c => {
     const rs = DB.delCliente(c.customer_id);
@@ -14536,6 +14682,16 @@ function datosLibro(){
       const suyo = !!c && !esClienteNuevo(c) && c.asignado_correo === r.Correo_Stratis;
       const primera = (vistos.has(clave) || !suyo) ? 0 : 1;
       vistos.add(clave);
+      /* De qué clase es el comercio sobre el que cayó la gestión.
+         Es la columna que faltaba. El 25/08 se discutió una cobertura de 133
+         contra 132 y la diferencia era UN comercio dado de alta por RUC: por
+         nombre se ve igual que cualquiera de la cartera y solo el Customer ID
+         lo delata. Sin esta columna, la única forma de encontrarlo es cruzar
+         sellos del servidor a mano, que es lo que hubo que hacer. */
+      const tipo = !c                                  ? "Sin ficha en el CRM"
+                 : esClienteNuevo(c)                   ? "Alta por RUC · venta nueva"
+                 : c.asignado_correo !== r.Correo_Stratis ? "De otra cartera"
+                 :                                       "De su cartera";
       const u = ejec.find(x => x.correo === r.Correo_Stratis);
       return {
         periodo:p, mes: idx[p] || 0,
@@ -14566,6 +14722,11 @@ function datosLibro(){
            lo agrupa por comercio y no puede recalcularlo con una fórmula sin
            repetir la regla del alta en cuarenta sitios. */
         aTiempo: aTiempo(r),
+        /* Los dos veredictos del CRM viajan con la fila para poder contrastarlos
+           contra lo que calcula Excel. Si alguna vez difieren, la hoja de
+           Contraste lo dice antes de que el acta salga. */
+        demora: demoraHabil(r),
+        tipo,
         respondio: (esAlCliente(r) && esEfectivo(r.Resultado)) ? 1 : 0,
         efectiva: (esAlCliente(r) && r.Cumple_Visita === "SI") ? 1 : 0,
         primera
@@ -14770,21 +14931,51 @@ function hojaGestiones(d, nFer){
   const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
                 "Fecha de gestión","Alta de la ficha","Fecha de registro",
                 "Días trabajados de demora","A tiempo",
-                "Medio","Dirigida a","Respondió","Visita efectiva","Primera del comercio en el periodo"];
+                "Medio","Dirigida a","Respondió","Visita efectiva","Primera del comercio en el periodo",
+                "Tipo de comercio","Entra al periodo","Cuenta para cobertura",
+                "A tiempo según el CRM","Días de demora según el CRM"];
   const filas = [cols];
+  const INI = P_(FIL.ini), FIN = P_(FIL.fin);
   d.gestiones.forEach((g, i) => {
     const f = i + 2;
-    /* El plazo arranca en el más tardío de los dos: la fecha de la gestión o
-       el día en que el comercio entró al CRM. Nadie puede registrar en una
-       ficha que todavía no existe. El MAX está a la vista para que se pueda
-       discutir sin volver al sistema. */
-    const desde = `MAX(${A1(7,f)},${A1(8,f)})`;
+    /* EL PLAZO ARRANCA EN LA FECHA DE LA GESTIÓN. Hasta el 26/08 esta hoja
+       arrancaba en `MAX(fecha de gestión, alta de la ficha)` con el argumento
+       de que nadie registra en una ficha que todavía no existe. El argumento
+       es cierto y la regla estaba mal: como la ficha la crea el mismo
+       ejecutivo, no cargarla congelaba el plazo, y 461 de las 800 fichas del
+       primer periodo entraron el 17 y el 18 de agosto. Tres de los cuatro
+       terminaban con puntualidad perfecta.
+
+       Se retiró del CRM el 24/08 y de la hoja del ejecutivo también, pero
+       ESTA hoja se quedó con la regla vieja dos días más. Como el resumen y
+       cada KPI se calculan sumando la columna L de acá, el mismo libro decía
+       una puntualidad arriba y otra en el detalle de cada persona. Un libro
+       que se contradice a sí mismo no sirve para sustentar una comisión.
+
+       El alta se queda en su columna, al lado, porque explica muchas de las
+       demoras. Explicar no es descontar. */
+    const desde = A1(7,f);
+    /* La dedup de cobertura, resuelta en la celda: cuenta 1 solo la PRIMERA
+       gestión de cada par ejecutivo-comercio que entra al periodo. Es la misma
+       cuenta que hace el CRM en `primera`, escrita de nuevo y por otro camino
+       para que las dos se puedan contrastar. */
+    const yaContado = `COUNTIFS($D$2:${A1(3,f)},${A1(3,f)},`
+                    + `$E$2:${A1(4,f)},${A1(4,f)},$S$2:${A1(18,f)},1)`;
     filas.push([
       g.periodo, g.mes, g.nombre, g.correo, g.cid, g.comercio, g.distrito,
       serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
       `=IF(${A1(9,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(9,f)},${RANGO_FERIADOS(nFer)}))`,
       `=IF(${A1(10,f)}<=1,1,0)`,
-      g.medio, g.destino, g.respondio, g.efectiva, g.primera
+      g.medio, g.destino, g.respondio, g.efectiva, g.primera,
+      g.tipo,
+      /* Las DOS condiciones del periodo, a la vista y en una sola celda:
+         ocurrir dentro de la ventana y quedar registrada antes del cierre. La
+         segunda faltaba hasta el 24/08 y por eso 52 gestiones cargadas con el
+         periodo vencido seguían contando. */
+      `=IF(AND(${A1(7,f)}>=${INI},${A1(7,f)}<=${FIN},${A1(9,f)}<=${FIN}),1,0)`,
+      `=IF(AND(${A1(18,f)}=1,${A1(17,f)}="De su cartera",${yaContado}=1),1,0)`,
+      g.aTiempo ? 1 : 0,
+      g.demora
     ]);
   });
   /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
@@ -14792,7 +14983,8 @@ function hojaGestiones(d, nFer){
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
     fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"],
          [10, 2, filas.length, "dd/mm/yyyy"]],
-    anchos:[10,6,18,26,14,30,16,15,15,15,13,9,16,15,11,13,14] });
+    anchos:[10,6,18,26,14,30,16,15,15,15,13,9,16,15,11,13,14,
+            24,13,16,15,17] });
 }
 
 /* ---- Coordinación con BBVA: la otra mitad de la cobertura --------------
@@ -15374,7 +15566,93 @@ function hojaCruce(d, nG){
     anchos:[22].concat(medios.map(() => 14)).concat([10,11,14,16]) });
 }
 
+/* ---- Contraste: las dos cuentas, una al lado de la otra -----------------
+
+   La hoja que este libro no tenía y que costó una semana de discusión.
+
+   El CRM calcula los tres requisitos y se los muestra a los ejecutivos todos
+   los días. Este libro los vuelve a calcular con fórmulas de Excel, por otro
+   camino y a partir de las mismas filas. Mientras nadie compare las dos
+   cuentas, pueden separarse sin que nadie se entere: es exactamente lo que
+   pasó con el plazo de registro, que en el CRM arrancaba en la fecha de la
+   gestión y en la hoja de Gestiones seguía arrancando en el alta de la ficha.
+   El mismo archivo decía dos puntualidades distintas.
+
+   Acá van las dos, con una columna que dice REVISAR cuando no coinciden. No
+   sirve para decidir cuál tiene razón —para eso hay que mirar la fila— sino
+   para saber que hay algo que mirar ANTES de que el acta salga firmada.
+
+   Si una fila dice REVISAR, el acta no sale hasta entender por qué. */
+function hojaContraste(d, nG, sello){
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const filas = [
+    ["Contraste · lo que calcula el CRM contra lo que calcula este libro", "", ""],
+    [`Periodo en Parámetros · libro extraído el ${sello}. Las dos cuentas salen de las mismas `
+     + `filas de la hoja Gestiones, por caminos distintos.`, "", ""],
+    [],
+    ["Ejecutivo",
+     "Gestiones\ndel periodo\nCRM", "Gestiones\ndel periodo\nfórmula", "¿Coincide?",
+     "Comercios\ncubiertos\nCRM", "Comercios\ncubiertos\nfórmula", "¿Coincide?",
+     "Gestiones\na tiempo\nCRM", "Gestiones\na tiempo\nfórmula", "¿Coincide?"]
+  ];
+  const PRI = filas.length + 1;
+  d.ejec.forEach(u => {
+    const f = filas.length + 1;
+    const e = `${G("D")},"${u.correo}"`, m = `${G("B")},${P_(FIL.mes)}`;
+    const igual = (a, b) => `=IF(${A1(a,f)}=${A1(b,f)},"Sí","REVISAR")`;
+    filas.push([
+      u.nombre,
+      /* La cuenta del CRM: el periodo lo decidió él, y viaja en la columna Mes. */
+      `=COUNTIFS(${e},${m})`,
+      /* La del libro: el periodo se decide en la celda, comparando fechas
+         contra Parámetros. Si el CRM asignó mal un periodo, acá se separa. */
+      `=SUMIFS(${G("S")},${e})`,
+      igual(1, 2),
+      `=SUMIFS(${G("Q")},${e},${m})`,
+      `=SUMIFS(${G("T")},${e})`,
+      igual(4, 5),
+      `=SUMIFS(${G("U")},${e},${m})`,
+      `=SUMIFS(${G("L")},${e},${G("S")},1)`,
+      igual(7, 8)
+    ]);
+  });
+  const ULT = filas.length;
+  filas.push([]);
+  filas.push(["¿Todo cuadra?",
+    `=IF(COUNTIF(${A1(3,PRI)}:${A1(9,ULT)},"REVISAR")=0,"Sí · las dos cuentas dan lo mismo",`
+    + `"NO · hay filas que revisar antes de firmar el acta")`]);
+  filas.push([]);
+  filas.push(["Qué mirar si alguna dice REVISAR"]);
+  [["Gestiones del periodo",
+    "El CRM cuenta por la columna Mes; el libro compara fechas contra Parámetros. "
+    + "Difieren si una gestión quedó asignada a un periodo que no le toca, o si se "
+    + "registró después del cierre."],
+   ["Comercios cubiertos",
+    "El libro solo cuenta comercios con «Tipo de comercio» igual a «De su cartera». "
+    + "Una diferencia suele ser un alta por RUC o un comercio de otra cartera "
+    + "colándose por el nombre."],
+   ["Gestiones a tiempo",
+    "Las dos miden desde la fecha de la gestión hasta el registro. Si difieren, "
+    + "alguien cambió la regla en un lado y no en el otro."]
+  ].forEach(([q, por]) => filas.push([q, por]));
+
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4,
+    etiquetas:d.ejec.map((_, i) => PRI + i).concat([ULT + 2, ULT + 4]),
+    notas:[[ULT + 6, 2], [ULT + 7, 2], [ULT + 8, 2]],
+    semaforo:[[`${A1(3,PRI)}:${A1(9,ULT)}`, ["Sí"], ["REVISAR"]]],
+    anchos:[26, 13, 13, 12, 13, 13, 12, 13, 13, 12] });
+}
+
 /* ---- El libro ----------------------------------------------------------- */
+/* El sello de extracción. El libro de un cierre es una foto, y una foto sin
+   fecha no sirve de evidencia: la discusión de la cobertura de agosto se fue
+   media hora en que un número era del 24 y el resto del 18. */
+function selloExtraccion(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} `
+       + `a las ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function armarLibroIncentivos(p){
   const d = datosLibro();
   const par = hojaParametros(p, d);
@@ -15387,7 +15665,8 @@ function armarLibroIncentivos(p){
      crudos al final. Nadie abre un libro por la hoja de 4000 filas. */
   const hojas = [
     ["Resumen",    hojaResumen(p, d, nG, nC, nN)],
-    ["Parámetros", par.ws]
+    ["Parámetros", par.ws],
+    ["Contraste",  hojaContraste(d, nG, selloExtraccion())]
   ];
   d.ejec.forEach(u => hojas.push([nombreHoja(u.nombre), hojaEjecutivo(u, p, d, nG, nC, nN)]));
   hojas.push(["Evolución", hojaEvolucion(d)]);
