@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 21:52", huella:"586be9" };
+const BUILD = { sello:"26/08/2026 22:31", huella:"f427b6" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1679,6 +1679,18 @@ const esAlBanco   = r => destinatarioDe(r) === "bbva";
 /* Una gestión de campo: la escribió un ejecutivo Y fue dirigida al comercio.
    Es la unidad con la que se cuenta cobertura, efectividad y visitas. */
 const esGestionCliente = r => !esReconstruida(r) && esAlCliente(r);
+
+/* ---- Lo que deja constancia ---------------------------------------------
+   Acuerdo del 26/08: una gestión cuenta cuando existe un correo que se puede
+   poner sobre la mesa. Chat, llamada y visita son trabajo real y se registran
+   igual —siguen en la línea de tiempo y en el historial del ejecutivo—, pero
+   no sostienen nada frente al banco: si mañana BBVA dice que nunca le pidieron
+   los datos de un comercio, un chat no se le puede mostrar a nadie.
+
+   Cuenta el correo de los dos lados, al banco y al comercio, porque los dos
+   dejan un rastro consultable y los dos son trabajo del ejecutivo. */
+const MEDIOS_CON_CORREO = ["correo", "bbva_correo", "bbva_correo_cliente"];
+const esCorreoEvidenciable = r => !esReconstruida(r) && MEDIOS_CON_CORREO.includes(r.Tipo_Contacto);
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -13923,11 +13935,33 @@ function fotoReporte(){
   const conAlguna   = new Set(ges.map(g => String(g.Customer_id)));
   const conRespuesta= new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
   const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
+  /* El correo cuenta de los dos lados: al banco y al comercio. Y hay que
+     pedirlos por separado, porque `DB.todos()` es el montón del CLIENTE — las
+     coordinaciones con el banco viven en `DB.bbva()`. Buscarlo solo en el
+     primero dejaba fuera todo el correo al ejecutivo de BBVA, que es
+     exactamente la mitad del acuerdo. */
+  const conCorreo = new Set([...DB.todos(), ...DB.bbva()]
+    .filter(esCorreoEvidenciable).map(g => String(g.Customer_id)));
 
   const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
-  const contacto = enCartera(conAlguna);
-  const gestion  = enCartera(conRespuesta);
-  const visita   = enCartera(conVisita);
+  /* Cada escalón es parte del anterior, y eso no es una decisión de dibujo:
+     es la regla del 26/08 aplicada hasta el final. Si una visita sin correo
+     detrás no cuenta como gestión, tampoco puede contar como visita del
+     embudo — si no, el mismo comercio quedaría fuera de un escalón y dentro
+     del siguiente, y el embudo dejaría de ser un embudo.
+
+     Lo que queda afuera no se pierde de vista: se cuenta aparte y se declara,
+     porque es trabajo hecho al que le falta el respaldo, y eso es una tarea
+     concreta y no un descarte. */
+  const y = (a, b) => new Set([...a].filter(x => b.has(x)));
+  const contacto    = enCartera(conAlguna);
+  const gestion     = enCartera(conCorreo);
+  const efectividad = enCartera(y(conRespuesta, conCorreo));
+  const visita      = enCartera(y(conVisita, conCorreo));
+  const sinRespaldo = {
+    efectivos: enCartera(conRespuesta) - efectividad,
+    visitas:   enCartera(conVisita) - visita
+  };
 
   const retenidos   = cart.filter(esRetencion).length;
   const recuperados = cart.filter(esRecuperado).length;
@@ -13968,17 +14002,30 @@ function fotoReporte(){
   const pct = n => portafolio ? n / portafolio * 100 : 0;
   const cnv = (n, d) => d ? n / d * 100 : 0;
 
+  /* ---- El embudo, redefinido el 26/08 ---------------------------------
+     Antes el segundo escalón era «Contacto»: se registró al menos un intento.
+     Con 795 de 802 fichas tocadas, ese escalón daba 99% y no decía nada — un
+     embudo cuyo primer tramo no se angosta es un adorno.
+
+     Ahora el segundo escalón es GESTIÓN con el criterio de la campaña: hay
+     gestión cuando existe un correo que se puede poner sobre la mesa, al banco
+     o al comercio. Y debajo va EFECTIVIDAD, que es lo que antes se llamaba
+     gestión: los contactos que obtuvieron respuesta.
+
+     El trabajo por chat, llamada o visita no desaparece —sigue registrado, en
+     la línea de tiempo y en el historial de cada ejecutivo—; lo que no hace es
+     contar como sustento, porque no lo es. */
   const embudo = [
-    { k:"portafolio", label:"Portafolio asignado", n:portafolio, color:"navy",
+    { k:"portafolio",  label:"Portafolio asignado", n:portafolio, color:"navy",
       pct:100, conv:null, texto:"" },
-    { k:"contacto",   label:"Contacto",  n:contacto, color:"azul2",
-      pct:pct(contacto), conv:cnv(contacto, portafolio), texto:"del portafolio" },
-    { k:"gestion",    label:"Gestión",   n:gestion,  color:"azul",
-      pct:pct(gestion),  conv:cnv(gestion, contacto),   texto:"de los contactados" },
-    { k:"visita",     label:"Visita",    n:visita,   color:"naranja",
-      pct:pct(visita),   conv:cnv(visita, gestion),     texto:"de los gestionados" },
-    { k:"objetivo",   label:"Objetivo",  n:objetivo, color:"verde",
-      pct:pct(objetivo), conv:cnv(objetivo, visita),    texto:"de las visitas" }
+    { k:"gestion",     label:"Gestión",      n:gestion, color:"azul2",
+      pct:pct(gestion),     conv:cnv(gestion, portafolio),      texto:"del portafolio" },
+    { k:"efectividad", label:"Efectividad",  n:efectividad, color:"azul",
+      pct:pct(efectividad), conv:cnv(efectividad, gestion),     texto:"de los gestionados" },
+    { k:"visita",      label:"Visitas",      n:visita, color:"naranja",
+      pct:pct(visita),      conv:cnv(visita, efectividad),      texto:"de los efectivos" },
+    { k:"objetivo",    label:"Retenciones",  n:objetivo, color:"verde",
+      pct:pct(objetivo),    conv:cnv(objetivo, visita),         texto:"de las visitas" }
   ];
 
   /* ---- Facturación: el único objetivo cuyo dato no genera el CRM --------
@@ -14053,7 +14100,7 @@ function fotoReporte(){
     ritmoR: ritmo(metaR, objetivo), ritmoV: ritmo(metaV, ventasNuevas),
     metaR, metaV, metaPct,
     portafolio, asignadaMetas, registrados:cart.length,
-    contacto, gestion, visita, objetivo, retenidos, recuperados, perdidos, ventasNuevas,
+    contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
     diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento,
@@ -14315,11 +14362,19 @@ function repJueves(hoy){
    gestiones, igual que el embudo de siempre: si acá contara gestiones, el
    avance de la semana saldría inflado y las dos láminas no cerrarían. */
 function repEmbudoAl(fecha){
-  const ges = DB.todos().filter(esGestionCliente)
-    .filter(g => repDia(g.Fecha_Contacto) <= fecha);
+  const hasta = g => repDia(g.Fecha_Contacto) <= fecha;
+  const ges = DB.todos().filter(esGestionCliente).filter(hasta);
+  /* Las mismas definiciones que el embudo de hoy, o los dos tonos de la barra
+     estarían midiendo cosas distintas y el avance de la semana saldría de la
+     nada. Cuando cambió el embudo el 26/08 esto se quedó atrás una hora, y lo
+     agarró la prueba de que ningún escalón del corte puede superar al de hoy:
+     daba 71 contra 52. */
+  const conCorreo = new Set([...DB.todos(), ...DB.bbva()]
+    .filter(esCorreoEvidenciable).filter(hasta).map(g => String(g.Customer_id)));
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
-  const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
-  const idsDe = f => new Set(ges.filter(f).map(g => String(g.Customer_id)));
+  const enCartera = s2 => cart.filter(c => s2.has(String(c.customer_id))).length;
+  const idsDe = f2 => new Set(ges.filter(f2).map(g => String(g.Customer_id)));
+  const y = (a, b) => new Set([...a].filter(x => b.has(x)));
 
   const cerradoAl = c => {
     /* Sin fecha de cierre no se puede decir cuándo pasó. Se cuenta en el
@@ -14329,10 +14384,11 @@ function repEmbudoAl(fecha){
     return d !== null && d <= fecha;
   };
   return {
-    contacto: enCartera(idsDe(() => true)),
-    gestion:  enCartera(idsDe(g => esEfectivo(g.Resultado))),
-    visita:   enCartera(idsDe(g => g.Cumple_Visita === "SI")),
-    objetivo: cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
+    contacto:    enCartera(idsDe(() => true)),
+    gestion:     enCartera(conCorreo),
+    efectividad: enCartera(y(idsDe(g => esEfectivo(g.Resultado)), conCorreo)),
+    visita:      enCartera(y(idsDe(g => g.Cumple_Visita === "SI"), conCorreo)),
+    objetivo:    cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
   };
 }
 
@@ -14424,9 +14480,19 @@ const repSoles = n => {
 };
 /* «afiliación» + «es» daba «afiliaciónes». El plural en español no siempre es
    la palabra más una letra, así que se escriben las dos formas. */
-const repAparte = f =>
-  `${f.ventasNuevas} ${f.ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas"} ` +
-  `fuera del portafolio · ${f.perdidos} ${f.perdidos === 1 ? "comercio perdido" : "comercios perdidos"}`;
+/* La línea de abajo del embudo. Desde el 26/08 lleva también lo que quedó
+   fuera de los escalones por no tener correo detrás: es trabajo hecho al que
+   le falta el respaldo, y esconderlo sería quedarse con un embudo más prolijo
+   y menos cierto. */
+const repAparte = f => {
+  const sr = f.sinRespaldo || { efectivos:0, visitas:0 };
+  const falta = [];
+  if (sr.efectivos) falta.push(`${sr.efectivos} ${sr.efectivos === 1 ? "contacto efectivo" : "contactos efectivos"}`);
+  if (sr.visitas)   falta.push(`${sr.visitas} ${sr.visitas === 1 ? "visita" : "visitas"}`);
+  return `${f.ventasNuevas} ${f.ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas"} ` +
+    `fuera del portafolio · ${f.perdidos} ${f.perdidos === 1 ? "comercio perdido" : "comercios perdidos"}` +
+    (falta.length ? ` · ${falta.join(" y ")} sin correo de respaldo, fuera del embudo` : "");
+};
 const repFecha = iso => fmtFecha(String(iso || "").slice(0,10));
 /* En una lámina el 13/08/2026 se lee como un dato de sistema; el 13 de agosto
    de 2026 se lee como una fecha. Es la diferencia entre un volcado y algo
@@ -14466,10 +14532,18 @@ function repDatos(f){
     portafolio:f.portafolio, contacto:f.contacto, gestion:f.gestion,
     visita:f.visita, objetivo:f.objetivo,
     ventasNuevas:f.ventasNuevas, perdidos:f.perdidos, faltanContactar:f.faltanContactar,
-    pctContacto:repPct(e("contacto").pct), pctGestion:repPct(e("gestion").pct),
-    pctVisita:repPct(e("visita").pct),    pctObjetivo:repPct(e("objetivo").pct),
-    convContacto:repPct(e("contacto").conv), convGestion:repPct(e("gestion").conv),
-    convVisita:repPct(e("visita").conv),     convObjetivo:repPct(e("objetivo").conv),
+    /* «Contacto» dejó de ser un escalón del embudo el 26/08, pero sigue siendo
+       un número del proyecto y hay lecturas escritas que lo nombran: se calcula
+       aparte para que ningún texto guardado se quede en blanco de golpe. */
+    efectividad:f.efectividad,
+    pctContacto: repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0),
+    pctGestion:repPct(e("gestion").pct), pctEfectividad:repPct(e("efectividad").pct),
+    pctVisita:repPct(e("visita").pct),   pctObjetivo:repPct(e("objetivo").pct),
+    convContacto: repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0),
+    convGestion:repPct(e("gestion").conv), convEfectividad:repPct(e("efectividad").conv),
+    convVisita:repPct(e("visita").conv),   convObjetivo:repPct(e("objetivo").conv),
+    sinRespaldoEfectivos:(f.sinRespaldo || {}).efectivos || 0,
+    sinRespaldoVisitas:(f.sinRespaldo || {}).visitas || 0,
     /* el ritmo */
     gestiones:f.gestiones, distritos:f.distritos,
     diasCampo:f.diasDeCampo, diasActivos:f.diasActivos,
