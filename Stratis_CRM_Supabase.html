@@ -10,6 +10,14 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stratis CRM">
+<!-- Las dos familias del rediseño. `display=swap` para que el texto se lea
+     desde el primer cuadro: esto se abre en la calle, con la señal que haya, y
+     una pantalla en blanco esperando una fuente es peor que una fuente fea.
+     Las dos pilas de respaldo terminan en la del sistema, así que si Google no
+     responde la aplicación se ve exactamente como se veía antes. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap">
 <link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
 <link rel="icon" href="data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27512%27%20height%3D%27512%27%3E%3Crect%20width%3D%27512%27%20height%3D%27512%27%20rx%3D%2796%27%20fill%3D%27%230b2545%27/%3E%3Ctext%20x%3D%27256%27%20y%3D%27340%27%20font-family%3D%27system-ui%2Csans-serif%27%20font-size%3D%27280%27%20font-weight%3D%27800%27%20fill%3D%27%23ffffff%27%20text-anchor%3D%27middle%27%3ES%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="data:application/manifest+json;charset=utf-8,%7B%22name%22%3A%20%22Stratis%20CRM%20%E2%80%94%20BBVA%20Adquirencia%22%2C%20%22short_name%22%3A%20%22Stratis%20CRM%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22scope%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%230b2545%22%2C%20%22theme_color%22%3A%20%22%230b2545%22%2C%20%22orientation%22%3A%20%22portrait%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%3Bcharset%3Dutf-8%2C%253Csvg%2520xmlns%253D%2527http%253A//www.w3.org/2000/svg%2527%2520width%253D%2527512%2527%2520height%253D%2527512%2527%253E%253Crect%2520width%253D%2527512%2527%2520height%253D%2527512%2527%2520rx%253D%252796%2527%2520fill%253D%2527%25230b2545%2527/%253E%253Ctext%2520x%253D%2527256%2527%2520y%253D%2527340%2527%2520font-family%253D%2527system-ui%252Csans-serif%2527%2520font-size%253D%2527280%2527%2520font-weight%253D%2527800%2527%2520fill%253D%2527%2523ffffff%2527%2520text-anchor%253D%2527middle%2527%253ES%253C/text%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22512x512%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%2C%20%22purpose%22%3A%20%22any%20maskable%22%7D%5D%7D">
@@ -17,28 +25,38 @@
 <style>
 :root{
   color-scheme: light;
-  --surface-1:#fcfcfb; --plane:#f3f4f1; --card:#ffffff;
-  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --line:#c3c2b7; --ring:rgba(11,11,11,.10);
-  --brand:#0b2545; --brand-2:#2a78d6;
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
-  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
-  --good-ink:#006300; --crit-ink:#a32626; --warn-ink:#8a6100; --serious-ink:#9c4a25;
-  --good-bg:#e8f6e8; --warn-bg:#fef3d9; --serious-bg:#fdeade; --crit-bg:#fbe6e6; --info-bg:#e7f0fc;
-  --r:14px; --r-sm:9px;
-  --sh:0 1px 2px rgba(11,11,11,.05), 0 4px 14px rgba(11,11,11,.05);
+  /* Los neutros dejan de ser cálidos y pasan a un gris azulado. Es el cambio
+     que más se nota sin mover una sola caja de sitio: el papel oliva hacía que
+     el azul de la marca se viera apagado al lado. */
+  --surface-1:#ffffff; --surface-2:#eef1f6; --plane:#f4f6f9; --card:#ffffff;
+  --ink:#0d1b2a; --ink-2:#4a5768; --muted:#7d8898;
+  --grid:#e6eaf1; --line:#dee4ec; --ring:rgba(13,27,42,.10);
+  --brand:#0b2545; --brand-2:#2f6fd0; --brand-bg:#e8f0fc;
+  --s1:#2f6fd0; --s2:#e0662f; --s3:#12805a; --s4:#cf9400;
+  --good:#12805a; --warn:#cf9400; --serious:#e0662f; --crit:#bd2b2b;
+  --good-ink:#0c6144; --crit-ink:#98211f; --warn-ink:#8a6100; --serious-ink:#9c4a25;
+  --ok-ink:#0c6144; --warn-tx:#8a6100;
+  --good-bg:#e4f4ed; --warn-bg:#fdf2d8; --serious-bg:#fdeade; --crit-bg:#fbe8e8; --info-bg:#e8f0fc;
+  --r:12px; --r-sm:8px;
+  --sh:0 1px 2px rgba(13,27,42,.06), 0 6px 16px rgba(13,27,42,.05);
   --nav-h:62px;
+  /* Archivo para los títulos y los números; Public Sans para leer. Se declaran
+     como variables para que un cambio de familia sea una línea y no cuarenta. */
+  --f-disp:"Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-body:"Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
-  --surface-1:#1a1a19; --plane:#0d0d0d; --card:#1a1a19;
-  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --line:#383835; --ring:rgba(255,255,255,.10);
-  --brand:#0f1c2e; --brand-2:#3987e5;
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-  --good-ink:#0ca30c; --crit-ink:#e66767; --warn-ink:#fab219; --serious-ink:#ec835a;
-  --good-bg:#122b12; --warn-bg:#33280a; --serious-bg:#33200f; --crit-bg:#331414; --info-bg:#0f2137;
-  --sh:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+  --surface-1:#141d29; --surface-2:#1a2432; --plane:#0d151f; --card:#141d29;
+  --ink:#eef3f9; --ink-2:#aab8c8; --muted:#7f8ea1;
+  --grid:#1d2733; --line:#26313f; --ring:rgba(255,255,255,.10);
+  --brand:#08111f; --brand-2:#5a8fe8; --brand-bg:#16243a;
+  --s1:#5a8fe8; --s2:#e0803f; --s3:#26a074; --s4:#cf9f2a;
+  --good:#26a074; --warn:#cf9f2a; --serious:#e0803f; --crit:#d5544a;
+  --good-ink:#4cc79a; --crit-ink:#e88178; --warn-ink:#e0b552; --serious-ink:#eda07a;
+  --ok-ink:#4cc79a; --warn-tx:#e0b552;
+  --good-bg:#10281f; --warn-bg:#2b2311; --serious-bg:#2b1d11; --crit-bg:#2c1615; --info-bg:#16243a;
+  --sh:0 1px 2px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
@@ -47,10 +65,17 @@ html,body{margin:0;padding:0;height:100%}
 html{overflow-x:hidden}
 main{min-width:0;overflow-x:clip}
 body{
-  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-family:var(--f-body);
   background:var(--plane); color:var(--ink);
   font-size:15px; line-height:1.45; overscroll-behavior-y:none;
 }
+/* Los títulos y los números en la familia de despliegue. Los números van con
+   cifras de ancho fijo: en una columna de cantidades, que no bailen de una
+   fila a la siguiente es la diferencia entre poder compararlas de un vistazo y
+   tener que leerlas una por una. */
+h1,h2,h3,h4{font-family:var(--f-disp);letter-spacing:-.01em;text-wrap:balance}
+.stat .val,.kpi .val,.cuenta,.cola-n{font-family:var(--f-disp);
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--brand-2)}
 .hidden{display:none !important}
@@ -273,6 +298,10 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .chip.neg{background:#EEF0FF;color:#3B43FB;border:1px solid #D8DCFF}
 /* La coordinación con el banco, en la misma línea de tiempo pero distinguible
    de un vistazo: mismo hilo, otro interlocutor. */
+.rl-build{display:block;width:100%;margin:8px 0 0;padding:6px 8px;border:0;border-radius:7px;
+  background:transparent;color:var(--muted);font:inherit;font-size:10.5px;letter-spacing:.02em;
+  text-align:left;cursor:pointer;opacity:.75}
+.rl-build:hover{background:rgba(255,255,255,.07);opacity:1}
 .tl-bbva>.card{border-left:3px solid var(--brand-2)}
 /* El cierre cierra la línea: barra al costado y fondo tenue, para que se
    distinga de un contacto más sin gritar. */
@@ -1395,6 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
+const BUILD = { sello:"26/08/2026 08:29", huella:"4c673e" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -4076,9 +4106,22 @@ function renderRail(){
     <div class="rl-como">${selectorComoEjec()}</div>
     <div class="rl-yo"><i>${esc(iniciales || "··")}</i>
       <div><b>${esc(S.user.nombreCompleto || S.user.nombre || "")}</b>
-        <span>${esc(S.user.rol || "")}</span></div></div>`;
+        <span>${esc(S.user.rol || "")}</span></div></div>
+    ${/* La versión cargada, para que caché y bug dejen de parecerse. Si dos
+          personas ven cosas distintas, se comparan estos seis caracteres. */""}
+    <button class="rl-build" data-recargar="1"
+      title="Versión cargada en este navegador. Clic para traer la última.">
+      v ${esc(BUILD.sello)} · ${esc(BUILD.huella)}</button>`;
 
   el.querySelectorAll("button[data-tab]").forEach(b => b.onclick = () => go(b.dataset.tab));
+  /* Recargar salteando el caché del navegador. Con `max-age=600` en el
+     servidor, una pestaña abierta desde antes del pase sigue con el archivo
+     viejo aunque se le dé F5. El parámetro obliga a pedirlo de nuevo. */
+  el.querySelectorAll("[data-recargar]").forEach(b => b.onclick = () => {
+    const u = new URL(location.href);
+    u.searchParams.set("v", Date.now());
+    location.replace(u.toString());
+  });
   el.querySelectorAll(".selComoEjec").forEach(sel => { sel.onchange = () => mirarComo(sel.value); });
 }
 /* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
@@ -4349,7 +4392,11 @@ function avisoVentana(){
       gestión tuya, el Customer ID de los comercios que registraste, y la ubicación de tus gestiones.
       <b>A partir de mañana vuelve a estar cerrado.</b>
       ${(() => {
-        const faltan = cartera().filter(c => !esClienteNuevo(c) && !c.contacto_bbva).length;
+        /* Solo los que siguen abiertos. A un comercio que ya vendió, se retuvo
+           o se perdió no se le pide completar cómo se contactó al banco: el
+           dato ya no cambia nada y la lista se vuelve una tarea eterna. */
+        const faltan = cartera().filter(c =>
+          !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c)).length;
         return faltan ? `<div style="margin-top:8px"><b>Te faltan ${faltan} comercio${faltan===1?"":"s"}</b>
           por indicar cómo se contactó al ejecutivo de BBVA. Se completa entrando al comercio y
           tocando <b>Editar comercio</b>.
@@ -4384,7 +4431,11 @@ function viewCartera(){
     if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
     if (S.fContacto === "con")     return b._efectivos > 0;
     if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
-    if (S.fContacto === "sin_bbva") return !esClienteNuevo(c) && !c.contacto_bbva;
+    /* La misma regla que el contador que lleva hasta acá: si el filtro trajera
+       también los cerrados, el número del aviso y el largo de la lista no
+       coincidirían, y quien la abre pensaría que el CRM le miente. */
+    if (S.fContacto === "sin_bbva")
+      return !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c);
     /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
        de análisis: existe para vaciarse. */
     if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
@@ -8452,7 +8503,11 @@ function bloqueCorregir(r, regs){
 
   const sinUbi   = regs.filter(sinUbicacion);
   const tarde    = regs.filter(x => demoraHabil(x) > 1);
-  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
 
   const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en
     && (mando ? true : x.correo_stratis === S.user.correo));
@@ -9039,7 +9094,11 @@ function decisionesTablero(r, regs){
      no para corregir. */
   const conElAlta = regs.filter(x => typeof cargadaConLaFicha === "function"
                                   && cargadaConLaFicha(x));
-  const sinCanal = base.filter(c => !esClienteNuevo(c) && !c.contacto_bbva);
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
   const ambiguos = base.filter(c => typeof correoAmbiguo === "function" && correoAmbiguo(c));
   const sinComentario = base.filter(c => {
     const rs = DB.delCliente(c.customer_id);
