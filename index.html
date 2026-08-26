@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 21:30", huella:"2bbf6b" };
+const BUILD = { sello:"26/08/2026 21:52", huella:"586be9" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3224,6 +3224,7 @@ const DB = {
    ningún contador. */
 function bbvaDe(cid){
   const todas = DB.bbvaDe(cid);
+  const medioAlta = (byId[String(cid)] || {}).contacto_bbva || "";
   const co = todas.filter(r => !esReconstruida(r));
   const sello = todas.find(esReconstruida) || null;
   const resp = co.find(r => respondioBBVA(r.Resultado)) || null;
@@ -3259,7 +3260,30 @@ function bbvaDe(cid){
        todavía si fue al banco o al cliente con copia. */
     sello,
     reconstruidas: todas.filter(esReconstruida).length,
-    selloAmbiguo: !!sello && !co.length
+    selloAmbiguo: !!sello && !co.length,
+    /* ---- El medio declarado al alta, tratado como lo que es --------------
+       Hasta el 26/08 una ficha sin coordinación registrada era, sin más, un
+       «caso parado hasta coordinar con BBVA». Y eso era falso en la mitad de
+       los casos: el ejecutivo YA había mandado el correo —por eso el alta dice
+       «correo»—, solo que ese correo no quedó como una gestión aparte. La
+       pantalla le pedía hacer de nuevo lo que ya había hecho, y le escondía
+       las dos salidas que sí necesitaba.
+
+       Así que el medio del alta decide, y la regla es la de la campaña:
+
+         · Declarado por CORREO —al banco o al cliente con copia— hay
+           constancia escrita. El caso no está parado: está esperando al banco,
+           y las dos salidas se habilitan igual que con una coordinación
+           registrada.
+         · Declarado por cualquier otro medio —llamada, WhatsApp, chat, visita
+           a la agencia— no hay nada que otro pueda consultar. Ahí sí falta
+           algo, y lo que falta es el correo de confirmación, no «coordinar».
+
+       Las dos ramas solo aplican mientras no haya ninguna coordinación
+       registrada: en cuanto la hay, manda la coordinación. */
+    altaCorreo:    (medioAlta === "CORREO" || medioAlta === "CORREO_CC") && !co.length,
+    altaOtroMedio: !!medioAlta && medioAlta !== "CORREO" && medioAlta !== "CORREO_CC" && !co.length,
+    medioAlta
   };
 }
 
@@ -4986,12 +5010,17 @@ function cardCoordinacionBBVA(c, mio){
           ? `<span class="chip warn">Todavía no</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">${k.n} contacto${k.n===1?"":"s"} sin respuesta</div>`
           : `<span class="chip ${cerrado ? "" : "warn"}">${
-               cerrado ? "No se registró" : "Sin coordinar"}</span>
+               cerrado ? "No se registró"
+                       : k.altaCorreo ? "Todavía no" : "Sin coordinar"}</span>
              <div style="font-size:12px;color:var(--muted);margin-top:3px">${
                cerrado
                  ? "El caso cerró sin ninguna coordinación registrada con el banco"
-                 : k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
-                           : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
+                 : k.altaCorreo
+                   ? "Se declaró un correo al dar de alta y el banco todavía no ha respondido"
+                   : k.altaOtroMedio
+                     ? "El alta declara " + esc(String(nomContactoBBVA(k.medioAlta) || k.medioAlta).toLowerCase()) + ", que no deja constancia consultable"
+                     : k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
+                               : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
     </dd></div>
     ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
       <b>Falta el correo de respaldo.</b> La última coordinación fue por
@@ -5012,7 +5041,18 @@ function cardCoordinacionBBVA(c, mio){
 
           Las dos salidas se registran, y por eso están las dos acá: la
           segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
-      (k.n === 1 && !k.respondio && pide) ? `
+      (k.altaCorreo && pide) ? `
+      <div class="note warn" style="margin-top:11px">
+        <b>El correo salió y el banco todavía no responde.</b> Al dar de alta este comercio se
+        declaró que se coordinó por correo, así que hay constancia: el caso no está parado
+        esperando que alguien escriba, está esperando al banco. Desde acá tiene las mismas dos
+        salidas de siempre, y las dos se registran.
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+          <button class="btn sm ghost" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
+        </div>
+      </div>`
+      : (k.n === 1 && !k.respondio && pide) ? `
       <div class="note warn" style="margin-top:11px">
         <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
         se registran para que no quede la duda de quién tiene el turno.
@@ -5039,7 +5079,19 @@ function cardCoordinacionBBVA(c, mio){
           quién llamar. Antes eso se leía como un guion en una fila y se
           quedaba ahí semanas. Ahora el siguiente paso es el elemento más
           visible de la tarjeta, y dice qué pasa si no se da. */
-      (!k.n && pide && !propio) ? `
+      (k.altaOtroMedio && pide && !propio) ? `
+      <div class="note crit" style="margin-top:11px">
+        <b>Falta el correo de confirmación.</b> Al dar de alta se declaró que la coordinación fue
+        por ${esc(String(nomContactoBBVA(k.medioAlta) || k.medioAlta).toLowerCase())}, que no deja
+        constancia que otro pueda consultar. La campaña pide que el correo sea el respaldo formal:
+        mándalo con lo acordado, regístralo acá, y desde ese momento el caso puede seguir su
+        camino. Mientras no exista, no hay con qué sostener que a este comercio se le pidieron
+        los datos.
+        <div style="margin-top:10px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">Registrar el correo de confirmación</button>
+        </div>
+      </div>`
+      : (!k.n && !k.altaCorreo && pide && !propio) ? `
       <div class="cta-bbva">
         <div class="cta-bbva-txt">
           <b>El caso está parado hasta coordinar con BBVA</b>
