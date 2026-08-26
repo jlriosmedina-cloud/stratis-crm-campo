@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 19:13", huella:"1cfce1" };
+const BUILD = { sello:"26/08/2026 19:35", huella:"7767c8" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14180,6 +14180,96 @@ function repEvolutivo(f){
     } };
 }
 
+/* =========================================================================
+   EL DECK DE DIRECTORIO
+
+   El reporte de avance abre el proyecto en trece láminas porque su trabajo es
+   sostener una conversación de gestión: quién hizo qué, dónde se traba, qué
+   falta cargar. Un comité de dirección no tiene esa conversación. Tiene otra,
+   más corta y más difícil: si el proyecto llega o no llega, y qué hay que
+   decidir hoy para que llegue.
+
+   Por eso esto no es un resumen del otro. Es otro documento con otra pregunta:
+
+     · Nada de operación. No aparece la herramienta con la que se gestiona, ni
+       el nombre de ninguna persona del equipo, ni el plan de incentivos. En
+       una lámina de comité con la marca, eso se lee como ruido interno.
+     · Una proyección explícita. El avance de hoy no dice nada sin el ritmo:
+       106 comercios en 38 días no es «poco», es «así se llega a tanto en
+       diciembre». La lámina lo dice y se hace cargo.
+     · Siete láminas. Si hace falta una octava, es que algo de las siete no
+       estaba dicho como corresponde.
+
+   Los números salen de `fotoReporte()`, exactamente los mismos que el reporte
+   largo. Dos documentos con dos relatos y una sola fuente: si alguna vez
+   discrepan es porque alguien calculó dos veces, y acá se calcula una.
+   ========================================================================= */
+
+/* Dónde termina el proyecto si el ritmo de hoy se sostiene. No es un
+   pronóstico sofisticado y no pretende serlo: es la aritmética que cualquiera
+   en la sala haría en una servilleta, hecha a la vista para que se pueda
+   discutir el supuesto en vez de discutir la cuenta. */
+function repProyeccion(f){
+  /* El ritmo se mide sobre las semanas que el proyecto lleva EN CAMPO, no
+     sobre las corridas desde la firma. Las dos primeras semanas fueron de
+     coordinación con los ejecutivos del banco y no de calle: contarlas como
+     semanas flojas de campo diluiría el ritmo real hacia abajo. */
+  const semCampo = Math.max(1, f.diasDeCampo / 7);
+  const semRest  = Math.max(0, f.restante / 7);
+
+  const linea = (nombre, hecho, meta, unidad) => {
+    const ritmo = hecho / semCampo;
+    const proyectado = Math.round(hecho + ritmo * semRest);
+    const pedido = meta > hecho && semRest > 0 ? (meta - hecho) / semRest : 0;
+    return { nombre, hecho, meta, unidad, ritmo, proyectado,
+      llega: meta > 0 && proyectado >= meta,
+      brecha: Math.max(0, meta - proyectado),
+      pedido,
+      /* Cuánto habría que multiplicar el ritmo actual para llegar. Es el
+         número que convierte «vamos atrasados» en una decisión: duplicar el
+         equipo, correr la meta, o aceptar el resultado. */
+      factor: ritmo > 0 ? pedido / ritmo : null };
+  };
+
+  return {
+    semCampo, semRest,
+    contacto: linea("Portafolio contactado", f.contacto, f.portafolio, "comercios"),
+    objetivo: linea("Reactivación", f.objetivo, f.metaR, "comercios"),
+    venta:    linea("Afiliaciones nuevas", f.ventasNuevas, f.metaV, "afiliaciones")
+  };
+}
+
+/* La curva del proyecto: cuántos comercios del portafolio quedaron
+   contactados, acumulado, semana a semana. Es la única serie que cuenta el
+   desarrollo sin necesitar una explicación al lado. */
+function repCurva(f){
+  const ges = DB.todos().filter(esGestionCliente);
+  const enCartera = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
+  const primera = new Map();
+  ges.forEach(g => {
+    const cid = String(g.Customer_id);
+    if (!enCartera.has(cid)) return;
+    const d = repDia(g.Fecha_Contacto);
+    if (!d) return;
+    if (!primera.has(cid) || d < primera.get(cid)) primera.set(cid, d);
+  });
+
+  const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  const largo = Math.max(1, dias(f.ini, f.hoy) + 1);
+  const puntos = [];
+  let acum = 0;
+  for (let i = 0; i * 7 < largo; i++){
+    const desde = new Date(new Date(f.ini).getTime() + i * 7 * 86400000).toISOString().slice(0,10);
+    const hastaBruto = new Date(new Date(f.ini).getTime() + (i * 7 + 6) * 86400000).toISOString().slice(0,10);
+    const hasta = hastaBruto < f.hoy ? hastaBruto : f.hoy;
+    let nuevos = 0;
+    primera.forEach(d => { if (d >= desde && d <= hasta) nuevos++; });
+    acum += nuevos;
+    puntos.push({ n: i + 1, desde, hasta, nuevos, acum });
+  }
+  return { puntos, total: acum };
+}
+
 const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
 const repPct = n => repNum(n, n < 10 ? 1 : 0) + "%";
 const repSoles = n => {
@@ -14292,6 +14382,18 @@ function viewReporte(){
   if (!f.hayFact) avisos.push("Falta la facturación del periodo, que es el objetivo de mayor peso. El reporte se genera igual, con ese KPI marcado como pendiente.");
   if (!hitos.length) avisos.push("No hay hitos cargados: la lámina del relato saldrá vacía.");
 
+  /* El deck de directorio va a un comité con la marca, y su relato sale de los
+     mismos textos editables que el reporte largo. Un hito que mencione la
+     herramienta de gestión pasa de un documento interno a la sala del comité
+     sin que nadie lo note: acá no se bloquea —quien escribe manda— pero se
+     avisa antes, que es cuando todavía se puede corregir. */
+  const relatoEntero = JSON.stringify([REPORTE.hitos, REPORTE.relato, REPORTE.lecturas,
+                                       REPORTE.notas, REPORTE.acuerdos]);
+  if (/\bCRM\b/i.test(relatoEntero))
+    avisos.push("Algún texto del relato menciona el CRM. El deck de directorio va a un comité con la marca y no debería nombrar la herramienta con la que gestionamos: revísalo en «Editar el relato» antes de generarlo.");
+  if (/incentiv|\bbono\b|comisi[oó]n/i.test(relatoEntero))
+    avisos.push("Algún texto del relato menciona el plan de incentivos. Eso es interno y no va en material de comité.");
+
   const paso = (e, i) => {
     const ancho = f.portafolio ? Math.max(0.6, e.n / f.portafolio * 100) : 0;
     return `<div class="rep-paso">
@@ -14324,7 +14426,8 @@ function viewReporte(){
         · quedan ${f.restante} días</div>
     </div>
     <div class="rep-acc">
-      <button class="btn" id="repPptx">Descargar PowerPoint</button>
+      <button class="btn" id="repPptx">Reporte de avance</button>
+      <button class="btn" id="repDir">Deck de directorio</button>
       <button class="btn ghost sm" id="repAjustes">Editar el relato</button>
     </div>
   </div>
@@ -14453,7 +14556,11 @@ async function bajarFondo(ruta){
   } catch (e){ return null; }
 }
 
-async function generarPPTX(btn){
+/* Un solo camino para los dos documentos: se bajan la librería y los tres
+   fondos una vez y se le pasa el armador que corresponda. Duplicar esta
+   función para el deck de directorio habría duplicado también el manejo de
+   errores, que es la parte que nadie mira hasta que falla. */
+async function generarPPTX(btn, armador){
   const antes = btn ? btn.textContent : "";
   if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
   try {
@@ -14463,13 +14570,292 @@ async function generarPPTX(btn){
       bajarFondo(REP_FONDOS.contenido),
       bajarFondo(REP_FONDOS.cierre)
     ]);
-    armarPPTX(new Pptx(), { caratula, contenido, cierre });
+    (armador || armarPPTX)(new Pptx(), { caratula, contenido, cierre });
     toast("PowerPoint generado");
   } catch (e){
     toast("No se pudo generar: " + (e.message || e));
   } finally {
     if (btn){ btn.disabled = false; btn.textContent = antes; }
   }
+}
+
+function armarDirectorio(pptx, fondos){
+  const f = fotoReporte();
+  const D = repDatos(f);
+  const P = repProyecto();
+  const PR = repProyeccion(f);
+  const CU = repCurva(f);
+  const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
+  const H = repHex;
+
+  pptx.defineLayout({ name:"S16", width:13.333, height:7.5 });
+  pptx.layout = "S16";
+  pptx.author = "Stratis LATAM";
+  pptx.title  = P.cliente + " — comité de dirección";
+
+  const lamina = fondo => {
+    const s = pptx.addSlide();
+    s.background = fondo ? { data:fondo } : { color:"FFFFFF" };
+    return s;
+  };
+  const T = (s, t, o) => s.addText(repTexto(t, D), Object.assign(
+    { fontFace:FUENTE, color:H("gris"), fontSize:11, margin:0, valign:"middle" }, o));
+  const caja = (s, x, y, w, h, fill, linea) => s.addShape(pptx.ShapeType.rect, {
+    x, y, w, h, fill:{ color:fill }, line: linea ? { color:linea, width:0.75 } : { type:"none" } });
+  const titulo = (s, t, sub) => {
+    T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+    T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
+  };
+
+  /* ---- D1 · Carátula --------------------------------------------------- */
+  const c = lamina(fondos.caratula);
+  T(c, P.cliente, { x:0.82, y:5.02, w:8.6, h:0.52, fontSize:21, bold:true, fontFace:NEG, color:"FFFFFF" });
+  T(c, "Comité de dirección · desarrollo del proyecto",
+    { x:0.82, y:5.84, w:8.6, h:0.38, fontSize:14, color:"FFFFFF" });
+  T(c, "Corte al " + repFechaLarga(f.hoy),
+    { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
+
+  /* ---- D2 · Dónde está el proyecto -------------------------------------
+     Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
+     ocho segundos y salir sabiendo si el proyecto va bien. */
+  const a = lamina(fondos.contenido);
+  titulo(a, "Dónde está el proyecto",
+    `Día ${f.corrido} de ${f.total} · quedan ${f.restante} días hasta el ${repFechaLarga(f.fin)}`);
+
+  const CIF = [
+    { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
+      pie: `${f.restante} días por delante`, color:"gris" },
+    { n: String(f.contacto), et:"comercios contactados",
+      pie: `${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`, color:"azul" },
+    { n: String(f.objetivo), et:"con el objetivo cumplido",
+      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja" },
+    { n: String(f.ventasNuevas), et:"afiliaciones nuevas",
+      pie: f.metaV ? `meta al cierre: ${f.metaV}` : "", color:"verde" }
+  ];
+  const WC2 = 2.95, GC2 = 0.19;
+  CIF.forEach((x, i) => {
+    const px = 0.57 + i * (WC2 + GC2);
+    caja(a, px, 1.90, WC2, 2.10, "FFFFFF", REP_LINEA);
+    a.addShape(pptx.ShapeType.rect, { x:px, y:1.90, w:WC2, h:0.09,
+      fill:{ color:H(x.color) }, line:{ type:"none" } });
+    T(a, x.n,   { x:px + 0.22, y:2.16, w:WC2 - 0.44, h:0.80, fontSize:40, bold:true,
+      fontFace:NEG, color:H("navy") });
+    T(a, x.et,  { x:px + 0.22, y:3.00, w:WC2 - 0.44, h:0.34, fontSize:11.5, color:H("gris") });
+    T(a, x.pie, { x:px + 0.22, y:3.38, w:WC2 - 0.44, h:0.42, fontSize:10, color:H("gris2") });
+  });
+
+  /* La barra del calendario. Es lo que impide leer las cifras de arriba como
+     un logro o como un atraso sin saber contra cuánto tiempo. */
+  T(a, "Avance del calendario", { x:0.57, y:4.34, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.66, w:12.38, h:0.20, fill:{ color:"D3DBEB" }, line:{ type:"none" } });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.66, w:12.38 * f.corrido / f.total, h:0.20,
+    fill:{ color:H("navy") }, line:{ type:"none" } });
+  T(a, `${repFecha(f.ini)}`, { x:0.57, y:4.94, w:4.0, h:0.24, fontSize:10, color:H("gris2") });
+  T(a, `${repFecha(f.fin)}`, { x:8.95, y:4.94, w:4.0, h:0.24, fontSize:10, color:H("gris2"), align:"right" });
+
+  caja(a, 0.57, 5.52, 12.38, 1.34, REP_BANDA);
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.52, w:0.10, h:1.34,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(a, "La lectura", { x:0.86, y:5.64, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
+  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, el portafolio va ${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} contactado. `
+     + (PR.contacto.llega
+        ? `Sosteniendo el ritmo actual queda cubierto antes del cierre.`
+        : `Sosteniendo el ritmo actual se llega a ${PR.contacto.proyectado} de ${f.portafolio}: faltarían ${PR.contacto.brecha} comercios.`)
+     + ` El tramo que define el resultado no es el contacto sino lo que sigue: de los contactados, ${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} llegó a visita.`,
+    { x:0.86, y:5.94, w:11.8, h:0.80, fontSize:12, color:H("gris") });
+
+  /* ---- D3 · Cómo se construyó ------------------------------------------ */
+  const h = lamina(fondos.contenido);
+  titulo(h, "Cómo se ha construido el proyecto",
+    `Del arranque el ${repFechaLarga(f.ini)} al cierre el ${repFechaLarga(f.fin)}`);
+  const HI = REPORTE.hitos || [];
+  const YL = 3.60;
+  h.addShape(pptx.ShapeType.rect, { x:1.20, y:YL - 0.018, w:11.20, h:0.036,
+    fill:{ color:"C6D0E6" }, line:{ type:"none" } });
+  if (HI.length > 1){
+    const X0 = 1.90, X1 = 11.55, pasoX = (X1 - X0) / (HI.length - 1), W = 3.30;
+    HI.forEach((x, i) => {
+      const cx = X0 + i * pasoX, col = H(x.color), arriba = (i % 2 === 0);
+      h.addShape(pptx.ShapeType.ellipse, { x:cx - 0.105, y:YL - 0.105, w:0.21, h:0.21,
+        fill:{ color:col }, line:{ color:"FFFFFF", width:2 } });
+      h.addShape(pptx.ShapeType.rect, { x:cx - 0.012, y: arriba ? YL - 0.34 : YL + 0.08,
+        w:0.024, h:0.26, fill:{ color:col }, line:{ type:"none" } });
+      const yt = arriba ? 2.06 : 3.94;
+      T(h, x.fecha,   { x:cx - W/2, y:yt,        w:W, h:0.22, fontSize:10.5, bold:true, color:col, align:"center" });
+      T(h, x.titulo,  { x:cx - W/2, y:yt + 0.28, w:W, h:0.46, fontSize:11.5, bold:true, color:H("navy"), align:"center" });
+      T(h, x.detalle, { x:cx - W/2, y:yt + 0.80, w:W, h:0.42, fontSize:9.5,  color:H("gris"), align:"center" });
+    });
+  }
+  const relatoD = (REPORTE.relato || {}).hitos || "";
+  if (relatoD){
+    caja(h, 0.57, 5.62, 12.38, 1.16, REP_BANDA);
+    T(h, relatoD, { x:0.80, y:5.74, w:11.92, h:0.94, fontSize:11, color:H("gris") });
+  }
+
+  /* ---- D4 · El embudo --------------------------------------------------- */
+  const e = lamina(fondos.contenido);
+  titulo(e, "Del portafolio asignado al objetivo cumplido",
+    `${f.portafolio} comercios de la base congelada · ${repFecha(f.hoy)}`);
+  const maxE = Math.max(1, ...f.embudo.map(p => p.n));
+  f.embudo.forEach((p, i) => {
+    const py = 1.92 + i * 0.86;
+    T(e, p.label, { x:0.57, y:py, w:2.30, h:0.40, fontSize:12.5, bold:true, color:H("navy"), align:"right" });
+    const bw = Math.max(0.05, 7.10 * p.n / maxE);
+    e.addShape(pptx.ShapeType.rect, { x:3.05, y:py, w:bw, h:0.40,
+      fill:{ color:H(p.color) }, line:{ type:"none" } });
+    T(e, String(p.n), { x:3.05 + bw + 0.16, y:py, w:1.10, h:0.40, fontSize:16, bold:true,
+      fontFace:NEG, color:H(p.color) });
+    T(e, repPct(p.pct), { x:3.05 + bw + 1.30, y:py, w:1.00, h:0.40, fontSize:10.5, color:H("gris2") });
+    if (p.texto) T(e, repPct(p.conv) + " " + p.texto,
+      { x:11.10, y:py, w:1.85, h:0.40, fontSize:10.5, color:H("gris"), align:"right" });
+  });
+  caja(e, 0.57, 6.18, 12.38, 0.94, REP_BANDA);
+  e.addShape(pptx.ShapeType.rect, { x:0.57, y:6.18, w:0.10, h:0.94,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(e, "Dónde se define el resultado", { x:0.86, y:6.28, w:4.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
+  T(e, `El portafolio se contacta a buen ritmo. El escalón que decide el resultado del proyecto es el de la visita: de cada cien comercios gestionados, ${repNum(f.gestion ? f.visita / f.gestion * 100 : 0, 0)} recibe una visita, y de cada cien visitados ${repNum(f.visita ? f.objetivo / f.visita * 100 : 0, 0)} cumple el objetivo. Ensanchar ese tramo es lo que mueve el número de diciembre.`,
+    { x:0.86, y:6.56, w:11.8, h:0.48, fontSize:11, color:H("gris") });
+
+  /* ---- D5 · El desarrollo, semana a semana ------------------------------
+     Una sola serie acumulada. Un comité no necesita ver cuánto se hizo cada
+     semana; necesita ver la pendiente y hacia dónde apunta. */
+  const g = lamina(fondos.contenido);
+  titulo(g, "El desarrollo, semana a semana",
+    `Comercios del portafolio contactados, acumulado desde el arranque`);
+
+  const XG = 0.90, YG = 1.94, WG = 11.6, HG = 3.66;
+  /* El eje horizontal cubre el proyecto ENTERO, no solo lo transcurrido. Una
+     curva dibujada solo sobre las semanas corridas siempre llena la lámina y
+     siempre parece que va bien; extendida hasta diciembre, la distancia que
+     falta se ve sola y no hay que explicarla. */
+  const semTot = Math.max(2, Math.ceil(f.total / 7));
+  const techo  = Math.max(f.portafolio || 1, CU.total);
+  const px = i => XG + WG * Math.min(i, semTot - 1) / (semTot - 1);
+  const py = v => YG + HG * (1 - v / techo);
+
+  g.addShape(pptx.ShapeType.rect, { x:XG, y:YG + HG, w:WG, h:0.02,
+    fill:{ color:"C6D0E6" }, line:{ type:"none" } });
+  /* La línea del portafolio completo: sin ella la curva sube y parece que
+     todo va bien, cuando lo que importa es cuánto le falta para el techo. */
+  g.addShape(pptx.ShapeType.rect, { x:XG, y:py(f.portafolio || 0), w:WG, h:0.02,
+    fill:{ color:H("gris2") }, line:{ type:"none" } });
+  T(g, `${f.portafolio} · portafolio completo`,
+    { x:XG, y:py(f.portafolio || 0) - 0.28, w:4.0, h:0.24, fontSize:9.5, color:H("gris2") });
+
+  /* Un tramo de recta entre dos puntos. pptxgenjs no dibuja líneas sueltas:
+     se hace con un rectángulo fino rotado, que para esto alcanza. */
+  const tramo = (x1, y1, x2, y2, color, grosor) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    const largo = Math.sqrt(dx*dx + dy*dy);
+    if (largo < 0.001) return;
+    g.addShape(pptx.ShapeType.rect, { x:x1, y:y1 - grosor/2, w:largo, h:grosor,
+      fill:{ color:H(color) }, line:{ type:"none" },
+      rotate: Math.atan2(dy, dx) * 180 / Math.PI });
+  };
+
+  if (CU.puntos.length){
+    CU.puntos.forEach((pt, k2) => {
+      if (k2 > 0){
+        const ant = CU.puntos[k2 - 1];
+        tramo(px(k2 - 1), py(ant.acum), px(k2), py(pt.acum), "azul", 0.05);
+      }
+      g.addShape(pptx.ShapeType.ellipse, { x:px(k2) - 0.06, y:py(pt.acum) - 0.06, w:0.12, h:0.12,
+        fill:{ color:H("azul") }, line:{ color:"FFFFFF", width:1.2 } });
+    });
+    const ult = CU.puntos[CU.puntos.length - 1], iUlt = CU.puntos.length - 1;
+    T(g, `${ult.acum} hoy`, { x:px(iUlt) - 1.10, y:py(ult.acum) - 0.36, w:1.00, h:0.26,
+      fontSize:11, bold:true, color:H("azul"), align:"right" });
+
+    /* La proyección: la misma pendiente, hasta el cierre. Va en naranja y
+       punteada de hecho —una sucesión de tramos cortos— para que nadie la
+       confunda con lo que ya pasó. */
+    const proy = Math.min(techo, PR.contacto.proyectado);
+    const pasos = 22;
+    for (let t = 0; t < pasos; t += 2){
+      const a1 = t / pasos, a2 = Math.min(1, (t + 1) / pasos);
+      const x1 = px(iUlt) + (px(semTot - 1) - px(iUlt)) * a1;
+      const x2 = px(iUlt) + (px(semTot - 1) - px(iUlt)) * a2;
+      const y1 = py(ult.acum + (proy - ult.acum) * a1);
+      const y2 = py(ult.acum + (proy - ult.acum) * a2);
+      tramo(x1, y1, x2, y2, "naranja", 0.045);
+    }
+    g.addShape(pptx.ShapeType.ellipse, { x:px(semTot - 1) - 0.075, y:py(proy) - 0.075, w:0.15, h:0.15,
+      fill:{ color:H("naranja") }, line:{ color:"FFFFFF", width:1.5 } });
+    T(g, `${proy} proyectado`, { x:px(semTot - 1) - 2.30, y:py(proy) - 0.36, w:2.20, h:0.26,
+      fontSize:11, bold:true, color:H("naranja"), align:"right" });
+  }
+  T(g, repFecha(f.ini), { x:XG - 0.40, y:YG + HG + 0.12, w:1.60, h:0.22,
+    fontSize:9.5, color:H("gris2"), align:"center" });
+  T(g, repFecha(f.fin), { x:XG + WG - 1.20, y:YG + HG + 0.12, w:1.60, h:0.22,
+    fontSize:9.5, color:H("gris2"), align:"center" });
+  T(g, "Azul, lo contactado semana a semana · naranja, la proyección al ritmo actual",
+    { x:XG, y:YG + HG + 0.40, w:11.6, h:0.22, fontSize:9.5, color:H("gris2") });
+
+  caja(g, 0.57, 6.24, 12.38, 0.90, REP_BANDA);
+  g.addShape(pptx.ShapeType.rect, { x:0.57, y:6.24, w:0.10, h:0.90,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(g, `Ritmo actual: ${repNum(PR.contacto.ritmo, 1)} comercios por semana`,
+    { x:0.86, y:6.34, w:5.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
+  T(g, PR.contacto.llega
+      ? `A este ritmo el portafolio queda contactado antes del cierre.`
+      : `A este ritmo el proyecto cierra con ${PR.contacto.proyectado} de ${f.portafolio} comercios contactados. Para cubrirlo completo harían falta ${repNum(PR.contacto.pedido, 1)} por semana, ${PR.contacto.factor ? repNum(PR.contacto.factor, 1) + " veces el ritmo de hoy" : "un ritmo que hoy no existe"}.`,
+    { x:0.86, y:6.62, w:11.8, h:0.44, fontSize:11, color:H("gris") });
+
+  /* ---- D6 · Dónde termina el proyecto ----------------------------------- */
+  const k = lamina(fondos.contenido);
+  titulo(k, "Dónde termina el proyecto si el ritmo se sostiene",
+    `Proyección al ${repFechaLarga(f.fin)} sobre el ritmo de las últimas ${repNum(PR.semCampo, 0)} semanas de campo`);
+
+  const LIN = [PR.contacto, PR.objetivo, PR.venta];
+  const WK = 3.95, GK = 0.28;
+  LIN.forEach((x, i) => {
+    const px = 0.57 + i * (WK + GK);
+    caja(k, px, 1.86, WK, 3.55, "FFFFFF", REP_LINEA);
+    k.addShape(pptx.ShapeType.rect, { x:px, y:1.86, w:WK, h:0.09,
+      fill:{ color:H(x.llega ? "verde" : "naranja") }, line:{ type:"none" } });
+    T(k, x.nombre, { x:px + 0.22, y:2.08, w:WK - 0.44, h:0.32, fontSize:13, bold:true,
+      fontFace:NEG, color:H("navy") });
+    T(k, x.llega ? "Llega a la meta" : "No llega al ritmo actual",
+      { x:px + 0.22, y:2.42, w:WK - 0.44, h:0.24, fontSize:10, bold:true,
+        color:H(x.llega ? "verde" : "naranja") });
+
+    const filas = [
+      ["Hoy", String(x.hecho)],
+      ["Ritmo por semana", repNum(x.ritmo, 1)],
+      ["Proyectado al cierre", String(x.proyectado)],
+      ["Meta", String(x.meta)]
+    ];
+    filas.forEach(([et, val], j) => {
+      const yy = 2.80 + j * 0.42;
+      T(k, et,  { x:px + 0.24, y:yy, w:WK - 1.30, h:0.34, fontSize:11, color:H("gris") });
+      T(k, val, { x:px + WK - 1.10, y:yy, w:0.90, h:0.34, fontSize:12, bold:true,
+        color: j === 2 ? H(x.llega ? "verde" : "naranja") : H("navy"), align:"right" });
+    });
+    caja(k, px + 0.16, 4.62, WK - 0.32, 0.66, REP_BANDA);
+    T(k, x.llega
+        ? "Sin acción adicional"
+        : `Faltan ${x.brecha} ${x.unidad}. Harían falta ${repNum(x.pedido, 1)} por semana` + (x.factor ? `, ${repNum(x.factor, 1)}× el ritmo de hoy.` : "."),
+      { x:px + 0.28, y:4.70, w:WK - 0.56, h:0.52, fontSize:10, bold:true,
+        color:H(x.llega ? "verde" : "navy") });
+  });
+
+  caja(k, 0.57, 5.62, 12.38, 1.24, REP_BANDA);
+  k.addShape(pptx.ShapeType.rect, { x:0.57, y:5.62, w:0.10, h:1.24,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(k, "Lo que hay que decidir", { x:0.86, y:5.74, w:4.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
+  const noLlegan = LIN.filter(x => !x.llega);
+  T(k, noLlegan.length === 0
+      ? "Los tres objetivos llegan al ritmo actual. La decisión es sostenerlo."
+      : `${noLlegan.length === 1 ? "Un objetivo no llega" : noLlegan.length + " objetivos no llegan"} al ritmo actual: ${noLlegan.map(x => x.nombre.toLowerCase())
+            .reduce((t, x, i, arr) => t + (i === 0 ? "" : i === arr.length - 1 ? " y " : ", ") + x, "")}. `
+        + `Hay tres caminos y son excluyentes: subir el ritmo —lo que significa más gente en calle o más días—, correr la meta con el banco, o aceptar el resultado proyectado. `
+        + `La facturación, que pesa la mitad del plan, todavía no se puede medir: el banco entrega el dato un mes después del cierre de cada periodo.`,
+    { x:0.86, y:6.02, w:11.8, h:0.76, fontSize:11.5, color:H("gris") });
+
+  /* ---- D7 · Cierre ------------------------------------------------------ */
+  lamina(fondos.cierre);
+
+  pptx.writeFile({ fileName: `Directorio_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
 }
 
 function armarPPTX(pptx, fondos){
@@ -15031,6 +15417,7 @@ function cardReporte(){
 
 function bindReporte(){
   if ($("#repPptx"))    $("#repPptx").onclick = e => generarPPTX(e.currentTarget);
+  if ($("#repDir"))     $("#repDir").onclick  = e => generarPPTX(e.currentTarget, armarDirectorio);
   if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
   document.querySelectorAll("[data-repedit]").forEach(b =>
     b.onclick = () => modalReporte(b.dataset.repedit));
