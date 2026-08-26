@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 17:17", huella:"83479f" };
+const BUILD = { sello:"26/08/2026 18:48", huella:"31b02e" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1580,6 +1580,26 @@ const CONTACTO_BBVA = [
   { id:"CHAT",     label:"Chat BBVA",           desc:"Se coordinó por el chat interno del banco" }
 ];
 const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* ---- De dónde salió un lead de venta nueva ------------------------------
+   El reporte separa los leads de venta en dos vistas —los que salieron de un
+   comercio de la base congelada y los que son de afuera— y hasta el 26/08 no
+   había forma de saberlo: las fichas de cartera no traen RUC, así que no hay
+   nada contra qué cruzar el RUC del lead. Lo marca quien lo trabajó.
+
+   Sin marcar NO es lo mismo que «de afuera». Una ficha sin marcar se cuenta
+   aparte, como pendiente; meterla en una de las dos vistas por descarte sería
+   inventar el dato que este campo existe para no inventar. */
+const ORIGEN_LEAD = [
+  { id:"DENTRO", label:"De un comercio de la base",
+    desc:"El lead salió de un comercio que ya estaba en la cartera asignada por BBVA" },
+  { id:"FUERA",  label:"De afuera de la base",
+    desc:"Es un comercio que no forma parte de la cartera asignada" }
+];
+const nomOrigenLead = id => (ORIGEN_LEAD.find(x => x.id === id) || {}).label || "";
+const leadDentroDeBase = c => !!c && esClienteNuevo(c) && c.origen_lead === "DENTRO";
+const leadFueraDeBase  = c => !!c && esClienteNuevo(c) && c.origen_lead === "FUERA";
+const leadSinMarcar    = c => !!c && esClienteNuevo(c) && !c.origen_lead;
 
 /* ---- La coordinación con el ejecutivo de BBVA, ahora como interacción ----
    Hasta acá el banco vivía en un sello: un campo con un valor, puesto al crear
@@ -3061,6 +3081,27 @@ const REPORTE_DEF = {
   },
   hitos: [],
   relato: { hitos:"" },
+  /* Los acuerdos vigentes, en una sola lámina. Viven acá y no en el código
+     porque son texto que cambia cada vez que hay una reunión, y porque quien
+     los acordó tiene que poder corregirlos sin pedirle a nadie que toque un
+     archivo. Una columna sin puntos se muestra igual, con su pendiente
+     escrito: un acuerdo que falta traer es información, no un hueco. */
+  acuerdos: [
+    { titulo:"Con Ana María", color:"azul2", puntos:[],
+      pendiente:"Faltan traer los acuerdos de esa reunión a este marco" },
+    { titulo:"Con Gerald", color:"azul", puntos:[
+      "Tres vistas separadas: retención, leads dentro de cartera y leads fuera",
+      "El funnel de cada vista, con los cuatro ejecutivos",
+      "Las visitas con visibilidad propia",
+      "Foco principal en retención"], pendiente:"" },
+    { titulo:"Definido hoy", color:"naranja", puntos:[
+      "Hay gestión cuando ya hubo un intento de contacto con el cliente",
+      "Solo se contabilizan las respaldadas por correo al cliente, con nosotros en copia",
+      "Llamada, WhatsApp y reuniones se pueden usar; el correo es el respaldo formal",
+      "Un resumen de dónde se concentran gestiones y visitas",
+      "Una sola presentación para gestión interna, BBVA y Mastercard"], pendiente:"" }
+  ],
+  cierre_acuerdos:"El acuerdo que ordena a los otros: esta misma presentación se usa para la gestión interna y para los reportes a BBVA y Mastercard. No se mantienen formatos paralelos.",
   lecturas: { embudo:[] },
   notas: { hitos:"", embudo:"", kpis:"" },
   objetivos: [
@@ -4690,7 +4731,12 @@ function viewFicha(c){
       ${esClienteNuevo(c) ? `
         <div class="kv"><dt>RUC</dt><dd class="mono">${esc(c.ruc)}</dd></div>
         <div class="kv"><dt>Razón social</dt><dd>${esc(c.razon_social) || "—"}</dd></div>
-        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>`
+        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
+        <div class="kv"><dt>Origen del lead</dt><dd>${c.origen_lead
+          ? esc(nomOrigenLead(c.origen_lead))
+          : `<span class="chip warn">Sin marcar</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">El reporte lo cuenta aparte hasta que alguien indique si salió de la base</div>`
+        }</dd></div>`
       : `
         <div class="kv"><dt>Customer ID</dt><dd class="mono">${esc(c.customer_id)}</dd></div>
         <div class="kv"><dt>Nombre</dt><dd>${esc(titulo(c.nombre_comercio)) || '<span style="color:var(--muted)">—</span>'}</dd></div>
@@ -5317,7 +5363,7 @@ function nuevoFormCliente(){
     nombre_comercio:"", rubro:"", rubro_otro:"",
     distrito:"", direccion:"", estado:"ACTIVO",
     resultado_gestion:"PENDIENTE", motivo_no_retencion:"", observacion:"",
-    contacto_bbva:""
+    contacto_bbva:"", origen_lead:""
   };
 }
 
@@ -5333,7 +5379,8 @@ function formDeCliente(c){
     resultado_gestion: c.resultado_gestion || "PENDIENTE",
     motivo_no_retencion: c.motivo_no_retencion || "",
     observacion: c.observacion || "",
-    contacto_bbva: c.contacto_bbva || ""
+    contacto_bbva: c.contacto_bbva || "",
+    origen_lead: c.origen_lead || ""
   };
 }
 
@@ -5419,6 +5466,24 @@ function renderFormCliente(){
     </div>
   </div>
 
+  <div class="card" id="cardOrigenLead">
+    <h3>¿De dónde salió este lead?</h3>
+    <div class="note" style="margin-bottom:11px">
+      El reporte separa los leads de venta en dos: los que nacieron de un comercio que
+      ya estaba en la cartera que asignó BBVA, y los que son de afuera. El CRM no puede
+      deducirlo —los comercios de cartera no tienen RUC cargado, así que no hay contra
+      qué cruzarlo—, y quien lo sabe eres tú, que lo trabajaste.
+      <b>Si no estás seguro, déjalo sin marcar</b>: el reporte lo cuenta aparte como
+      pendiente, y eso es más útil que una marca inventada.
+    </div>
+    <div class="opts">
+      ${ORIGEN_LEAD.map(x => `
+        <div class="opt ${f.origen_lead===x.id?"on":""}" data-origlead="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
   <div class="card" id="cardUbicacion">
     <h3>Ubicación del comercio</h3>
     <div class="field">
@@ -5472,6 +5537,15 @@ function renderFormCliente(){
     f.contacto_bbva = el.dataset.cbbva;
     $("#view").querySelectorAll("[data-cbbva]").forEach(x =>
       x.classList.toggle("on", x.dataset.cbbva === f.contacto_bbva));
+  });
+  /* Se puede desmarcar: si alguien eligió por apurarse, volver a tocar la
+     misma opción la apaga y la ficha queda otra vez en «sin marcar», que es
+     un estado honesto. Sin esto la única salida sería dejar puesta la marca
+     equivocada. */
+  $("#view").querySelectorAll("[data-origlead]").forEach(el => el.onclick = () => {
+    f.origen_lead = (f.origen_lead === el.dataset.origlead) ? "" : el.dataset.origlead;
+    $("#view").querySelectorAll("[data-origlead]").forEach(x =>
+      x.classList.toggle("on", x.dataset.origlead === f.origen_lead));
   });
   $("#view").querySelectorAll("[data-backcli]").forEach(b => b.onclick = () => {
     const volver = S.editCli;
@@ -5653,7 +5727,12 @@ function camposSegunOrigen(){
      Lo que un RUC no tiene todavía —nombre comercial, estado, ubicación— lo
      pone BBVA al afiliarlo o se captura en la primera visita. */
   [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
-   ["#cardContactoBBVA", false], ["#cardCierre", true], ["#cardGestion", !S.editCli]]
+   ["#cardContactoBBVA", false], ["#cardCierre", true], ["#cardGestion", !S.editCli],
+   /* El origen del lead solo tiene sentido en una venta nueva: una ficha de
+      cartera ES la base, preguntarle si viene de la base no significa nada.
+      La restricción de la tabla lo impide igual, pero un campo que no se
+      puede llenar mal es mejor que uno que se rechaza al guardar. */
+   ["#cardOrigenLead", !nuevo]]
     .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
 
   if (nuevo){
@@ -5796,6 +5875,10 @@ async function guardarCliente(){
     /* El medio con el que se coordinó con BBVA se guarda igual que en cartera:
        es el mismo paso del mismo flujo, y al editar tiene que poder corregirse. */
     fila.contacto_bbva   = f.contacto_bbva || null;
+    /* Vacío se guarda como null y no como cadena vacía: la restricción de la
+       tabla solo admite null, DENTRO o FUERA, y «sin marcar» tiene que poder
+       distinguirse de «marcado». */
+    fila.origen_lead     = f.origen_lead || null;
     /* La llave sigue siendo el RUC; el customer_id es su forma dentro de la
        tabla, para que las gestiones cuelguen del mismo sitio que en cartera.
        Es la misma convención que ya usaba «crear_venta_nueva». */
@@ -5807,6 +5890,11 @@ async function guardarCliente(){
     fila.estado          = f.estado;
     fila.observacion     = String(f.observacion).trim() || null;
     fila.contacto_bbva   = f.contacto_bbva || null;
+    /* Una ficha de cartera nunca lleva origen del lead. Se manda null en vez
+       de omitirlo: si una ficha cambiara de venta nueva a cartera, omitirlo
+       dejaría la marca vieja pegada y la restricción rechazaría el guardado
+       con un mensaje que no le dice nada a nadie. */
+    fila.origen_lead     = null;
     if (!editando) fila.customer_id = cid;
   }
 
@@ -5828,9 +5916,13 @@ async function guardarCliente(){
       });
       if (error) throw error;
       /* El medio con el que se coordinó con BBVA, igual que en la cartera. */
-      if (f.contacto_bbva){
-        await sb.from("clientes").update({ contacto_bbva: f.contacto_bbva })
-                .eq("customer_id", "NUEVO-" + ruc);
+      /* `crear_prospecto` no recibe estos dos, así que se ponen enseguida.
+         Van juntos en un solo update para no pegarle dos veces a la fila. */
+      const extra = {};
+      if (f.contacto_bbva) extra.contacto_bbva = f.contacto_bbva;
+      if (f.origen_lead)   extra.origen_lead   = f.origen_lead;
+      if (Object.keys(extra).length){
+        await sb.from("clientes").update(extra).eq("customer_id", "NUEVO-" + ruc);
       }
     } else {
       fila.asignado = S.user.nombre;
@@ -9793,7 +9885,8 @@ const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_c
   rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
   estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
   observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
-  customer_id:"Customer ID", fecha_contacto:"Fecha de la gestión" };
+  customer_id:"Customer ID", fecha_contacto:"Fecha de la gestión",
+  origen_lead:"Origen del lead" };
 const nomCampo = k => CAMPO_ES[k] || k;
 const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
 
@@ -13678,10 +13771,17 @@ function bindBono(){
        metas viven en reporte_config y se editan en Ajustes.
 
    Y una restricción que es del negocio y no de la pantalla: nada de lo que
-   sale de acá menciona el CRM ni abre por ejecutivo. El CRM es la herramienta
-   de gestión de Stratis, y en una lámina para quien financia el proyecto se
-   lee como una etapa del proceso comercial que no es. El detalle por persona
-   es interno: en el reporte se ve el proyecto, no el equipo.
+   sale de acá menciona el CRM. El CRM es la herramienta de gestión de Stratis,
+   y en una lámina para quien financia el proyecto se lee como una etapa del
+   proceso comercial que no es.
+
+   LO QUE CAMBIÓ EL 26/08. Hasta esa fecha acá decía, además, que el reporte
+   nunca abre por ejecutivo. Ya no: se acordó una sola presentación para la
+   gestión interna, para BBVA y para Mastercard, en vez de tres formatos
+   paralelos que nadie mantiene sincronizados. El archivo trae los dos bloques,
+   separados por una lámina divisoria: adelante el proyecto, que es lo que ve
+   Mastercard, y atrás el detalle por ejecutivo. Se presenta entero o se corta
+   en la divisoria; lo que no pasa es que existan dos verdades.
    ========================================================================= */
 
 const REP_COLOR = {
@@ -13847,7 +13947,7 @@ function fotoReporte(){
       avance: metaV ? ventasNuevas / metaV * 100 : null }
   ];
 
-  return { hoy, ini, fin, total, corrido, restante, semanas,
+  const base = { hoy, ini, fin, total, corrido, restante, semanas,
     ritmoR: ritmo(metaR, objetivo), ritmoV: ritmo(metaV, ventasNuevas),
     metaR, metaV, metaPct,
     portafolio, asignadaMetas, registrados:cart.length,
@@ -13856,6 +13956,216 @@ function fotoReporte(){
     diasDeCampo, porDia, faltanContactar, fechaCobertura,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
+
+  /* Las vistas y el evolutivo cuelgan de la misma foto, y se calculan después
+     porque necesitan `portafolio` y `objetivo` ya resueltos. Van acá y no en
+     una segunda función pública para que siga habiendo un solo lugar donde
+     este reporte saca sus números. */
+  base.tres = repVistas(base);
+  base.evo  = repEvolutivo(base);
+  return base;
+}
+
+/* =========================================================================
+   LAS TRES VISTAS Y EL EVOLUTIVO SEMANAL
+
+   Lo de arriba mira el proyecto como un todo. Esto lo parte en las tres vistas
+   que se acordaron el 26/08 —base de retención, leads dentro de la cartera y
+   leads fuera— y agrega el corte semanal contra el periodo anterior.
+
+   DOS NÚMEROS DE GESTIÓN, A PROPÓSITO. El acuerdo dice contar solo gestiones
+   respaldadas por un correo al cliente. Hoy hay 931 gestiones al cliente y 390
+   por correo: aplicar la regla a secas borraría de un plumazo más de la mitad
+   del trabajo registrado, y esconder la brecha sería peor. Cada vista muestra
+   las dos cifras, y la distancia entre ellas ES el indicador: mide cuánto del
+   trabajo hecho todavía no tiene con qué sustentarse frente al banco.
+
+   Y «sin marcar» no se reparte por descarte. Una ficha de venta cuyo origen
+   nadie indicó no es una venta de afuera: es una ficha sin marcar, y se cuenta
+   en su propia columna. Repartirla al montón más grande daría un reporte más
+   prolijo y menos cierto.
+   ========================================================================= */
+
+/* Los dos periodos que se comparan. El del bono corre del 19 al 18; el primero
+   arrancó el 20/07 porque ese fue el día uno del proyecto, no el 19. */
+const REP_PERIODOS = [
+  { k:"p1", nombre:"Primer periodo", desde:"2026-07-20", hasta:"2026-08-18" },
+  { k:"p2", nombre:"Periodo en curso", desde:"2026-08-19", hasta:"2026-09-18" }
+];
+
+const repDia = iso => String(iso || "").slice(0, 10);
+
+/* Qué hace que una gestión cuente como respaldada. Es correo al cliente; la
+   copia a BBVA lo refuerza y se cuenta aparte, porque es la única marca de
+   copia que el CRM sabe registrar hoy. El acuerdo pide «con nosotros en
+   copia», que todavía no tiene campo: mientras no lo tenga, se declara lo que
+   sí se puede probar y no se hace pasar una cosa por la otra. */
+const repRespaldada = r => r.Tipo_Contacto === "correo";
+
+function repFunnelDe(fichas, ges, ejecutivos){
+  const ids = new Set(fichas.map(c => String(c.customer_id)));
+  const mias = ges.filter(g => ids.has(String(g.Customer_id)));
+
+  const fila = (nombre, cartera, gs) => {
+    const tocados  = new Set(gs.map(g => String(g.Customer_id)));
+    const respald  = gs.filter(repRespaldada);
+    const visitas  = gs.filter(g => g.Cumple_Visita === "SI");
+    return {
+      nombre,
+      cartera,
+      gestiones:   gs.length,
+      respaldadas: respald.length,
+      conCopia:    gs.filter(g => g.Copia_BBVA).length,
+      comercios:   tocados.size,
+      conRespaldo: new Set(respald.map(g => String(g.Customer_id))).size,
+      visitas:     visitas.length,
+      conVisita:   new Set(visitas.map(g => String(g.Customer_id))).size,
+      /* La cobertura de una vista es cuántos de sus comercios recibieron al
+         menos una gestión, no cuántas gestiones se hicieron. Un comercio
+         tocado ocho veces sigue siendo un comercio. */
+      cobertura:   cartera ? tocados.size / cartera * 100 : null
+    };
+  };
+
+  const filas = ejecutivos.map(u => fila(
+    u.nombre,
+    fichas.filter(c => c.asignado_correo === u.correo).length,
+    mias.filter(g => g.Correo_Stratis === u.correo)
+  ));
+  return { filas, total: fila("Equipo", fichas.length, mias) };
+}
+
+function repVistas(f){
+  const ges = DB.todos().filter(esGestionCliente);
+  const ejecutivos = USUARIOS
+    .filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  const cartera = CLIENTES.filter(c => !esClienteNuevo(c));
+  const dentro  = CLIENTES.filter(leadDentroDeBase);
+  const fuera   = CLIENTES.filter(leadFueraDeBase);
+  const sinMarcar = CLIENTES.filter(leadSinMarcar);
+
+  /* El universo de la vista de retención es la base congelada que entregó
+     BBVA —841—, no las fichas que el CRM alcanzó a cargar. La diferencia no se
+     disimula: se declara, porque es trabajo pendiente de carga y no un
+     redondeo. */
+  const sinFicha = Math.max(0, f.portafolio - cartera.length);
+
+  const retencion = repFunnelDe(cartera, ges, ejecutivos);
+  /* La cobertura del equipo se mide contra la base que entregó BBVA, no contra
+     las fichas que el CRM alcanzó a cargar. Medida contra lo cargado daría
+     90% cuando de los 841 comercios asignados se tocaron 108: sería un número
+     cierto respondiendo la pregunta equivocada. La de cada ejecutivo sí va
+     contra su cartera, que es lo que le tocó y lo que puede trabajar. */
+  retencion.total.cobertura = f.portafolio ? retencion.total.comercios / f.portafolio * 100 : null;
+
+  /* El trabajo que hoy no cae en ninguna de las tres vistas, porque está en
+     fichas de venta cuyo origen nadie marcó todavía. Se calcula y se muestra:
+     si no, los tres bloques suman menos que el proyecto y nadie sabe por qué.
+     Al 26/08 son 25 gestiones y 19 visitas — más de un tercio de las visitas
+     del proyecto escondidas en una columna vacía. */
+  const pendF = repFunnelDe(sinMarcar, ges, ejecutivos);
+  const pend = Object.assign({}, pendF.total,
+    { porEjecutivo: pendF.filas.map(x => x.visitas) });
+
+  return {
+    sinFicha,
+    sinMarcar: sinMarcar.length,
+    pendiente: pend,
+    vistas: [
+      { k:"retencion", nombre:"Base de retención", foco:true,
+        universo: f.portafolio,
+        pie: sinFicha > 0
+          ? sinFicha + " de los " + f.portafolio + " asignados todavía no tienen ficha en el CRM"
+          : "Los " + f.portafolio + " comercios asignados tienen ficha",
+        cierre: { label:"Retenidos y recuperados", n: f.objetivo },
+        datos: retencion },
+
+      { k:"dentro", nombre:"Leads dentro de cartera", foco:false,
+        universo: dentro.length,
+        pie: "Oportunidades de venta nacidas en un comercio que ya estaba en la base",
+        cierre: { label:"Ventas cerradas", n: dentro.filter(esVentaNueva).length },
+        datos: repFunnelDe(dentro, ges, ejecutivos) },
+
+      { k:"fuera", nombre:"Leads fuera de cartera", foco:false,
+        universo: fuera.length,
+        pie: sinMarcar.length > 0
+          ? sinMarcar.length + " fichas de venta esperan que alguien indique de dónde salieron"
+          : "Oportunidades de venta en comercios ajenos a la base",
+        cierre: { label:"Ventas cerradas", n: fuera.filter(esVentaNueva).length },
+        datos: repFunnelDe(fuera, ges, ejecutivos) }
+    ]
+  };
+}
+
+/* ---- El evolutivo semana a semana, un periodo contra el otro -------------
+   Comparar los totales de un periodo cerrado contra uno que va por su segunda
+   semana no dice nada: el que va corriendo siempre pierde. Por eso se comparan
+   dos cosas distintas y se muestran las dos:
+
+     · la serie semanal completa de cada periodo, que enseña la FORMA —dónde
+       se concentró el trabajo—, y
+     · el acumulado al mismo día de cada periodo, que es la única comparación
+       que se puede leer como «vamos mejor» o «vamos peor». */
+function repEvolutivo(f){
+  const ges = DB.todos().filter(esGestionCliente);
+  const dia = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+
+  const serie = p => {
+    const hasta = p.hasta < f.hoy ? p.hasta : f.hoy;
+    const dentro = ges.filter(g => {
+      const d = repDia(g.Fecha_Contacto);
+      return d >= p.desde && d <= hasta;
+    });
+    const largo = dia(p.desde, hasta) + 1;
+    const semanas = [];
+    for (let i = 0; i * 7 < largo; i++){
+      const de = new Date(new Date(p.desde).getTime() + i * 7 * 86400000).toISOString().slice(0,10);
+      const a  = new Date(new Date(p.desde).getTime() + (i * 7 + 6) * 86400000).toISOString().slice(0,10);
+      const aTope = a < hasta ? a : hasta;
+      const gs = dentro.filter(g => { const d = repDia(g.Fecha_Contacto); return d >= de && d <= aTope; });
+      semanas.push({
+        n: i + 1, desde: de, hasta: aTope,
+        gestiones: gs.length,
+        respaldadas: gs.filter(repRespaldada).length,
+        visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+        parcial: aTope < a
+      });
+    }
+    return { ...p, hasta, largo, semanas,
+      gestiones: dentro.length,
+      respaldadas: dentro.filter(repRespaldada).length,
+      visitas: dentro.filter(g => g.Cumple_Visita === "SI").length };
+  };
+
+  const p1 = serie(REP_PERIODOS[0]);
+  const p2 = serie(REP_PERIODOS[1]);
+
+  /* El corte justo: los mismos días corridos en los dos periodos. */
+  const corridos = p2.largo;
+  const alMismoDia = p => {
+    const tope = new Date(new Date(p.desde).getTime() + (corridos - 1) * 86400000)
+      .toISOString().slice(0,10);
+    const gs = ges.filter(g => { const d = repDia(g.Fecha_Contacto); return d >= p.desde && d <= tope; });
+    return { hasta: tope,
+      gestiones: gs.length,
+      respaldadas: gs.filter(repRespaldada).length,
+      visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+      comercios: new Set(gs.map(g => String(g.Customer_id))).size };
+  };
+
+  const a = alMismoDia(REP_PERIODOS[0]), b = alMismoDia(REP_PERIODOS[1]);
+  const var_ = (x, y) => x ? (y - x) / x * 100 : null;
+
+  return { p1, p2, corridos,
+    comparado: {
+      p1: a, p2: b,
+      gestiones: var_(a.gestiones, b.gestiones),
+      respaldadas: var_(a.respaldadas, b.respaldadas),
+      visitas: var_(a.visitas, b.visitas),
+      comercios: var_(a.comercios, b.comercios)
+    } };
 }
 
 const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
@@ -14300,7 +14610,363 @@ function armarPPTX(pptx, fondos){
   T(k, "Notas: " + repNota("kpis"),
     { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
 
-  /* ---- 5 · Cierre ------------------------------------------------------ */
+  /* =======================================================================
+     De acá en adelante, lo que se acordó el 26/08. Las tres láminas que
+     siguen son de proyecto y son las que ve Mastercard; después viene una
+     lámina divisoria y el detalle por ejecutivo, que es para adentro y para
+     BBVA. Un solo archivo: se presenta entero o se corta en la divisoria, y
+     no hay dos formatos que mantener sincronizados.
+     ======================================================================= */
+  const V = f.tres, E = f.evo;
+
+  /* Una tabla con el mismo aspecto en todas las láminas. Encabezado navy,
+     filas alternadas, números a la derecha y la fila del equipo en negrita:
+     quien lee busca primero el total y después a quién le pertenece. */
+  const tabla = (s, x, y, w, cols, filas, anchos) => {
+    const cab = cols.map(c => ({ text:c, options:{ bold:true, color:"FFFFFF", fill:{ color:H("navy") },
+      fontSize:10, align:"center", valign:"middle" } }));
+    const cuerpo = filas.map((fi, i) => fi.map((celda, j) => ({
+      text: String(celda),
+      options: { fontSize:10, align: j === 0 ? "left" : "right", valign:"middle",
+        bold: fi.esTotal || false,
+        color: H(fi.esTotal ? "navy" : "gris"),
+        fill: { color: fi.esTotal ? "EDF1F8" : (i % 2 ? "F6F9FF" : "FFFFFF") } }
+    })));
+    s.addTable([cab, ...cuerpo], { x, y, w, colW:anchos, border:{ type:"solid", color:"E0E5EE", pt:0.5 },
+      fontFace:FUENTE, rowH:0.30, margin:0.06 });
+  };
+
+  const titulo = (s, t, sub) => {
+    T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+    T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
+  };
+
+  /* ---- 5 · Las tres vistas --------------------------------------------- */
+  const lv = lamina(fondos.contenido);
+  titulo(lv, "Las tres vistas del seguimiento",
+    `La retención es el foco · ${repPct(50)} facturación, ${repPct(30)} retención, ${repPct(20)} venta nueva`);
+
+  const WVIS = 3.95, GVIS = 0.28, YVIS = 1.66, HVIS = 4.70;
+  V.vistas.forEach((x, i) => {
+    const px = 0.57 + i * (WVIS + GVIS);
+    const d = x.datos.total;
+    caja(lv, px, YVIS, WVIS, HVIS, "FFFFFF", "E0E5EE");
+    /* La vista de retención lleva una banda de color y las otras no: el
+       acuerdo dice que el foco es retención, y una lámina donde las tres
+       vistas pesan lo mismo dice lo contrario de lo que se acordó. */
+    lv.addShape(pptx.ShapeType.rect, { x:px, y:YVIS, w:WVIS, h:0.09,
+      fill:{ color: H(x.foco ? "naranja" : "azul2") }, line:{ type:"none" } });
+    T(lv, x.nombre, { x:px + 0.22, y:YVIS + 0.24, w:WVIS - 0.44, h:0.34, fontSize:13, bold:true,
+      fontFace:NEG, color:H("navy") });
+    if (x.foco) T(lv, "el foco del proyecto", { x:px + 0.22, y:YVIS + 0.58, w:WVIS - 0.44, h:0.22,
+      fontSize:9.5, bold:true, color:H("naranja") });
+
+    /* Una vista sin universo no muestra un cero: muestra que el dato no está.
+       Un «0 comercios en la base» es una afirmación falsa sobre el proyecto;
+       «—» es la verdad de que todavía no se cargó. */
+    T(lv, x.universo > 0 ? String(x.universo) : "\u2014",
+      { x:px + 0.22, y:YVIS + 0.82, w:WVIS - 0.44, h:0.60, fontSize:34,
+        bold:true, fontFace:NEG, color:H(x.universo > 0 ? "navy" : "gris2") });
+    T(lv, x.k === "retencion" ? "comercios en la base" : "fichas de venta",
+      { x:px + 0.22, y:YVIS + 1.42, w:WVIS - 0.44, h:0.22, fontSize:10, color:H("gris2") });
+
+    /* La cobertura va en su propia fila y no pegada al número de comercios.
+       Juntas —«108 · 90%»— no entran en el ancho de la columna y el renglón se
+       parte en dos, que es como se ve que una lámina se armó sin mirarla. */
+    const filas = [
+      ["Comercios trabajados", String(d.comercios)],
+      ["Cobertura de la vista", d.cobertura === null ? "\u2014" : repPct(d.cobertura)],
+      ["Gestiones registradas", String(d.gestiones)],
+      ["Con correo de respaldo", String(d.respaldadas)],
+      ["Visitas efectivas", String(d.visitas)],
+      [x.cierre.label, String(x.cierre.n)]
+    ];
+    filas.forEach(([a, b], j) => {
+      const yy = YVIS + 1.76 + j * 0.38;
+      const ultima = j === filas.length - 1;
+      if (ultima) caja(lv, px + 0.16, yy - 0.03, WVIS - 0.32, 0.36, "EDF1F8");
+      T(lv, a, { x:px + 0.24, y:yy, w:WVIS - 1.34, h:0.30, fontSize:10.5,
+        color: ultima ? H("navy") : H("gris"), bold: ultima });
+      T(lv, b, { x:px + WVIS - 1.14, y:yy, w:0.94, h:0.30, fontSize:10.5, bold:true,
+        color: j === 3 ? H("azul") : H("navy"), align:"right" });
+    });
+    T(lv, x.pie, { x:px + 0.22, y:YVIS + 4.10, w:WVIS - 0.44, h:0.48, fontSize:9, color:H("gris2") });
+  });
+
+  caja(lv, 0.57, 6.52, 12.38, 0.80, "EDF1F8");
+  T(lv, "Por qué hay dos números de gestión",
+    { x:0.75, y:6.62, w:3.6, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
+  const sumG = V.vistas.reduce((n, x) => n + x.datos.total.gestiones, 0);
+  const sumR = V.vistas.reduce((n, x) => n + x.datos.total.respaldadas, 0);
+  T(lv, `Se acordó contar solo lo respaldado por correo al cliente. De ${sumG} gestiones registradas, ${sumR} tienen ese respaldo. La distancia entre ambas cifras es trabajo hecho que hoy no se puede sustentar frente al banco, y por eso se muestra en vez de esconderse.`
+    + (V.pendiente.gestiones > 0
+       ? `  ·  Aparte quedan ${V.pendiente.gestiones} gestiones y ${V.pendiente.visitas} visitas en las ${V.sinMarcar} fichas de venta sin marcar: no están en ninguna de las tres vistas hasta que alguien indique de dónde salieron.`
+       : ""),
+    { x:4.45, y:6.60, w:8.32, h:0.64, fontSize:10, color:H("gris") });
+
+  /* ---- 6 · El evolutivo semanal ---------------------------------------- */
+  const lev = lamina(fondos.contenido);
+  titulo(lev, "Semana a semana, un periodo contra el otro",
+    `Primer periodo ${repFecha(E.p1.desde)} al ${repFecha(E.p1.hasta)} · periodo en curso desde ${repFecha(E.p2.desde)}, día ${E.corridos}`);
+
+  const maxGES = Math.max(1, ...E.p1.semanas.concat(E.p2.semanas).map(s => s.gestiones));
+  /* Los dos paneles comparten geometría. Si cada uno repartiera su ancho entre
+     sus propias semanas, el periodo con menos semanas dibujaría palos más
+     anchos y más separados, y la lámina diría —sin decirlo— que ahí se trabajó
+     más. La comparación tiene que estar en la altura y en ningún otro lado. */
+  const nSem = Math.max(E.p1.semanas.length, E.p2.semanas.length, 1);
+  const PASO = 1.12, BW = 0.78;
+
+  const barrasSem = (px, py, ph, per, color) => {
+    T(lev, per.nombre, { x:px, y:py - 0.46, w:5.9, h:0.28, fontSize:11.5, bold:true, color:H("navy") });
+    if (!per.semanas.length)
+      T(lev, "Todavía sin gestiones registradas", { x:px, y:py + ph / 2 - 0.14, w:5.9, h:0.28,
+        fontSize:10.5, color:H("gris2") });
+    per.semanas.forEach((s, i) => {
+      const bx = px + i * PASO;
+      const bh = Math.max(0.04, ph * s.gestiones / maxGES);
+      lev.addShape(pptx.ShapeType.rect, { x:bx, y:py + ph - bh, w:BW, h:bh,
+        fill:{ color: H(color) }, line:{ type:"none" } });
+      /* La parte respaldada por correo va en el mismo palo, más oscura: son un
+         subconjunto de las mismas gestiones, no una serie aparte, y ponerlas
+         al lado haría creer que se suman. */
+      const rh = Math.max(0, ph * s.respaldadas / maxGES);
+      if (rh > 0.02) lev.addShape(pptx.ShapeType.rect, { x:bx, y:py + ph - rh, w:BW, h:rh,
+        fill:{ color: H("navy") }, line:{ type:"none" } });
+      T(lev, String(s.gestiones), { x:bx - 0.20, y:py + ph - bh - 0.28, w:BW + 0.40, h:0.24,
+        fontSize:9.5, bold:true, color:H("navy"), align:"center" });
+      T(lev, "S" + s.n + (s.parcial ? "*" : ""), { x:bx - 0.20, y:py + ph + 0.06, w:BW + 0.40, h:0.22,
+        fontSize:9, color:H("gris2"), align:"center" });
+    });
+  };
+  const ANCHO = nSem * PASO;
+  barrasSem(0.62, 2.40, 2.20, E.p1, "azul2");
+  barrasSem(0.62 + ANCHO + 1.10, 2.40, 2.20, E.p2, "naranja");
+  T(lev, "El palo claro son todas las gestiones; el tramo oscuro, las que tienen correo de respaldo.  ·  S* = semana incompleta",
+    { x:0.57, y:5.00, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
+
+  const YCMP = 5.24;
+  caja(lev, 0.57, YCMP, 12.38, 1.28, "FFFFFF", "C9D3E4");
+  T(lev, `Al mismo día de cada periodo — los primeros ${E.corridos} días`,
+    { x:0.75, y:YCMP + 0.12, w:6.0, h:0.26, fontSize:11, bold:true, color:H("navy") });
+  const compara = [
+    ["Comercios trabajados", E.comparado.p1.comercios, E.comparado.p2.comercios, E.comparado.comercios],
+    ["Gestiones", E.comparado.p1.gestiones, E.comparado.p2.gestiones, E.comparado.gestiones],
+    ["Con correo de respaldo", E.comparado.p1.respaldadas, E.comparado.p2.respaldadas, E.comparado.respaldadas],
+    ["Visitas efectivas", E.comparado.p1.visitas, E.comparado.p2.visitas, E.comparado.visitas]
+  ];
+  compara.forEach(([et, a, b, dif], i) => {
+    const px = 0.75 + i * 3.08;
+    T(lev, et, { x:px, y:YCMP + 0.46, w:2.90, h:0.22, fontSize:9.5, color:H("gris2") });
+    T(lev, String(a) + "  →  " + String(b), { x:px, y:YCMP + 0.70, w:2.90, h:0.32, fontSize:15,
+      bold:true, fontFace:NEG, color:H("navy") });
+    /* Cero por ciento no es una mejora. Un triángulo verde sobre «0%» dice
+       que algo subió cuando lo que pasó es que quedó igual. */
+    if (dif !== null) T(lev,
+      Math.round(dif) === 0 ? "sin cambio"
+        : (dif > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(dif), 0) + "%",
+      { x:px, y:YCMP + 1.02, w:2.90, h:0.22, fontSize:10, bold:true,
+        color: H(Math.round(dif) === 0 ? "gris2" : (dif > 0 ? "verde" : "naranja")) });
+  });
+  T(lev, "Notas: comparar el total de un periodo cerrado contra uno que recién empieza no dice nada; por eso el recuadro corta los dos periodos en el mismo día corrido.",
+    { x:0.57, y:6.74, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+
+  /* ---- 7 · La divisoria ------------------------------------------------ */
+  const dv = lamina(fondos.contenido);
+  caja(dv, 0.57, 2.55, 12.38, 2.40, "F6F9FF");
+  dv.addShape(pptx.ShapeType.rect, { x:0.57, y:2.55, w:0.12, h:2.40,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(dv, "Hasta aquí, el proyecto",
+    { x:1.10, y:2.92, w:11.3, h:0.56, fontSize:26, bold:true, fontFace:NEG, color:H("navy") });
+  T(dv, "Lo que sigue es el detalle por ejecutivo: avance, visitas y dónde está puesto el esfuerzo de cada uno. Es material de gestión interna y de trabajo con BBVA.",
+    { x:1.10, y:3.62, w:10.8, h:0.72, fontSize:13, color:H("gris") });
+
+  /* ---- 8 · La base de retención, por ejecutivo -------------------------- */
+  const r1 = lamina(fondos.contenido);
+  const vr = V.vistas[0];
+  titulo(r1, "Base de retención · avance por ejecutivo",
+    `${vr.universo} comercios asignados · ${vr.pie}`);
+  tabla(r1, 0.57, 1.75, 12.38,
+    ["Ejecutivo", "Cartera", "Comercios trabajados", "Cobertura", "Gestiones", "Con respaldo", "Visitas efectivas", "Comercios visitados"],
+    vr.datos.filas.map(x => [x.nombre, x.cartera, x.comercios, repPct(x.cobertura || 0),
+      x.gestiones, x.respaldadas, x.visitas, x.conVisita])
+      .concat([Object.assign([vr.datos.total.nombre, vr.datos.total.cartera, vr.datos.total.comercios,
+        repPct(vr.datos.total.cobertura || 0), vr.datos.total.gestiones, vr.datos.total.respaldadas,
+        vr.datos.total.visitas, vr.datos.total.conVisita], { esTotal:true })]),
+    [2.60, 1.20, 1.90, 1.28, 1.40, 1.40, 1.50, 1.10]);
+  /* La cobertura de cada ejecutivo y la del equipo no se calculan contra lo
+     mismo, y sin decirlo la tabla parece contradecirse: cuatro filas al 90% y
+     un total al 13%. Cada una responde una pregunta distinta y las dos hacen
+     falta — la del ejecutivo mide su trabajo, la del equipo mide el proyecto. */
+  caja(r1, 0.57, 4.10, 12.38, 1.06, "EDF1F8");
+  T(r1, "Por qué la fila del equipo no es el promedio de las otras",
+    { x:0.75, y:4.20, w:5.4, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
+  T(r1, `La cobertura de cada ejecutivo se mide contra la cartera que tiene asignada: es lo que le tocó y lo que puede trabajar. La del equipo se mide contra los ${f.portafolio} comercios de la base congelada, que incluye los que todavía no tienen ficha en el CRM. Por eso las filas pueden ir bien y el proyecto ir atrasado al mismo tiempo: son dos preguntas distintas y las dos importan.`,
+    { x:0.75, y:4.48, w:12.02, h:0.60, fontSize:10, color:H("gris") });
+
+  T(r1, "Notas: cobertura es cuántos comercios de su cartera recibieron al menos una gestión, no cuántas gestiones hizo. Con respaldo son las gestiones por correo al cliente.",
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+
+  /* ---- 9 · Los leads de venta, por ejecutivo ---------------------------- */
+  const r2 = lamina(fondos.contenido);
+  titulo(r2, "Leads de venta · dentro y fuera de la cartera",
+    V.sinMarcar > 0
+      ? `${V.sinMarcar} fichas de venta todavía sin marcar: no se reparten por descarte, se declaran aparte`
+      : "Todas las fichas de venta tienen su origen marcado");
+  [1, 2].forEach((idx, i) => {
+    const x = V.vistas[idx], py = 1.75 + i * 2.55;
+    T(r2, x.nombre + " · " + x.universo + (x.universo === 1 ? " ficha" : " fichas"),
+      { x:0.57, y:py, w:8.0, h:0.28, fontSize:12.5, bold:true, color:H("navy") });
+    tabla(r2, 0.57, py + 0.34, 12.38,
+      ["Ejecutivo", "Fichas", "Gestiones", "Con respaldo", "Visitas efectivas", "Ventas cerradas"],
+      x.datos.filas.map(u => [u.nombre, u.cartera, u.gestiones, u.respaldadas, u.visitas,
+        CLIENTES.filter(c => (idx === 1 ? leadDentroDeBase(c) : leadFueraDeBase(c))
+          && c.asignado_correo === (USUARIOS.find(z => z.nombre === u.nombre) || {}).correo
+          && esVentaNueva(c)).length])
+        .concat([Object.assign([x.datos.total.nombre, x.datos.total.cartera, x.datos.total.gestiones,
+          x.datos.total.respaldadas, x.datos.total.visitas, x.cierre.n], { esTotal:true })]),
+      [3.20, 1.60, 1.80, 1.90, 2.10, 1.78]);
+  });
+
+  /* ---- 9b · Dónde está puesto el esfuerzo -------------------------------
+     La pregunta que abrió esta lámina fue concreta: si alguien está poniendo
+     su trabajo en venta nueva mientras el plan pesa 30% retención y 20% venta.
+     Se responde con proporciones y no con totales: quien tiene más cartera
+     hace más de todo, y comparar cantidades absolutas solo diría quién tiene
+     la cartera más grande. */
+  const es = lamina(fondos.contenido);
+  titulo(es, "Dónde está puesto el esfuerzo",
+    "Cómo reparte cada uno sus gestiones entre la base de retención y los leads de venta");
+
+  const reparto = V.vistas[0].datos.filas.map((x, i) => {
+    const dentro = V.vistas[1].datos.filas[i], fuera = V.vistas[2].datos.filas[i];
+    const total = x.gestiones + dentro.gestiones + fuera.gestiones;
+    return { nombre:x.nombre, total,
+      ret:x.gestiones, dentro:dentro.gestiones, fuera:fuera.gestiones,
+      visRet:x.visitas, visLead:dentro.visitas + fuera.visitas,
+      pctRet: total ? x.gestiones / total * 100 : null,
+      pctFuera: total ? fuera.gestiones / total * 100 : null };
+  });
+  const eqTotal = reparto.reduce((n, x) => n + x.total, 0);
+  const eqRet   = reparto.reduce((n, x) => n + x.ret, 0);
+  const pctEq   = eqTotal ? eqRet / eqTotal * 100 : null;
+
+  const XB = 3.30, WB = 7.20;
+  reparto.forEach((x, i) => {
+    const py = 1.98 + i * 1.02;
+    T(es, x.nombre, { x:0.57, y:py, w:2.60, h:0.30, fontSize:12, bold:true, color:H("navy") });
+    T(es, x.total + (x.total === 1 ? " gestión" : " gestiones"),
+      { x:0.57, y:py + 0.32, w:2.60, h:0.22, fontSize:9.5, color:H("gris2") });
+    if (!x.total){
+      T(es, "Sin gestiones registradas todavía",
+        { x:XB, y:py + 0.02, w:WB, h:0.30, fontSize:10, color:H("gris2") });
+      return;
+    }
+    const tramos = [
+      { n:x.ret,    color:"naranja", et:"retención" },
+      { n:x.dentro, color:"azul",    et:"leads dentro" },
+      { n:x.fuera,  color:"azul2",   et:"leads fuera" }
+    ];
+    let bx = XB;
+    tramos.forEach(t => {
+      const w = WB * t.n / x.total;
+      if (w <= 0) return;
+      es.addShape(pptx.ShapeType.rect, { x:bx, y:py, w, h:0.34,
+        fill:{ color:H(t.color) }, line:{ type:"none" } });
+      /* El porcentaje solo se escribe dentro del tramo si hay lugar. Un 3%
+         impreso sobre una barra de dos milímetros no se lee: se amontona. */
+      if (w > 0.62) T(es, repNum(t.n / x.total * 100, 0) + "%",
+        { x:bx, y:py, w, h:0.34, fontSize:10, bold:true, color:"FFFFFF", align:"center" });
+      bx += w;
+    });
+    T(es, `${x.visRet} visitas en retención · ${x.visLead} en leads`,
+      { x:XB + WB + 0.20, y:py, w:2.55, h:0.34, fontSize:9.5, color:H("gris") });
+  });
+
+  T(es, "Naranja, base de retención · azul brillante, leads dentro de la cartera · azul oscuro, leads fuera de la cartera",
+    { x:0.57, y:6.14, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
+  caja(es, 0.57, 6.44, 12.38, 0.86, "EDF1F8");
+  T(es, "Lo que hay que mirar",
+    { x:0.75, y:6.54, w:3.0, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
+  T(es, pctEq === null
+      ? "Todavía no hay gestiones suficientes para leer la distribución."
+      : `El equipo pone ${repPct(pctEq)} de sus gestiones en la base de retención. El plan pesa 30% retención y 20% venta nueva, así que un reparto muy corrido hacia los leads —sobre todo hacia los de afuera de la base— trabaja contra el propio incentivo de quien lo hace.`,
+    { x:0.75, y:6.82, w:12.02, h:0.42, fontSize:10, color:H("gris") });
+
+  /* ---- 10 · Las visitas ------------------------------------------------- */
+  const vi = lamina(fondos.contenido);
+  titulo(vi, "Visitas efectivas · lo que pesa en el plan de incentivos",
+    "Una visita cuenta cuando es presencial, el cliente atendió y quedó respaldada con ubicación o exención");
+  const totVis = V.vistas.map(x => x.datos.total.visitas).reduce((a, b) => a + b, 0)
+    + V.pendiente.visitas;
+  /* La tercera franja son las visitas que están en fichas de venta sin marcar.
+     Sin ella el total de la lámina no coincide con el del proyecto, y la
+     diferencia —hoy más de un tercio— quedaría sin explicación. */
+  const visPorEje = V.vistas[0].datos.filas.map((x, i) => ({
+    nombre: x.nombre,
+    ret: x.visitas,
+    lead: V.vistas[1].datos.filas[i].visitas + V.vistas[2].datos.filas[i].visitas,
+    pend: V.pendiente.porEjecutivo ? V.pendiente.porEjecutivo[i] : 0
+  }));
+  const maxVIS = Math.max(1, ...visPorEje.map(x => x.ret + x.lead + x.pend));
+  visPorEje.forEach((x, i) => {
+    const py = 2.05 + i * 0.92;
+    T(vi, x.nombre, { x:0.57, y:py, w:2.40, h:0.34, fontSize:12, bold:true, color:H("navy") });
+    const XB0 = 3.10, WBMAX = 8.10;
+    const wr = WBMAX * x.ret / maxVIS, wl = WBMAX * x.lead / maxVIS,
+          wp = WBMAX * x.pend / maxVIS;
+    if (wr > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0, y:py, w:wr, h:0.34,
+      fill:{ color:H("naranja") }, line:{ type:"none" } });
+    if (wl > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0 + wr, y:py, w:wl, h:0.34,
+      fill:{ color:H("azul2") }, line:{ type:"none" } });
+    if (wp > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0 + wr + wl, y:py, w:wp, h:0.34,
+      fill:{ color:H("gris2") }, line:{ type:"none" } });
+    T(vi, `${x.ret + x.lead + x.pend}`, { x:XB0 + wr + wl + wp + 0.14, y:py, w:1.10, h:0.34,
+      fontSize:12, bold:true, color:H("navy") });
+    T(vi, `${x.ret} en retención · ${x.lead} en leads`
+      + (x.pend ? ` · ${x.pend} sin clasificar` : ""),
+      { x:0.57, y:py + 0.36, w:2.50, h:0.22, fontSize:9, color:H("gris2") });
+  });
+  caja(vi, 0.57, 5.86, 12.38, 0.92, "EDF1F8");
+  T(vi, `${totVis} visitas efectivas en el proyecto`,
+    { x:0.75, y:5.96, w:5.0, h:0.30, fontSize:13, bold:true, fontFace:NEG, color:H("navy") });
+  T(vi, "Naranja, visitas a la base de retención; azul, a leads de venta; gris, visitas en fichas de venta cuyo origen todavía nadie marcó. La visita es el escalón donde el embudo se angosta y es la parte del plan que hoy está más lejos de su meta.",
+    { x:0.75, y:6.28, w:11.9, h:0.42, fontSize:10, color:H("gris") });
+
+  /* ---- 11 · Los acuerdos vigentes ---------------------------------------
+     Va al final y no al principio a propósito: primero los números, después
+     el marco con el que se leen. Al revés, la lámina de acuerdos se convierte
+     en una portada que nadie mira. */
+  const AC = REPORTE.acuerdos || REPORTE_DEF.acuerdos || [];
+  if (AC.length){
+    const ac = lamina(fondos.contenido);
+    titulo(ac, "Acuerdos vigentes",
+      "Tres conversaciones, un solo marco — dejan de vivir en documentos separados");
+    const WA = (12.38 - 0.24 * (AC.length - 1)) / AC.length;
+    AC.forEach((x, i) => {
+      const px = 0.57 + i * (WA + 0.24);
+      caja(ac, px, 1.78, WA, 4.30, "FFFFFF", "E0E5EE");
+      ac.addShape(pptx.ShapeType.rect, { x:px, y:1.78, w:WA, h:0.09,
+        fill:{ color:H(x.color || "azul") }, line:{ type:"none" } });
+      T(ac, String(x.titulo || "").toUpperCase(),
+        { x:px + 0.24, y:2.02, w:WA - 0.48, h:0.26, fontSize:10.5, bold:true,
+          color:H(x.color || "azul"), charSpacing:1.4 });
+      const pts = x.puntos || [];
+      if (pts.length)
+        ac.addText(pts.map((t, k) => ({ text:repTexto(t, D),
+            options:{ bullet:true, breakLine: k < pts.length - 1 } })),
+          { x:px + 0.24, y:2.40, w:WA - 0.50, h:3.10, margin:0, fontFace:FUENTE,
+            fontSize:11, color:H("navy"), paraSpaceAfter:7, lineSpacing:15, valign:"top" });
+      if (x.pendiente)
+        T(ac, x.pendiente, { x:px + 0.24, y:2.40, w:WA - 0.50, h:0.60,
+          fontSize:10.5, italic:true, color:H("naranja"), valign:"top" });
+    });
+    caja(ac, 0.57, 6.28, 12.38, 0.78, "EDF1F8");
+    T(ac, REPORTE.cierre_acuerdos || REPORTE_DEF.cierre_acuerdos || "",
+      { x:0.75, y:6.38, w:12.02, h:0.58, fontSize:11.5, bold:true, color:H("navy") });
+  }
+
+  /* ---- 12 · Cierre ------------------------------------------------------ */
   lamina(fondos.cierre);
 
   pptx.writeFile({ fileName: `Reporte_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
@@ -14316,7 +14982,8 @@ const REP_BLOQUES = [
   { k:"relato",    t:"Relato de los hitos", d:"El párrafo que explica cómo arrancó el proyecto" },
   { k:"lecturas",  t:"Lecturas del embudo", d:"Las dos frases que acompañan el embudo" },
   { k:"notas",     t:"Notas al pie",        d:"La letra chica de cada lámina — es donde se definen los escalones" },
-  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" }
+  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" },
+  { k:"acuerdos",  t:"Acuerdos vigentes",  d:"Las tres columnas de la lámina de acuerdos: con Ana María, con Gerald y lo definido hoy" }
 ];
 
 function cardReporte(){
