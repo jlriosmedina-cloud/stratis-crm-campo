@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 19:35", huella:"7767c8" };
+const BUILD = { sello:"26/08/2026 20:04", huella:"0d032a" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14579,6 +14579,106 @@ async function generarPPTX(btn, armador){
   }
 }
 
+/* ---- Las dos láminas que comparten los dos documentos -------------------
+   El embudo y los tres objetivos son las láminas que José validó el 26/08:
+   «el diseño está bien». Viven acá, fuera de los dos armadores, por una razón
+   práctica y no de prolijidad: si cada documento tuviera su copia, el día que
+   alguien mueva una columna en una la otra queda distinta, y dos láminas que
+   dicen lo mismo con distinto aspecto se leen como dos versiones del dato.
+
+   Reciben un contexto con las herramientas de dibujo del armador que las
+   llama, así que no saben —ni les importa— en qué documento están.          */
+function repLaminaEmbudo(X, f){
+  /* ---- 3 · El embudo --------------------------------------------------- */
+  const e = X.lamina(X.fondos.contenido);
+  X.T(e, "Del portafolio asignado al objetivo cumplido",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:X.H("gris") });
+
+  const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
+        X_VAL = 9.10, X_CNV = 10.55, W_CNV = 2.40,
+        Y0 = 1.98, ALTO = 0.46, GAP = 0.155;
+  f.embudo.forEach((p, i) => {
+    const y = Y0 + i * (ALTO + GAP), col = X.H(p.color);
+    X.T(e, p.label, { x:X_LBL, y, w:W_LBL, h:ALTO, fontSize:11.5, bold:true, align:"right",
+      color: (i === 0 || i === f.embudo.length - 1) ? X.H("navy") : X.H("gris") });
+    const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
+    e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
+    X.T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
+    X.T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:X.H("gris2") });
+    if (i > 0) X.T(e, repPct(p.conv) + " " + p.texto,
+      { x:X_CNV, y, w:W_CNV, h:ALTO, fontSize:10.5, color:X.H("gris") });
+  });
+
+  const yc = Y0 + f.embudo.length * (ALTO + GAP) - 0.02;
+  X.caja(e, X_BAR, yc, 7.25, 0.32, "FBDDCF");
+  X.T(e, "Además: " + repAparte(f),
+    { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:X.H("naranja") });
+
+  const LEC = ((REPORTE.lecturas || {}).embudo) || [];
+  const YC = 5.46, HC = 1.34, WC = 6.04;
+  LEC.slice(0, 2).forEach((l, i) => {
+    const x = 0.57 + i * (WC + 0.30);
+    X.caja(e, x, YC, WC, HC, "FFFFFF", REP_LINEA);
+    e.addShape(X.pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
+      fill:{ color:X.H(l.color) }, line:{ type:"none" } });
+    X.T(e, l.titulo, { x:x + 0.48, y:YC + 0.21, w:WC - 0.72, h:0.26, fontSize:12, bold:true, color:X.H("navy") });
+    X.T(e, l.texto,  { x:x + 0.24, y:YC + 0.60, w:WC - 0.48, h:0.66, fontSize:10.5, color:X.H("gris"), valign:"top" });
+  });
+  X.T(e, "Notas: " + repNota("embudo"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
+function repLaminaObjetivos(X, f){
+
+  const k = X.lamina(X.fondos.contenido);
+  X.T(k, "Avance contra los tres objetivos del proyecto",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  X.T(k, `Objetivos medidos al cierre del proyecto, sobre la base congelada de ${f.portafolio} comercios${
+    f.baseFact ? " y " + repSoles(f.baseFact) + " de facturación" : ""}`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:X.H("gris") });
+
+  const YK = 1.90, HK = 3.86, WK = 3.926;
+  f.kpis.forEach((x, i) => {
+    const px = 0.57 + i * (WK + 0.30), col = X.H(x.color);
+    X.caja(k, px, YK, WK, HK, "FFFFFF", "DDE2EC");
+    X.T(k, x.nombre, { x:px + 0.26, y:YK + 0.24, w:WK - 1.30, h:0.56, fontSize:12.5, bold:true, color:X.H("navy"), valign:"top" });
+    k.addShape(X.pptx.ShapeType.roundRect, { x:px + WK - 0.92, y:YK + 0.24, w:0.66, h:0.26,
+      fill:{ color:col }, line:{ type:"none" }, rectRadius:0.13 });
+    X.T(k, x.peso + "%", { x:px + WK - 0.92, y:YK + 0.245, w:0.66, h:0.26, fontSize:9.5, bold:true, color:"FFFFFF", align:"center" });
+    X.T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:40, bold:true, fontFace:X.NEG, color:col });
+    X.T(k, x.sub,   { x:px + 0.26, y:YK + 1.64, w:WK - 0.52, h:0.24, fontSize:10, color:X.H("gris2") });
+    /* En el deck de comité, la etiqueta de una meta no puede explicar cómo se
+       reparte el trabajo adentro. «Meta al cierre · 7 por ejecutivo/mes» es
+       cierto y es interno: en esa sala la meta son 140 afiliaciones y cómo se
+       organiza el equipo para llegar no es materia de la conversación. Se
+       corta la aclaración y se deja la meta; el número no cambia. */
+    const filas = X.comite
+      ? x.filas.map(([a, b]) => [/ejecutiv/i.test(a) ? String(a).split("·")[0].trim() : a, b])
+      : x.filas;
+    filas.forEach(([a, b], j) => {
+      const yy = YK + 2.04 + j * 0.44;
+      X.T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:X.H("gris") });
+      X.T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:X.H("navy"), align:"right" });
+    });
+    X.caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, REP_BANDA);
+    X.T(k, x.pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:X.H("navy"), align:"center" });
+  });
+
+  const YB = 6.00;
+  X.T(k, "Avance del calendario", { x:0.57, y:YB, w:4.0, h:0.24, fontSize:10.5, bold:true, color:X.H("navy") });
+  k.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38, h:0.17, fill:{ color:"E4E8F0" }, line:{ type:"none" } });
+  k.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38 * f.corrido / f.total, h:0.17,
+    fill:{ color:X.H("navy") }, line:{ type:"none" } });
+  X.T(k, `${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} del proyecto corrido`,
+    { x:0.57, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:X.H("gris") });
+  X.T(k, `Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}`,
+    { x:6.95, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:X.H("gris"), align:"right" });
+  X.T(k, "Notas: " + repNota("kpis"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
 function armarDirectorio(pptx, fondos){
   const f = fotoReporte();
   const D = repDatos(f);
@@ -14606,6 +14706,7 @@ function armarDirectorio(pptx, fondos){
     T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
     T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
   };
+  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true };
 
   /* ---- D1 · Carátula --------------------------------------------------- */
   const c = lamina(fondos.caratula);
@@ -14614,55 +14715,6 @@ function armarDirectorio(pptx, fondos){
     { x:0.82, y:5.84, w:8.6, h:0.38, fontSize:14, color:"FFFFFF" });
   T(c, "Corte al " + repFechaLarga(f.hoy),
     { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
-
-  /* ---- D2 · Dónde está el proyecto -------------------------------------
-     Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
-     ocho segundos y salir sabiendo si el proyecto va bien. */
-  const a = lamina(fondos.contenido);
-  titulo(a, "Dónde está el proyecto",
-    `Día ${f.corrido} de ${f.total} · quedan ${f.restante} días hasta el ${repFechaLarga(f.fin)}`);
-
-  const CIF = [
-    { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
-      pie: `${f.restante} días por delante`, color:"gris" },
-    { n: String(f.contacto), et:"comercios contactados",
-      pie: `${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`, color:"azul" },
-    { n: String(f.objetivo), et:"con el objetivo cumplido",
-      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja" },
-    { n: String(f.ventasNuevas), et:"afiliaciones nuevas",
-      pie: f.metaV ? `meta al cierre: ${f.metaV}` : "", color:"verde" }
-  ];
-  const WC2 = 2.95, GC2 = 0.19;
-  CIF.forEach((x, i) => {
-    const px = 0.57 + i * (WC2 + GC2);
-    caja(a, px, 1.90, WC2, 2.10, "FFFFFF", REP_LINEA);
-    a.addShape(pptx.ShapeType.rect, { x:px, y:1.90, w:WC2, h:0.09,
-      fill:{ color:H(x.color) }, line:{ type:"none" } });
-    T(a, x.n,   { x:px + 0.22, y:2.16, w:WC2 - 0.44, h:0.80, fontSize:40, bold:true,
-      fontFace:NEG, color:H("navy") });
-    T(a, x.et,  { x:px + 0.22, y:3.00, w:WC2 - 0.44, h:0.34, fontSize:11.5, color:H("gris") });
-    T(a, x.pie, { x:px + 0.22, y:3.38, w:WC2 - 0.44, h:0.42, fontSize:10, color:H("gris2") });
-  });
-
-  /* La barra del calendario. Es lo que impide leer las cifras de arriba como
-     un logro o como un atraso sin saber contra cuánto tiempo. */
-  T(a, "Avance del calendario", { x:0.57, y:4.34, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
-  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.66, w:12.38, h:0.20, fill:{ color:"D3DBEB" }, line:{ type:"none" } });
-  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.66, w:12.38 * f.corrido / f.total, h:0.20,
-    fill:{ color:H("navy") }, line:{ type:"none" } });
-  T(a, `${repFecha(f.ini)}`, { x:0.57, y:4.94, w:4.0, h:0.24, fontSize:10, color:H("gris2") });
-  T(a, `${repFecha(f.fin)}`, { x:8.95, y:4.94, w:4.0, h:0.24, fontSize:10, color:H("gris2"), align:"right" });
-
-  caja(a, 0.57, 5.52, 12.38, 1.34, REP_BANDA);
-  a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.52, w:0.10, h:1.34,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(a, "La lectura", { x:0.86, y:5.64, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
-  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, el portafolio va ${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} contactado. `
-     + (PR.contacto.llega
-        ? `Sosteniendo el ritmo actual queda cubierto antes del cierre.`
-        : `Sosteniendo el ritmo actual se llega a ${PR.contacto.proyectado} de ${f.portafolio}: faltarían ${PR.contacto.brecha} comercios.`)
-     + ` El tramo que define el resultado no es el contacto sino lo que sigue: de los contactados, ${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} llegó a visita.`,
-    { x:0.86, y:5.94, w:11.8, h:0.80, fontSize:12, color:H("gris") });
 
   /* ---- D3 · Cómo se construyó ------------------------------------------ */
   const h = lamina(fondos.contenido);
@@ -14692,29 +14744,13 @@ function armarDirectorio(pptx, fondos){
     T(h, relatoD, { x:0.80, y:5.74, w:11.92, h:0.94, fontSize:11, color:H("gris") });
   }
 
-  /* ---- D4 · El embudo --------------------------------------------------- */
-  const e = lamina(fondos.contenido);
-  titulo(e, "Del portafolio asignado al objetivo cumplido",
-    `${f.portafolio} comercios de la base congelada · ${repFecha(f.hoy)}`);
-  const maxE = Math.max(1, ...f.embudo.map(p => p.n));
-  f.embudo.forEach((p, i) => {
-    const py = 1.92 + i * 0.86;
-    T(e, p.label, { x:0.57, y:py, w:2.30, h:0.40, fontSize:12.5, bold:true, color:H("navy"), align:"right" });
-    const bw = Math.max(0.05, 7.10 * p.n / maxE);
-    e.addShape(pptx.ShapeType.rect, { x:3.05, y:py, w:bw, h:0.40,
-      fill:{ color:H(p.color) }, line:{ type:"none" } });
-    T(e, String(p.n), { x:3.05 + bw + 0.16, y:py, w:1.10, h:0.40, fontSize:16, bold:true,
-      fontFace:NEG, color:H(p.color) });
-    T(e, repPct(p.pct), { x:3.05 + bw + 1.30, y:py, w:1.00, h:0.40, fontSize:10.5, color:H("gris2") });
-    if (p.texto) T(e, repPct(p.conv) + " " + p.texto,
-      { x:11.10, y:py, w:1.85, h:0.40, fontSize:10.5, color:H("gris"), align:"right" });
-  });
-  caja(e, 0.57, 6.18, 12.38, 0.94, REP_BANDA);
-  e.addShape(pptx.ShapeType.rect, { x:0.57, y:6.18, w:0.10, h:0.94,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(e, "Dónde se define el resultado", { x:0.86, y:6.28, w:4.5, h:0.26, fontSize:11, bold:true, color:H("navy") });
-  T(e, `El portafolio se contacta a buen ritmo. El escalón que decide el resultado del proyecto es el de la visita: de cada cien comercios gestionados, ${repNum(f.gestion ? f.visita / f.gestion * 100 : 0, 0)} recibe una visita, y de cada cien visitados ${repNum(f.visita ? f.objetivo / f.visita * 100 : 0, 0)} cumple el objetivo. Ensanchar ese tramo es lo que mueve el número de diciembre.`,
-    { x:0.86, y:6.56, w:11.8, h:0.48, fontSize:11, color:H("gris") });
+  /* ---- D3 · El embudo y los tres objetivos ------------------------------
+     Las dos láminas que José dio por buenas el 26/08. Son exactamente las
+     mismas que las del reporte largo —misma función, mismo dibujo— y no una
+     copia parecida: el comité y la gestión tienen que estar mirando la misma
+     figura, o la conversación se vuelve sobre cuál de las dos está bien. */
+  repLaminaEmbudo(X, f);
+  repLaminaObjetivos(X, f);
 
   /* ---- D5 · El desarrollo, semana a semana ------------------------------
      Una sola serie acumulada. Un comité no necesita ver cuánto se hizo cada
@@ -14929,84 +14965,11 @@ function armarPPTX(pptx, fondos){
   T(h, "Notas: datos al " + repFecha(f.hoy) + ". " + repNota("hitos"),
     { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
 
-  /* ---- 3 · El embudo --------------------------------------------------- */
-  const e = lamina(fondos.contenido);
-  T(e, "Del portafolio asignado al objetivo cumplido",
-    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
-  T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`,
-    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
-
-  const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
-        X_VAL = 9.10, X_CNV = 10.55, W_CNV = 2.40,
-        Y0 = 1.98, ALTO = 0.46, GAP = 0.155;
-  f.embudo.forEach((p, i) => {
-    const y = Y0 + i * (ALTO + GAP), col = H(p.color);
-    T(e, p.label, { x:X_LBL, y, w:W_LBL, h:ALTO, fontSize:11.5, bold:true, align:"right",
-      color: (i === 0 || i === f.embudo.length - 1) ? H("navy") : H("gris") });
-    const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
-    e.addShape(pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
-    T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
-    T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:H("gris2") });
-    if (i > 0) T(e, repPct(p.conv) + " " + p.texto,
-      { x:X_CNV, y, w:W_CNV, h:ALTO, fontSize:10.5, color:H("gris") });
-  });
-
-  const yc = Y0 + f.embudo.length * (ALTO + GAP) - 0.02;
-  caja(e, X_BAR, yc, 7.25, 0.32, "FBDDCF");
-  T(e, "Además: " + repAparte(f),
-    { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:H("naranja") });
-
-  const LEC = ((REPORTE.lecturas || {}).embudo) || [];
-  const YC = 5.46, HC = 1.34, WC = 6.04;
-  LEC.slice(0, 2).forEach((l, i) => {
-    const x = 0.57 + i * (WC + 0.30);
-    caja(e, x, YC, WC, HC, "FFFFFF", REP_LINEA);
-    e.addShape(pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
-      fill:{ color:H(l.color) }, line:{ type:"none" } });
-    T(e, l.titulo, { x:x + 0.48, y:YC + 0.21, w:WC - 0.72, h:0.26, fontSize:12, bold:true, color:H("navy") });
-    T(e, l.texto,  { x:x + 0.24, y:YC + 0.60, w:WC - 0.48, h:0.66, fontSize:10.5, color:H("gris"), valign:"top" });
-  });
-  T(e, "Notas: " + repNota("embudo"),
-    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
-
-  /* ---- 4 · Los tres objetivos ------------------------------------------ */
-  const k = lamina(fondos.contenido);
-  T(k, "Avance contra los tres objetivos del proyecto",
-    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
-  T(k, `Objetivos medidos al cierre del proyecto, sobre la base congelada de ${f.portafolio} comercios${
-    f.baseFact ? " y " + repSoles(f.baseFact) + " de facturación" : ""}`,
-    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
-
-  const YK = 1.90, HK = 3.86, WK = 3.926;
-  f.kpis.forEach((x, i) => {
-    const px = 0.57 + i * (WK + 0.30), col = H(x.color);
-    caja(k, px, YK, WK, HK, "FFFFFF", "DDE2EC");
-    T(k, x.nombre, { x:px + 0.26, y:YK + 0.24, w:WK - 1.30, h:0.56, fontSize:12.5, bold:true, color:H("navy"), valign:"top" });
-    k.addShape(pptx.ShapeType.roundRect, { x:px + WK - 0.92, y:YK + 0.24, w:0.66, h:0.26,
-      fill:{ color:col }, line:{ type:"none" }, rectRadius:0.13 });
-    T(k, x.peso + "%", { x:px + WK - 0.92, y:YK + 0.245, w:0.66, h:0.26, fontSize:9.5, bold:true, color:"FFFFFF", align:"center" });
-    T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:40, bold:true, fontFace:NEG, color:col });
-    T(k, x.sub,   { x:px + 0.26, y:YK + 1.64, w:WK - 0.52, h:0.24, fontSize:10, color:H("gris2") });
-    x.filas.forEach(([a, b], j) => {
-      const yy = YK + 2.04 + j * 0.44;
-      T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:H("gris") });
-      T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:H("navy"), align:"right" });
-    });
-    caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, REP_BANDA);
-    T(k, x.pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:H("navy"), align:"center" });
-  });
-
-  const YB = 6.00;
-  T(k, "Avance del calendario", { x:0.57, y:YB, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
-  k.addShape(pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38, h:0.17, fill:{ color:"E4E8F0" }, line:{ type:"none" } });
-  k.addShape(pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38 * f.corrido / f.total, h:0.17,
-    fill:{ color:H("navy") }, line:{ type:"none" } });
-  T(k, `${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} del proyecto corrido`,
-    { x:0.57, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:H("gris") });
-  T(k, `Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}`,
-    { x:6.95, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:H("gris"), align:"right" });
-  T(k, "Notas: " + repNota("kpis"),
-    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
+  /* El contexto que reciben las láminas compartidas: las mismas herramientas
+     de dibujo, para que se vean igual salgan del documento que salgan. */
+  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG };
+  repLaminaEmbudo(X, f);
+  repLaminaObjetivos(X, f);
 
   /* =======================================================================
      De acá en adelante, lo que se acordó el 26/08. Las tres láminas que
