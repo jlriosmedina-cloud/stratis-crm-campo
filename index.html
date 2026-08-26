@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 18:48", huella:"31b02e" };
+const BUILD = { sello:"26/08/2026 19:13", huella:"1cfce1" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -13789,6 +13789,18 @@ const REP_COLOR = {
   naranja:"#F86F35", verde:"#0BBC96", gris:"#3F5073", gris2:"#A0ABBC"
 };
 const repCol = k => REP_COLOR[k] || REP_COLOR.gris;
+
+/* Los dos tonos de los recuadros del reporte.
+   El fondo de la plantilla de Stratis es un degradado que va del blanco a un
+   azul muy claro (#EFF3FC). Un recuadro pintado de #F6F9FF —que era lo que
+   había— queda POR ENCIMA de ese tono en la parte baja de la lámina: existe,
+   ocupa lugar y no se ve. La primera versión de estas láminas se revisó sobre
+   fondo gris de prueba, donde todo se leía; sobre la plantilla de verdad, la
+   mitad de los recuadros desaparecía.
+   REP_BANDA está deliberadamente por debajo del fondo, y REP_LINEA es un
+   borde que se distingue del degradado en cualquier punto de la lámina. */
+const REP_BANDA = "DDE4F4";
+const REP_LINEA = "B9C6E0";
 const repHex = k => repCol(k).replace("#", "");
 
 /* Los fondos son las láminas de la plantilla de Stratis, exportadas como
@@ -14525,7 +14537,7 @@ function armarPPTX(pptx, fondos){
   }
   const relato = (REPORTE.relato || {}).hitos || "";
   if (relato){
-    caja(h, 0.57, 5.38, 12.38, 1.08, "F6F9FF");
+    caja(h, 0.57, 5.38, 12.38, 1.08, REP_BANDA);
     T(h, relato, { x:0.95, y:5.56, w:11.62, h:0.74, fontSize:11.5, color:H("gris"), valign:"top" });
   }
   T(h, "Notas: datos al " + repFecha(f.hoy) + ". " + repNota("hitos"),
@@ -14554,7 +14566,7 @@ function armarPPTX(pptx, fondos){
   });
 
   const yc = Y0 + f.embudo.length * (ALTO + GAP) - 0.02;
-  caja(e, X_BAR, yc, 7.25, 0.32, "FFF9F7");
+  caja(e, X_BAR, yc, 7.25, 0.32, "FBDDCF");
   T(e, "Además: " + repAparte(f),
     { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:H("naranja") });
 
@@ -14562,7 +14574,7 @@ function armarPPTX(pptx, fondos){
   const YC = 5.46, HC = 1.34, WC = 6.04;
   LEC.slice(0, 2).forEach((l, i) => {
     const x = 0.57 + i * (WC + 0.30);
-    caja(e, x, YC, WC, HC, "F6F9FF");
+    caja(e, x, YC, WC, HC, "FFFFFF", REP_LINEA);
     e.addShape(pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
       fill:{ color:H(l.color) }, line:{ type:"none" } });
     T(e, l.titulo, { x:x + 0.48, y:YC + 0.21, w:WC - 0.72, h:0.26, fontSize:12, bold:true, color:H("navy") });
@@ -14594,7 +14606,7 @@ function armarPPTX(pptx, fondos){
       T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:H("gris") });
       T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:H("navy"), align:"right" });
     });
-    caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, "F6F9FF");
+    caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, REP_BANDA);
     T(k, x.pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:H("navy"), align:"center" });
   });
 
@@ -14630,9 +14642,9 @@ function armarPPTX(pptx, fondos){
       options: { fontSize:10, align: j === 0 ? "left" : "right", valign:"middle",
         bold: fi.esTotal || false,
         color: H(fi.esTotal ? "navy" : "gris"),
-        fill: { color: fi.esTotal ? "EDF1F8" : (i % 2 ? "F6F9FF" : "FFFFFF") } }
+        fill: { color: fi.esTotal ? REP_BANDA : (i % 2 ? REP_BANDA : "FFFFFF") } }
     })));
-    s.addTable([cab, ...cuerpo], { x, y, w, colW:anchos, border:{ type:"solid", color:"E0E5EE", pt:0.5 },
+    s.addTable([cab, ...cuerpo], { x, y, w, colW:anchos, border:{ type:"solid", color:REP_LINEA, pt:0.5 },
       fontFace:FUENTE, rowH:0.30, margin:0.06 });
   };
 
@@ -14650,7 +14662,7 @@ function armarPPTX(pptx, fondos){
   V.vistas.forEach((x, i) => {
     const px = 0.57 + i * (WVIS + GVIS);
     const d = x.datos.total;
-    caja(lv, px, YVIS, WVIS, HVIS, "FFFFFF", "E0E5EE");
+    caja(lv, px, YVIS, WVIS, HVIS, "FFFFFF", REP_LINEA);
     /* La vista de retención lleva una banda de color y las otras no: el
        acuerdo dice que el foco es retención, y una lámina donde las tres
        vistas pesan lo mismo dice lo contrario de lo que se acordó. */
@@ -14684,7 +14696,7 @@ function armarPPTX(pptx, fondos){
     filas.forEach(([a, b], j) => {
       const yy = YVIS + 1.76 + j * 0.38;
       const ultima = j === filas.length - 1;
-      if (ultima) caja(lv, px + 0.16, yy - 0.03, WVIS - 0.32, 0.36, "EDF1F8");
+      if (ultima) caja(lv, px + 0.16, yy - 0.03, WVIS - 0.32, 0.36, REP_BANDA);
       T(lv, a, { x:px + 0.24, y:yy, w:WVIS - 1.34, h:0.30, fontSize:10.5,
         color: ultima ? H("navy") : H("gris"), bold: ultima });
       T(lv, b, { x:px + WVIS - 1.14, y:yy, w:0.94, h:0.30, fontSize:10.5, bold:true,
@@ -14693,7 +14705,7 @@ function armarPPTX(pptx, fondos){
     T(lv, x.pie, { x:px + 0.22, y:YVIS + 4.10, w:WVIS - 0.44, h:0.48, fontSize:9, color:H("gris2") });
   });
 
-  caja(lv, 0.57, 6.52, 12.38, 0.80, "EDF1F8");
+  caja(lv, 0.57, 6.52, 12.38, 0.80, REP_BANDA);
   T(lv, "Por qué hay dos números de gestión",
     { x:0.75, y:6.62, w:3.6, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
   const sumG = V.vistas.reduce((n, x) => n + x.datos.total.gestiones, 0);
@@ -14746,7 +14758,7 @@ function armarPPTX(pptx, fondos){
     { x:0.57, y:5.00, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
 
   const YCMP = 5.24;
-  caja(lev, 0.57, YCMP, 12.38, 1.28, "FFFFFF", "C9D3E4");
+  caja(lev, 0.57, YCMP, 12.38, 1.28, "FFFFFF", REP_LINEA);
   T(lev, `Al mismo día de cada periodo — los primeros ${E.corridos} días`,
     { x:0.75, y:YCMP + 0.12, w:6.0, h:0.26, fontSize:11, bold:true, color:H("navy") });
   const compara = [
@@ -14773,7 +14785,7 @@ function armarPPTX(pptx, fondos){
 
   /* ---- 7 · La divisoria ------------------------------------------------ */
   const dv = lamina(fondos.contenido);
-  caja(dv, 0.57, 2.55, 12.38, 2.40, "F6F9FF");
+  caja(dv, 0.57, 2.55, 12.38, 2.40, "FFFFFF", REP_LINEA);
   dv.addShape(pptx.ShapeType.rect, { x:0.57, y:2.55, w:0.12, h:2.40,
     fill:{ color:H("naranja") }, line:{ type:"none" } });
   T(dv, "Hasta aquí, el proyecto",
@@ -14798,7 +14810,7 @@ function armarPPTX(pptx, fondos){
      mismo, y sin decirlo la tabla parece contradecirse: cuatro filas al 90% y
      un total al 13%. Cada una responde una pregunta distinta y las dos hacen
      falta — la del ejecutivo mide su trabajo, la del equipo mide el proyecto. */
-  caja(r1, 0.57, 4.10, 12.38, 1.06, "EDF1F8");
+  caja(r1, 0.57, 4.10, 12.38, 1.06, REP_BANDA);
   T(r1, "Por qué la fila del equipo no es el promedio de las otras",
     { x:0.75, y:4.20, w:5.4, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
   T(r1, `La cobertura de cada ejecutivo se mide contra la cartera que tiene asignada: es lo que le tocó y lo que puede trabajar. La del equipo se mide contra los ${f.portafolio} comercios de la base congelada, que incluye los que todavía no tienen ficha en el CRM. Por eso las filas pueden ir bien y el proyecto ir atrasado al mismo tiempo: son dos preguntas distintas y las dos importan.`,
@@ -14885,7 +14897,7 @@ function armarPPTX(pptx, fondos){
 
   T(es, "Naranja, base de retención · azul brillante, leads dentro de la cartera · azul oscuro, leads fuera de la cartera",
     { x:0.57, y:6.14, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
-  caja(es, 0.57, 6.44, 12.38, 0.86, "EDF1F8");
+  caja(es, 0.57, 6.44, 12.38, 0.86, REP_BANDA);
   T(es, "Lo que hay que mirar",
     { x:0.75, y:6.54, w:3.0, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
   T(es, pctEq === null
@@ -14927,7 +14939,7 @@ function armarPPTX(pptx, fondos){
       + (x.pend ? ` · ${x.pend} sin clasificar` : ""),
       { x:0.57, y:py + 0.36, w:2.50, h:0.22, fontSize:9, color:H("gris2") });
   });
-  caja(vi, 0.57, 5.86, 12.38, 0.92, "EDF1F8");
+  caja(vi, 0.57, 5.86, 12.38, 0.92, REP_BANDA);
   T(vi, `${totVis} visitas efectivas en el proyecto`,
     { x:0.75, y:5.96, w:5.0, h:0.30, fontSize:13, bold:true, fontFace:NEG, color:H("navy") });
   T(vi, "Naranja, visitas a la base de retención; azul, a leads de venta; gris, visitas en fichas de venta cuyo origen todavía nadie marcó. La visita es el escalón donde el embudo se angosta y es la parte del plan que hoy está más lejos de su meta.",
@@ -14945,7 +14957,7 @@ function armarPPTX(pptx, fondos){
     const WA = (12.38 - 0.24 * (AC.length - 1)) / AC.length;
     AC.forEach((x, i) => {
       const px = 0.57 + i * (WA + 0.24);
-      caja(ac, px, 1.78, WA, 4.30, "FFFFFF", "E0E5EE");
+      caja(ac, px, 1.78, WA, 4.30, "FFFFFF", REP_LINEA);
       ac.addShape(pptx.ShapeType.rect, { x:px, y:1.78, w:WA, h:0.09,
         fill:{ color:H(x.color || "azul") }, line:{ type:"none" } });
       T(ac, String(x.titulo || "").toUpperCase(),
@@ -14961,7 +14973,7 @@ function armarPPTX(pptx, fondos){
         T(ac, x.pendiente, { x:px + 0.24, y:2.40, w:WA - 0.50, h:0.60,
           fontSize:10.5, italic:true, color:H("naranja"), valign:"top" });
     });
-    caja(ac, 0.57, 6.28, 12.38, 0.78, "EDF1F8");
+    caja(ac, 0.57, 6.28, 12.38, 0.78, REP_BANDA);
     T(ac, REPORTE.cierre_acuerdos || REPORTE_DEF.cierre_acuerdos || "",
       { x:0.75, y:6.38, w:12.02, h:0.58, fontSize:11.5, bold:true, color:H("navy") });
   }
