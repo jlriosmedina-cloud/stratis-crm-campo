@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 19:04", huella:"0c3025" };
+const BUILD = { sello:"27/08/2026 20:53", huella:"5483a8" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1928,6 +1928,73 @@ function comercioGestionado(c, regs, hasta){
   if (!tieneCierreRegistrado(c) && huboContactoEfectivo(regs, hasta)) return true;
   const u = ultimaActividad(c, regs, hasta);
   return !!u && u.ok;
+}
+
+/* ---- La última gestión, escrita ------------------------------------------
+   Pedido de José el 27/08, y nace de un problema concreto: la hoja que se
+   exporta para BBVA no llevaba ninguna columna que dijera CUÁL es la última
+   gestión de cada comercio. Sin ella, cualquier fórmula del lado de Sheets
+   tiene que reconstruirla —y no puede: `Ultimo_Resultado` solo distingue
+   cuatro valores, `Fecha_Ultima_Gestion` viene vacía en varias filas, y un
+   comercio tiene muchas filas sin nada que marque cuál manda—. El resultado
+   eran fórmulas que contaban «alguna» gestión donde la regla dice «la última»,
+   y de ahí las contradicciones entre la hoja y el CRM.
+
+   Así que el CRM lo escribe. La hoja deja de deducir y pasa a leer: una
+   columna con el veredicto (`SI`/`NO`), otra con la categoría en palabras y
+   otra con el medio, para poder excluir a mano lo que se quiera —«si la última
+   fue solo chat, no la cuentes»— sin volver a implementar la regla.
+
+   El orden de prioridad es el mismo que el de `comercioGestionado`, y tiene
+   que seguir siéndolo: si alguna vez esta función y aquella dijeran cosas
+   distintas, volveríamos justo al problema que vino a resolver. Hay una prueba
+   que las compara comercio por comercio. */
+const CAT_CIERRE = { RETENIDO:"Retención concretada", VENTA:"Venta concretada",
+                     PERDIDO:"Perdido" };
+
+function ultimaGestionDe(c, regs, hasta){
+  const tope = hasta || hoyISO();
+  const dia = d => String(d || "").slice(0, 10);
+  const reales = (regs || []).filter(r => !esReconstruida(r)
+    && dia(r.Fecha_Contacto) && dia(r.Fecha_Contacto) <= tope);
+  const cerrado    = tieneCierreRegistrado(c);
+  const cerradoEl  = cerrado && c.cerrado_en ? dia(c.cerrado_en) : "";
+  const etiqueta   = () => CAT_CIERRE[c.resultado_gestion] || "Cerrado";
+
+  /* Cerrado sin fecha: pasó, pero no se puede ubicar en el tiempo. */
+  if (cerrado && !c.cerrado_en)
+    return { dia:"", categoria:etiqueta(), medio:"", cuenta:"SI" };
+
+  let ultDia = "";
+  reales.forEach(r => { const d = dia(r.Fecha_Contacto); if (d > ultDia) ultDia = d; });
+  if (cerradoEl && cerradoEl > ultDia) ultDia = cerradoEl;
+
+  if (!ultDia) return { dia:"", categoria:"Sin gestiones", medio:"", cuenta:"NO" };
+
+  /* El cierre es el hecho que terminó el caso: manda en su día. */
+  if (cerradoEl === ultDia)
+    return { dia:ultDia, categoria:etiqueta(), medio:"", cuenta:"SI" };
+
+  /* Dentro del último día manda lo que califica —esa es la regla del día como
+     unidad—, y entre varias, la más tardía. */
+  const delDia  = reales.filter(r => dia(r.Fecha_Contacto) === ultDia);
+  const validas = delDia.filter(esGestionValida);
+  const grupo   = validas.length ? validas : delDia;
+  const orden   = r => String(r.Hora_Contacto || "") + "|" + String(r.Creado_En || "");
+  const r = grupo.slice().sort((a, b) => orden(a).localeCompare(orden(b)))[grupo.length - 1];
+
+  if (validas.length){
+    const cat = r.Cumple_Visita === "SI" ? "Visita realizada"
+              : esEfectivo(r.Resultado)  ? "Cliente respondió"
+              : "Correo enviado";
+    return { dia:ultDia, categoria:cat, medio:r.Tipo_Contacto || "", cuenta:"SI" };
+  }
+  /* No calificó el día, pero el titular ya había contestado antes y el caso
+     sigue abierto: es negociación vigente y cuenta. */
+  if (huboContactoEfectivo(regs, tope))
+    return { dia:ultDia, categoria:"Negociación vigente", medio:r.Tipo_Contacto || "", cuenta:"SI" };
+
+  return { dia:ultDia, categoria:"Intento sin respuesta", medio:r.Tipo_Contacto || "", cuenta:"NO" };
 }
 
 /* La misma pregunta, acotada a una ventana y a un montón de filas que ya
@@ -11238,6 +11305,23 @@ const COLS_DETALLE = [
   /* --- Paso 3 · En qué quedó ------------------------------------------- */
   "Resultado_Gestion","Calificacion","Comentario_Ejecutivo",
 
+  /* --- Paso 4 · La última gestión, para poder contarla desde la hoja ----
+     Las tres últimas columnas de la hoja, y van al final a propósito: se
+     pueden agregar sin correr nada de lo que ya está pegado.
+
+     Existen porque sin ellas la hoja no puede aplicar la regla. «Comercio
+     gestionado» es «su ÚLTIMA gestión califica», y eso no se deduce desde
+     Sheets: un comercio tiene muchas filas y ninguna columna decía cuál
+     manda. Las fórmulas terminaban contando «alguna» gestión, que es otra
+     pregunta y da otro número — de ahí las contradicciones entre la base que
+     se le entrega al banco y lo que muestra el CRM.
+
+     `Cuenta_Como_Gestion` es el veredicto del CRM, para contar con un
+     COUNTIF y sin reimplementar nada. Las otras dos están para poder afinar
+     a mano —«si la última fue solo chat, no la cuentes»— sin perder el
+     veredicto de referencia. */
+  "Ultima_Gestion","Ultima_Gestion_Fecha","Ultima_Gestion_Medio","Cuenta_Como_Gestion",
+
   /* --- Y lo que hay que revisar de esta fila ---------------------------- */
   "Alertas"];
 
@@ -11523,6 +11607,16 @@ function filaComercio(c, soloEntrega){
       Comentario_Ejecutivo: ultimo("Comentario_Ejecutivo") || (MARCA_DEDUCIDO + relatoCaso(c, regs, efectivos)),
       Alertas:              alertasDe(c, regs, efectivos, suma)
     };
+    /* La última gestión sale de la MISMA función que usa el CRM en pantalla y
+       en el embudo del deck. No se recalcula acá: si se recalculara, esta hoja
+       sería un cuarto lugar donde la palabra «gestión» puede significar otra
+       cosa, que es exactamente el problema que estas columnas vienen a cerrar.
+       El medio va con su nombre en español, el mismo que el resto de la hoja. */
+    const ug = ultimaGestionDe(c, DB.historiaDe(c.customer_id));
+    det.Ultima_Gestion        = ug.categoria;
+    det.Ultima_Gestion_Fecha  = ug.dia;
+    det.Ultima_Gestion_Medio  = ug.medio ? nomTipo(ug.medio) : "";
+    det.Cuenta_Como_Gestion   = ug.cuenta;
     Object.assign(det, coordBBVA(c));
     return entrega.concat(COLS_DETALLE.map(k => det[k] === undefined ? "" : det[k]));
 }
