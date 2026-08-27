@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 14:16", huella:"d6a202" };
+const BUILD = { sello:"27/08/2026 16:34", huella:"72fd0f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1849,6 +1849,79 @@ const esGestionValida = r => !esReconstruida(r) &&
   (esCorreoEvidenciable(r) || esEfectivo(r.Resultado) || r.Cumple_Visita === "SI");
 const CIERRES_REGISTRADOS = ["RETENIDO", "VENTA", "PERDIDO"];
 const tieneCierreRegistrado = c => !!c && CIERRES_REGISTRADOS.includes(c.resultado_gestion);
+
+/* ---- «La actividad más reciente», en un solo lugar -----------------------
+   La otra mitad de la regla del 27/08, y la que se quedó fuera el primer día:
+   «se tomará la actividad más reciente; aplícalo para todo lo que es gestión».
+   No basta con que en algún momento haya habido un correo —lo que decide es en
+   qué quedó el comercio—. Un correo del 14 seguido de una llamada sin
+   respuesta del 24 dice que el caso se enfrió.
+
+   El 27/08 el Reporte ya contaba así y la Cartera no: preguntaba `some()`, o
+   sea «¿alguna vez?». Vanessa veía 6 pendientes donde la regla daba 38, y los
+   32 que faltaban eran justamente los peores —los que se ven trabajados y no
+   lo están—. Dos definiciones de una palabra dan dos números; por eso esto
+   vive acá, en singular, y el filtro de la Cartera, el panel del ejecutivo y
+   el embudo del reporte preguntan todos lo mismo.
+
+   El cierre no es una interacción: vive en la ficha. Entra a la línea de
+   tiempo en su fecha de cierre —y de último en su día, que para eso es el
+   hecho que terminó el caso— y compite por «la más reciente» como todo lo
+   demás. Un cierre sin fecha no se puede ubicar en el tiempo, pero el hecho es
+   cierto: cuenta igual. */
+/* ---- La unidad es el DÍA, no la fila ------------------------------------
+   Segunda corrección del 27/08, y salió de mirar por qué se caían los que se
+   caían. A Alfredo se le cayeron 43 comercios: el 17/08 mandó el correo y esa
+   misma tarde —15:03, 15:25, 16:44…— mandó un WhatsApp que nadie contestó. El
+   WhatsApp era más tarde en el día, se convertía en «la actividad más
+   reciente» y tumbaba al correo de horas antes.
+
+   Eso castiga el seguimiento: el comercio con correo MÁS insistencia contaba
+   peor que el mismo comercio con solo el correo. Está al revés, y ninguna
+   regla que premie no insistir puede quedarse.
+
+   Lo que enfría un comercio es el silencio de los días siguientes, no el
+   intento del mismo día. Así que un día cuenta como trabajado si ESE DÍA pasó
+   algo que califica, sin importar qué más se registró después dentro del
+   mismo día; y lo que decide es el último día con actividad.
+
+   La distinción es la correcta: a Alfredo, cuyos seguimientos fueron la misma
+   tarde, le devuelve 40 comercios; a Vanessa, cuyos seguimientos del 24/08
+   fueron seis días después del correo del 18, le devuelve 3. Esos 16 de
+   Vanessa sí se enfriaron. */
+function ultimoDiaConActividad(regs, hasta, extraDia){
+  let dia = null, ok = false;
+  const ver = (d, califica) => {
+    if (!d || (hasta && d > hasta)) return;
+    if (dia === null || d > dia){ dia = d; ok = califica; }
+    else if (d === dia) ok = ok || califica;
+  };
+  (regs || []).forEach(r => {
+    if (esReconstruida(r)) return;
+    ver(String(r.Fecha_Contacto || "").slice(0,10), esGestionValida(r));
+  });
+  /* El cierre no es una interacción: vive en la ficha y entra por su fecha. */
+  if (extraDia) ver(String(extraDia).slice(0,10), true);
+  return dia === null ? null : { d: dia, ok };
+}
+
+const ultimaActividad = (c, regs, hasta) => ultimoDiaConActividad(
+  regs, hasta, tieneCierreRegistrado(c) && c.cerrado_en ? c.cerrado_en : null);
+
+function comercioGestionado(c, regs, hasta){
+  /* Cerrado sin fecha de cierre: no se puede ubicar, pero pasó. */
+  if (tieneCierreRegistrado(c) && !c.cerrado_en) return true;
+  const u = ultimaActividad(c, regs, hasta);
+  return !!u && u.ok;
+}
+
+/* La misma pregunta, acotada a una ventana y a un montón de filas que ya
+   vienen filtradas por comercio, por ejecutivo y por periodo. Es lo que
+   necesitan el Tablero y el Panel para «Gestionados en el periodo». */
+const ultimoDiaCalifica = filas => {
+  const u = ultimoDiaConActividad(filas, null, null);
+  return !!u && u.ok;
+};
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -3644,12 +3717,16 @@ const RULES = {
       _n: gest.length,
       _intentos: gest.length,
       _efectivos: gest.filter(r => esEfectivo(r.Resultado)).length,
-      /* ¿Este comercio cuenta como gestionado? Regla del 27/08: un hecho con
-         resultado, de cualquiera de los dos montones —al comercio o al
-         banco—, o un cierre registrado en la ficha. Vive acá y no en el filtro
-         de la Cartera para que la lista que se abre al tocar «Gestionados»
-         cuente lo mismo que el número que se tocó. */
-      _gestionado: regs.some(esGestionValida) || tieneCierreRegistrado(c),
+      /* ¿Este comercio cuenta como gestionado? Regla del 27/08 completa: la
+         ACTIVIDAD MÁS RECIENTE tiene que ser un hecho con resultado —de
+         cualquiera de los dos montones, al comercio o al banco— o el cierre
+         registrado en la ficha. `comercioGestionado` es la misma función que
+         contesta en el reporte: una sola definición, un solo número.
+
+         Acá decía `regs.some(...)` hasta el 27/08 por la tarde. Preguntaba
+         «¿alguna vez?» donde la regla pregunta «¿en qué quedó?», y por eso la
+         Cartera de Vanessa mostraba 6 pendientes contra los 38 del embudo. */
+      _gestionado: comercioGestionado(c, regs, hoyISO()),
       /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
       _banco: regs.filter(esGestionBanco).length,
       _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
@@ -5014,8 +5091,8 @@ function viewCartera(){
       ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],["sin_gestion","Faltan por gestionar"],
          ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
-          k === "gestionado" ? ` title="Comercios con al menos un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"`
-          : k === "sin_gestion" ? ` title="Comercios que todavía no cuentan como gestionados. Incluye los que ya tienen intentos sin respuesta, que se ven trabajados y no lo están"` : ""
+          k === "gestionado" ? ` title="Comercios cuya ÚLTIMA gestión es un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"`
+          : k === "sin_gestion" ? ` title="Comercios cuya última gestión fue un intento sin respuesta, o que no se han tocado. Los primeros se ven trabajados y no lo están: son los que hay que retomar"` : ""
         }>${l}</button>`).join("")}
     </div>
     ${avisoPorActualizar()}
@@ -9342,8 +9419,10 @@ function bloqueMiPeriodo(r){
   ${faltan ? `<button class="alerta-gest" data-verfaltan="1">
     <div class="ag-n">${faltan}</div>
     <div class="ag-t"><b>comercios te faltan por gestionar</b>
-      <span>Cuentan cuando les mandas un correo —al banco o al comercio—, cuando el cliente
-      te responde, cuando haces la reunión, o cuando cierras el caso.${
+      <span>Cuenta la <b>última</b> gestión de cada uno: vale si le mandaste un correo
+      —al banco o al comercio—, si el cliente te respondió, si hiciste la reunión o si
+      cerraste el caso. Si lo último que quedó fue un intento sin respuesta, el comercio
+      vuelve a esta lista.${
         sinTocar ? ` ${sinTocar} de ellos no tienen todavía ningún intento.` : ""}</span></div>
     <div class="ag-ir">Ver cuáles →</div>
   </button>` : `<div class="note ok" style="margin:0 0 12px">
@@ -12234,12 +12313,17 @@ function alcanceDe(correo, periodo){
   const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === correo && esVentaNueva(c)
                                          && cerroEn(c, periodo)).length;
   const logrado  = retenidos + recuperados;
-  /* Misma regla de gestión que el Tablero (27/08): un hecho con resultado, no
-     un intento registrado. Si acá contara otra cosa, la misma persona tendría
-     dos cifras de «trabajados» en dos pantallas del mismo CRM. */
+  /* Misma regla de gestión que el Tablero (27/08): la ÚLTIMA actividad del
+     comercio dentro del periodo tiene que calificar —y la unidad es el día, no
+     la fila—. Si acá contara otra cosa, la misma persona tendría dos cifras de
+     «trabajados» en dos pantallas del mismo CRM.
+
+     Decía `some()` hasta el 27/08 por la tarde, que es «¿alguna vez en el
+     periodo?». Se corrigió junto con la Cartera, a pedido de José, aunque esta
+     cifra alimenta el cálculo del bono. */
   const trabajados = suyos.filter(c =>
-    [...DB.delCliente(c.customer_id), ...DB.bbvaDe(c.customer_id)]
-      .some(r => mesISO(r.Fecha_Contacto) === periodo && esGestionValida(r))
+    ultimoDiaCalifica([...DB.delCliente(c.customer_id), ...DB.bbvaDe(c.customer_id)]
+      .filter(r => mesISO(r.Fecha_Contacto) === periodo))
     || (tieneCierreRegistrado(c) && cerroEn(c, periodo))).length;
   return { asignada, retenidos, recuperados, perdidos, logrado, trabajados, ventasNuevas,
            pct: asignada ? logrado / asignada : 0,
@@ -12273,12 +12357,23 @@ function filaEjecutivo(u, r){
 
      Se pregunta a los dos montones: `DB.todos()` es el del comercio y
      `DB.bbva()` el de la coordinación con el banco. El correo al ejecutivo de
-     BBVA es la mitad del trabajo y vive solo en el segundo. */
-  const gestionados = new Set();
+     BBVA es la mitad del trabajo y vive solo en el segundo.
+
+     Y lo que decide es la ÚLTIMA actividad dentro del rango, por DÍA: un
+     correo a las 15:03 y un WhatsApp sin respuesta a las 15:25 son el mismo
+     día de trabajo. Antes acá bastaba con que hubiera UNA fila válida en el
+     rango; eso contestaba «¿alguna vez?» donde la regla pregunta «¿en qué
+     quedó?», y era la misma brecha que tenía la Cartera. */
+  const porComercio = new Map();
   [...DB.todos(), ...DB.bbva()]
     .filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r))
-    .filter(esGestionValida)
-    .forEach(x => gestionados.add(String(x.Customer_id)));
+    .forEach(x => {
+      const cid = String(x.Customer_id);
+      if (!porComercio.has(cid)) porComercio.set(cid, []);
+      porComercio.get(cid).push(x);
+    });
+  const gestionados = new Set();
+  porComercio.forEach((filas, cid) => { if (ultimoDiaCalifica(filas)) gestionados.add(cid); });
 
   const asignada    = asignadaDe(u.correo, r);
   /* El cierre no es una interacción: vive en la ficha. Un comercio cerrado en
@@ -15035,14 +15130,21 @@ function repLineaGestion(f){
  * Con `desde` vacío mira toda la historia hasta `hasta`: eso es el acumulado.
  * Con los dos puestos mira solo esa semana: eso es «trabajados». */
 function repUltimaCalifica(linea, desde, hasta){
-  let ult = null;
+  /* El último DÍA, no el último hecho. Un correo a las 15:03 y un WhatsApp sin
+     respuesta a las 15:25 son el mismo día de trabajo, y el día cuenta si algo
+     de ese día califica —si no, la regla castigaría el seguimiento—. Ver
+     `ultimoDiaConActividad` en el core, que es la misma regla para la Cartera:
+     las dos pantallas tienen que dar el mismo conjunto, y hay una prueba que
+     lo exige. */
+  let dia = null, ok = false;
   for (let i = 0; i < linea.length; i++){
     const x = linea[i];
     if (desde && x.d < desde) continue;
     if (hasta && x.d > hasta) continue;
-    ult = x;                                  // la línea viene ordenada
+    if (dia === null || x.d > dia){ dia = x.d; ok = x.ok; }   // la línea viene ordenada
+    else if (x.d === dia) ok = ok || x.ok;
   }
-  return !!ult && ult.ok;
+  return ok;
 }
 
 /* Los comercios gestionados hasta una fecha. Sin fecha, los de hoy. */
