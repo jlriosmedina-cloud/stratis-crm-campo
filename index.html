@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 02:40", huella:"6b273b" };
+const BUILD = { sello:"27/08/2026 03:15", huella:"5e2643" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14254,7 +14254,17 @@ function fotoReporte(){
   }).length;
   const porDia = diasDeCampo ? contacto / diasDeCampo : 0;
   const faltanContactar = Math.max(0, portafolio - contacto);
-  const diasParaCubrir = porDia > 0 ? Math.ceil(faltanContactar / porDia) : null;
+  /* ---- La cobertura se proyecta sobre GESTIÓN, no sobre contacto ---------
+     Desde que el segundo escalón del embudo es la gestión, medir la cobertura
+     con el contacto a secas mete un tercer denominador en el mismo documento:
+     el embudo dice 68 de 841, la lectura decía «faltan 738 por contactar» y
+     nadie sabía cuál de los dos era el avance. Ahora las dos cuentas usan la
+     misma definición y el deck habla de una sola cosa. El contacto sigue
+     calculándose —se declara como fichas con algún intento— pero no proyecta
+     nada. */
+  const porDiaGestion = diasDeCampo ? gestion / diasDeCampo : 0;
+  const faltanGestionar = Math.max(0, portafolio - gestion);
+  const diasParaCubrir = porDiaGestion > 0 ? Math.ceil(faltanGestionar / porDiaGestion) : null;
   const fechaCobertura = diasParaCubrir === null ? "" :
     new Date(new Date(hoy).getTime() + diasParaCubrir * 86400000).toISOString().slice(0,10);
   const distritos = new Set(cart.map(c => c.distrito).filter(Boolean)).size;
@@ -14329,6 +14339,29 @@ function fotoReporte(){
   const hayFact = baseFact > 0 && (cerrados.length > 0 || factEsDeclarada);
   const crecimiento = hayFact ? (factActual - baseFact) / baseFact * 100 : null;
 
+  /* ---- La proyección al cierre del mes ---------------------------------
+     Idea de Gabriel, del 26/08: un mes a medio correr comparado contra un mes
+     entero siempre parece una caída, y esa comparación no dice nada. Lo que
+     se presenta es «vamos en X al día N, proyectado al cierre da Y, o sea Z%».
+
+     La proyección es LINEAL sobre días corridos, no hábiles: un comercio
+     factura el sábado igual que el martes, y la base contra la que se compara
+     también es un mes corrido. El método se escribe en la lámina —«sobre N de
+     M días»— para que cualquiera pueda rehacer la cuenta; una proyección sin
+     su regla a la vista es una cifra que hay que creer.
+
+     `facturacion_periodo_hasta` es la fecha del acumulado y se edita en
+     Ajustes. Sin ella no se proyecta nada: preferimos mostrar el acumulado
+     crudo antes que inventar un cierre de mes. */
+  const hastaFact = String(P.facturacion_periodo_hasta || "").slice(0, 10);
+  const mesFact = hastaFact.slice(0, 7);
+  const diasDelMes = mesFact
+    ? new Date(Date.UTC(Number(mesFact.slice(0,4)), Number(mesFact.slice(5,7)), 0)).getUTCDate() : 0;
+  const diaFact = hastaFact ? Number(hastaFact.slice(8,10)) : 0;
+  const proyectaFact = hayFact && factEsDeclarada && diaFact > 0 && diaFact < diasDelMes;
+  const factProyectada = proyectaFact ? factActual * diasDelMes / diaFact : null;
+  const crecProyectado = proyectaFact ? (factProyectada - baseFact) / baseFact * 100 : null;
+
   const oR = repObjetivo("reactivacion");
   const oV = repObjetivo("venta");
   const metaR = Number(oR.meta) || 0, metaV = Number(oV.meta) || 0;
@@ -14336,21 +14369,33 @@ function fotoReporte(){
 
   const kpis = [
     { id:"facturacion", nombre:oF.nombre, peso:oF.peso, color:oF.color, listo:hayFact,
-      cifra: hayFact ? (crecimiento >= 0 ? "+" : "\u2212") + Math.abs(crecimiento).toFixed(1).replace(".", ",") + "%" : "—",
-      sub: hayFact ? "de crecimiento sobre la base" : "falta cargar la facturación del periodo",
+      /* Con proyección, la cifra grande es la variación PROYECTADA al cierre
+         del mes; sin ella, la variación del acumulado como hasta ahora. */
+      cifra: !hayFact ? "—"
+        : (proyectaFact
+            ? (crecProyectado >= 0 ? "+" : "\u2212") + Math.abs(crecProyectado).toFixed(1).replace(".", ",") + "%"
+            : (crecimiento >= 0 ? "+" : "\u2212") + Math.abs(crecimiento).toFixed(1).replace(".", ",") + "%"),
+      sub: !hayFact ? "falta cargar la facturación del periodo"
+        : proyectaFact ? "proyectado al cierre de " + repMesLargo(hastaFact)
+                       : "de crecimiento sobre la base",
       filas: [
         ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
-        [factEsDeclarada ? (P.facturacion_periodo_etiqueta || "Facturación del periodo")
-                         : (ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado"),
+        [proyectaFact ? "Acumulado al " + repFecha(hastaFact)
+          : factEsDeclarada ? (P.facturacion_periodo_etiqueta || "Facturación del periodo")
+                            : (ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado"),
          hayFact ? repSoles(factActual) : "pendiente"],
-        [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
+        proyectaFact
+          ? ["Proyección al cierre del mes", repSoles(factProyectada)]
+          : [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
       ],
-      pie: hayFact
-        ? (factEsDeclarada ? "Total del periodo · falta el detalle por ejecutivo"
-           : metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
-                                   : "Meta de facturación alcanzada")
-        : "Se carga en Ajustes › Facturación del periodo",
-      avance: hayFact && metaPct ? Math.max(0, crecimiento) / metaPct * 100 : null },
+      pie: !hayFact ? "Se carga en Ajustes › Facturación del periodo"
+        : proyectaFact
+          ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días · meta al cierre ${repSoles(metaFact)}`
+          : (factEsDeclarada ? "Total del periodo · falta el detalle por ejecutivo"
+             : metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
+                                     : "Meta de facturación alcanzada"),
+      avance: hayFact && metaPct
+        ? Math.max(0, proyectaFact ? crecProyectado : crecimiento) / metaPct * 100 : null },
 
     { id:"reactivacion", nombre:oR.nombre, peso:oR.peso, color:oR.color, listo:true,
       cifra: String(objetivo),
@@ -14358,7 +14403,9 @@ function fotoReporte(){
       filas: [
         [oR.etiqueta_meta || "Meta al cierre", metaR + " comercios"],
         ["Avance sobre la meta", metaR ? repPct(objetivo / metaR * 100) : "—"],
-        ["Faltan contactar", faltanContactar + " comercios"]
+        /* Mismo denominador que el embudo: lo que falta para cubrir el
+           portafolio con GESTIÓN, no con un intento cualquiera. */
+        ["Faltan por gestionar", faltanGestionar + " comercios"]
       ],
       pie: ritmo(metaR, objetivo) > 0
         ? "Hacen falta " + repNum(ritmo(metaR, objetivo), 1) + " por semana"
@@ -14386,7 +14433,9 @@ function fotoReporte(){
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
     diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
+    porDiaGestion, faltanGestionar,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
+    hastaFact, diaFact, diasDelMes, proyectaFact, factProyectada, crecProyectado,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
 
   /* Las vistas y el evolutivo cuelgan de la misma foto, y se calculan después
@@ -14888,9 +14937,13 @@ function repSemanal(f){
     pico: { contactos: picoDe("contactos"), retenciones: picoDe("retenciones"),
             visitas: picoDe("visitas") },
     series: [
+      /* La unidad va en el nombre. «Visitas efectivas» a secas se confundía con
+         el escalón «Visitas» del embudo, que cuenta COMERCIOS visitados: 14
+         visitas pueden caer sobre 6 comercios nuevos y otros ya visitados, y
+         las dos cifras juntas parecían un error de cuenta. */
       { k:"contactos",   nombre:"Comercios trabajados", color:"azul" },
       { k:"retenciones", nombre:"Retenciones concretadas", color:"naranja" },
-      { k:"visitas",     nombre:"Visitas efectivas", color:"verde" }
+      { k:"visitas",     nombre:"Visitas realizadas", color:"verde" }
     ],
     variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
                  visitas: dif("visitas") } };
@@ -14948,10 +15001,17 @@ const repMesLargo = iso => {
    avisa al guardar en vez de dejar un {loQueSea} suelto en la lámina. */
 function repDatos(f){
   const e = k => f.embudo.find(x => x.k === k) || {};
+  /* El año va SIEMPRE que no sea el del corte. Sin él, una proyección de
+     cobertura que caía en noviembre de 2027 se leía «principios de noviembre»
+     y, al lado, «después del cierre» —que es el 18 de diciembre de 2026—.
+     Las dos frases eran ciertas y juntas parecían un error de cuenta: nadie
+     iba a adivinar que faltaba un año de distancia. */
   const mesDe = iso => {
     if (!iso) return "—";
     const d = Number(iso.slice(8,10)), m = MESES_ES[Number(iso.slice(5,7)) - 1] || "";
-    return (d <= 10 ? "principios de " : d <= 20 ? "mediados de " : "fines de ") + m;
+    const anio = iso.slice(0,4);
+    return (d <= 10 ? "principios de " : d <= 20 ? "mediados de " : "fines de ") + m
+         + (anio === String(f.hoy).slice(0,4) ? "" : " de " + anio);
   };
   return {
     /* el embudo */
@@ -14977,10 +15037,8 @@ function repDatos(f){
     /* El ritmo medido en gestiones con resultado, no en fichas tocadas. Son
        dos cosas distintas y hasta el 27/08 solo existía la segunda, así que
        cualquier lectura sobre «el ritmo» hablaba del intento y no del avance. */
-    porDiaGestion: (() => {
-      const v = f.diasDeCampo ? f.gestion / f.diasDeCampo : 0;
-      return repNum(v, v < 10 ? 1 : 0);
-    })(),
+    porDiaGestion: repNum(f.porDiaGestion, f.porDiaGestion < 10 ? 1 : 0),
+    faltanGestionar:f.faltanGestionar,
     porSemana:repNum(f.porDia * 7, f.porDia * 7 < 10 ? 1 : 0),
     mesCobertura:mesDe(f.fechaCobertura), fechaCobertura:repFecha(f.fechaCobertura),
     /* La frase «antes del cierre» era una promesa escrita a mano que dejaba de
@@ -15249,7 +15307,12 @@ function repLaminaEmbudo(X, f){
      barras y ahí lo tapaban las tarjetas de lectura: una leyenda que no se ve
      convierte un gráfico bien pensado en uno confuso. */
   X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`
-       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana · contorno: casos que se enfriaron` : ""),
+       /* La leyenda nombra solo lo que está dibujado: si ningún escalón bajó,
+          no hay contorno en la lámina y anunciarlo obliga a buscar algo que no
+          existe. */
+       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana` : "")
+       + (X.corte && f.embudo.some(pp => X.corte[pp.k] !== undefined && X.corte[pp.k] > pp.n)
+            ? " · contorno: casos que se enfriaron" : ""),
     { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
 
   const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
@@ -15513,27 +15576,41 @@ function armarDirectorio(pptx, fondos){
      Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
      ocho segundos y salir sabiendo si el proyecto va bien. */
   const a = lamina(fondos.contenido);
+  /* Cuánto se movió cada escalón del acumulado desde el corte del jueves. Sale
+     del MISMO objeto que usa la barra del embudo, no de una cuenta paralela:
+     dos láminas que dicen lo mismo tienen que leerlo del mismo lugar. */
+  const mov = k => (X.corte && X.corte[k] !== undefined) ? f[k] - X.corte[k] : 0;
   titulo(a, "Dónde está el proyecto hoy",
     `Acumulado al ${repFechaLarga(f.hoy)} · día ${f.corrido} de ${f.total}, quedan ${f.restante}`);
 
   const CIF = [
+    /* `mas:null` = esta tarjeta no tiene movimiento que declarar (el calendario
+       corre solo). Se distingue de `mas:0`, que sí lo tiene y vale cero. */
     { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
-      pie: `${f.restante} días hasta el cierre`, color:"gris" },
+      pie: `${f.restante} días hasta el cierre`, color:"gris", mas:null },
     /* La cifra del comité es la GESTIÓN, no el contacto a secas: comercios
        donde quedó un hecho con resultado —correo, contacto efectivo, reunión
        realizada o cierre—. Decir «644 comercios contactados» y después mostrar
        un embudo que arranca más abajo obliga a explicar la diferencia en voz
        alta cada vez. El intento sin resultado sigue existiendo y se declara
        debajo, en la misma tarjeta. */
+    /* El «+N» de esta lámina es la VARIACIÓN DEL ACUMULADO desde el jueves, la
+       misma que dibuja la barra del embudo dos láminas más adelante. Hasta el
+       27/08 acá salía la ACTIVIDAD de la semana —35 comercios trabajados, 14
+       visitas realizadas— y en el embudo la variación —−14 y +6—, las dos
+       rotuladas «esta semana» en láminas contiguas. Son dos cantidades ciertas
+       y distintas, y con la misma etiqueta se leen como una contradicción; un
+       revisor la encontró en la primera pasada. La actividad semanal vive en
+       la lámina 3, que es la que trata de eso. Acá manda el acumulado. */
     { n: String(f.gestion), et:"comercios con gestión",
       pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
-      color:"azul", mas: SEM.curso ? SEM.curso.contactos : 0 },
+      color:"azul", mas: mov("gestion") },
     { n: String(f.objetivo), et:"con el objetivo cumplido",
       pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja",
-      mas: SEM.curso ? SEM.curso.retenciones : 0 },
+      mas: mov("objetivo") },
     { n: String(f.visita), et:"comercios visitados",
       pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
-      color:"verde", mas: SEM.curso ? SEM.curso.visitas : 0 }
+      color:"verde", mas: mov("visita") }
   ];
   const WC2 = 2.95, GC2 = 0.19;
   CIF.forEach((x, i2) => {
@@ -15546,10 +15623,24 @@ function armarDirectorio(pptx, fondos){
     /* Lo que se sumó desde el jueves, al lado de la cifra. Un acumulado sin el
        movimiento de la semana obliga a preguntarlo, y esta lámina existe para
        que no haya que preguntar nada. */
-    if (x.mas) T(a, "+" + x.mas + " esta semana",
-      { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold:true, color:H(x.color) });
-    T(a, x.et,  { x:px + 0.22, y: x.mas ? 3.24 : 3.00, w:WC2 - 0.44, h:0.30, fontSize:11.5, color:H("gris") });
-    T(a, x.pie, { x:px + 0.22, y: x.mas ? 3.54 : 3.34, w:WC2 - 0.44, h:0.44, fontSize:10, color:H("gris2") });
+    /* La línea del movimiento ocupa su sitio SIEMPRE, tenga o no algo que
+       decir: si solo aparece en las tarjetas que se movieron, las cuatro
+       etiquetas quedan a alturas distintas y la fila se ve rota. Y «sin
+       cambios» es información —el objetivo no se movió en la semana—, no un
+       hueco que convenga dejar en blanco.
+       Puede ser negativo: con la regla de la actividad más reciente un escalón
+       baja cuando un caso se enfría. Se dibuja con su signo y en naranja. */
+    /* Sin el año: la fecha completa hacía que «sin cambios desde el jueves
+       20/08/2026» se partiera en dos líneas y se montara sobre la cifra. El
+       año ya está en el subtítulo de la lámina. */
+    const jueves = " desde el jueves " + repFecha(X.corteFecha).slice(0, 5);
+    if (x.mas !== null && x.mas !== undefined)
+      T(a, x.mas ? (x.mas > 0 ? "+" : "\u2212") + Math.abs(x.mas) + jueves
+                 : "sin cambios" + jueves,
+        { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold: !!x.mas,
+          color: !x.mas ? H("gris2") : x.mas > 0 ? H(x.color) : H("naranja") });
+    T(a, x.et,  { x:px + 0.22, y:3.24, w:WC2 - 0.44, h:0.30, fontSize:11.5, color:H("gris") });
+    T(a, x.pie, { x:px + 0.22, y:3.54, w:WC2 - 0.44, h:0.44, fontSize:10, color:H("gris2") });
   });
 
   T(a, "Avance del calendario", { x:0.57, y:4.42, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
@@ -15574,7 +15665,7 @@ function armarDirectorio(pptx, fondos){
      Esta puede bajar, y esa es exactamente su utilidad. */
   const g = lamina(fondos.contenido);
   titulo(g, "El desarrollo, semana a semana",
-    `Semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
+    `Actividad de cada semana —no el acumulado— · semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
 
   const DIA = repSemanaDia(f);
   const SW = 3.95, SG = 0.28, SY = 1.80, SH = 3.30;
@@ -15701,8 +15792,9 @@ function armarDirectorio(pptx, fondos){
       + `así que la variación contra ella se lee junto al promedio semanal de cada tarjeta.`
     : "";
   T(g, SEM.curso
-      ? `Cada tarjeta compara la semana en curso contra la anterior AL MISMO DÍA — hoy es el día ${DIA.diasAct} de siete—, no contra su total. `
-        + `Comparar tres días contra siete siempre daría una caída, y esa caída no diría nada sobre cómo va la semana.`
+      ? `Esta lámina cuenta la ACTIVIDAD de cada semana: cuántos comercios se trabajaron y cuántas visitas se hicieron, `
+        + `aunque el comercio ya contara desde antes. La lámina del embudo cuenta el ACUMULADO y cuánto se movió, que es otra cifra. `
+        + `Cada tarjeta compara la semana en curso contra la anterior AL MISMO DÍA — hoy es el día ${DIA.diasAct} de siete—, no contra su total.`
         + avisoPico
       : "Todavía no hay días corridos en la semana en curso." + avisoPico,
     { x:0.86, y:5.78, w:11.8, h:0.98, fontSize:11.5, color:H("gris") });
