@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 16:34", huella:"72fd0f" };
+const BUILD = { sello:"27/08/2026 17:57", huella:"8ce3bc" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -15298,13 +15298,21 @@ function fotoReporte(){
   const embudo = [
     { k:"portafolio",  label:"Portafolio asignado", n:portafolio, color:"navy",
       pct:100, conv:null, texto:"" },
-    { k:"gestion",     label:"Gestión",      n:gestion, color:"azul2",
+    /* El `sub` es la redacción que puso José sobre la lámina el 27/08. El
+       rótulo solo nombra el escalón; abajo dice, en las palabras del comité,
+       qué hecho lo mueve. «Gestión» a secas obligaba a leer las notas del pie
+       para saber qué se estaba contando. */
+    { k:"gestion",     label:"Gestión",      sub:"Clientes impactados por los ejecutivos",
+      n:gestion, color:"azul2",
       pct:pct(gestion),     conv:cnv(gestion, portafolio),      texto:"del portafolio" },
-    { k:"efectividad", label:"Efectividad",  n:efectividad, color:"azul",
+    { k:"efectividad", label:"Efectividad",  sub:"Respuesta concreta por parte del cliente",
+      n:efectividad, color:"azul",
       pct:pct(efectividad), conv:cnv(efectividad, gestion),     texto:"de los gestionados" },
-    { k:"visita",      label:"Visitas",      n:visita, color:"naranja",
+    { k:"visita",      label:"Visitas",      sub:"Presenciales o virtuales",
+      n:visita, color:"naranja",
       pct:pct(visita),      conv:cnv(visita, efectividad),      texto:"de los efectivos" },
-    { k:"objetivo",    label:"Retenciones",  n:objetivo, color:"verde",
+    { k:"objetivo",    label:"Retenciones",  sub:"Comercios recuperados",
+      n:objetivo, color:"verde",
       pct:pct(objetivo),    conv:cnv(objetivo, visita),         texto:"de las visitas" }
   ];
 
@@ -15479,6 +15487,18 @@ const REP_PERIODOS = [
 ];
 
 const repDia = iso => String(iso || "").slice(0, 10);
+
+/* ---- Cuándo NO se puede comparar contra la semana pasada ------------------
+   El 27/08/2026 cambió qué cuenta como comercio gestionado: pasó a mandar la
+   actividad más reciente, y por día. La cuenta de hoy y la que el comité vio el
+   jueves miden cosas distintas, así que su resta no es un avance ni un
+   retroceso: es el cambio de regla. Dibujarla como «−11 desde el jueves»
+   obliga a explicar en la sala algo que no pasó en el campo.
+
+   Se apaga sola: en cuanto el corte del jueves caiga bajo la regla nueva, la
+   comparación vuelve sin que nadie tenga que acordarse de sacar nada. */
+const REGLA_GESTION_DESDE = "2026-08-27";
+const repReglaCambio = corte => String(corte || "") < REGLA_GESTION_DESDE;
 
 /* Qué hace que una gestión cuente como respaldada. Es correo al cliente; la
    copia a BBVA lo refuerza y se cuenta aparte, porque es la única marca de
@@ -15945,9 +15965,15 @@ function repSemanal(f){
          el escalón «Visitas» del embudo, que cuenta COMERCIOS visitados: 14
          visitas pueden caer sobre 6 comercios nuevos y otros ya visitados, y
          las dos cifras juntas parecían un error de cuenta. */
-      { k:"contactos",   nombre:"Comercios trabajados", color:"azul" },
-      { k:"retenciones", nombre:"Retenciones concretadas", color:"naranja" },
-      { k:"visitas",     nombre:"Visitas realizadas", color:"verde" }
+      /* Orden y color del embudo: trabajados, visitas, retenciones — azul,
+         naranja, verde. Hasta el 27/08 esta lámina iba trabajados, retenciones,
+         visitas, y encima pintaba las visitas de verde y las retenciones de
+         naranja, justo al revés que el embudo de la lámina anterior. El mismo
+         concepto con dos colores en dos láminas seguidas hace que la leyenda
+         no sirva de nada. */
+      { k:"contactos",   nombre:"Comercios trabajados", color:"azul2" },
+      { k:"visitas",     nombre:"Visitas realizadas", color:"naranja" },
+      { k:"retenciones", nombre:"Retenciones concretadas", color:"verde" }
     ],
     variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
                  visitas: dif("visitas") } };
@@ -16310,22 +16336,64 @@ function repLaminaEmbudo(X, f){
   /* Con corte anterior, el subtítulo explica los dos tonos. Iba debajo de las
      barras y ahí lo tapaban las tarjetas de lectura: una leyenda que no se ve
      convierte un gráfico bien pensado en uno confuso. */
-  X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`
-       /* La leyenda nombra solo lo que está dibujado: si ningún escalón bajó,
-          no hay contorno en la lámina y anunciarlo obliga a buscar algo que no
-          existe. */
-       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana` : "")
-       + (X.corte && f.embudo.some(pp => X.corte[pp.k] !== undefined && X.corte[pp.k] > pp.n)
-            ? " · contorno: casos que se enfriaron" : ""),
+  X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`,
     { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
 
   const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
         X_VAL = 9.10, X_CNV = 10.55, W_CNV = 2.40,
-        Y0 = 1.98, ALTO = 0.46, GAP = 0.155;
+        /* La leyenda dibujada se come 0,30" que antes eran subtítulo, y los
+           sub-rótulos hacen la fila más alta. Se recupera apretando el aire
+           ENTRE filas —de 0,155" a 0,13"—, que es espacio muerto; bajar las
+           barras habría empujado la banda naranja sobre las tarjetas de
+           lectura. */
+        Y0 = 2.06, ALTO = 0.46, GAP = 0.13;
+
+  /* ---- La leyenda, dibujada -----------------------------------------------
+     Vivía metida en el subtítulo, en la misma línea que la fecha y el día del
+     proyecto: una leyenda que hay que buscar dentro de un párrafo no es una
+     leyenda. Va acá, con sus muestras de color, justo encima de las barras que
+     explica, y nombra SOLO lo que está dibujado —si ningún escalón bajó no hay
+     contorno, y anunciarlo obliga a buscar algo que no existe—. */
+  const bajo = X.corte && f.embudo.some(pp => X.corte[pp.k] !== undefined && X.corte[pp.k] > pp.n);
+  /* Ranuras de ancho fijo, no calculadas: pptxgenjs no mide texto, así que
+     encadenar posiciones a ojo termina con dos rótulos montados el día que uno
+     crece. Tres ranuras de 2,35" entran holgadas en los 5,28" de la barra más
+     el margen, y el texto más largo mide menos de dos. */
+  const muestra = (i2, dibuja, texto) => {
+    const lx = X_BAR + i2 * 2.35;
+    dibuja(lx);
+    X.T(e, texto, { x:lx + 0.26, y:1.66, w:2.00, h:0.24, fontSize:9.5, color:X.H("gris2") });
+  };
+  if (X.corte){
+    muestra(0, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:X.H("azul2"), transparency:60 }, line:{ type:"none" } }),
+      `al jueves ${repFecha(X.corteFecha).slice(0,5)}`);
+    muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:X.H("azul2") }, line:{ type:"none" } }), "ganado esta semana");
+    if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:"FFFFFF" }, line:{ color:X.H("naranja"), width:0.75, dashType:"dash" } }),
+      "casos que se enfriaron");
+  } else if (X.reglaCambio){
+    /* Sin comparación semanal, y hay que decir por qué: el número del jueves y
+       el de hoy están medidos con reglas distintas, así que su resta no es un
+       avance ni un retroceso. Callarlo dejaría al comité restando de memoria. */
+    e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y:1.60, w:0.08, h:0.36,
+      fill:{ color:X.H("naranja") }, line:{ type:"none" } });
+    X.T(e, "Sin comparación contra la semana pasada: el "
+       + repFecha(X.reglaDesde) + " cambió el criterio de medición —ahora manda la actividad "
+       + "más reciente de cada comercio— y las dos cifras no miden lo mismo.",
+      { x:X_BAR + 0.18, y:1.60, w:8.90, h:0.36, fontSize:9.5, color:X.H("naranja"), valign:"top" });
+  }
   f.embudo.forEach((p, i) => {
     const y = Y0 + i * (ALTO + GAP), col = X.H(p.color);
-    X.T(e, p.label, { x:X_LBL, y, w:W_LBL, h:ALTO, fontSize:11.5, bold:true, align:"right",
+    /* Con sub-rótulo el nombre sube y la explicación se le acuesta debajo; sin
+       él, el nombre se queda centrado en el alto de la barra. Así la fila del
+       portafolio —que no necesita explicación— no queda desalineada. */
+    X.T(e, p.label, { x:X_LBL, y, w:W_LBL, h: p.sub ? 0.26 : ALTO, fontSize:11.5, bold:true,
+      align:"right", valign: p.sub ? "bottom" : "middle",
       color: (i === 0 || i === f.embudo.length - 1) ? X.H("navy") : X.H("gris") });
+    if (p.sub) X.T(e, p.sub, { x:X_LBL, y:y + 0.26, w:W_LBL, h:0.20, fontSize:8.5,
+      align:"right", valign:"top", color:X.H("gris2") });
     const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
     /* Con un corte anterior, la barra se parte en dos: el tono pleno es lo que
        ya estaba el jueves y el claro es lo que se ganó desde entonces. Es la
@@ -16565,8 +16633,13 @@ function armarDirectorio(pptx, fondos){
     T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
   };
   const SEM = repSemanal(f);
+  /* Sin corte anterior no hay barra en dos tonos ni «+N desde el jueves»: la
+     regla está arriba, en `repReglaCambio`. */
+  const reglaCambio = repReglaCambio(SEM.corte);
   const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
-              corte: repEmbudoAl(SEM.corte, f), corteFecha: SEM.corte };
+              reglaCambio, reglaDesde: REGLA_GESTION_DESDE,
+              corte: reglaCambio ? null : repEmbudoAl(SEM.corte, f),
+              corteFecha: SEM.corte };
 
   /* ---- 1 · Carátula ---------------------------------------------------- */
   const c = lamina(fondos.caratula);
@@ -16583,7 +16656,11 @@ function armarDirectorio(pptx, fondos){
   /* Cuánto se movió cada escalón del acumulado desde el corte del jueves. Sale
      del MISMO objeto que usa la barra del embudo, no de una cuenta paralela:
      dos láminas que dicen lo mismo tienen que leerlo del mismo lugar. */
-  const mov = k => (X.corte && X.corte[k] !== undefined) ? f[k] - X.corte[k] : 0;
+  /* `null` = esta tarjeta no tiene movimiento que declarar. Es lo que pasa
+     cuando el criterio de medición cambió después del jueves: la resta no
+     mide avance, mide el cambio de regla, y decir «sin cambios desde el
+     jueves» sería peor que no decir nada —afirma algo falso—. */
+  const mov = k => (X.corte && X.corte[k] !== undefined) ? f[k] - X.corte[k] : null;
   titulo(a, "Dónde está el proyecto hoy",
     `Acumulado al ${repFechaLarga(f.hoy)} · día ${f.corrido} de ${f.total}, quedan ${f.restante}`);
 
@@ -16606,16 +16683,32 @@ function armarDirectorio(pptx, fondos){
        y distintas, y con la misma etiqueta se leen como una contradicción; un
        revisor la encontró en la primera pasada. La actividad semanal vive en
        la lámina 3, que es la que trata de eso. Acá manda el acumulado. */
-    { n: String(f.gestion), et:"comercios con gestión",
+    /* El orden es el del embudo —gestión, visitas, retenciones— y no otro. Al
+       27/08 esta lámina ponía las retenciones antes que las visitas: dos
+       láminas seguidas contaban la misma historia en distinto orden y el ojo
+       tenía que reordenarla solo.
+
+       Y el COLOR de cada tarjeta es el de su escalón en el embudo. Antes acá
+       «visitados» era verde y «recuperados» naranja, y en el embudo al revés:
+       el mismo concepto con dos colores en láminas contiguas, que es la forma
+       más rápida de que una leyenda no sirva para nada. `k` amarra la tarjeta
+       a su escalón para que esto no se pueda volver a desincronizar a mano. */
+    { k:"gestion", n: String(f.gestion), et:"comercios con gestión",
+      sub:"impactados por los ejecutivos",
       pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
-      color:"azul", mas: mov("gestion") },
-    { n: String(f.objetivo), et:"con el objetivo cumplido",
-      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja",
-      mas: mov("objetivo") },
-    { n: String(f.visita), et:"comercios visitados",
+      mas: mov("gestion") },
+    { k:"visita", n: String(f.visita), et:"comercios visitados",
+      sub:"presenciales o virtuales",
       pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
-      color:"verde", mas: mov("visita") }
+      mas: mov("visita") },
+    { k:"objetivo", n: String(f.objetivo), et:"comercios recuperados",
+      sub:"con el objetivo de retención cumplido",
+      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "",
+      mas: mov("objetivo") }
   ];
+  /* El color sale del embudo, no de una lista paralela. */
+  const colDe = k => (f.embudo.find(p => p.k === k) || {}).color || "gris";
+  CIF.forEach(x => { if (x.k) x.color = colDe(x.k); });
   const WC2 = 2.95, GC2 = 0.19;
   CIF.forEach((x, i2) => {
     const px = 0.57 + i2 * (WC2 + GC2);
@@ -16643,8 +16736,34 @@ function armarDirectorio(pptx, fondos){
                  : "sin cambios" + jueves,
         { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold: !!x.mas,
           color: !x.mas ? H("gris2") : x.mas > 0 ? H(x.color) : H("naranja") });
-    T(a, x.et,  { x:px + 0.22, y:3.24, w:WC2 - 0.44, h:0.30, fontSize:11.5, color:H("gris") });
-    T(a, x.pie, { x:px + 0.22, y:3.54, w:WC2 - 0.44, h:0.44, fontSize:10, color:H("gris2") });
+    T(a, x.et,  { x:px + 0.22, y:3.20, w:WC2 - 0.44, h:0.24, fontSize:11.5, color:H("gris") });
+    /* La aclaración que pidió José: el rótulo dice QUÉ se cuenta y el
+       sub-rótulo, con qué criterio. «Comercios con gestión» sin más obliga a
+       preguntar qué cuenta como gestión, y la respuesta no puede vivir solo en
+       las notas de otra lámina. */
+    if (x.sub) T(a, x.sub, { x:px + 0.22, y:3.44, w:WC2 - 0.44, h:0.20, fontSize:9,
+      italic:true, color:H("gris2") });
+    T(a, x.pie, { x:px + 0.22, y: x.sub ? 3.66 : 3.50, w:WC2 - 0.44, h:0.44,
+      fontSize:10, color:H("gris2") });
+  });
+
+  /* ---- La leyenda: qué escalón del embudo es cada tarjeta -----------------
+     Esta lámina y la del embudo cuentan lo mismo con dos formas distintas —
+     tarjetas y barras—. Con el color amarrado al escalón, una línea basta para
+     que quien mire las dos sepa que está viendo una sola historia.
+
+     Va arriba de las tarjetas, en el mismo sitio que la leyenda de la lámina
+     del embudo: dos leyendas en el mismo lugar se aprenden una sola vez. */
+  const LEY_Y = 1.58;
+  T(a, "Escalones del embudo:",
+    { x:0.57, y:LEY_Y, w:1.55, h:0.22, fontSize:9.5, color:H("gris2") });
+  let lgx = 2.20;
+  CIF.filter(x => x.k).forEach(x => {
+    a.addShape(pptx.ShapeType.rect, { x:lgx, y:LEY_Y + 0.05, w:0.18, h:0.13,
+      fill:{ color:H(x.color) }, line:{ type:"none" } });
+    T(a, (f.embudo.find(p => p.k === x.k) || {}).label || "",
+      { x:lgx + 0.24, y:LEY_Y, w:1.60, h:0.22, fontSize:9.5, bold:true, color:H("gris") });
+    lgx += 1.95;
   });
 
   T(a, "Avance del calendario", { x:0.57, y:4.42, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
@@ -16662,6 +16781,15 @@ function armarDirectorio(pptx, fondos){
      + `El tramo que define el resultado es lo que viene después: de esas gestiones, ${repPct(f.gestion ? f.efectividad / f.gestion * 100 : 0)} obtuvo respuesta, ${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} llegó a visita y ${repPct(f.gestion ? f.objetivo / f.gestion * 100 : 0)} cerró con el objetivo cumplido. `
      + `Ahí es donde se decide el número de diciembre.`,
     { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
+
+  /* El hueco donde debería estar «+N desde el jueves» necesita explicación: un
+     comité que la semana pasada vio un número y esta semana ve otro sin
+     variación va a restar de memoria, y esa resta no significa nada. */
+  if (X.reglaCambio)
+    T(a, "Sin comparación contra la semana pasada: el " + repFecha(X.reglaDesde)
+       + " cambió el criterio de medición —ahora manda la actividad más reciente de cada comercio—, "
+       + "así que la cifra del jueves y la de hoy no miden lo mismo.",
+      { x:0.57, y:7.00, w:12.38, h:0.22, fontSize:8.5, color:H("naranja"), valign:"top" });
 
   /* ---- 3 · El desarrollo semanal ----------------------------------------
      Tres series y su comparación contra la semana anterior. No es la misma
@@ -16697,7 +16825,18 @@ function armarDirectorio(pptx, fondos){
        comparación honesta— y contra el promedio semanal, que es la que
        sobrevive a una semana excepcional. */
     const prom = (SEM.promedio || {})[serie.k];
+    /* Y el cierre de la semana pasada, que es el número que la curva rotula al
+       final de su línea. Sin nombrarlo, la tarjeta decía «la pasada iba en 10»
+       mientras el gráfico de al lado mostraba 14: dos cifras ciertas —al mismo
+       día y al cierre de la semana— que sin etiqueta se leen como un error de
+       cuenta. José lo marcó como «datos de visitas realizadas inconsistentes»,
+       y tenía razón en que la lámina no se explicaba. */
+    const cierrePrev = (() => {
+      const v2 = (dd.previa || []).filter(x => x !== null && x !== undefined);
+      return v2.length ? v2[v2.length - 1] : null;
+    })();
     T(g, `al día ${DIA.diasAct} de la semana · la pasada iba en ${comp.previa}`
+       + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : "")
        + (prom ? ` · promedio semanal ${repNum(prom, prom < 10 ? 1 : 0)}` : ""),
       /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
          una sola y sin sitio se montaba sobre la curva. */
@@ -16726,6 +16865,7 @@ function armarDirectorio(pptx, fondos){
        curva sin números obliga a estimar la altura contra un eje que no está
        dibujado; con el valor al final de cada línea, las dos semanas se
        comparan leyendo, no midiendo. */
+    let puesto = null;   // dónde quedó el rótulo anterior, para no pisarlo
     const linea = (vals, transp, pleno) => {
       for (let k2 = 1; k2 < vals.length; k2++){
         if (vals[k2] === null || vals[k2 - 1] === null) continue;
@@ -16751,11 +16891,26 @@ function armarDirectorio(pptx, fondos){
       const cabeArriba = yv - GY > 0.24;
       const cabeAbajo  = yv + 0.28 <= GY + GH;
       const arriba = pleno ? cabeArriba : (!cabeAbajo && cabeArriba);
+      let lx = Math.min(GX + GW - 0.46, Math.max(GX - 0.10, ejeX(ult) - 0.23));
+      let ly = arriba ? yv - 0.26 : yv + 0.08;
+      /* Las dos líneas terminan a un día de distancia, y cuando además caen a
+         la misma altura los dos rótulos quedan pegados y se leen como un solo
+         número: en la tarjeta de visitas del 26/08 salía «14 14». La regla de
+         arriba/abajo no alcanzaba porque con el nodo pegado al techo NINGUNO
+         de los dos cabe arriba y los dos bajan al mismo sitio.
+         Acá el segundo rótulo se aparta del primero: primero probando el otro
+         lado del nodo, y si tampoco, corriéndose en horizontal. */
+      if (puesto && Math.abs(lx - puesto.x) < 0.44 && Math.abs(ly - puesto.y) < 0.22){
+        /* Se apila SOBRE el anterior, no debajo: abajo está el eje con las
+           fechas, y una cifra encima de «27/08» es el mismo problema con otro
+           vecino. Solo baja si arriba se saldría de la tarjeta. */
+        ly = (puesto.y - 0.22 >= GY - 0.30) ? puesto.y - 0.22 : puesto.y + 0.22;
+      }
       T(g, String(vals[ult]), {
-        x: Math.min(GX + GW - 0.46, Math.max(GX - 0.10, ejeX(ult) - 0.23)),
-        y: arriba ? yv - 0.26 : yv + 0.08, w:0.46, h:0.20,
+        x: lx, y: ly, w:0.46, h:0.20,
         fontSize: pleno ? 10 : 8.5, bold:true, align:"center",
         color: pleno ? H(serie.color) : H("gris2") });
+      puesto = { x:lx, y:ly };
     };
     linea(dd.previa, 62, false);   // la semana pasada, en claro
     linea(dd.actual, 0, true);     // esta semana, en pleno
