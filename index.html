@@ -1285,6 +1285,51 @@ button.kpi:hover{border-color:var(--brand-2)}
 .panel .nota b{color:var(--ink-2);font-weight:600}
 
 .tabla-cont{overflow-x:auto;margin-top:11px}
+/* ---- Actividad del equipo ------------------------------------------------
+   Una tabla densa que se lee de arriba abajo como una jornada. La fila entera
+   es el objetivo del clic —no un enlace escondido en una celda—, así que lleva
+   cursor, foco visible y su propio realce al pasar por encima. */
+table.tbl-act{border-collapse:collapse;width:100%;font-size:13px}
+table.tbl-act th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);text-align:left;padding:0 14px 8px 0;white-space:nowrap}
+table.tbl-act td{padding:10px 14px 10px 0;border-top:1px solid var(--grid);vertical-align:top}
+table.tbl-act tr.act-f{cursor:pointer}
+table.tbl-act tr.act-f:hover td{background:var(--surface-2)}
+table.tbl-act tr.act-f:focus{outline:none}
+table.tbl-act tr.act-f:focus td{background:var(--brand-bg);box-shadow:inset 0 0 0 1px var(--brand-2)}
+table.tbl-act tr.act-dia td{padding:16px 0 6px;border-top:none}
+table.tbl-act tr.act-dia b{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2)}
+table.tbl-act tr.act-dia span{color:var(--muted);font-size:12px;margin-left:9px}
+.act-h{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap;width:60px}
+.act-q{color:var(--ink-2);white-space:nowrap;width:130px}
+.act-t{min-width:230px}
+.act-p{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:7px;
+  vertical-align:middle;flex:none}
+.act-t b{font-weight:600}
+.act-t span{display:block;margin-left:14px}
+.act-d{color:var(--ink-2);font-size:12.5px;margin-top:1px}
+.act-n{color:var(--muted);font-size:12px;margin-top:3px;font-style:italic}
+.act-av{color:var(--serious-ink);font-size:12px;font-weight:600;margin-top:3px}
+.act-c{color:var(--ink);min-width:150px}
+.act-id{display:block;font-variant-numeric:tabular-nums;color:var(--muted);font-size:11.5px}
+.act-fe{white-space:nowrap;font-variant-numeric:tabular-nums;width:150px}
+.act-vacio{color:var(--muted)}
+.act-desf{display:block;font-size:11.5px;font-weight:650;margin-top:2px;font-variant-numeric:normal}
+.act-desf.atras{color:var(--serious-ink)}
+.act-desf.futuro{color:var(--crit-ink)}
+/* Lo neutro no es una alarma: una cita para dentro de dos días es su propósito,
+   no un error, y en naranja mandaba a revisar lo que estaba bien. */
+.act-desf.neutro{color:var(--muted);font-weight:500}
+/* Una casilla de verificación con su texto al lado, alineada con los selects
+   de al lado en la misma fila de filtros. */
+.fchk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2);
+  cursor:pointer;padding:9px 0;user-select:none}
+.fchk input{width:15px;height:15px;accent-color:var(--brand-2);cursor:pointer;margin:0}
+@media (max-width:900px){
+  .act-q{width:auto}
+  .act-c{min-width:110px}
+}
+
 table.tbl-tab{border-collapse:collapse;width:100%;font-size:13px}
 table.tbl-tab th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
   color:var(--muted);text-align:right;padding:0 0 8px 16px;white-space:nowrap}
@@ -1424,7 +1469,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 03:15", huella:"5e2643" };
+const BUILD = { sello:"27/08/2026 04:34", huella:"29ed24" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3535,6 +3580,9 @@ const S = {
   q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
   qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
   fEjecAgenda:"todos",   // Agenda: por ejecutivo, solo para supervisión
+  /* Actividad del equipo: el flujo de todo lo que se registra, solo mando */
+  fActRango:"hoy", fActEjec:"todos", fActTipo:"todos", fActDesfase:false,
+  qAct:"", limiteAct:120,
   fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   mesPanel:"",   /* mes de la cartera asignada, en Ajustes; vacío = el actual */
@@ -3650,7 +3698,13 @@ function esBBVA(){
 const soloLectura = () => esBBVA();
 
 /* Las pestañas que este perfil no abre, ni desde el menú ni a mano. */
-const VEDADAS_BBVA = ["bono", "reporte", "ayuda"];
+/* «Actividad» entró a esta lista el 27/08, el mismo día que se creó. Es la
+   pantalla que muestra quién del equipo registró qué y a qué hora: material
+   de supervisión interna, exactamente lo que no puede ver el cliente. La
+   guarda `soloMando` no alcanzaba —solo aparta al Ejecutivo—, así que sin
+   esta línea el perfil de BBVA la habría tenido desde el primer despliegue.
+   Lo agarró la prueba que cuenta las pestañas de ese perfil. */
+const VEDADAS_BBVA = ["actividad", "bono", "reporte", "ayuda"];
 const puedeVerTab = tab =>
   !(esBBVA() && (VEDADAS_BBVA.includes(tab) || /^form_/.test(String(tab))));
 
@@ -4269,6 +4323,7 @@ const NAV = [
   { id:"agenda",   ic:"◷", label:"Calendario" },
   { id:"registros",ic:"≡", label:"Registros" },
   { id:"panel",    ic:"◕", label:"Panel" },
+  { id:"actividad",ic:"◎", label:"Actividad", soloMando:true },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
   { id:"reporte",  ic:"▤", label:"Reporte", soloMando:true },
   { id:"ayuda",    ic:"⚙", label:"Ajustes" }
@@ -4302,7 +4357,7 @@ function renderNav(){
  * El ejecutivo no la recibe nunca: su navegación no cambia en este tramo. */
 const RAIL = [
   { g:"Campaña", items:["panel","cartera","agenda","registros"] },
-  { g:"Solo supervisión", items:["bono","reporte","ayuda"] }
+  { g:"Solo supervisión", items:["actividad","bono","reporte","ayuda"] }
 ];
 const ETIQUETA_RAIL = { panel:"Tablero", agenda:"Calendario de visitas" };
 
@@ -4508,6 +4563,7 @@ function renderInterno(){
   else if (S.tab === "agenda")            v.innerHTML = viewAgenda();
   else if (S.tab === "bono")              v.innerHTML = viewBono();
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
+  else if (S.tab === "actividad")         v.innerHTML = viewActividad();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
   else if (S.tab === "reporte")           v.innerHTML = viewReporte();
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
@@ -9587,6 +9643,362 @@ function viewTablero(){
 
   ${esBBVA() ? "" : `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
     <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`}`;
+}
+
+/* =========================================================================
+   Actividad del equipo — la pantalla que faltaba
+   =========================================================================
+
+   El 26/08 Aníbal dijo que llevaba el día poniéndose al día con los correos y
+   que no se reflejaba. Averiguar qué había hecho tomó una hora de consultas a
+   mano contra cuatro tablas, y la respuesta no estaba en ninguna pantalla del
+   CRM: sus cinco confirmaciones de canal no son gestiones y no aparecían en
+   «Registros»; sus citas estaban en el Calendario; sus borrados en la bitácora
+   de Ajustes; y la fecha con la que registró cada cosa no se veía en ningún
+   lado junto a la hora en que la registró de verdad.
+
+   Cada pieza estaba, repartida en cuatro sitios y ordenada por el criterio de
+   cada sitio. Ninguno respondía la pregunta que se hace un supervisor: «¿qué
+   pasó hoy, quién lo hizo y cuándo?».
+
+   Esta vista pone todo en una sola línea de tiempo ordenada por CUÁNDO PASÓ DE
+   VERDAD —la hora del sistema, no la fecha que alguien tecleó— y pone las dos
+   fechas una al lado de la otra. Un correo registrado hoy con fecha del 5 de
+   agosto se ve en la misma fila: 21 días de desfase, en naranja.
+
+   Es de solo lectura a propósito. Al tocar una fila se abre la ficha del
+   comercio, que es donde la edición ya existe, con sus reglas y su bitácora, y
+   donde le corresponde corregir al ejecutivo dueño del registro. Una pantalla
+   de supervisión que además escribe sobre el trabajo de otros es una pantalla
+   que puede romper un dato sin que nadie se entere.
+
+   No la ve ningún ejecutivo.
+   ========================================================================= */
+
+/* Cuántos días hay entre la fecha con la que se registró algo y el día en que
+   de verdad se grabó. Positivo = la fecha escrita quedó ATRÁS de la real. */
+function desfaseDias(fechaRegistrada, cuandoSeGrabo){
+  const f = String(fechaRegistrada || "").slice(0,10);
+  const c = String(cuandoSeGrabo || "").slice(0,10);
+  if (!f || !c) return null;
+  return Math.round((new Date(c) - new Date(f)) / 86400000);
+}
+
+/* ---- Qué significa el desfase, que NO es lo mismo en cada evento ---------
+   Una gestión describe algo que YA pasó: su fecha debería ser la del día en
+   que se grabó, y cualquier distancia es una señal. Una cita describe algo que
+   VA a pasar: agendarla para dentro de dos días es exactamente su propósito, y
+   marcarlo en rojo sería llamar error a lo correcto — la primera versión de
+   esta pantalla lo hacía, y pintaba de alarma la visita del viernes.
+
+   Para una cita lo anormal es lo contrario: quedar puesta para una fecha que
+   ya pasó el día en que se creó.
+
+   Devuelve el texto que va bajo la fecha y su tono, o null si no hay nada que
+   decir. */
+function marcaDesfase(tipo, d){
+  if (d === null || d === undefined) return null;
+  const dias = n => Math.abs(n) + (Math.abs(n) === 1 ? " día" : " días");
+  if (tipo === "cita"){
+    if (d > 0)  return { texto:"agendada " + dias(d) + " hacia atrás", tono:"atras" };
+    if (d === 0) return { texto:"para el mismo día", tono:"neutro" };
+    return { texto:"en " + dias(d), tono:"neutro" };
+  }
+  if (d === 0) return null;                       // registrada el día que pasó
+  if (d > 0)  return { texto:dias(d) + " antes", tono:"atras" };
+  /* Fecha futura sobre un hecho que ya ocurrió: es lo más raro de los dos. */
+  return { texto:dias(d) + " en el futuro", tono:"futuro" };
+}
+/* Solo cuenta como «fecha corrida» lo que de verdad lo es. Con el criterio
+   anterior, una semana de citas bien agendadas inflaba la cifra de alarma. */
+const desfaseRaro = e => { const m = marcaDesfase(e.tipo, e.desfase);
+  return !!m && m.tono !== "neutro"; };
+
+/* Los tipos de evento, con su color y su etiqueta. El orden importa: es el que
+   usa el filtro, y va de lo más frecuente a lo más raro. */
+const ACT_TIPOS = [
+  { id:"gestion",  label:"Gestiones",            color:"s1"      },
+  { id:"ficha",    label:"Fichas creadas",       color:"s3"      },
+  { id:"canal",    label:"Canal BBVA confirmado",color:"brand-2" },
+  { id:"cita",     label:"Citas y tareas",       color:"s2"      },
+  { id:"cierre",   label:"Citas cerradas",       color:"s4"      },
+  { id:"edicion",  label:"Ediciones",            color:"muted"   },
+  { id:"borrado",  label:"Borrados",             color:"crit"    }
+];
+const actTipo = id => ACT_TIPOS.find(t => t.id === id) || { label:id, color:"muted" };
+
+/* ---- El flujo de eventos -------------------------------------------------
+   Se arma con lo que ya está en memoria: no hay una consulta nueva ni una
+   tabla nueva. Eso importa por dos razones: la vista se actualiza sola con la
+   misma sincronización que el resto del CRM —websocket más reloj de 45 s—, y
+   no agrega ni una fila que mantener. */
+function actividadEventos(){
+  const ev = [];
+  const cuando = x => { const t = new Date(x).getTime(); return isNaN(t) ? 0 : t; };
+  const nombreDe = correo => {
+    const u = USUARIOS.find(x => x.correo === correo);
+    return u ? u.nombre : (correo || "—");
+  };
+
+  /* 1 · Las gestiones. Las tres clases: al comercio, al banco y las que
+     fabricó la migración. Las fabricadas se muestran marcadas en vez de
+     esconderse: son parte de lo que hay en la ficha y explican por qué un
+     comercio con «una gestión» puede estar en cero. */
+  DB.crudo.forEach(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const alBanco = esAlBanco(r);
+    ev.push({
+      ts: cuando(r.Creado_En), tipo:"gestion",
+      correo: r.Correo_Stratis, quien: r.Ejecutivo || nombreDe(r.Correo_Stratis),
+      cid: String(r.Customer_id), comercio: c.nombre_comercio || "",
+      titulo: (r.Inferida ? "Fila del alta · " : "") +
+        (alBanco ? "Coordinación con BBVA" : "Gestión al comercio"),
+      detalle: [actMedio(r.Tipo_Contacto), actResultado(r.Resultado),
+                r.Cumple_Visita === "SI" ? "visita cumplida" : ""]
+                .filter(Boolean).join(" · "),
+      nota: (r.Comentario_Ejecutivo || r.Comentario_Cliente || r.Espera || "").trim(),
+      fechaReg: String(r.Fecha_Contacto || "").slice(0,10),
+      horaReg: r.Hora_Contacto || "",
+      desfase: desfaseDias(r.Fecha_Contacto, r.Creado_En),
+      inferida: !!r.Inferida
+    });
+  });
+
+  /* 2 · Las fichas creadas y 3 · el canal confirmado. Los dos salen de
+     `clientes`, y el canal tiene su propia marca de tiempo desde la migración
+     que la agregó: no hay que deducirla de la última modificación. */
+  CLIENTES.forEach(c => {
+    ev.push({
+      ts: cuando(c.creado_en), tipo:"ficha",
+      correo: c.asignado_correo, quien: c.asignado || nombreDe(c.asignado_correo),
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      titulo: esClienteNuevo(c) ? "Ficha creada · venta nueva" : "Ficha creada",
+      detalle: [c.distrito, rubroLabel(c), c.contacto_bbva ? "alta por " + nomMedioBBVA2(c.contacto_bbva) : ""]
+        .filter(Boolean).join(" · "),
+      nota:"", fechaReg:"", desfase:null
+    });
+    if (c.canal_confirmado_por) ev.push({
+      ts: cuando(c.canal_confirmado_en), tipo:"canal",
+      correo: c.canal_confirmado_por, quien: nombreDe(c.canal_confirmado_por),
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      titulo:"Canal BBVA confirmado",
+      detalle:"Confirmó que el alta se coordinó por " + (nomMedioBBVA2(c.contacto_bbva) || "ese medio"),
+      /* La advertencia que le habría ahorrado el día a Aníbal. */
+      /* `every` sobre un arreglo vacío devuelve true, así que se cuenta lo
+         real en vez de preguntar por lo fabricado: un comercio sin ninguna
+         fila también tiene que salir avisado. */
+      aviso: DB.historiaDe(c.customer_id).filter(r => !esReconstruida(r)).length === 0
+        ? "Confirmar no crea una gestión: este comercio sigue en cero" : "",
+      nota:"", fechaReg:"", desfase:null
+    });
+  });
+
+  /* 4 · La agenda: citas con día y hora, y tareas sin hora —llamar, esperar—.
+     Se distinguen porque una cita se puede cumplir y una tarea se vence. */
+  SEGUIMIENTOS.forEach(s => {
+    const c = byId[String(s.customer_id)] || {};
+    const esVisita = !!s.modalidad;
+    ev.push({
+      ts: cuando(s.creado_en), tipo:"cita",
+      correo: s.correo_stratis, quien: s.ejecutivo || nombreDe(s.correo_stratis),
+      cid: String(s.customer_id), comercio: c.nombre_comercio || "",
+      titulo: esVisita ? "Visita agendada" : "Tarea de seguimiento",
+      detalle: (esVisita ? cortoModalidad(s.modalidad) + " · " : (s.accion ? s.accion + " · " : "")) +
+        "para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) +
+        (s.hora_inicio ? " a las " + horaCorta(s.hora_inicio) : ""),
+      nota: (s.comentario || "").trim(),
+      fechaReg: String(s.fecha_objetivo || "").slice(0,10),
+      /* Para una cita el desfase se lee al revés: agendar para ATRÁS es el
+         error. Se guarda con el mismo signo que las gestiones y el rótulo lo
+         explica. */
+      desfase: desfaseDias(s.fecha_objetivo, s.creado_en)
+    });
+    if (s.cerrado_en) ev.push({
+      ts: cuando(s.cerrado_en), tipo:"cierre",
+      correo: s.cerrado_por || s.correo_stratis, quien: nombreDe(s.cerrado_por || s.correo_stratis),
+      cid: String(s.customer_id), comercio: c.nombre_comercio || "",
+      titulo: "Cita cerrada · " + (s.cerrado_motivo || "sin motivo"),
+      detalle: "Estaba puesta para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) +
+        (s.hora_inicio ? " a las " + horaCorta(s.hora_inicio) : ""),
+      /* El defecto que atrapó a Aníbal: una gestión de hoy cerrando como
+         cumplida una cita que todavía no llegaba. */
+      aviso: (s.cerrado_motivo === "CUMPLIDA" &&
+              String(s.fecha_objetivo).slice(0,10) > String(s.cerrado_en).slice(0,10))
+        ? "Se dio por cumplida antes de su fecha" : "",
+      nota:"", fechaReg:"", desfase:null
+    });
+  });
+
+  /* 5 · Lo que la bitácora sí registra: ediciones y borrados. Las altas no
+     pasan por ahí, y por eso se leyeron arriba de cada tabla. */
+  (AUDITORIA || []).forEach(a => {
+    const esBorrado = a.accion === "eliminar";
+    const d = (a.detalle && (a.detalle._borrado || a.detalle)) || {};
+    ev.push({
+      ts: cuando(a.creado_en), tipo: esBorrado ? "borrado" : "edicion",
+      correo: a.correo, quien: a.ejecutivo || nombreDe(a.correo),
+      cid: String(a.customer_id || ""), comercio: a.comercio || "",
+      titulo: (esBorrado ? "Borró " : "Editó ") +
+        (a.tabla === "interacciones" ? "una gestión"
+         : a.tabla === "clientes" ? "una ficha" : a.tabla),
+      detalle: [d.medio ? actMedio(d.medio) : "",
+                d.fecha ? "fechada " + d.fecha : "",
+                d.nombre || "", d.llave || ""].filter(Boolean).join(" · "),
+      nota: (d.comentario || d._motivo || "").trim(),
+      fechaReg:"", desfase:null
+    });
+  });
+
+  return ev.filter(x => x.ts > 0).sort((a, b) => b.ts - a.ts);
+}
+
+/* Los nombres largos de medio y resultado. Hay dos catálogos —el del comercio
+   y el del banco— y esta pantalla mezcla las dos clases de gestión en una sola
+   lista, así que pregunta a los dos antes de rendirse y mostrar el código
+   crudo. Sin esto, media tabla decía «bbva_correo». */
+const actMedio = id => (tipoById(id) || {}).label || nomMedioBBVA(id) || String(id || "");
+const actResultado = id => (resultadoById(id) || {}).label || nomResultadoBBVA(id) || String(id || "");
+/* El medio declarado en el alta viene en mayúsculas en la ficha. */
+const nomMedioBBVA2 = id => nomMedioBBVA(String(id || "").toLowerCase()) || String(id || "").toLowerCase();
+
+/* ---- La pantalla --------------------------------------------------------- */
+function viewActividad(){
+  /* La puerta está en `go()`, que es por donde entra la navegación. Esta es la
+     segunda cerradura, y existe porque `go()` solo protege el camino normal:
+     cualquier código que ponga `S.tab` a mano —una prueba, un enlace nuevo, un
+     estado restaurado— pintaría la pantalla entera sin pasar por ahí. En una
+     vista que muestra el trabajo nominal del equipo, una sola cerradura es
+     pocas. */
+  if (!puedeVerTab("actividad") || vistaDeCampo())
+    return `<div class="vacio">Esta pantalla es de supervisión.</div>`;
+
+  const hoy = hoyISO();
+  const menos = n => new Date(new Date(hoy).getTime() - n * 86400000).toISOString().slice(0,10);
+  const RANGOS = [["hoy","Hoy",0], ["ayer","Ayer y hoy",1], ["7","7 días",6], ["30","30 días",29]];
+  const rango = RANGOS.find(r => r[0] === S.fActRango) || RANGOS[0];
+  const desde = menos(rango[2]);
+
+  const todos = actividadEventos()
+    .filter(e => new Date(e.ts).toISOString().slice(0,10) >= desde);
+
+  let lista = todos;
+  if (S.fActEjec !== "todos") lista = lista.filter(e => e.correo === S.fActEjec);
+  if (S.fActTipo !== "todos") lista = lista.filter(e => e.tipo === S.fActTipo);
+  if (S.fActDesfase) lista = lista.filter(desfaseRaro);
+  const q = (S.qAct || "").trim().toLowerCase();
+  if (q) lista = lista.filter(e =>
+    (e.comercio + " " + e.cid + " " + e.quien + " " + e.titulo + " " + e.detalle + " " + e.nota)
+      .toLowerCase().includes(q));
+
+  /* Las tres cifras de cabecera se cuentan sobre el rango completo, no sobre
+     lo filtrado: son el contexto contra el que se lee el filtro. */
+  const personas = new Set(todos.map(e => e.correo).filter(Boolean)).size;
+  const corridas = todos.filter(desfaseRaro).length;
+
+  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo")
+    .map(u => [u.correo, `${u.nombre} · ${todos.filter(e => e.correo === u.correo).length}`]);
+  const opciones = (valor, todosTxt, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todosTxt}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
+  const mostrar = lista.slice(0, S.limiteAct || 120);
+
+  /* Se agrupa por día real. Un supervisor lee «qué pasó el miércoles», no
+     «las últimas cien filas». */
+  let filas = "", diaActual = "";
+  mostrar.forEach(e => {
+    const iso = new Date(e.ts).toISOString().slice(0,10);
+    if (iso !== diaActual){
+      diaActual = iso;
+      const n = lista.filter(x => new Date(x.ts).toISOString().slice(0,10) === iso).length;
+      filas += `<tr class="act-dia"><td colspan="5">
+        <b>${esc(fechaLarga(iso))}</b><span>${n} ${n === 1 ? "evento" : "eventos"}</span></td></tr>`;
+    }
+    const t = actTipo(e.tipo);
+    const hora = new Date(e.ts).toLocaleTimeString("es-PE",
+      { hour:"2-digit", minute:"2-digit", hour12:false });
+
+    /* La columna que motivó la pantalla: con qué fecha se registró, y a qué
+       distancia de cuándo se registró de verdad. */
+    let fecha = `<span class="act-vacio">—</span>`;
+    if (e.fechaReg){
+      const m = marcaDesfase(e.tipo, e.desfase);
+      fecha = `<b>${esc(fmtFecha(e.fechaReg))}</b>${e.horaReg ? " " + esc(e.horaReg) : ""}` +
+        (m ? `<span class="act-desf ${m.tono}">${esc(m.texto)}</span>` : "");
+    }
+
+    filas += `<tr class="act-f" data-actcid="${esc(e.cid)}" tabindex="0">
+      <td class="act-h">${hora}</td>
+      <td class="act-q">${esc(e.quien)}</td>
+      <td class="act-t"><i class="act-p" style="background:var(--${t.color})"></i>
+        <b>${esc(e.titulo)}</b>
+        ${e.detalle ? `<span class="act-d">${esc(e.detalle)}</span>` : ""}
+        ${e.aviso ? `<span class="act-av">${esc(e.aviso)}</span>` : ""}
+        ${e.nota ? `<span class="act-n">${esc(e.nota.slice(0,140))}</span>` : ""}</td>
+      <td class="act-c">${e.comercio ? esc(e.comercio) : `<span class="act-vacio">—</span>`}
+        ${e.cid ? `<span class="act-id">${esc(e.cid)}</span>` : ""}</td>
+      <td class="act-fe">${fecha}</td>
+    </tr>`;
+  });
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>Actividad del equipo</h2>
+      <div class="sub">Todo lo que se registró en el CRM, ordenado por cuándo pasó de verdad.
+        La última columna dice con qué fecha se registró cada cosa.</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Eventos</div><div class="val">${todos.length}</div>
+      <div class="sub">${esc(rango[1].toLowerCase())}</div></div>
+    <div class="stat"><div class="lbl">Personas</div><div class="val">${personas}</div>
+      <div class="sub">registraron algo en el periodo</div></div>
+    <div class="stat ${corridas ? "malo" : ""}"><div class="lbl">Con la fecha corrida</div>
+      <div class="val">${corridas}</div>
+      <div class="sub">gestiones fechadas en otro día, o citas puestas hacia atrás</div></div>
+  </div>
+
+  <div class="filtros">
+    <div class="seg">${RANGOS.map(([v,l]) =>
+      `<button data-f="actrango" data-v="${v}" class="${S.fActRango===v?"on":""}">${l}</button>`).join("")}
+    </div>
+    <div class="sel-row">
+      <label class="fsel"><span>Ejecutivo</span>
+        <select id="ejecAct">${opciones(S.fActEjec, `Todo el equipo · ${todos.length}`, ejecutivos)}</select></label>
+      <label class="fsel"><span>Tipo</span>
+        <select id="tipoAct">${opciones(S.fActTipo, "Todo lo que pasó",
+          ACT_TIPOS.filter(t => todos.some(e => e.tipo === t.id))
+                   .map(t => [t.id, `${t.label} · ${todos.filter(e => e.tipo === t.id).length}`]))}</select></label>
+      <label class="fchk"><input type="checkbox" id="desfAct"${S.fActDesfase?" checked":""}>
+        <span>Solo con la fecha corrida</span></label>
+    </div>
+    <input class="busca" id="qAct" placeholder="Buscar por comercio, Customer ID, persona o comentario…"
+           value="${esc(S.qAct || "")}">
+  </div>
+
+  ${lista.length ? `
+  <div class="tabla-cont">
+    <table class="tbl-act">
+      <thead><tr>
+        <th>Hora real</th><th>Quién</th><th>Qué hizo</th><th>Comercio</th>
+        <th title="La fecha con la que quedó registrado, y a qué distancia de la hora real">Fecha registrada</th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+  </div>
+  ${lista.length > mostrar.length
+    ? `<div class="mas-row"><button class="btn ghost" id="masAct">Ver ${
+        Math.min(120, lista.length - mostrar.length)} más · quedan ${lista.length - mostrar.length}</button></div>`
+    : ""}`
+  : `<div class="vacio">No hay actividad registrada con estos filtros.</div>`}
+
+  <p class="nota"><b>Hora real</b> es cuándo se grabó en el CRM; <b>fecha registrada</b> es la que
+  escribió la persona. Cuando no coinciden, el trabajo aparece en otro día del que se hizo — por eso
+  se marca. Al tocar una fila se abre la ficha del comercio, que es donde se corrige: la corrección
+  la hace quien registró, con su nombre en la bitácora.</p>`;
 }
 
 /* =========================================================================
@@ -18354,6 +18766,39 @@ function bindExtras(){
   if (typeof bindBono === "function") bindBono();
   if (typeof bindReporte === "function") bindReporte();
   if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
+
+  /* ---- Actividad del equipo -------------------------------------------- */
+  document.querySelectorAll('[data-f="actrango"]').forEach(b => b.onclick = () => {
+    S.fActRango = b.dataset.v; S.limiteAct = 120; render(); });
+  if ($("#ejecAct")) $("#ejecAct").onchange = e => { S.fActEjec = e.target.value; S.limiteAct = 120; render(); };
+  if ($("#tipoAct")) $("#tipoAct").onchange = e => { S.fActTipo = e.target.value; S.limiteAct = 120; render(); };
+  if ($("#desfAct")) $("#desfAct").onchange = e => { S.fActDesfase = e.target.checked; S.limiteAct = 120; render(); };
+  if ($("#masAct"))  $("#masAct").onclick  = () => { S.limiteAct += 120; render(); };
+  const qa = $("#qAct");
+  if (qa){
+    /* Mismo trato que el buscador de Registros: se espera a que la persona
+       deje de teclear y se le devuelve el cursor donde estaba, porque el
+       repintado reemplaza el campo entero. */
+    qa.oninput = e => {
+      S.qAct = e.target.value; S.limiteAct = 120;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#qAct");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  /* Tocar una fila abre la ficha del comercio. Es lo único que hace esta
+     pantalla además de mirar: la corrección vive en la ficha, con sus reglas
+     y su bitácora, y la hace quien registró. */
+  document.querySelectorAll("[data-actcid]").forEach(tr => {
+    const ir = () => { const cid = tr.dataset.actcid;
+      if (!cid || !byId[cid]) return;
+      S.tab = "cartera"; S.cid = cid; render(); };
+    tr.onclick = ir;
+    tr.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); ir(); } };
+  });
 
   /* ---- El calendario de visitas ---------------------------------------- */
   document.querySelectorAll("[data-calmes]").forEach(b => b.onclick = () => {
