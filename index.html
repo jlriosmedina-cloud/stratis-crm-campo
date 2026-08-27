@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 22:46", huella:"d49532" };
+const BUILD = { sello:"27/08/2026 23:19", huella:"c08d57" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -15926,9 +15926,20 @@ function repAgenda(f){
   const cart = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
   /* Solo cartera: lo comprometido que muestra este deck es de retención. Una
      reunión agendada con un lead de venta es trabajo real y se ve en el CRM,
-     pero acá inflaría una lámina que dice medir otra cosa. */
-  const citas = citasTodas().filter(s => !s.cerrado_en)
+     pero acá inflaría una lámina que dice medir otra cosa.
+
+     Y la cita YA CONCRETADA sigue contando en su día. Hasta el 27/08 acá solo
+     entraban las abiertas, así que la columna de hoy se vaciaba sola a medida
+     que el equipo cumplía: a las 5 de la tarde un jueves de diez visitas
+     mostraba tres, y esas tres eran las que faltaban. La lámina se llama «lo
+     comprometido para esta semana» y el compromiso del jueves son diez, se
+     hayan hecho o no. Lo que no cuenta es lo que dejó de ser un compromiso:
+     la reagendada —que ya se cuenta en su fecha nueva y si no se contaría dos
+     veces— y la descartada. */
+  const vive = s => { const e = estadoCita(s); return e !== "reagendada" && e !== "descartada"; };
+  const citas = citasTodas()
     .filter(s => cart.has(String(s.customer_id)))
+    .filter(vive)
     .filter(s => {
       const fe = String(s.fecha_objetivo || "").slice(0,10);
       return fe >= desde && fe <= vie;
@@ -15941,6 +15952,9 @@ function repAgenda(f){
     const delDia = citas.filter(s => String(s.fecha_objetivo).slice(0,10) === iso);
     dias.push({ iso, dia: DIAS_ES[x.getUTCDay()],
       n: delDia.length,
+      /* Cuántas de ese día ya ocurrieron. La columna se dibuja en dos tonos con
+         esto: el compromiso del día completo, y adentro lo que ya está hecho. */
+      hechas: delDia.filter(s => seConcreto(estadoCita(s))).length,
       presencial: delDia.filter(s => s.modalidad === "PRESENCIAL").length,
       virtual:    delDia.filter(s => s.modalidad === "VIRTUAL").length });
   }
@@ -15948,6 +15962,8 @@ function repAgenda(f){
   /* Comercios habilitados y sin cita puesta. Es el otro lado de la misma
      lámina: lo comprometido dice qué va a pasar, esto dice cuánto todavía
      puede entrar. Sin ese contraste, «12 visitas» no se sabe si es mucho. */
+  /* Acá sí manda «sin cita ABIERTA»: mide cuántos comercios todavía se pueden
+     agendar, y uno cuya visita ya se hizo vuelve a estar disponible. */
   const conCita = new Set(citasTodas().filter(s => !s.cerrado_en)
     .filter(s => cart.has(String(s.customer_id))).map(s => String(s.customer_id)));
   const sinAgendar = CLIENTES.filter(c => !esClienteNuevo(c)
@@ -15956,6 +15972,7 @@ function repAgenda(f){
 
   return { desde, vie, dias, sinAgendar,
     total: citas.length,
+    hechas: citas.filter(s => seConcreto(estadoCita(s))).length,
     presencial: citas.filter(s => s.modalidad === "PRESENCIAL").length,
     virtual:    citas.filter(s => s.modalidad === "VIRTUAL").length,
     /* Cuántas de esas citas son de comercios que ya están gestionados: mide si
@@ -16748,11 +16765,23 @@ function repLaminaAgenda(X, f){
        y una columna en cero se leen distinto, y acá el cero es el dato. */
     X.caja(s, px, GY2, WD, GH2, "EEF2F9");
     const h = GH2 * d.n / tope;
-    if (d.n) s.addShape(X.pptx.ShapeType.rect, { x:px, y:GY2 + GH2 - h, w:WD, h,
-      fill:{ color:X.H(d.iso === f.hoy ? "naranja" : "azul") }, line:{ type:"none" } });
-    X.T(s, String(d.n), { x:px, y: d.n && h > 0.34 ? GY2 + GH2 - h + 0.06 : GY2 + GH2 - h - 0.28,
-      w:WD, h:0.26, fontSize:12, bold:true, align:"center",
-      color: d.n && h > 0.34 ? "FFFFFF" : X.H("gris2") });
+    const col = X.H(d.iso === f.hoy ? "naranja" : "azul2");
+    /* La columna es el compromiso del día completo, en tono claro; lo que ya
+       ocurrió va adentro en tono pleno. Es el mismo vocabulario del embudo y
+       de la lámina semanal —claro lo que estaba, pleno lo hecho—, así que se
+       lee sin explicación. Un día sin nada hecho queda todo claro; el jueves a
+       media tarde se ve cuánto lleva el equipo y cuánto le queda. */
+    if (d.n){
+      s.addShape(X.pptx.ShapeType.rect, { x:px, y:GY2 + GH2 - h, w:WD, h,
+        fill:{ color:col, transparency:60 }, line:{ type:"none" } });
+      const hh = GH2 * (d.hechas || 0) / tope;
+      if (hh) s.addShape(X.pptx.ShapeType.rect, { x:px, y:GY2 + GH2 - hh, w:WD, h:hh,
+        fill:{ color:col }, line:{ type:"none" } });
+    }
+    /* La cifra va SIEMPRE encima de la columna, no adentro: con la columna
+       partida en dos tonos, un número blanco sobre el tramo claro no se lee. */
+    X.T(s, String(d.n), { x:px, y:GY2 + GH2 - h - 0.28,
+      w:WD, h:0.26, fontSize:12, bold:true, align:"center", color:X.H("navy") });
     X.T(s, d.dia, { x:px, y:GY2 + GH2 + 0.06, w:WD, h:0.22, fontSize:9.5,
       bold: d.iso === f.hoy, align:"center", color:X.H(d.iso === f.hoy ? "naranja" : "gris") });
     X.T(s, repFecha(d.iso).slice(0,5), { x:px, y:GY2 + GH2 + 0.28, w:WD, h:0.20,
@@ -16768,7 +16797,11 @@ function repLaminaAgenda(X, f){
       : "Todavía no hay visitas ni reuniones agendadas para esta ventana."
         + (A.sinAgendar ? ` Hay ${A.sinAgendar} comercios habilitados esperando que se les ponga fecha.` : ""),
     { x:0.86, y:6.14, w:11.8, h:0.52, fontSize:12, color:X.H("gris") });
-  X.T(s, "Solo citas abiertas: una visita ya realizada deja de contar acá y pasa al embudo.",
+  X.T(s, (A.hechas
+      ? `Tono pleno: ${A.hechas === 1 ? "la que ya se concretó" : "las " + A.hechas + " que ya se concretaron"}`
+        + " · tono claro: las que faltan. "
+      : "Tono pleno: las que ya se concretaron · tono claro: las que faltan. ")
+    + "La cita reagendada cuenta en su fecha nueva, no en la vieja.",
     { x:0.57, y:6.90, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
 }
 
