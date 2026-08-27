@@ -1289,6 +1289,100 @@ button.kpi:hover{border-color:var(--brand-2)}
    Una tabla densa que se lee de arriba abajo como una jornada. La fila entera
    es el objetivo del clic —no un enlace escondido en una celda—, así que lleva
    cursor, foco visible y su propio realce al pasar por encima. */
+/* ---- El resumen comparativo por ejecutivo --------------------------------
+   Barras apiladas horizontales. Cada tramo lleva 2 px de aire del color del
+   fondo entre medio y extremos redondeados de 4 px: sin el aire, dos tramos
+   del mismo hue se leen como uno. */
+.rz{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px 20px;margin:0 0 16px}
+.rz-cab{display:flex;flex-wrap:wrap;gap:14px;align-items:baseline;justify-content:space-between;
+  margin-bottom:18px}
+.rz-cab h3{margin:0;font-size:15px}
+.rz-kpi{display:flex;gap:22px;flex-wrap:wrap}
+.rz-kpi div{text-align:right}
+.rz-kpi b{display:block;font-size:21px;line-height:1.1;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.rz-kpi div.mal b{color:var(--serious-ink)}
+.rz-kpi span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.rz-gs{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.rz-t{margin-bottom:12px}
+.rz-t b{display:block;font-size:13.5px;color:var(--ink)}
+.rz-t span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.rz-fila{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.rz-n{flex:0 0 108px;font-size:12.5px;color:var(--ink-2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.rz-pista{flex:1;min-width:0}
+.rz-b{display:flex;height:16px;min-width:3px}
+.rz-b i{display:block;height:100%}
+.rz-b i.rz-ok{background:#2f6fd0;border-radius:4px 0 0 4px}
+.rz-b i.rz-no{border-radius:0 4px 4px 0;
+  /* Los 2 px de aire van del color del fondo, no de un gris: así el corte se
+     lee igual en claro y en oscuro sin repintar nada. */
+  box-shadow:inset 2px 0 0 var(--card)}
+.rz-b i.rz-no.azulclaro{background:#8fb4e4}
+.rz-b i.rz-no.naranja{background:#e0662f}
+.rz-b i.rz-ok:only-child,.rz-b i[style*="width:100.0%"]{border-radius:4px}
+.rz-v{flex:0 0 96px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rz-v b{font-size:14px;color:var(--ink)}
+.rz-v span{font-size:11.5px;color:var(--muted);margin-left:3px}
+.rz-v em{display:block;font-style:normal;font-size:11.5px;color:var(--ink-2)}
+.rz-ley{display:flex;gap:16px;margin-top:12px;font-size:11.5px;color:var(--ink-2)}
+.rz-ley i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;
+  vertical-align:-1px}
+.rz-ley i.rz-ok{background:#2f6fd0}
+.rz-ley i.rz-no.azulclaro{background:#8fb4e4}
+.rz-ley i.rz-no.naranja{background:#e0662f}
+table.tbl-rz{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:20px}
+table.tbl-rz caption{text-align:left;font-size:11.5px;color:var(--muted);padding-bottom:7px}
+table.tbl-rz th{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted);text-align:right;padding:0 0 7px 14px;white-space:nowrap}
+table.tbl-rz th:first-child{text-align:left;padding-left:0}
+table.tbl-rz td{padding:7px 0 7px 14px;border-top:1px solid var(--grid);text-align:right}
+table.tbl-rz td:first-child{text-align:left;padding-left:0;color:var(--ink-2)}
+table.tbl-rz td.n{font-variant-numeric:tabular-nums}
+table.tbl-rz td.mal{color:var(--serious-ink);font-weight:650}
+table.tbl-rz tr.total td{border-top:2px solid var(--line);font-weight:700;color:var(--ink)}
+/* En modo oscuro los dos tonos suben un paso: los del claro se apagan sobre el
+   fondo hundido. No es un volteo automático, son otros pasos de la misma rampa. */
+:root[data-theme="dark"] .rz-b i.rz-ok,:root[data-theme="dark"] .rz-ley i.rz-ok{background:#5a8fe8}
+:root[data-theme="dark"] .rz-b i.rz-no.azulclaro,
+:root[data-theme="dark"] .rz-ley i.rz-no.azulclaro{background:#3d5f8f}
+:root[data-theme="dark"] .rz-b i.rz-no.naranja,
+:root[data-theme="dark"] .rz-ley i.rz-no.naranja{background:#e0803f}
+@media (max-width:900px){
+  .rz-gs{grid-template-columns:1fr;gap:22px}
+  .rz-n{flex-basis:88px}
+}
+
+/* ---- La alerta de lo que falta por gestionar -----------------------------
+   Es un botón, no un aviso: el número no sirve sin la lista detrás. Ocupa el
+   ancho entero a propósito — es lo primero que tiene que ver un ejecutivo al
+   abrir su panel, por encima de cualquier porcentaje. */
+.alerta-gest{display:flex;align-items:center;gap:16px;width:100%;text-align:left;
+  background:var(--serious-bg);border:1px solid var(--serious);border-radius:var(--r);
+  padding:14px 18px;margin:0 0 14px;cursor:pointer;font:inherit;color:var(--ink);
+  transition:box-shadow .12s}
+.alerta-gest:hover{box-shadow:var(--sh)}
+.alerta-gest .ag-n{font-size:34px;font-weight:800;line-height:1;color:var(--serious-ink);
+  font-variant-numeric:tabular-nums;flex:none}
+.alerta-gest .ag-t{flex:1;min-width:0}
+.alerta-gest .ag-t b{display:block;font-size:14.5px;color:var(--serious-ink)}
+.alerta-gest .ag-t span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.alerta-gest .ag-ir{flex:none;font-size:13px;font-weight:650;color:var(--serious-ink);white-space:nowrap}
+@media (max-width:640px){
+  .alerta-gest{flex-wrap:wrap;gap:10px}
+  .alerta-gest .ag-t{flex:1 1 100%;order:3}
+  .alerta-gest .ag-ir{margin-left:auto}
+}
+/* La cobertura como barra, debajo de las cifras: un porcentaje suelto no dice
+   si va bien; la barra sí, de un vistazo. */
+.cob-linea{margin:6px 2px 0}
+.cob-linea .cob-t{font-size:13px;color:var(--ink-2);margin-bottom:6px}
+.cob-linea .cob-t b{color:var(--ink);font-size:15px;margin-left:4px}
+.cob-linea .cob-t span{color:var(--muted);margin-left:8px;font-size:12.5px}
+.cob-linea .pista{height:8px;background:var(--grid);border-radius:5px;overflow:hidden}
+.cob-linea .pista i{display:block;height:100%;background:var(--brand-2);border-radius:5px}
+
 table.tbl-act{border-collapse:collapse;width:100%;font-size:13px}
 table.tbl-act th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
   color:var(--muted);text-align:left;padding:0 14px 8px 0;white-space:nowrap}
@@ -1469,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 05:05", huella:"3b2958" };
+const BUILD = { sello:"27/08/2026 05:44", huella:"de5bb2" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -4609,6 +4703,26 @@ function bindComunes(){
   document.querySelectorAll("[data-verges]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verGestiones(el.dataset.verges, el.dataset.verejec || "");
   });
+  /* La alerta del panel lleva a SU lista, que es lo que la hace útil: sin el
+     salto es un número que informa y no ayuda. Va a la Cartera con el filtro
+     de lo que falta por gestionar, sobre la cartera de quien está mirando. */
+  document.querySelectorAll("[data-verfaltan]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    S.fContacto = "sin_gestion"; S.fRubro = S.fEstadoCli = S.fDistrito = "todos";
+    S.q = ""; S.limite = 40;
+    const q = correoObservado();
+    S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    go("cartera");
+  });
+  /* Y los estados derivados, igual: cada cifra del panel abre su lista. */
+  document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    S.fContacto = "est:" + el.dataset.verest;
+    S.fRubro = S.fEstadoCli = S.fDistrito = "todos"; S.q = ""; S.limite = 40;
+    const q = correoObservado();
+    S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    go("cartera");
+  });
   /* El destrabe, en un toque. Abre el registro de contacto ya puesto en
      «correo al cliente» y con la copia al banco marcada, que es exactamente
      lo que el ejecutivo está a punto de escribir. Se le deja el formulario
@@ -4754,6 +4868,11 @@ function viewCartera(){
        la lista no cuadrara con el número que se acaba de tocar. */
     if (S.fContacto === "registrado") return !esClienteNuevo(c);
     if (S.fContacto === "gestionado") return !esClienteNuevo(c) && !!b._gestionado;
+    /* El complemento: los que TODAVÍA no cuentan. Es la lista a la que lleva
+       la alerta del panel, y es distinta de «sin intentar»: acá entran también
+       los que ya recibieron una llamada que nadie contestó, que son los que se
+       ven trabajados y no lo están. */
+    if (S.fContacto === "sin_gestion") return !esClienteNuevo(c) && !b._gestionado;
     /* Los estados calculados también filtran, que es para lo que sirven: cada
        uno responde «qué hago hoy con este comercio». */
     if (S.fContacto.startsWith("est:")) return estadoDerivado(c) === S.fContacto.slice(4);
@@ -4829,10 +4948,11 @@ function viewCartera(){
          trabajo, sin importar si contestaron. Se podía preguntar por los que no
          se tocaron y por los que respondieron, pero no por el conjunto. -->
     <div class="seg" role="group" aria-label="Situación del comercio">
-      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],
+      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],["sin_gestion","Faltan por gestionar"],
          ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
-          k === "gestionado" ? ` title="Comercios con al menos un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"` : ""
+          k === "gestionado" ? ` title="Comercios con al menos un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"`
+          : k === "sin_gestion" ? ` title="Comercios que todavía no cuentan como gestionados. Incluye los que ya tienen intentos sin respuesta, que se ven trabajados y no lo están"` : ""
         }>${l}</button>`).join("")}
     </div>
     ${avisoPorActualizar()}
@@ -9080,6 +9200,102 @@ function bloqueDetalle(r, regs){
 
    No se muestra a supervisión: ellos tienen la tabla completa en el bloque de
    la llave y en Incentivos. */
+/* ---- Tu periodo en números ----------------------------------------------
+   El bloque que pidió José el 27/08 y que el panel no tenía: las ocho cifras
+   con las que un ejecutivo decide qué hacer AHORA, en una sola fila y con las
+   dos que llevan a una lista puestas como botones.
+
+   La que manda es la alerta de lo que falta por gestionar. Un ejecutivo que
+   mira su panel y ve «cobertura 58%» no sabe a quién llamar; el que ve «te
+   faltan 47» y puede tocarlos sí. Y como el bono se traba justamente ahí, la
+   alerta es también el camino más corto para destrabarlo.
+
+   Todo se cuenta con la regla de gestión del 27/08 —correo al banco o al
+   comercio, contacto efectivo, reunión realizada o cierre—, la misma con la
+   que se arma el embudo del reporte. Que el ejecutivo y el comité cuenten
+   distinto es exactamente lo que este proyecto lleva una semana corrigiendo. */
+function bloqueMiPeriodo(r){
+  if (!vistaDeCampo()) return "";
+  const mios = universoPanel();
+  if (!mios.length) return "";
+
+  const cartera = mios.filter(c => !esClienteNuevo(c));
+  const nuevos  = mios.filter(c => esClienteNuevo(c));
+
+  /* Un comercio está gestionado con el mismo criterio de siempre: lo dice su
+     resumen, que ya lo calcula una vez por ficha. */
+  const gestionado = c => !!(c._base || RULES.recomputarBase(c.customer_id) || c._base || {})._gestionado;
+  const conGestion = cartera.filter(gestionado).length;
+  const faltan     = cartera.length - conGestion;
+  /* De los que faltan, cuántos ni siquiera tienen un intento. Es la diferencia
+     entre «no lo he tocado» y «lo toqué y no contestó», que se atienden
+     distinto: al primero se le escribe, al segundo se insiste. */
+  const sinTocar = cartera.filter(c => !gestionado(c)
+    && !DB.historiaDe(c.customer_id).some(x => !esReconstruida(x))).length;
+
+  /* Las gestiones VÁLIDAS: filas que califican, no intentos. Del periodo y del
+     último día trabajado, que es el que vence hoy. */
+  const validas = fs => fs.filter(esGestionValida).length;
+  const mias = DB.crudo.filter(x => x.Correo_Stratis === (correoObservado() || ""));
+  const delPeriodo = mias.filter(x => enRango(x.Fecha_Contacto, r));
+  const ayer  = diaTrabajadoAnterior(hoyISO());
+  const deAyer = ayer ? mias.filter(x => String(x.Fecha_Contacto).slice(0,10) === ayer) : [];
+
+  const visitas = delPeriodo.filter(x => x.Cumple_Visita === "SI").length;
+  const ventas  = nuevos.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
+  const negociando  = cartera.filter(c => estadoDerivado(c) === "EN_NEGOCIACION").length;
+  const porContactar= cartera.filter(c => estadoDerivado(c) === "POR_CONTACTAR").length;
+  const cobertura = cartera.length ? Math.round(conGestion / cartera.length * 100) : 0;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">1</span>
+    <div><b>Tu periodo en números</b><span>${esc(r.detalle)}</span></div>
+  </div>
+
+  ${faltan ? `<button class="alerta-gest" data-verfaltan="1">
+    <div class="ag-n">${faltan}</div>
+    <div class="ag-t"><b>comercios te faltan por gestionar</b>
+      <span>Cuentan cuando les mandas un correo —al banco o al comercio—, cuando el cliente
+      te responde, cuando haces la reunión, o cuando cierras el caso.${
+        sinTocar ? ` ${sinTocar} de ellos no tienen todavía ningún intento.` : ""}</span></div>
+    <div class="ag-ir">Ver cuáles →</div>
+  </button>` : `<div class="note ok" style="margin:0 0 12px">
+    <b>No te falta ninguno.</b> Los ${cartera.length} comercios de tu cartera tienen gestión.</div>`}
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Customer ID</div><div class="val">${cartera.length}</div>
+      <div class="sub">comercios de la cartera de BBVA a tu nombre</div></div>
+    <div class="stat"><div class="lbl">RUC</div><div class="val">${nuevos.length}</div>
+      <div class="sub">${nuevos.length === 1 ? "lead de venta nueva" : "leads de venta nueva"} que trajiste</div></div>
+    <div class="stat"><div class="lbl">Gestiones válidas del periodo</div>
+      <div class="val">${validas(delPeriodo)}</div>
+      <div class="sub">de ${delPeriodo.length} registradas · el resto son intentos sin resultado</div></div>
+    <div class="stat ${ayer && !validas(deAyer) ? "malo" : ""}">
+      <div class="lbl">Válidas de ${ayer ? esc(fmtFecha(ayer)) : "ayer"}</div>
+      <div class="val">${validas(deAyer)}</div>
+      <div class="sub">${ayer ? "el último día trabajado — su plazo vence hoy" : "sin día anterior"}</div></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${visitas}</div>
+      <div class="sub">gestiones que cumplen visita en el periodo</div></div>
+    <div class="stat"><div class="lbl">Ventas cerradas</div><div class="val">${ventas}</div>
+      <div class="sub">afiliaciones nuevas cerradas en el periodo</div></div>
+    <button class="stat stat-link" data-verest="POR_CONTACTAR"><div class="lbl">Por contactar</div>
+      <div class="val">${porContactar}</div>
+      <div class="sub">BBVA respondió y falta hablar con el titular — <b>ver cuáles</b></div></button>
+    <button class="stat stat-link" data-verest="EN_NEGOCIACION"><div class="lbl">En negociación</div>
+      <div class="val">${negociando}</div>
+      <div class="sub">hablaste con el titular y el caso sigue abierto — <b>ver cuáles</b></div></button>
+  </div>
+
+  <div class="cob-linea">
+    <div class="cob-t">Cobertura de tu cartera <b>${cobertura}%</b>
+      <span>${conGestion} de ${cartera.length} con gestión</span></div>
+    <div class="pista"><i style="width:${cobertura}%"></i></div>
+  </div>`;
+}
+
 function bloqueMiRegistro(){
   if (!vistaDeCampo()) return "";
   const correo = correoObservado() || (S.user && S.user.correo);
@@ -9109,11 +9325,11 @@ function bloqueMiRegistro(){
   <div class="card">
     <div class="ctrl-h">
       <h3>Tu registro al día</h3>
-      <span class="chip ${ok ? "ok" : "crit"}">${pct1(q.valor)}% · mínimo ${q.meta}%</span>
+      <span class="chip ${ok ? "ok" : "crit"}">${pct1(q.valor)} · mínimo ${q.meta}%</span>
     </div>
     <div class="stat-row" style="margin-bottom:0">
       <div class="stat ${ok ? "" : "malo"}"><div class="lbl">Puntualidad del periodo</div>
-        <div class="val">${pct1(q.valor)}%</div>
+        <div class="val">${pct1(q.valor)}</div>
         <div class="sub">${q.puntuales} de ${ll.gestiones} registradas dentro del plazo</div></div>
       <div class="stat ${ok ? "" : "malo"}"><div class="lbl">${ok ? "Margen" : "Te faltan"}</div>
         <div class="val">${ok ? margen : q.faltan}</div>
@@ -9164,6 +9380,7 @@ function viewPanel(){
   return `
   ${bannerComoEjec()}
   ${selectorPanel(r)}
+  ${bloqueMiPeriodo(r)}
   ${bloqueMiRegistro()}
   ${bloqueProyecto()}
   ${bloqueActividad(r, regs)}
@@ -9756,9 +9973,16 @@ const actTipo = id => ACT_TIPOS.find(t => t.id === id) || { label:id, color:"mut
 function actividadEventos(){
   const ev = [];
   const cuando = x => { const t = new Date(x).getTime(); return isNaN(t) ? 0 : t; };
+  /* Quién lo hizo. No todo lo que queda registrado lo hace una persona del
+     equipo: las correcciones supervisadas y las ediciones del relato del
+     reporte entran sin correo de nadie, y aparecían como «—», que en una
+     columna llamada «Quién» se lee como un dato que falta. Se nombran. */
+  const esSistema = correo => !correo || correo === "correccion-supervisada";
   const nombreDe = correo => {
+    if (!correo) return "Sistema";
+    if (correo === "correccion-supervisada") return "Corrección supervisada";
     const u = USUARIOS.find(x => x.correo === correo);
-    return u ? u.nombre : (correo || "—");
+    return u ? u.nombre : correo;
   };
 
   /* 1 · Las gestiones. Las tres clases: al comercio, al banco y las que
@@ -9781,7 +10005,12 @@ function actividadEventos(){
       fechaReg: String(r.Fecha_Contacto || "").slice(0,10),
       horaReg: r.Hora_Contacto || "",
       desfase: desfaseDias(r.Fecha_Contacto, r.Creado_En),
-      inferida: !!r.Inferida
+      inferida: !!r.Inferida,
+      /* Las dos preguntas del resumen, resueltas acá para que el gráfico no
+         tenga que volver a mirar la fila cruda: ¿cuenta como gestión? ¿se
+         registró dentro de plazo? */
+      valida: esGestionValida(r),
+      aTiempo: aTiempo(r)
     });
   });
 
@@ -9870,7 +10099,9 @@ function actividadEventos(){
     });
   });
 
-  return ev.filter(x => x.ts > 0).sort((a, b) => b.ts - a.ts);
+  return ev.filter(x => x.ts > 0)
+    .map(x => Object.assign(x, { sistema: esSistema(x.correo) }))
+    .sort((a, b) => b.ts - a.ts);
 }
 
 /* Los nombres largos de medio y resultado. Hay dos catálogos —el del comercio
@@ -9881,6 +10112,140 @@ const actMedio = id => (tipoById(id) || {}).label || nomMedioBBVA(id) || String(
 const actResultado = id => (resultadoById(id) || {}).label || nomResultadoBBVA(id) || String(id || "");
 /* El medio declarado en el alta viene en mayúsculas en la ficha. */
 const nomMedioBBVA2 = id => nomMedioBBVA(String(id || "").toLowerCase()) || String(id || "").toLowerCase();
+
+
+/* ---- El resumen comparativo por ejecutivo -------------------------------
+   Lo que piden José y Gabriel: de un vistazo, cuánto trabajó cada uno, cuánto
+   de eso CUENTA, y si lo registró dentro de plazo.
+
+   Son dos preguntas distintas y por eso son dos gráficos, no uno con dos
+   escalas —un eje doble es la forma más rápida de que dos medidas se lean como
+   una—. Las dos son parte-todo sobre el mismo total, así que van en barra
+   apilada horizontal: la barra entera es lo que registró, y el tramo oscuro es
+   la parte que cuenta.
+
+   Sobre el color: el par obvio para «a tiempo / fuera de plazo» era verde y
+   naranja, y no se puede usar. Medidos con el validador, para un ojo protán
+   esos dos quedan a ΔE 5,9 —por debajo del piso— y son prácticamente el mismo
+   color. Es una distinción que decide el bono de alguien: no puede depender de
+   ver bien el rojo y el verde. Se usa azul contra naranja, que pasa con ΔE
+   25,2, y además cada tramo lleva su cifra escrita, así que el color nunca es
+   la única señal.
+
+   El azul claro de «intentos sin resultado» no llega a 3:1 contra el fondo. La
+   regla dice que eso obliga a etiqueta visible o vista de tabla; acá hay las
+   dos. Y no es casual que lo que NO cuenta sea lo más tenue.
+
+   Debajo va la tabla con las cifras exactas, que no es un adorno: es la vista
+   que funciona con lector de pantalla, la que se copia a un correo y la que
+   resuelve cualquier duda sobre lo que dice una barra. */
+function repResumenEjecutivos(todos){
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  if (!ejec.length) return "";
+
+  /* Solo las GESTIONES entran al resumen: una ficha creada o una cita agendada
+     son trabajo, pero no son interacciones y mezclarlas haría que el
+     denominador dejara de significar algo. */
+  const ges = todos.filter(e => e.tipo === "gestion" && !e.inferida);
+  if (!ges.length) return "";
+
+  const filas = ejec.map(u => {
+    const suyas = ges.filter(e => e.correo === u.correo);
+    const validas = suyas.filter(e => e.valida).length;
+    const aTpo = suyas.filter(e => e.aTiempo).length;
+    return { nombre:u.nombre, correo:u.correo,
+      total:suyas.length, validas, intentos:suyas.length - validas,
+      aTiempo:aTpo, tarde:suyas.length - aTpo,
+      comercios:new Set(suyas.map(e => e.cid)).size };
+  /* Ordenadas por lo que cuenta, de mayor a menor: comparar magnitudes es
+     mucho más fácil cuando vienen ordenadas, y lo que se compara acá es
+     cuánto trabajo con resultado puso cada uno. */
+  }).filter(f => f.total).sort((a, b) => b.validas - a.validas);
+  if (!filas.length) return "";
+
+  const T = filas.reduce((a, f) => ({
+    total:a.total + f.total, validas:a.validas + f.validas,
+    aTiempo:a.aTiempo + f.aTiempo, tarde:a.tarde + f.tarde
+  }), { total:0, validas:0, aTiempo:0, tarde:0 });
+  const tope = Math.max(...filas.map(f => f.total), 1);
+  const pc = (n, d) => d ? Math.round(n / d * 100) : 0;
+
+  /* Una barra apilada. El ancho de la barra entera es el total de esa persona
+     contra el mayor del equipo, así que las barras se comparan entre sí y no
+     cada una consigo misma. */
+  const barra = (f, buena, mala, claseMala) => {
+    const w = f.total / tope * 100;
+    const p = f.total ? buena / f.total * 100 : 0;
+    return `<div class="rz-b" style="width:${w.toFixed(1)}%">
+      <i class="rz-ok" style="width:${p.toFixed(1)}%"></i>
+      <i class="rz-no ${claseMala}" style="width:${(100 - p).toFixed(1)}%"></i>
+    </div>`;
+  };
+
+  const grafico = (titulo, sub, buenaK, malaK, etiqueta, claseMala) => `
+    <div class="rz-g">
+      <div class="rz-t"><b>${titulo}</b><span>${sub}</span></div>
+      ${filas.map(f => `<div class="rz-fila">
+        <div class="rz-n">${esc(f.nombre)}</div>
+        <div class="rz-pista">${barra(f, f[buenaK], f[malaK], claseMala)}</div>
+        <div class="rz-v"><b>${f[buenaK]}</b><span>de ${f.total}</span>
+          <em>${pc(f[buenaK], f.total)}%</em></div>
+      </div>`).join("")}
+      <div class="rz-ley">
+        <span><i class="rz-ok"></i>${esc(etiqueta[0])}</span>
+        <span><i class="rz-no ${claseMala}"></i>${esc(etiqueta[1])}</span>
+      </div>
+    </div>`;
+
+  return `
+  <div class="rz">
+    <div class="rz-cab">
+      <h3>Gestión del equipo en el periodo</h3>
+      <div class="rz-kpi">
+        <div><b>${T.validas}</b><span>gestiones válidas</span></div>
+        <div><b>${T.total}</b><span>interacciones registradas</span></div>
+        <div><b>${pc(T.validas, T.total)}%</b><span>de lo registrado cuenta</span></div>
+        <div class="${pc(T.aTiempo, T.total) < 95 ? "mal" : ""}">
+          <b>${pc(T.aTiempo, T.total)}%</b><span>registrado dentro de plazo</span></div>
+      </div>
+    </div>
+
+    <div class="rz-gs">
+      ${grafico("Cuánto de lo registrado cuenta",
+                "una gestión cuenta si dejó un correo, una respuesta, una reunión o un cierre",
+                "validas", "intentos",
+                ["Gestiones válidas", "Intentos sin resultado"], "azulclaro")}
+      ${grafico("Cuánto se registró a tiempo",
+                "el plazo es el mismo día o el día trabajado siguiente",
+                "aTiempo", "tarde",
+                ["Dentro de plazo", "Fuera de plazo"], "naranja")}
+    </div>
+
+    <div class="tabla-cont">
+      <table class="tbl-rz">
+        <caption>Las mismas cifras, exactas</caption>
+        <thead><tr><th>Ejecutivo</th><th>Interacciones</th><th>Válidas</th><th>% válidas</th>
+          <th>A tiempo</th><th>Fuera de plazo</th><th>% a tiempo</th><th>Comercios</th></tr></thead>
+        <tbody>
+          ${filas.map(f => `<tr>
+            <td>${esc(f.nombre)}</td>
+            <td class="n">${f.total}</td><td class="n">${f.validas}</td>
+            <td class="n">${pc(f.validas, f.total)}%</td>
+            <td class="n">${f.aTiempo}</td>
+            <td class="n ${f.tarde ? "mal" : ""}">${f.tarde}</td>
+            <td class="n ${pc(f.aTiempo, f.total) < 95 ? "mal" : ""}">${pc(f.aTiempo, f.total)}%</td>
+            <td class="n">${f.comercios}</td></tr>`).join("")}
+          <tr class="total"><td>Equipo</td>
+            <td class="n">${T.total}</td><td class="n">${T.validas}</td>
+            <td class="n">${pc(T.validas, T.total)}%</td>
+            <td class="n">${T.aTiempo}</td><td class="n">${T.tarde}</td>
+            <td class="n">${pc(T.aTiempo, T.total)}%</td>
+            <td class="n">${new Set(ges.map(e => e.cid)).size}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
 
 /* ---- La pantalla --------------------------------------------------------- */
 function viewActividad(){
@@ -9912,10 +10277,19 @@ function viewActividad(){
 
   /* Las tres cifras de cabecera se cuentan sobre el rango completo, no sobre
      lo filtrado: son el contexto contra el que se lee el filtro. */
-  const personas = new Set(todos.map(e => e.correo).filter(Boolean)).size;
+  /* «Personas» cuenta gente del equipo, no cadenas distintas en una columna.
+     Con el criterio anterior salían seis donde había cuatro: sumaba las
+     ediciones del relato —que entran sin correo— y la corrección supervisada,
+     que no es nadie. Lo del sistema se declara aparte. */
+  const personas = new Set(todos.filter(e => !e.sistema).map(e => e.correo)).size;
+  const delSistema = todos.filter(e => e.sistema).length;
   const corridas = todos.filter(desfaseRaro).length;
 
-  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo")
+  /* `activo !== false` no es un detalle: sin él, una cuenta desactivada sigue
+     ofreciéndose en el selector con cero eventos al lado, y el supervisor la
+     elige pensando que es alguien que no trabajó. El resumen ya la filtraba;
+     el selector no, y los dos tienen que decir lo mismo. */
+  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
     .map(u => [u.correo, `${u.nombre} · ${todos.filter(e => e.correo === u.correo).length}`]);
   const opciones = (valor, todosTxt, items) =>
     `<option value="todos"${valor==="todos"?" selected":""}>${todosTxt}</option>` +
@@ -9976,7 +10350,8 @@ function viewActividad(){
     <div class="stat"><div class="lbl">Eventos</div><div class="val">${todos.length}</div>
       <div class="sub">${esc(rango[1].toLowerCase())}</div></div>
     <div class="stat"><div class="lbl">Personas</div><div class="val">${personas}</div>
-      <div class="sub">registraron algo en el periodo</div></div>
+      <div class="sub">del equipo registraron algo${
+        delSistema ? ` · ${delSistema} ${delSistema === 1 ? "movimiento" : "movimientos"} del sistema` : ""}</div></div>
     <div class="stat ${corridas ? "malo" : ""}"><div class="lbl">Con la fecha corrida</div>
       <div class="val">${corridas}</div>
       <div class="sub">gestiones fechadas en otro día, o citas puestas hacia atrás</div></div>
@@ -9999,6 +10374,8 @@ function viewActividad(){
     <input class="busca" id="qAct" placeholder="Buscar por comercio, Customer ID, persona o comentario…"
            value="${esc(S.qAct || "")}">
   </div>
+
+  ${repResumenEjecutivos(todos)}
 
   ${lista.length ? `
   <div class="tabla-cont">
@@ -13450,6 +13827,11 @@ function fotoPeriodo(p){
 /* =========================================================================
    La pantalla
    ========================================================================= */
+/* OJO: esta ya devuelve el signo. Escribir `${pct1(x)}%` da «73,7%%», que es
+   lo que se veía en el panel del ejecutivo hasta el 27/08. Hay otra `pct1`
+   local en el tablero que NO lo trae y sombrea a esta dentro de sus funciones:
+   dos funciones con el mismo nombre y distinto contrato es la trampa, y el
+   nombre se queda porque renombrarla toca demasiados sitios a la vez. */
 const pct1 = n => (Math.round(n * 10) / 10).toFixed(1).replace(/\.0$/, "") + "%";
 
 /* Una cifra por semana no es un porcentaje: cada requisito trae su forma de
