@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 21:57", huella:"57ab34" };
+const BUILD = { sello:"27/08/2026 22:46", huella:"d49532" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -15544,30 +15544,41 @@ function fotoReporte(){
   const metaR = Number(oR.meta) || 0, metaV = Number(oV.meta) || 0;
   const ritmo = (meta, hecho) => (semanas > 0 && meta > hecho) ? (meta - hecho) / semanas : 0;
 
+  /* La meta de facturación DEL MES, que es contra la que se lee el mes en
+     curso. La meta al cierre del proyecto —base × (1 + meta_pct)— mide otra
+     cosa y en un mes a medio correr no dice nada. Se carga en Ajustes; sin
+     ella la tarjeta cae a la meta del proyecto, como antes. */
+  const metaMes = Number(P.facturacion_meta_mes) || 0;
+
   const kpis = [
     { id:"facturacion", nombre:oF.nombre, peso:oF.peso, color:oF.color, listo:hayFact,
-      /* Con proyección, la cifra grande es la variación PROYECTADA al cierre
-         del mes; sin ella, la variación del acumulado como hasta ahora. */
+      /* La cifra grande es el MONTO proyectado al cierre del mes, no su
+         variación porcentual. Es el formato que José fijó el 27/08 sobre el
+         deck que se presenta: las otras dos tarjetas muestran un hecho —5
+         comercios, 8 afiliaciones— y esta mostraba un juicio. El porcentaje
+         sigue existiendo y se lee solo, comparando el monto contra la meta
+         que está dos líneas más abajo. */
       cifra: !hayFact ? "—"
-        : (proyectaFact
-            ? (crecProyectado >= 0 ? "+" : "\u2212") + Math.abs(crecProyectado).toFixed(1).replace(".", ",") + "%"
-            : (crecimiento >= 0 ? "+" : "\u2212") + Math.abs(crecimiento).toFixed(1).replace(".", ",") + "%"),
+        : repSoles(proyectaFact ? factProyectada : factActual),
       sub: !hayFact ? "falta cargar la facturación del periodo"
         : proyectaFact ? "proyectado al cierre de " + repMesLargo(hastaFact)
-                       : "de crecimiento sobre la base",
+                       : "acumulado del periodo",
       filas: [
         ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
         [proyectaFact ? "Acumulado al " + repFecha(hastaFact)
           : factEsDeclarada ? (P.facturacion_periodo_etiqueta || "Facturación del periodo")
                             : (ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado"),
          hayFact ? repSoles(factActual) : "pendiente"],
-        proyectaFact
-          ? ["Proyección al cierre del mes", repSoles(factProyectada)]
+        metaMes > 0
+          ? ["Meta al cierre del mes", repSoles(metaMes)]
           : [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
       ],
       pie: !hayFact ? "Se carga en Ajustes › Facturación del periodo"
         : proyectaFact
-          ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días · meta al cierre ${repSoles(metaFact)}`
+          ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días` +
+            (metaMes > 0
+              ? ` · ${factProyectada >= metaMes ? "supera" : "falta"} ${repSoles(Math.abs(factProyectada - metaMes))} contra la meta del mes`
+              : ` · meta al cierre ${repSoles(metaFact)}`)
           : (factEsDeclarada ? "Total del periodo · falta el detalle por ejecutivo"
              : metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
                                      : "Meta de facturación alcanzada"),
@@ -16379,7 +16390,6 @@ function viewReporte(){
         · quedan ${f.restante} días</div>
     </div>
     <div class="rep-acc">
-      <button class="btn" id="repPptx">Reporte de avance</button>
       <button class="btn" id="repDir">Deck de directorio</button>
       <button class="btn ghost sm" id="repAjustes">Editar el relato</button>
     </div>
@@ -16513,6 +16523,8 @@ async function bajarFondo(ruta){
    fondos una vez y se le pasa el armador que corresponda. Duplicar esta
    función para el deck de directorio habría duplicado también el manejo de
    errores, que es la parte que nadie mira hasta que falla. */
+/* `armador` ya no tiene default: desde el 27/08 hay un solo documento, y un
+   default silencioso sería la puerta por la que vuelve el segundo. */
 async function generarPPTX(btn, armador){
   const antes = btn ? btn.textContent : "";
   if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
@@ -16523,7 +16535,7 @@ async function generarPPTX(btn, armador){
       bajarFondo(REP_FONDOS.contenido),
       bajarFondo(REP_FONDOS.cierre)
     ]);
-    (armador || armarPPTX)(new Pptx(), { caratula, contenido, cierre });
+    armador(new Pptx(), { caratula, contenido, cierre });
     toast("PowerPoint generado");
   } catch (e){
     toast("No se pudo generar: " + (e.message || e));
@@ -16777,7 +16789,13 @@ function repLaminaObjetivos(X, f){
     k.addShape(X.pptx.ShapeType.roundRect, { x:px + WK - 0.92, y:YK + 0.24, w:0.66, h:0.26,
       fill:{ color:col }, line:{ type:"none" }, rectRadius:0.13 });
     X.T(k, x.peso + "%", { x:px + WK - 0.92, y:YK + 0.245, w:0.66, h:0.26, fontSize:9.5, bold:true, color:"FFFFFF", align:"center" });
-    X.T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:40, bold:true, fontFace:X.NEG, color:col });
+    /* El cuerpo se elige por el largo de la cifra. Desde que Facturación
+       encabeza con el MONTO —«S/ 27,00 MM», once caracteres— los 40 puntos que
+       le quedan bien a un «6» partían la línea en dos y la segunda se montaba
+       sobre el subtítulo. Un número que no cabe no es un número grande. */
+    const cuerpo = String(x.cifra).length > 9 ? 25
+                 : String(x.cifra).length > 6 ? 31 : 40;
+    X.T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:cuerpo, bold:true, fontFace:X.NEG, color:col });
     X.T(k, x.sub,   { x:px + 0.26, y:YK + 1.64, w:WK - 0.52, h:0.24, fontSize:10, color:X.H("gris2") });
     /* En el deck de comité, la etiqueta de una meta no puede explicar cómo se
        reparte el trabajo adentro. «Meta al cierre · 7 por ejecutivo/mes» es
@@ -16909,10 +16927,17 @@ function armarDirectorio(pptx, fondos){
        el mismo concepto con dos colores en láminas contiguas, que es la forma
        más rápida de que una leyenda no sirva para nada. `k` amarra la tarjeta
        a su escalón para que esto no se pueda volver a desincronizar a mano. */
+    /* `mas:null` en Gestión: esta tarjeta no declara su movimiento en texto.
+       Es el formato que José fijó el 27/08 sobre el deck que se presenta, y
+       tiene sentido: el movimiento de la gestión se ve —y con más precisión—
+       en la barra en dos tonos del embudo, dos láminas más adelante. Repetirlo
+       acá en texto era decir dos veces lo mismo, y con el criterio recién
+       cambiado era además lo primero que alguien iba a restar de memoria. Las
+       otras dos tarjetas sí lo declaran, porque no tienen barra propia. */
     { k:"gestion", n: String(f.gestion), et:"comercios con gestión",
-      sub:"impactados por los ejecutivos",
+      sub:"impactados por los ejecutivos", sinMovimiento:true,
       pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
-      mas: mov("gestion") },
+      mas: null },
     { k:"visita", n: String(f.visita), et:"comercios visitados",
       sub:"presenciales o virtuales",
       pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
@@ -17021,7 +17046,11 @@ function armarDirectorio(pptx, fondos){
     `Actividad de cada semana —no el acumulado— · semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
 
   const DIA = repSemanaDia(f);
-  const SW = 3.95, SG = 0.28, SY = 1.80, SH = 3.30;
+  /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
+     pie: sin ella el tercio de abajo de la lámina quedaba vacío y las tres
+     curvas apretadas arriba. El alto que liberó el texto se lo lleva el
+     gráfico, que es lo que la lámina viene a mostrar. */
+  const SW = 3.95, SG = 0.28, SY = 1.80, SH = 4.80;
   SEM.series.forEach((serie, i2) => {
     const px = 0.57 + i2 * (SW + SG);
     caja(g, px, SY, SW, SH, "FFFFFF", REP_LINEA);
@@ -17032,20 +17061,20 @@ function armarDirectorio(pptx, fondos){
 
     const dd = DIA.series.find(x => x.k === serie.k) || { previa:[], actual:[] };
     const comp = DIA.alMismoDia.find(x => x.k === serie.k) || { previa:0, actual:0 };
-    const v = comp.previa ? (comp.actual - comp.previa) / comp.previa * 100
-                          : (comp.actual ? null : 0);
-
     T(g, String(comp.actual), { x:px + 0.22, y:SY + 0.58, w:1.50, h:0.58, fontSize:30,
       bold:true, fontFace:NEG, color:H(serie.color) });
-    T(g, v === null ? "sin base para comparar"
-       : Math.round(v) === 0 ? "igual que la semana pasada"
-       : (v > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(v), 0) + "% vs. la semana pasada",
-      { x:px + 1.76, y:SY + 0.74, w:SW - 1.98, h:0.28, fontSize:10, bold:true,
-        color: v === null || Math.round(v) === 0 ? H("gris2") : H(v > 0 ? "verde" : "naranja") });
+    /* El badge «▼ 79% vs. la semana pasada» salió el 27/08, con el formato que
+       José fijó sobre el deck que se presenta. La comparación no se pierde: la
+       curva clara es la semana pasada y el pie dice en cuánto iba al mismo
+       día. Lo que se va es el porcentaje, que sobre bases chicas grita —una
+       retención menos es «▼ 100%»— y en una lámina de comité se lee como una
+       alarma donde hay ruido. */
     /* Dos referencias, no una: contra la semana pasada al mismo día —que es la
        comparación honesta— y contra el promedio semanal, que es la que
        sobrevive a una semana excepcional. */
-    const prom = (SEM.promedio || {})[serie.k];
+    /* El promedio semanal salió del pie por lo mismo: era la tercera cifra de
+       una línea que ya traía dos, y el pico de la semana del 14 —que es lo
+       que el promedio venía a matizar— ya no se compara con un porcentaje. */
     /* Y el cierre de la semana pasada, que es el número que la curva rotula al
        final de su línea. Sin nombrarlo, la tarjeta decía «la pasada iba en 10»
        mientras el gráfico de al lado mostraba 14: dos cifras ciertas —al mismo
@@ -17063,14 +17092,13 @@ function armarDirectorio(pptx, fondos){
       && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
       ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
     T(g, `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
-       + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : "")
-       + (prom ? ` · promedio semanal ${repNum(prom, prom < 10 ? 1 : 0)}` : ""),
+       + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : ""),
       /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
          una sola y sin sitio se montaba sobre la curva. */
       { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
 
     /* Las dos líneas, acumuladas, sobre el mismo eje de siete días. */
-    const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 1.14;
+    const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 2.60;
     const tope = Math.max(1, ...dd.previa.filter(x => x !== null),
                              ...dd.actual.filter(x => x !== null));
     g.addShape(pptx.ShapeType.rect, { x:GX, y:GY + GH, w:GW, h:0.015,
@@ -17156,34 +17184,18 @@ function armarDirectorio(pptx, fondos){
       { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
   });
 
-  caja(g, 0.57, 5.36, 12.38, 1.52, REP_BANDA);
-  g.addShape(pptx.ShapeType.rect, { x:0.57, y:5.36, w:0.10, h:1.52,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(g, SEM.curso
-      ? `La semana en curso, del ${repFecha(SEM.curso.desde)} al ${repFecha(f.hoy)} — ${SEM.curso.dias} días`
-      : "La semana en curso",
-    { x:0.86, y:5.48, w:6.5, h:0.28, fontSize:11, bold:true, color:H("navy") });
-  /* Si la semana con la que se compara fue un pico, hay que decirlo en la
-     misma lámina y con la cuenta a la vista. Un −92% sin esa línea se lee como
-     un derrumbe del equipo cuando lo que hubo fue una semana excepcional. */
-  const picos = ["contactos", "retenciones", "visitas"]
-    .map(k => ({ k, p:(SEM.pico || {})[k],
-                 nombre:(SEM.series.find(x => x.k === k) || {}).nombre }))
-    .filter(x => x.p);
-  const avisoPico = picos.length
-    ? ` La semana del ${repFecha(picos[0].p.semana.desde)} al ${repFecha(picos[0].p.semana.hasta)} `
-      + `llegó a ${picos[0].p.semana[picos[0].k]} en «${String(picos[0].nombre).toLowerCase()}», `
-      + `${repNum(picos[0].p.veces, 1)} veces el promedio de las semanas anteriores `
-      + `(${repNum(picos[0].p.promedioOtras, 0)}): es un pico y no la referencia normal, `
-      + `así que la variación contra ella se lee junto al promedio semanal de cada tarjeta.`
-    : "";
-  T(g, SEM.curso
-      ? `Esta lámina cuenta la ACTIVIDAD de cada semana: cuántos comercios se trabajaron y cuántas visitas se hicieron, `
-        + `aunque el comercio ya contara desde antes. La lámina del embudo cuenta el ACUMULADO y cuánto se movió, que es otra cifra. `
-        + `Cada tarjeta compara la semana en curso contra la anterior AL MISMO DÍA — hoy es el día ${DIA.diasAct} de siete—, no contra su total.`
-        + avisoPico
-      : "Todavía no hay días corridos en la semana en curso." + avisoPico,
-    { x:0.86, y:5.78, w:11.8, h:0.98, fontSize:11.5, color:H("gris") });
+  /* La banda explicativa del pie salió el 27/08, con el formato que José fijó
+     sobre el deck que se presenta. Decía tres cosas ciertas —qué mide esta
+     lámina contra el embudo, que la comparación es al mismo día, y que la
+     semana del 14 fue un pico—, pero un comité no lee un párrafo de seis
+     líneas debajo de tres gráficos: los mira y pasa. Lo que la banda protegía
+     —que un −92% no se leyera como un derrumbe— ya no hace falta, porque el
+     porcentaje también salió: quedan las dos curvas, y una curva clara por
+     encima de la plena dice «la semana pasada iba mejor» sin ningún párrafo.
+
+     El subtítulo de la lámina sigue diciendo «Actividad de cada semana —no el
+     acumulado—», que es la única de las tres que evitaba una confusión real. */
+
 
   /* ---- 4 y 5 · El embudo con el corte, y los tres objetivos --------------
      Las dos láminas que José dio por buenas. Son exactamente las mismas que
@@ -17206,457 +17218,31 @@ function armarDirectorio(pptx, fondos){
   pptx.writeFile({ fileName: `Directorio_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
 }
 
-function armarPPTX(pptx, fondos){
-  const f = fotoReporte();
-  const D = repDatos(f);
-  const P = repProyecto();
-  const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
-  const H = repHex;
+/* El «Reporte de avance» —el documento largo, de once láminas— se retiró el
+   27/08/2026. El deck de directorio quedó armado y validado, y sostener dos
+   documentos que cuentan lo mismo con distinto detalle era garantizar que
+   tarde o temprano dijeran cosas distintas: cada regla que cambiaba había que
+   aplicarla dos veces, y la segunda se olvidaba.
 
-  pptx.defineLayout({ name:"S16", width:13.333, height:7.5 });
-  pptx.layout = "S16";
-  pptx.author = "Stratis LATAM";
-  pptx.title  = P.cliente + " — reporte de avance";
-
-  const lamina = fondo => {
-    const s = pptx.addSlide();
-    if (fondo) s.background = { data:fondo };
-    else s.background = { color:"F6F9FF" };
-    return s;
-  };
-  /* Todo lo que se escribe en una lámina pasa por repTexto: es la única forma
-     de garantizar que ningún número escrito a mano sobreviva a un cambio en
-     la base. Los que genera el propio código no llevan llaves y no se tocan. */
-  const T = (s, t, o) => s.addText(repTexto(t, D), Object.assign(
-    { fontFace:FUENTE, color:H("gris"), fontSize:11, margin:0, valign:"middle" }, o));
-  const caja = (s, x, y, w, h, fill, linea) => s.addShape(pptx.ShapeType.rect, {
-    x, y, w, h, fill:{ color:fill }, line: linea ? { color:linea, width:0.75 } : { type:"none" } });
-
-  /* ---- 1 · Carátula ---------------------------------------------------- */
-  /* El texto va debajo del lema de la plantilla y no encima: el fondo trae
-     «INNOVATE, PERFORM & GROW» horneado, y el título puesto donde iría en una
-     lámina en blanco se le montaba. Sobre la foto, en blanco; la fecha de
-     corte en naranja, que es lo único que cambia entre un reporte y el
-     siguiente y conviene que salte a la vista. */
-  const c = lamina(fondos.caratula);
-  T(c, P.cliente,   { x:0.82, y:5.02, w:8.6, h:0.52, fontSize:21, bold:true, fontFace:NEG, color:"FFFFFF" });
-  T(c, P.subtitulo, { x:0.82, y:5.84, w:8.6, h:0.38, fontSize:14, color:"FFFFFF" });
-  T(c, "Corte al " + repFechaLarga(f.hoy),
-    { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
-
-  /* ---- 2 · Hitos ------------------------------------------------------- */
-  const h = lamina(fondos.contenido);
-  T(h, "Cómo se ha construido el proyecto",
-    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
-  T(h, `Del arranque el ${repFechaLarga(f.ini)} al cierre el ${repFechaLarga(f.fin)} · hoy, día ${f.corrido} de ${f.total}`,
-    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:H("gris") });
-
-  const HI = REPORTE.hitos || [];
-  const YL = 3.40;
-  h.addShape(pptx.ShapeType.rect, { x:1.20, y:YL - 0.018, w:11.20, h:0.036,
-    fill:{ color:"E0E5EE" }, line:{ type:"none" } });
-  if (HI.length > 1){
-    const X0 = 1.90, X1 = 11.55, pasoX = (X1 - X0) / (HI.length - 1), W = 3.30;
-    HI.forEach((x, i) => {
-      const cx = X0 + i * pasoX, col = H(x.color), arriba = (i % 2 === 0);
-      h.addShape(pptx.ShapeType.ellipse, { x:cx - 0.105, y:YL - 0.105, w:0.21, h:0.21,
-        fill:{ color:col }, line:{ color:"FFFFFF", width:2 } });
-      h.addShape(pptx.ShapeType.rect, { x:cx - 0.012, y: arriba ? YL - 0.34 : YL + 0.08,
-        w:0.024, h:0.26, fill:{ color:col }, line:{ type:"none" } });
-      const yt = arriba ? 1.86 : 3.74;
-      T(h, x.fecha,   { x:cx - W/2, y:yt,        w:W, h:0.22, fontSize:10.5, bold:true, color:col, align:"center" });
-      T(h, x.titulo,  { x:cx - W/2, y:yt + 0.28, w:W, h:0.46, fontSize:11.5, bold:true, color:H("navy"), align:"center" });
-      T(h, x.detalle, { x:cx - W/2, y:yt + 0.80, w:W, h:0.42, fontSize:9.5,  color:H("gris"), align:"center" });
-    });
-  }
-  const relato = (REPORTE.relato || {}).hitos || "";
-  if (relato){
-    caja(h, 0.57, 5.38, 12.38, 1.08, REP_BANDA);
-    T(h, relato, { x:0.95, y:5.56, w:11.62, h:0.74, fontSize:11.5, color:H("gris"), valign:"top" });
-  }
-  T(h, "Notas: datos al " + repFecha(f.hoy) + ". " + repNota("hitos"),
-    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
-
-  /* El contexto que reciben las láminas compartidas: las mismas herramientas
-     de dibujo, para que se vean igual salgan del documento que salgan. */
-  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG };
-  repLaminaEmbudo(X, f);
-  repLaminaObjetivos(X, f);
-
-  /* =======================================================================
-     De acá en adelante, lo que se acordó el 26/08. Las tres láminas que
-     siguen son de proyecto y son las que ve Mastercard; después viene una
-     lámina divisoria y el detalle por ejecutivo, que es para adentro y para
-     BBVA. Un solo archivo: se presenta entero o se corta en la divisoria, y
-     no hay dos formatos que mantener sincronizados.
-     ======================================================================= */
-  const V = f.tres, E = f.evo;
-
-  /* Una tabla con el mismo aspecto en todas las láminas. Encabezado navy,
-     filas alternadas, números a la derecha y la fila del equipo en negrita:
-     quien lee busca primero el total y después a quién le pertenece. */
-  const tabla = (s, x, y, w, cols, filas, anchos) => {
-    const cab = cols.map(c => ({ text:c, options:{ bold:true, color:"FFFFFF", fill:{ color:H("navy") },
-      fontSize:10, align:"center", valign:"middle" } }));
-    const cuerpo = filas.map((fi, i) => fi.map((celda, j) => ({
-      text: String(celda),
-      options: { fontSize:10, align: j === 0 ? "left" : "right", valign:"middle",
-        bold: fi.esTotal || false,
-        color: H(fi.esTotal ? "navy" : "gris"),
-        fill: { color: fi.esTotal ? REP_BANDA : (i % 2 ? REP_BANDA : "FFFFFF") } }
-    })));
-    s.addTable([cab, ...cuerpo], { x, y, w, colW:anchos, border:{ type:"solid", color:REP_LINEA, pt:0.5 },
-      fontFace:FUENTE, rowH:0.30, margin:0.06 });
-  };
-
-  const titulo = (s, t, sub) => {
-    T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
-    T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
-  };
-
-  /* ---- 5 · Las tres vistas --------------------------------------------- */
-  const lv = lamina(fondos.contenido);
-  titulo(lv, "Las tres vistas del seguimiento",
-    `La retención es el foco · ${repPct(50)} facturación, ${repPct(30)} retención, ${repPct(20)} venta nueva`);
-
-  const WVIS = 3.95, GVIS = 0.28, YVIS = 1.66, HVIS = 4.70;
-  V.vistas.forEach((x, i) => {
-    const px = 0.57 + i * (WVIS + GVIS);
-    const d = x.datos.total;
-    caja(lv, px, YVIS, WVIS, HVIS, "FFFFFF", REP_LINEA);
-    /* La vista de retención lleva una banda de color y las otras no: el
-       acuerdo dice que el foco es retención, y una lámina donde las tres
-       vistas pesan lo mismo dice lo contrario de lo que se acordó. */
-    lv.addShape(pptx.ShapeType.rect, { x:px, y:YVIS, w:WVIS, h:0.09,
-      fill:{ color: H(x.foco ? "naranja" : "azul2") }, line:{ type:"none" } });
-    T(lv, x.nombre, { x:px + 0.22, y:YVIS + 0.24, w:WVIS - 0.44, h:0.34, fontSize:13, bold:true,
-      fontFace:NEG, color:H("navy") });
-    if (x.foco) T(lv, "el foco del proyecto", { x:px + 0.22, y:YVIS + 0.58, w:WVIS - 0.44, h:0.22,
-      fontSize:9.5, bold:true, color:H("naranja") });
-
-    /* Una vista sin universo no muestra un cero: muestra que el dato no está.
-       Un «0 comercios en la base» es una afirmación falsa sobre el proyecto;
-       «—» es la verdad de que todavía no se cargó. */
-    T(lv, x.universo > 0 ? String(x.universo) : "\u2014",
-      { x:px + 0.22, y:YVIS + 0.82, w:WVIS - 0.44, h:0.60, fontSize:34,
-        bold:true, fontFace:NEG, color:H(x.universo > 0 ? "navy" : "gris2") });
-    T(lv, x.k === "retencion" ? "comercios en la base" : "fichas de venta",
-      { x:px + 0.22, y:YVIS + 1.42, w:WVIS - 0.44, h:0.22, fontSize:10, color:H("gris2") });
-
-    /* La cobertura va en su propia fila y no pegada al número de comercios.
-       Juntas —«108 · 90%»— no entran en el ancho de la columna y el renglón se
-       parte en dos, que es como se ve que una lámina se armó sin mirarla. */
-    const filas = [
-      ["Comercios trabajados", String(d.comercios)],
-      ["Cobertura de la vista", d.cobertura === null ? "\u2014" : repPct(d.cobertura)],
-      ["Gestiones registradas", String(d.gestiones)],
-      ["Con correo de respaldo", String(d.respaldadas)],
-      ["Visitas efectivas", String(d.visitas)],
-      [x.cierre.label, String(x.cierre.n)]
-    ];
-    filas.forEach(([a, b], j) => {
-      const yy = YVIS + 1.76 + j * 0.38;
-      const ultima = j === filas.length - 1;
-      if (ultima) caja(lv, px + 0.16, yy - 0.03, WVIS - 0.32, 0.36, REP_BANDA);
-      T(lv, a, { x:px + 0.24, y:yy, w:WVIS - 1.34, h:0.30, fontSize:10.5,
-        color: ultima ? H("navy") : H("gris"), bold: ultima });
-      T(lv, b, { x:px + WVIS - 1.14, y:yy, w:0.94, h:0.30, fontSize:10.5, bold:true,
-        color: j === 3 ? H("azul") : H("navy"), align:"right" });
-    });
-    T(lv, x.pie, { x:px + 0.22, y:YVIS + 4.10, w:WVIS - 0.44, h:0.48, fontSize:9, color:H("gris2") });
-  });
-
-  caja(lv, 0.57, 6.52, 12.38, 0.80, REP_BANDA);
-  T(lv, "Por qué hay dos números de gestión",
-    { x:0.75, y:6.62, w:3.6, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
-  const sumG = V.vistas.reduce((n, x) => n + x.datos.total.gestiones, 0);
-  const sumR = V.vistas.reduce((n, x) => n + x.datos.total.respaldadas, 0);
-  T(lv, `Se acordó contar solo lo respaldado por correo al cliente. De ${sumG} gestiones registradas, ${sumR} tienen ese respaldo. La distancia entre ambas cifras es trabajo hecho que hoy no se puede sustentar frente al banco, y por eso se muestra en vez de esconderse.`
-    + (V.pendiente.gestiones > 0
-       ? `  ·  Aparte quedan ${V.pendiente.gestiones} gestiones y ${V.pendiente.visitas} visitas en las ${V.sinMarcar} fichas de venta sin marcar: no están en ninguna de las tres vistas hasta que alguien indique de dónde salieron.`
-       : ""),
-    { x:4.45, y:6.60, w:8.32, h:0.64, fontSize:10, color:H("gris") });
-
-  /* ---- 6 · El evolutivo semanal ---------------------------------------- */
-  const lev = lamina(fondos.contenido);
-  titulo(lev, "Semana a semana, un periodo contra el otro",
-    `Primer periodo ${repFecha(E.p1.desde)} al ${repFecha(E.p1.hasta)} · periodo en curso desde ${repFecha(E.p2.desde)}, día ${E.corridos}`);
-
-  const maxGES = Math.max(1, ...E.p1.semanas.concat(E.p2.semanas).map(s => s.gestiones));
-  /* Los dos paneles comparten geometría. Si cada uno repartiera su ancho entre
-     sus propias semanas, el periodo con menos semanas dibujaría palos más
-     anchos y más separados, y la lámina diría —sin decirlo— que ahí se trabajó
-     más. La comparación tiene que estar en la altura y en ningún otro lado. */
-  const nSem = Math.max(E.p1.semanas.length, E.p2.semanas.length, 1);
-  const PASO = 1.12, BW = 0.78;
-
-  const barrasSem = (px, py, ph, per, color) => {
-    T(lev, per.nombre, { x:px, y:py - 0.46, w:5.9, h:0.28, fontSize:11.5, bold:true, color:H("navy") });
-    if (!per.semanas.length)
-      T(lev, "Todavía sin gestiones registradas", { x:px, y:py + ph / 2 - 0.14, w:5.9, h:0.28,
-        fontSize:10.5, color:H("gris2") });
-    per.semanas.forEach((s, i) => {
-      const bx = px + i * PASO;
-      const bh = Math.max(0.04, ph * s.gestiones / maxGES);
-      lev.addShape(pptx.ShapeType.rect, { x:bx, y:py + ph - bh, w:BW, h:bh,
-        fill:{ color: H(color) }, line:{ type:"none" } });
-      /* La parte respaldada por correo va en el mismo palo, más oscura: son un
-         subconjunto de las mismas gestiones, no una serie aparte, y ponerlas
-         al lado haría creer que se suman. */
-      const rh = Math.max(0, ph * s.respaldadas / maxGES);
-      if (rh > 0.02) lev.addShape(pptx.ShapeType.rect, { x:bx, y:py + ph - rh, w:BW, h:rh,
-        fill:{ color: H("navy") }, line:{ type:"none" } });
-      T(lev, String(s.gestiones), { x:bx - 0.20, y:py + ph - bh - 0.28, w:BW + 0.40, h:0.24,
-        fontSize:9.5, bold:true, color:H("navy"), align:"center" });
-      T(lev, "S" + s.n + (s.parcial ? "*" : ""), { x:bx - 0.20, y:py + ph + 0.06, w:BW + 0.40, h:0.22,
-        fontSize:9, color:H("gris2"), align:"center" });
-    });
-  };
-  const ANCHO = nSem * PASO;
-  barrasSem(0.62, 2.40, 2.20, E.p1, "azul2");
-  barrasSem(0.62 + ANCHO + 1.10, 2.40, 2.20, E.p2, "naranja");
-  T(lev, "El palo claro son todas las gestiones; el tramo oscuro, las que tienen correo de respaldo.  ·  S* = semana incompleta",
-    { x:0.57, y:5.00, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
-
-  const YCMP = 5.24;
-  caja(lev, 0.57, YCMP, 12.38, 1.28, "FFFFFF", REP_LINEA);
-  T(lev, `Al mismo día de cada periodo — los primeros ${E.corridos} días`,
-    { x:0.75, y:YCMP + 0.12, w:6.0, h:0.26, fontSize:11, bold:true, color:H("navy") });
-  const compara = [
-    ["Comercios trabajados", E.comparado.p1.comercios, E.comparado.p2.comercios, E.comparado.comercios],
-    ["Gestiones", E.comparado.p1.gestiones, E.comparado.p2.gestiones, E.comparado.gestiones],
-    ["Con correo de respaldo", E.comparado.p1.respaldadas, E.comparado.p2.respaldadas, E.comparado.respaldadas],
-    ["Visitas efectivas", E.comparado.p1.visitas, E.comparado.p2.visitas, E.comparado.visitas]
-  ];
-  compara.forEach(([et, a, b, dif], i) => {
-    const px = 0.75 + i * 3.08;
-    T(lev, et, { x:px, y:YCMP + 0.46, w:2.90, h:0.22, fontSize:9.5, color:H("gris2") });
-    T(lev, String(a) + "  →  " + String(b), { x:px, y:YCMP + 0.70, w:2.90, h:0.32, fontSize:15,
-      bold:true, fontFace:NEG, color:H("navy") });
-    /* Cero por ciento no es una mejora. Un triángulo verde sobre «0%» dice
-       que algo subió cuando lo que pasó es que quedó igual. */
-    if (dif !== null) T(lev,
-      Math.round(dif) === 0 ? "sin cambio"
-        : (dif > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(dif), 0) + "%",
-      { x:px, y:YCMP + 1.02, w:2.90, h:0.22, fontSize:10, bold:true,
-        color: H(Math.round(dif) === 0 ? "gris2" : (dif > 0 ? "verde" : "naranja")) });
-  });
-  T(lev, "Notas: comparar el total de un periodo cerrado contra uno que recién empieza no dice nada; por eso el recuadro corta los dos periodos en el mismo día corrido.",
-    { x:0.57, y:6.74, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
-
-  /* ---- 7 · La divisoria ------------------------------------------------ */
-  const dv = lamina(fondos.contenido);
-  caja(dv, 0.57, 2.55, 12.38, 2.40, "FFFFFF", REP_LINEA);
-  dv.addShape(pptx.ShapeType.rect, { x:0.57, y:2.55, w:0.12, h:2.40,
-    fill:{ color:H("naranja") }, line:{ type:"none" } });
-  T(dv, "Hasta aquí, el proyecto",
-    { x:1.10, y:2.92, w:11.3, h:0.56, fontSize:26, bold:true, fontFace:NEG, color:H("navy") });
-  T(dv, "Lo que sigue es el detalle por ejecutivo: avance, visitas y dónde está puesto el esfuerzo de cada uno. Es material de gestión interna y de trabajo con BBVA.",
-    { x:1.10, y:3.62, w:10.8, h:0.72, fontSize:13, color:H("gris") });
-
-  /* ---- 8 · La base de retención, por ejecutivo -------------------------- */
-  const r1 = lamina(fondos.contenido);
-  const vr = V.vistas[0];
-  titulo(r1, "Base de retención · avance por ejecutivo",
-    `${vr.universo} comercios asignados · ${vr.pie}`);
-  tabla(r1, 0.57, 1.75, 12.38,
-    ["Ejecutivo", "Cartera", "Comercios trabajados", "Cobertura", "Gestiones", "Con respaldo", "Visitas efectivas", "Comercios visitados"],
-    vr.datos.filas.map(x => [x.nombre, x.cartera, x.comercios, repPct(x.cobertura || 0),
-      x.gestiones, x.respaldadas, x.visitas, x.conVisita])
-      .concat([Object.assign([vr.datos.total.nombre, vr.datos.total.cartera, vr.datos.total.comercios,
-        repPct(vr.datos.total.cobertura || 0), vr.datos.total.gestiones, vr.datos.total.respaldadas,
-        vr.datos.total.visitas, vr.datos.total.conVisita], { esTotal:true })]),
-    [2.60, 1.20, 1.90, 1.28, 1.40, 1.40, 1.50, 1.10]);
-  /* La cobertura de cada ejecutivo y la del equipo no se calculan contra lo
-     mismo, y sin decirlo la tabla parece contradecirse: cuatro filas al 90% y
-     un total al 13%. Cada una responde una pregunta distinta y las dos hacen
-     falta — la del ejecutivo mide su trabajo, la del equipo mide el proyecto. */
-  caja(r1, 0.57, 4.10, 12.38, 1.06, REP_BANDA);
-  T(r1, "Por qué la fila del equipo no es el promedio de las otras",
-    { x:0.75, y:4.20, w:5.4, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
-  T(r1, `La cobertura de cada ejecutivo se mide contra la cartera que tiene asignada: es lo que le tocó y lo que puede trabajar. La del equipo se mide contra los ${f.portafolio} comercios de la base congelada, que incluye los que todavía no tienen ficha en el CRM. Por eso las filas pueden ir bien y el proyecto ir atrasado al mismo tiempo: son dos preguntas distintas y las dos importan.`,
-    { x:0.75, y:4.48, w:12.02, h:0.60, fontSize:10, color:H("gris") });
-
-  T(r1, "Notas: cobertura es cuántos comercios de su cartera recibieron al menos una gestión, no cuántas gestiones hizo. Con respaldo son las gestiones por correo al cliente.",
-    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:H("gris2") });
-
-  /* ---- 9 · Los leads de venta, por ejecutivo ---------------------------- */
-  const r2 = lamina(fondos.contenido);
-  titulo(r2, "Leads de venta · dentro y fuera de la cartera",
-    V.sinMarcar > 0
-      ? `${V.sinMarcar} fichas de venta todavía sin marcar: no se reparten por descarte, se declaran aparte`
-      : "Todas las fichas de venta tienen su origen marcado");
-  [1, 2].forEach((idx, i) => {
-    const x = V.vistas[idx], py = 1.75 + i * 2.55;
-    T(r2, x.nombre + " · " + x.universo + (x.universo === 1 ? " ficha" : " fichas"),
-      { x:0.57, y:py, w:8.0, h:0.28, fontSize:12.5, bold:true, color:H("navy") });
-    tabla(r2, 0.57, py + 0.34, 12.38,
-      ["Ejecutivo", "Fichas", "Gestiones", "Con respaldo", "Visitas efectivas", "Ventas cerradas"],
-      x.datos.filas.map(u => [u.nombre, u.cartera, u.gestiones, u.respaldadas, u.visitas,
-        CLIENTES.filter(c => (idx === 1 ? leadDentroDeBase(c) : leadFueraDeBase(c))
-          && c.asignado_correo === (USUARIOS.find(z => z.nombre === u.nombre) || {}).correo
-          && esVentaNueva(c)).length])
-        .concat([Object.assign([x.datos.total.nombre, x.datos.total.cartera, x.datos.total.gestiones,
-          x.datos.total.respaldadas, x.datos.total.visitas, x.cierre.n], { esTotal:true })]),
-      [3.20, 1.60, 1.80, 1.90, 2.10, 1.78]);
-  });
-
-  /* ---- 9b · Dónde está puesto el esfuerzo -------------------------------
-     La pregunta que abrió esta lámina fue concreta: si alguien está poniendo
-     su trabajo en venta nueva mientras el plan pesa 30% retención y 20% venta.
-     Se responde con proporciones y no con totales: quien tiene más cartera
-     hace más de todo, y comparar cantidades absolutas solo diría quién tiene
-     la cartera más grande. */
-  const es = lamina(fondos.contenido);
-  titulo(es, "Dónde está puesto el esfuerzo",
-    "Cómo reparte cada uno sus gestiones entre la base de retención y los leads de venta");
-
-  const reparto = V.vistas[0].datos.filas.map((x, i) => {
-    const dentro = V.vistas[1].datos.filas[i], fuera = V.vistas[2].datos.filas[i];
-    const total = x.gestiones + dentro.gestiones + fuera.gestiones;
-    return { nombre:x.nombre, total,
-      ret:x.gestiones, dentro:dentro.gestiones, fuera:fuera.gestiones,
-      visRet:x.visitas, visLead:dentro.visitas + fuera.visitas,
-      pctRet: total ? x.gestiones / total * 100 : null,
-      pctFuera: total ? fuera.gestiones / total * 100 : null };
-  });
-  const eqTotal = reparto.reduce((n, x) => n + x.total, 0);
-  const eqRet   = reparto.reduce((n, x) => n + x.ret, 0);
-  const pctEq   = eqTotal ? eqRet / eqTotal * 100 : null;
-
-  const XB = 3.30, WB = 7.20;
-  reparto.forEach((x, i) => {
-    const py = 1.98 + i * 1.02;
-    T(es, x.nombre, { x:0.57, y:py, w:2.60, h:0.30, fontSize:12, bold:true, color:H("navy") });
-    T(es, x.total + (x.total === 1 ? " gestión" : " gestiones"),
-      { x:0.57, y:py + 0.32, w:2.60, h:0.22, fontSize:9.5, color:H("gris2") });
-    if (!x.total){
-      T(es, "Sin gestiones registradas todavía",
-        { x:XB, y:py + 0.02, w:WB, h:0.30, fontSize:10, color:H("gris2") });
-      return;
-    }
-    const tramos = [
-      { n:x.ret,    color:"naranja", et:"retención" },
-      { n:x.dentro, color:"azul",    et:"leads dentro" },
-      { n:x.fuera,  color:"azul2",   et:"leads fuera" }
-    ];
-    let bx = XB;
-    tramos.forEach(t => {
-      const w = WB * t.n / x.total;
-      if (w <= 0) return;
-      es.addShape(pptx.ShapeType.rect, { x:bx, y:py, w, h:0.34,
-        fill:{ color:H(t.color) }, line:{ type:"none" } });
-      /* El porcentaje solo se escribe dentro del tramo si hay lugar. Un 3%
-         impreso sobre una barra de dos milímetros no se lee: se amontona. */
-      if (w > 0.62) T(es, repNum(t.n / x.total * 100, 0) + "%",
-        { x:bx, y:py, w, h:0.34, fontSize:10, bold:true, color:"FFFFFF", align:"center" });
-      bx += w;
-    });
-    T(es, `${x.visRet} visitas en retención · ${x.visLead} en leads`,
-      { x:XB + WB + 0.20, y:py, w:2.55, h:0.34, fontSize:9.5, color:H("gris") });
-  });
-
-  T(es, "Naranja, base de retención · azul brillante, leads dentro de la cartera · azul oscuro, leads fuera de la cartera",
-    { x:0.57, y:6.14, w:12.38, h:0.24, fontSize:9, color:H("gris2") });
-  caja(es, 0.57, 6.44, 12.38, 0.86, REP_BANDA);
-  T(es, "Lo que hay que mirar",
-    { x:0.75, y:6.54, w:3.0, h:0.26, fontSize:10.5, bold:true, color:H("navy") });
-  T(es, pctEq === null
-      ? "Todavía no hay gestiones suficientes para leer la distribución."
-      : `El equipo pone ${repPct(pctEq)} de sus gestiones en la base de retención. El plan pesa 30% retención y 20% venta nueva, así que un reparto muy corrido hacia los leads —sobre todo hacia los de afuera de la base— trabaja contra el propio incentivo de quien lo hace.`,
-    { x:0.75, y:6.82, w:12.02, h:0.42, fontSize:10, color:H("gris") });
-
-  /* ---- 10 · Las visitas ------------------------------------------------- */
-  const vi = lamina(fondos.contenido);
-  titulo(vi, "Visitas efectivas · lo que pesa en el plan de incentivos",
-    "Una visita cuenta cuando es presencial, el cliente atendió y quedó respaldada con ubicación o exención");
-  const totVis = V.vistas.map(x => x.datos.total.visitas).reduce((a, b) => a + b, 0)
-    + V.pendiente.visitas;
-  /* La tercera franja son las visitas que están en fichas de venta sin marcar.
-     Sin ella el total de la lámina no coincide con el del proyecto, y la
-     diferencia —hoy más de un tercio— quedaría sin explicación. */
-  const visPorEje = V.vistas[0].datos.filas.map((x, i) => ({
-    nombre: x.nombre,
-    ret: x.visitas,
-    lead: V.vistas[1].datos.filas[i].visitas + V.vistas[2].datos.filas[i].visitas,
-    pend: V.pendiente.porEjecutivo ? V.pendiente.porEjecutivo[i] : 0
-  }));
-  const maxVIS = Math.max(1, ...visPorEje.map(x => x.ret + x.lead + x.pend));
-  visPorEje.forEach((x, i) => {
-    const py = 2.05 + i * 0.92;
-    T(vi, x.nombre, { x:0.57, y:py, w:2.40, h:0.34, fontSize:12, bold:true, color:H("navy") });
-    const XB0 = 3.10, WBMAX = 8.10;
-    const wr = WBMAX * x.ret / maxVIS, wl = WBMAX * x.lead / maxVIS,
-          wp = WBMAX * x.pend / maxVIS;
-    if (wr > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0, y:py, w:wr, h:0.34,
-      fill:{ color:H("naranja") }, line:{ type:"none" } });
-    if (wl > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0 + wr, y:py, w:wl, h:0.34,
-      fill:{ color:H("azul2") }, line:{ type:"none" } });
-    if (wp > 0) vi.addShape(pptx.ShapeType.rect, { x:XB0 + wr + wl, y:py, w:wp, h:0.34,
-      fill:{ color:H("gris2") }, line:{ type:"none" } });
-    T(vi, `${x.ret + x.lead + x.pend}`, { x:XB0 + wr + wl + wp + 0.14, y:py, w:1.10, h:0.34,
-      fontSize:12, bold:true, color:H("navy") });
-    T(vi, `${x.ret} en retención · ${x.lead} en leads`
-      + (x.pend ? ` · ${x.pend} sin clasificar` : ""),
-      { x:0.57, y:py + 0.36, w:2.50, h:0.22, fontSize:9, color:H("gris2") });
-  });
-  caja(vi, 0.57, 5.86, 12.38, 0.92, REP_BANDA);
-  T(vi, `${totVis} visitas efectivas en el proyecto`,
-    { x:0.75, y:5.96, w:5.0, h:0.30, fontSize:13, bold:true, fontFace:NEG, color:H("navy") });
-  T(vi, "Naranja, visitas a la base de retención; azul, a leads de venta; gris, visitas en fichas de venta cuyo origen todavía nadie marcó. La visita es el escalón donde el embudo se angosta y es la parte del plan que hoy está más lejos de su meta.",
-    { x:0.75, y:6.28, w:11.9, h:0.42, fontSize:10, color:H("gris") });
-
-  /* ---- 11 · Los acuerdos vigentes ---------------------------------------
-     Va al final y no al principio a propósito: primero los números, después
-     el marco con el que se leen. Al revés, la lámina de acuerdos se convierte
-     en una portada que nadie mira. */
-  const AC = REPORTE.acuerdos || REPORTE_DEF.acuerdos || [];
-  if (AC.length){
-    const ac = lamina(fondos.contenido);
-    titulo(ac, "Acuerdos vigentes",
-      "Tres conversaciones, un solo marco — dejan de vivir en documentos separados");
-    const WA = (12.38 - 0.24 * (AC.length - 1)) / AC.length;
-    AC.forEach((x, i) => {
-      const px = 0.57 + i * (WA + 0.24);
-      caja(ac, px, 1.78, WA, 4.30, "FFFFFF", REP_LINEA);
-      ac.addShape(pptx.ShapeType.rect, { x:px, y:1.78, w:WA, h:0.09,
-        fill:{ color:H(x.color || "azul") }, line:{ type:"none" } });
-      T(ac, String(x.titulo || "").toUpperCase(),
-        { x:px + 0.24, y:2.02, w:WA - 0.48, h:0.26, fontSize:10.5, bold:true,
-          color:H(x.color || "azul"), charSpacing:1.4 });
-      const pts = x.puntos || [];
-      if (pts.length)
-        ac.addText(pts.map((t, k) => ({ text:repTexto(t, D),
-            options:{ bullet:true, breakLine: k < pts.length - 1 } })),
-          { x:px + 0.24, y:2.40, w:WA - 0.50, h:3.10, margin:0, fontFace:FUENTE,
-            fontSize:11, color:H("navy"), paraSpaceAfter:7, lineSpacing:15, valign:"top" });
-      if (x.pendiente)
-        T(ac, x.pendiente, { x:px + 0.24, y:2.40, w:WA - 0.50, h:0.60,
-          fontSize:10.5, italic:true, color:H("naranja"), valign:"top" });
-    });
-    caja(ac, 0.57, 6.28, 12.38, 0.78, REP_BANDA);
-    T(ac, REPORTE.cierre_acuerdos || REPORTE_DEF.cierre_acuerdos || "",
-      { x:0.75, y:6.38, w:12.02, h:0.58, fontSize:11.5, bold:true, color:H("navy") });
-  }
-
-  /* ---- 12 · Cierre ------------------------------------------------------ */
-  lamina(fondos.cierre);
-
-  pptx.writeFile({ fileName: `Reporte_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
-}
+   Con él se fueron sus láminas propias —las tres vistas, el evolutivo por
+   periodo, los acuerdos, los hitos—. Las dos que compartía con el deck
+   —el embudo y los tres objetivos— viven en `repLaminaEmbudo` y
+   `repLaminaObjetivos`, que es donde ya estaban. */
 
 /* ---- Editar el relato, desde Ajustes -------------------------------------
    Seis bloques, uno por fila de reporte_config. Se editan de a uno y se
    guardan enteros: un hito no se edita suelto porque el orden y la coherencia
    entre hitos son de quien escribe, no de un formulario campo por campo. */
+/* Solo lo que el deck de directorio usa. «Hitos», «Relato» y «Acuerdos» se
+   retiraron el 27/08 junto con el reporte largo: eran los únicos que los
+   dibujaban, y dejar campos que no salen en ningún lado es peor que no
+   tenerlos —alguien los llena creyendo que se publican—. Los textos siguen
+   guardados en la base; lo que se quitó es la puerta para editarlos. */
 const REP_BLOQUES = [
-  { k:"proyecto",  t:"Marco del proyecto",  d:"Nombre de la campaña, fechas y la base congelada de comercios y facturación" },
-  { k:"hitos",     t:"Hitos",               d:"La línea de tiempo: fecha, título y detalle de cada uno" },
-  { k:"relato",    t:"Relato de los hitos", d:"El párrafo que explica cómo arrancó el proyecto" },
-  { k:"lecturas",  t:"Lecturas del embudo", d:"Las dos frases que acompañan el embudo" },
+  { k:"proyecto",  t:"Marco del proyecto",  d:"Nombre de la campaña, fechas, la base congelada de comercios y la facturación del periodo" },
+  { k:"lecturas",  t:"Lecturas del embudo", d:"Las frases que acompañan el embudo — hasta tres" },
   { k:"notas",     t:"Notas al pie",        d:"La letra chica de cada lámina — es donde se definen los escalones" },
-  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" },
-  { k:"acuerdos",  t:"Acuerdos vigentes",  d:"Las tres columnas de la lámina de acuerdos: con Ana María, con Gerald y lo definido hoy" }
+  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" }
 ];
 
 function cardReporte(){
@@ -17691,7 +17277,6 @@ function cardReporte(){
 }
 
 function bindReporte(){
-  if ($("#repPptx"))    $("#repPptx").onclick = e => generarPPTX(e.currentTarget);
   if ($("#repDir"))     $("#repDir").onclick  = e => generarPPTX(e.currentTarget, armarDirectorio);
   if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
   document.querySelectorAll("[data-repedit]").forEach(b =>
@@ -17810,7 +17395,8 @@ function validarBloqueReporte(clave, v){
       if (!esObj(x) || !x.titulo || !x.texto) return "Cada lectura necesita título y texto.";
       if (x.color && !REP_COLOR[x.color]) return `El color «${x.color}» no existe.`;
     }
-    if (l.length > 2) return "En la lámina entran dos lecturas; la tercera se saldría del recuadro.";
+    /* Tres desde el 27/08: la lámina reparte el ancho entre las que haya. */
+    if (l.length > 3) return "En la lámina entran tres lecturas; la cuarta se saldría del recuadro.";
   }
   return "";
 }
