@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 00:43", huella:"c2c166" };
+const BUILD = { sello:"27/08/2026 01:47", huella:"fc32d4" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1691,6 +1691,25 @@ const esGestionCliente = r => !esReconstruida(r) && esAlCliente(r);
    dejan un rastro consultable y los dos son trabajo del ejecutivo. */
 const MEDIOS_CON_CORREO = ["correo", "bbva_correo", "bbva_correo_cliente"];
 const esCorreoEvidenciable = r => !esReconstruida(r) && MEDIOS_CON_CORREO.includes(r.Tipo_Contacto);
+
+/* ---- Qué cuenta como comercio GESTIONADO (regla del 27/08) --------------
+   El correo sigue siendo la mejor prueba, pero no es la única. La regla que
+   rige desde el 27/08 es más ancha y más justa: un comercio está gestionado
+   cuando quedó al menos UN hecho con resultado detrás — un correo al banco o
+   al comercio, un contacto efectivo, una reunión o visita que se realizó, o
+   un cierre registrado (ganado o perdido).
+
+   Lo que NO cuenta es el intento sin nada detrás: la llamada que nadie
+   contestó, el chat sin respuesta, la visita fallida. Ese trabajo se registra
+   igual y se ve en la línea de tiempo, pero no mueve el escalón.
+
+   El cierre no vive en una interacción sino en la ficha, así que se pregunta
+   aparte con `tieneCierreRegistrado`: un comercio cerrado es trabajo
+   terminado aunque no haya quedado ninguna fila de gestión detrás. */
+const esGestionValida = r => !esReconstruida(r) &&
+  (esCorreoEvidenciable(r) || esEfectivo(r.Resultado) || r.Cumple_Visita === "SI");
+const CIERRES_REGISTRADOS = ["RETENIDO", "VENTA", "PERDIDO"];
+const tieneCierreRegistrado = c => !!c && CIERRES_REGISTRADOS.includes(c.resultado_gestion);
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -3458,6 +3477,12 @@ const RULES = {
       _n: gest.length,
       _intentos: gest.length,
       _efectivos: gest.filter(r => esEfectivo(r.Resultado)).length,
+      /* ¿Este comercio cuenta como gestionado? Regla del 27/08: un hecho con
+         resultado, de cualquiera de los dos montones —al comercio o al
+         banco—, o un cierre registrado en la ficha. Vive acá y no en el filtro
+         de la Cartera para que la lista que se abre al tocar «Gestionados»
+         cuente lo mismo que el número que se tocó. */
+      _gestionado: regs.some(esGestionValida) || tieneCierreRegistrado(c),
       /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
       _banco: regs.filter(esGestionBanco).length,
       _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
@@ -4561,7 +4586,7 @@ function viewCartera(){
        cartera que entregó BBVA, y meter acá los RUC que trajo Stratis haría que
        la lista no cuadrara con el número que se acaba de tocar. */
     if (S.fContacto === "registrado") return !esClienteNuevo(c);
-    if (S.fContacto === "gestionado") return !esClienteNuevo(c) && b._intentos > 0;
+    if (S.fContacto === "gestionado") return !esClienteNuevo(c) && !!b._gestionado;
     /* Los estados calculados también filtran, que es para lo que sirven: cada
        uno responde «qué hago hoy con este comercio». */
     if (S.fContacto.startsWith("est:")) return estadoDerivado(c) === S.fContacto.slice(4);
@@ -4640,7 +4665,7 @@ function viewCartera(){
       ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],
          ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
-          k === "gestionado" ? ` title="Comercios con al menos un contacto o intento de contacto con el cliente"` : ""
+          k === "gestionado" ? ` title="Comercios con al menos un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"` : ""
         }>${l}</button>`).join("")}
     </div>
     ${avisoPorActualizar()}
@@ -8408,7 +8433,7 @@ const COLS_PANEL = [
     ttl:"Customer ID cargados en el CRM, se hayan trabajado o no. Cargar la ficha exige indicar cómo se coordinó con el ejecutivo de BBVA",
     val:f => f.registrados || "—" },
   { k:"trabajados",  th:"Gestionados", lista:"gestionado",
-    ttl:"Comercios con al menos un contacto o intento de contacto CON EL CLIENTE en el periodo. Nada que ver con BBVA",
+    ttl:"Comercios con al menos un hecho con resultado en el periodo: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado. El intento sin respuesta se registra, pero no cuenta acá",
     val:f => f.trabajados || "—" },
   { k:"cargadosSinGestion", th:"Cargados sin gestión", extra:true,
     ttl:"Registrados en el CRM que no tienen ni una gestión: ficha creada y nunca trabajada",
@@ -8548,10 +8573,14 @@ function bloqueEquipo(r){
         llamada, WhatsApp, visita o chat—, que es lo que sostiene que el caso viene de una gestión
         real y no de una lista suelta. Por eso un comercio registrado sí implica contacto con el
         banco. La diferencia con <i>Asignados</i> es cartera que todavía no entró al CRM.</p>
-        <p><b>Gestionados</b> es otra cosa y no tiene nada que ver con BBVA: son los comercios que
-        recibieron al menos <b>un contacto o intento de contacto con el cliente</b> en el rango
-        —visita, llamada, WhatsApp, correo—, haya contestado o no. La diferencia con
-        <i>Registrados</i> son fichas creadas y nunca trabajadas.</p>
+        <p><b>Gestionados</b> es otra cosa: son los comercios donde quedó al menos <b>un hecho con
+        resultado</b> en el rango. Cuenta cualquiera de estos cuatro: un correo enviado al banco o
+        al comercio, un contacto efectivo, una reunión o visita que se realizó, o un cierre
+        registrado —concretado o perdido—. Hasta el 27/08 acá contaba cualquier intento, y por eso
+        la cobertura daba casi 100% sin decir nada: la llamada que nadie contestó y el chat sin
+        respuesta se registran igual y siguen a la vista en la ficha, pero no mueven esta columna.
+        La diferencia con <i>Registrados</i> son fichas creadas y nunca trabajadas, más las que
+        solo tienen intentos sin respuesta.</p>
         <p>Las dos cifras se pueden tocar: llevan a la Cartera con esos comercios en pantalla. La
         Cartera no tiene rango de fechas —muestra el estado de hoy—, así que si el número no
         coincide con el del Panel, el aviso lo dice.</p>
@@ -9143,8 +9172,10 @@ function tablaTablero(x){
       </table>
     </div>
     <p class="nota"><b>Asignados</b> los pone BBVA. <b>Registrados</b> son las fichas cargadas en el
-      CRM, se hayan trabajado o no. <b>Gestionados</b> son los que recibieron al menos un contacto
-      con el cliente en este periodo. Los números subrayados abren su lista.</p>
+      CRM, se hayan trabajado o no. <b>Gestionados</b> son los que tienen al menos un hecho
+      con resultado en el periodo: un correo al banco o al comercio, un contacto efectivo,
+      una reunión o visita realizada, o un cierre registrado. El intento sin respuesta se
+      registra igual, pero no cuenta acá. Los números subrayados abren su lista.</p>
   </div>`;
 }
 
@@ -11195,8 +11226,13 @@ function alcanceDe(correo, periodo){
   const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === correo && esVentaNueva(c)
                                          && cerroEn(c, periodo)).length;
   const logrado  = retenidos + recuperados;
-  const trabajados = suyos.filter(c => DB.delCliente(c.customer_id)
-      .some(r => mesISO(r.Fecha_Contacto) === periodo)).length;
+  /* Misma regla de gestión que el Tablero (27/08): un hecho con resultado, no
+     un intento registrado. Si acá contara otra cosa, la misma persona tendría
+     dos cifras de «trabajados» en dos pantallas del mismo CRM. */
+  const trabajados = suyos.filter(c =>
+    [...DB.delCliente(c.customer_id), ...DB.bbvaDe(c.customer_id)]
+      .some(r => mesISO(r.Fecha_Contacto) === periodo && esGestionValida(r))
+    || (tieneCierreRegistrado(c) && cerroEn(c, periodo))).length;
   return { asignada, retenidos, recuperados, perdidos, logrado, trabajados, ventasNuevas,
            pct: asignada ? logrado / asignada : 0,
            pctTrabajo: asignada ? trabajados / asignada : 0 };
@@ -11219,10 +11255,28 @@ function asignadaDe(correo, r){
 function filaEjecutivo(u, r){
   const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo && !esClienteNuevo(c));
   const gest  = DB.todos().filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r));
-  const tocados = new Set(gest.map(x => String(x.Customer_id)));
+
+  /* «Gestionado» dejó de ser «se registró algún intento» el 27/08. Cuenta el
+     comercio donde quedó un hecho CON RESULTADO: un correo al banco o al
+     comercio, un contacto efectivo, una reunión o visita realizada, o un
+     cierre registrado. La llamada que nadie contestó sigue registrada y sigue
+     siendo trabajo, pero no mueve esta columna — y por eso mismo la cobertura
+     que sale de acá dejó de ser un 99% que no decía nada.
+
+     Se pregunta a los dos montones: `DB.todos()` es el del comercio y
+     `DB.bbva()` el de la coordinación con el banco. El correo al ejecutivo de
+     BBVA es la mitad del trabajo y vive solo en el segundo. */
+  const gestionados = new Set();
+  [...DB.todos(), ...DB.bbva()]
+    .filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r))
+    .filter(esGestionValida)
+    .forEach(x => gestionados.add(String(x.Customer_id)));
 
   const asignada    = asignadaDe(u.correo, r);
-  const trabajados  = suyos.filter(c => tocados.has(String(c.customer_id))).length;
+  /* El cierre no es una interacción: vive en la ficha. Un comercio cerrado en
+     el periodo cuenta como gestionado aunque no haya quedado fila detrás. */
+  const trabajados  = suyos.filter(c => gestionados.has(String(c.customer_id))
+    || (tieneCierreRegistrado(c) && enRango(c.cerrado_en, r))).length;
   const retenidos   = suyos.filter(c => esRetencion(c)  && enRango(c.cerrado_en, r)).length;
   const recuperados = suyos.filter(c => esRecuperado(c) && enRango(c.cerrado_en, r)).length;
   const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === u.correo && esVentaNueva(c)
@@ -13906,6 +13960,44 @@ const repNota = k => (REPORTE.notas || {})[k] || "";
    Una sola función para toda la pantalla y para el PowerPoint. Si el reporte
    y la lámina alguna vez discrepan, es porque alguien calculó dos veces; acá
    se calcula una. */
+
+/* ---- Comercios gestionados: UNA sola fuente para todas las láminas -------
+   Devuelve un Map de customer_id → fecha del primer hecho que cuenta como
+   gestión, limitado a la cartera y recortado al periodo.
+
+   Que esto viva en un solo lugar no es prolijidad: es lo que evita que la
+   cifra grande de la lámina 2, la curva de la 3 y el escalón del embudo de la
+   4 digan tres números distintos con el mismo nombre. Ya pasó una vez —el
+   corte del jueves salía 71 contra un acumulado de 52— y se arregló
+   escribiendo la definición dos veces, que es exactamente la forma de que
+   vuelva a pasar. Ahora se escribe una.
+
+   La regla la fijó José el 27/08: cuenta el correo al banco o al comercio, el
+   contacto efectivo, la reunión o visita realizada y el cierre registrado.
+   El intento sin resultado no cuenta. Ver `esGestionValida` en el core. */
+function repGestionados(f){
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = new Set(cart.map(c => String(c.customer_id)));
+  const m = new Map();
+  const poner = (cid, d) => {
+    if (!enCartera.has(cid) || !d) return;
+    if (d < f.ini) d = f.ini;
+    if (d > f.hoy) return;
+    if (!m.has(cid) || d < m.get(cid)) m.set(cid, d);
+  };
+  [...DB.todos(), ...DB.bbva()].filter(esGestionValida)
+    .forEach(g => poner(String(g.Customer_id), repDia(g.Fecha_Contacto)));
+  /* El cierre no es una interacción: vive en la ficha. Si no quedó fecha de
+     cierre se ancla al arranque del periodo —nunca a hoy—, para que un dato
+     incompleto no se disfrace de avance de esta semana. */
+  cart.filter(tieneCierreRegistrado).forEach(c =>
+    poner(String(c.customer_id), c.cerrado_en ? String(c.cerrado_en).slice(0,10) : f.ini));
+  return m;
+}
+/* El conjunto de gestionados a una fecha. Con `hasta` vacío, el de hoy. */
+const repIdsGestionados = (m, hasta) => new Set([...m]
+  .filter(([, d]) => !hasta || d <= hasta).map(([cid]) => cid));
+
 function fotoReporte(){
   const P = repProyecto();
   const hoy = hoyISO();
@@ -13935,29 +14027,28 @@ function fotoReporte(){
   const conAlguna   = new Set(ges.map(g => String(g.Customer_id)));
   const conRespuesta= new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
   const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
-  /* El correo cuenta de los dos lados: al banco y al comercio. Y hay que
-     pedirlos por separado, porque `DB.todos()` es el montón del CLIENTE — las
-     coordinaciones con el banco viven en `DB.bbva()`. Buscarlo solo en el
-     primero dejaba fuera todo el correo al ejecutivo de BBVA, que es
-     exactamente la mitad del acuerdo. */
-  const conCorreo = new Set([...DB.todos(), ...DB.bbva()]
-    .filter(esCorreoEvidenciable).map(g => String(g.Customer_id)));
+  /* Los gestionados salen de una sola función compartida con las láminas
+     semanales, para que las tres digan el mismo número. */
+  const mapaGestion = repGestionados({ ini, hoy });
+  const conGestion  = repIdsGestionados(mapaGestion);
 
   const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
-  /* Cada escalón es parte del anterior, y eso no es una decisión de dibujo:
-     es la regla del 26/08 aplicada hasta el final. Si una visita sin correo
-     detrás no cuenta como gestión, tampoco puede contar como visita del
-     embudo — si no, el mismo comercio quedaría fuera de un escalón y dentro
-     del siguiente, y el embudo dejaría de ser un embudo.
-
-     Lo que queda afuera no se pierde de vista: se cuenta aparte y se declara,
-     porque es trabajo hecho al que le falta el respaldo, y eso es una tarea
-     concreta y no un descarte. */
+  /* Cada escalón sigue siendo parte del anterior, y con la regla ancha del
+     27/08 eso ya no hay que forzarlo: un contacto efectivo ES una gestión y
+     una visita realizada TAMBIÉN, así que los dos escalones de abajo caen
+     dentro del de arriba por definición y no por una intersección puesta a
+     mano. La intersección se conserva igual, escrita, porque documenta la
+     relación y porque el día que la regla vuelva a moverse el embudo no se
+     va a romper en silencio. */
   const y = (a, b) => new Set([...a].filter(x => b.has(x)));
   const contacto    = enCartera(conAlguna);
-  const gestion     = enCartera(conCorreo);
-  const efectividad = enCartera(y(conRespuesta, conCorreo));
-  const visita      = enCartera(y(conVisita, conCorreo));
+  const gestion     = enCartera(conGestion);
+  const efectividad = enCartera(y(conRespuesta, conGestion));
+  const visita      = enCartera(y(conVisita, conGestion));
+  /* Lo que quedaba fuera del embudo por no tener correo detrás. Con la regla
+     ancha ya no queda nada afuera; se sigue calculando —y declarando si
+     apareciera— porque una cifra que se borra es una cifra que nadie vuelve a
+     mirar el día que deja de ser cero. */
   const sinRespaldo = {
     efectivos: enCartera(conRespuesta) - efectividad,
     visitas:   enCartera(conVisita) - visita
@@ -14005,19 +14096,22 @@ function fotoReporte(){
      retenciones— y encima suena a fracaso donde solo falta el dato. */
   const cnv = (n, d) => d ? n / d * 100 : null;
 
-  /* ---- El embudo, redefinido el 26/08 ---------------------------------
+  /* ---- El embudo, redefinido el 26/08 y ajustado el 27/08 --------------
      Antes el segundo escalón era «Contacto»: se registró al menos un intento.
      Con 795 de 802 fichas tocadas, ese escalón daba 99% y no decía nada — un
      embudo cuyo primer tramo no se angosta es un adorno.
 
-     Ahora el segundo escalón es GESTIÓN con el criterio de la campaña: hay
-     gestión cuando existe un correo que se puede poner sobre la mesa, al banco
-     o al comercio. Y debajo va EFECTIVIDAD, que es lo que antes se llamaba
-     gestión: los contactos que obtuvieron respuesta.
+     El 26/08 el escalón pasó a ser GESTIÓN medida solo por correo. Esa regla
+     dejaba fuera trabajo que sí tiene resultado, y José la corrigió el 27/08:
+     hay gestión cuando quedó al menos un hecho con resultado detrás —correo al
+     banco o al comercio, contacto efectivo, reunión o visita realizada, o un
+     cierre registrado, ganado o perdido—. Debajo va EFECTIVIDAD, que es lo que
+     antes se llamaba gestión: los contactos que obtuvieron respuesta.
 
-     El trabajo por chat, llamada o visita no desaparece —sigue registrado, en
-     la línea de tiempo y en el historial de cada ejecutivo—; lo que no hace es
-     contar como sustento, porque no lo es. */
+     Lo que sigue sin contar es el intento sin nada detrás: la llamada que
+     nadie contestó, el chat sin respuesta, la visita fallida. Ese trabajo no
+     desaparece —sigue registrado, en la línea de tiempo y en el historial de
+     cada ejecutivo—; lo que no hace es mover el escalón. */
   const embudo = [
     { k:"portafolio",  label:"Portafolio asignado", n:portafolio, color:"navy",
       pct:100, conv:null, texto:"" },
@@ -14122,7 +14216,7 @@ function fotoReporte(){
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
-    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo,
+    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, mapaGestion,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
 
@@ -14378,19 +14472,71 @@ function repJueves(hoy){
   return d.toISOString().slice(0, 10);
 }
 
+/* ---- Lo que está comprometido de acá al viernes -------------------------
+   Todas las demás láminas miran hacia atrás. Esta mira hacia adelante, y es la
+   única que responde la pregunta con la que alguien se levanta de la reunión:
+   ¿qué hay puesto en el calendario para esta semana?
+
+   Va de HOY al viernes de esta misma semana. Si hoy ya es viernes, muestra el
+   viernes; si es sábado o domingo —que en campaña pasa—, toma el viernes
+   siguiente, porque una ventana vacía no es información, es un error de
+   cuenta. Solo citas abiertas: una cita ya cerrada dejó de ser un compromiso y
+   pasó a ser una visita, que se cuenta en el embudo. */
+function repAgenda(f){
+  const d = new Date(f.hoy + "T12:00:00Z");
+  const dow = d.getUTCDay();                    // 0 domingo … 6 sábado
+  const faltan = dow === 0 ? 5 : dow === 6 ? 6 : (5 - dow);
+  const vie = new Date(d.getTime() + faltan * 86400000).toISOString().slice(0,10);
+  const desde = f.hoy;
+
+  const cart = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
+  const citas = citasTodas().filter(s => !s.cerrado_en).filter(s => {
+    const fe = String(s.fecha_objetivo || "").slice(0,10);
+    return fe >= desde && fe <= vie;
+  });
+
+  const dias = [];
+  for (let x = new Date(desde + "T12:00:00Z"); x.toISOString().slice(0,10) <= vie;
+       x = new Date(x.getTime() + 86400000)){
+    const iso = x.toISOString().slice(0,10);
+    const delDia = citas.filter(s => String(s.fecha_objetivo).slice(0,10) === iso);
+    dias.push({ iso, dia: DIAS_ES[x.getUTCDay()],
+      n: delDia.length,
+      presencial: delDia.filter(s => s.modalidad === "PRESENCIAL").length,
+      virtual:    delDia.filter(s => s.modalidad === "VIRTUAL").length });
+  }
+
+  /* Comercios habilitados y sin cita puesta. Es el otro lado de la misma
+     lámina: lo comprometido dice qué va a pasar, esto dice cuánto todavía
+     puede entrar. Sin ese contraste, «12 visitas» no se sabe si es mucho. */
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  const sinAgendar = CLIENTES.filter(c => !esClienteNuevo(c)
+    && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && habilitadoEn(c.customer_id) && !conCita.has(String(c.customer_id))).length;
+
+  return { desde, vie, dias, sinAgendar,
+    total: citas.length,
+    presencial: citas.filter(s => s.modalidad === "PRESENCIAL").length,
+    virtual:    citas.filter(s => s.modalidad === "VIRTUAL").length,
+    /* Cuántas de esas citas son de comercios que ya están gestionados: mide si
+       lo comprometido continúa un trabajo o abre uno nuevo. */
+    deGestionados: citas.filter(s => cart.has(String(s.customer_id))
+      && (f.mapaGestion || new Map()).has(String(s.customer_id))).length };
+}
+
 /* El embudo tal como estaba a una fecha. Cada escalón cuenta comercios, no
    gestiones, igual que el embudo de siempre: si acá contara gestiones, el
    avance de la semana saldría inflado y las dos láminas no cerrarían. */
-function repEmbudoAl(fecha){
+function repEmbudoAl(fecha, f){
   const hasta = g => repDia(g.Fecha_Contacto) <= fecha;
   const ges = DB.todos().filter(esGestionCliente).filter(hasta);
-  /* Las mismas definiciones que el embudo de hoy, o los dos tonos de la barra
-     estarían midiendo cosas distintas y el avance de la semana saldría de la
-     nada. Cuando cambió el embudo el 26/08 esto se quedó atrás una hora, y lo
-     agarró la prueba de que ningún escalón del corte puede superar al de hoy:
-     daba 71 contra 52. */
-  const conCorreo = new Set([...DB.todos(), ...DB.bbva()]
-    .filter(esCorreoEvidenciable).filter(hasta).map(g => String(g.Customer_id)));
+  /* El mismo mapa de gestionados que usa el embudo de hoy, recortado a la
+     fecha. Antes acá se repetía la definición y se quedó atrás una hora
+     cuando la regla cambió: la prueba de que ningún escalón del corte puede
+     superar al de hoy lo agarró dando 71 contra 52. Ahora hay una sola
+     definición y no se puede volver a desalinear. */
+  const conGestion = repIdsGestionados(
+    (f && f.mapaGestion) || repGestionados(f || { ini:"0000-01-01", hoy:fecha }), fecha);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const enCartera = s2 => cart.filter(c => s2.has(String(c.customer_id))).length;
   const idsDe = f2 => new Set(ges.filter(f2).map(g => String(g.Customer_id)));
@@ -14405,9 +14551,9 @@ function repEmbudoAl(fecha){
   };
   return {
     contacto:    enCartera(idsDe(() => true)),
-    gestion:     enCartera(conCorreo),
-    efectividad: enCartera(y(idsDe(g => esEfectivo(g.Resultado)), conCorreo)),
-    visita:      enCartera(y(idsDe(g => g.Cumple_Visita === "SI"), conCorreo)),
+    gestion:     enCartera(conGestion),
+    efectividad: enCartera(y(idsDe(g => esEfectivo(g.Resultado)), conGestion)),
+    visita:      enCartera(y(idsDe(g => g.Cumple_Visita === "SI"), conGestion)),
     objetivo:    cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
   };
 }
@@ -14427,23 +14573,14 @@ function repSemanaDia(f){
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
   const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
-  const enCartera = new Set(cart.map(c => String(c.customer_id)));
 
-  /* El primer toque de cada comercio es su primer CORREO evidenciable —al
-     comercio o al banco—, no su primer contacto de cualquier tipo. Es el mismo
-     conjunto que cuenta el escalón «Gestión» del embudo y la cifra grande de
-     la lámina 2: si acá se contara el contacto a secas, tres láminas del mismo
+  /* El primer toque de cada comercio es la fecha en que pasó a contar como
+     GESTIONADO con la regla del 27/08 —correo, contacto efectivo, reunión
+     realizada o cierre—, no su primer intento de cualquier tipo. Sale del
+     mismo mapa que alimenta el escalón «Gestión» del embudo y la cifra grande
+     de la lámina 2: si acá se contara otra cosa, tres láminas del mismo
      documento estarían contando cosas distintas con el mismo nombre. */
-  const primeraDe = new Map();
-  [...DB.todos(), ...DB.bbva()].filter(esCorreoEvidenciable).forEach(g => {
-    const cid = String(g.Customer_id);
-    if (!enCartera.has(cid)) return;
-    let d = repDia(g.Fecha_Contacto);
-    if (!d) return;
-    if (d < f.ini) d = f.ini;
-    if (d > f.hoy) return;
-    if (!primeraDe.has(cid) || d < primeraDe.get(cid)) primeraDe.set(cid, d);
-  });
+  const primeraDe = f.mapaGestion || repGestionados(f);
 
   const enDia = (d, k) => {
     if (k === "contactos"){ let n = 0; primeraDe.forEach(x => { if (x === d) n++; }); return n; }
@@ -14491,23 +14628,14 @@ function repSemanal(f){
   const corte = repJueves(f.hoy);
   const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
-  const enCartera = new Set(cart.map(c => String(c.customer_id)));
 
-  /* El primer toque de cada comercio es su primer CORREO evidenciable —al
-     comercio o al banco—, no su primer contacto de cualquier tipo. Es el mismo
-     conjunto que cuenta el escalón «Gestión» del embudo y la cifra grande de
-     la lámina 2: si acá se contara el contacto a secas, tres láminas del mismo
+  /* El primer toque de cada comercio es la fecha en que pasó a contar como
+     GESTIONADO con la regla del 27/08 —correo, contacto efectivo, reunión
+     realizada o cierre—, no su primer intento de cualquier tipo. Sale del
+     mismo mapa que alimenta el escalón «Gestión» del embudo y la cifra grande
+     de la lámina 2: si acá se contara otra cosa, tres láminas del mismo
      documento estarían contando cosas distintas con el mismo nombre. */
-  const primeraDe = new Map();
-  [...DB.todos(), ...DB.bbva()].filter(esCorreoEvidenciable).forEach(g => {
-    const cid = String(g.Customer_id);
-    if (!enCartera.has(cid)) return;
-    let d = repDia(g.Fecha_Contacto);
-    if (!d) return;
-    if (d < f.ini) d = f.ini;
-    if (d > f.hoy) return;
-    if (!primeraDe.has(cid) || d < primeraDe.get(cid)) primeraDe.set(cid, d);
-  });
+  const primeraDe = f.mapaGestion || repGestionados(f);
 
   const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
@@ -14645,6 +14773,13 @@ function repDatos(f){
     gestiones:f.gestiones, distritos:f.distritos,
     diasCampo:f.diasDeCampo, diasActivos:f.diasActivos,
     porDia:repNum(f.porDia, f.porDia < 10 ? 1 : 0),
+    /* El ritmo medido en gestiones con resultado, no en fichas tocadas. Son
+       dos cosas distintas y hasta el 27/08 solo existía la segunda, así que
+       cualquier lectura sobre «el ritmo» hablaba del intento y no del avance. */
+    porDiaGestion: (() => {
+      const v = f.diasDeCampo ? f.gestion / f.diasDeCampo : 0;
+      return repNum(v, v < 10 ? 1 : 0);
+    })(),
     porSemana:repNum(f.porDia * 7, f.porDia * 7 < 10 ? 1 : 0),
     mesCobertura:mesDe(f.fechaCobertura), fechaCobertura:repFecha(f.fechaCobertura),
     /* La frase «antes del cierre» era una promesa escrita a mano que dejaba de
@@ -14955,18 +15090,110 @@ function repLaminaEmbudo(X, f){
     { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:X.H("naranja") });
 
 
-  const LEC = ((REPORTE.lecturas || {}).embudo) || [];
-  const YC = 5.46, HC = 1.34, WC = 6.04;
-  LEC.slice(0, 2).forEach((l, i) => {
+  /* Hasta tres lecturas. La tercera entró el 27/08 para dejar escrito qué se
+     hizo distinto esta semana: un embudo dice cuánto se movió, nunca por qué,
+     y esa pregunta la hace alguien en la sala todas las veces. El ancho sale
+     de cuántas hay, así que una sola ocupa la lámina y tres se reparten. */
+  const LEC = (((REPORTE.lecturas || {}).embudo) || []).slice(0, 3);
+  const YC = 5.46, HC = 1.34;
+  const WC = LEC.length >= 3 ? 3.926 : LEC.length === 2 ? 6.04 : 12.38;
+  LEC.forEach((l, i) => {
     const x = 0.57 + i * (WC + 0.30);
     X.caja(e, x, YC, WC, HC, "FFFFFF", REP_LINEA);
     e.addShape(X.pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
       fill:{ color:X.H(l.color) }, line:{ type:"none" } });
-    X.T(e, l.titulo, { x:x + 0.48, y:YC + 0.21, w:WC - 0.72, h:0.26, fontSize:12, bold:true, color:X.H("navy") });
-    X.T(e, l.texto,  { x:x + 0.24, y:YC + 0.60, w:WC - 0.48, h:0.66, fontSize:10.5, color:X.H("gris"), valign:"top" });
+    /* Con tres tarjetas el título se parte en dos líneas y el texto necesita
+       cuatro: se le da altura al título y se baja un punto la letra del cuerpo,
+       porque la alternativa es que la última línea se apoye en el borde. */
+    const tres = LEC.length >= 3;
+    X.T(e, l.titulo, { x:x + 0.48, y:YC + (tres ? 0.16 : 0.21), w:WC - 0.72, h: tres ? 0.34 : 0.26,
+      fontSize: tres ? 10.5 : 12, bold:true, color:X.H("navy"), valign: tres ? "top" : "middle" });
+    X.T(e, l.texto,  { x:x + 0.24, y:YC + (tres ? 0.56 : 0.60), w:WC - 0.48, h: tres ? 0.72 : 0.66,
+      fontSize: tres ? 9 : 10.5, color:X.H("gris"), valign:"top" });
   });
   X.T(e, "Notas: " + repNota("embudo"),
     { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
+/* ---- La lámina que mira hacia adelante -----------------------------------
+   Visitas y reuniones comprometidas de hoy al viernes. Se dibuja con el mismo
+   vocabulario que las otras —tarjeta blanca, filete de color arriba, cifra
+   grande— para que no se lea como un anexo de otro documento.
+
+   No lleva nombres de nadie: en esta sala lo que importa es cuánto está
+   comprometido y para cuándo, no quién lo tiene. */
+function repLaminaAgenda(X, f){
+  const A = repAgenda(f);
+  const s = X.lamina(X.fondos.contenido);
+  X.T(s, "Lo comprometido para esta semana",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  X.T(s, `Visitas y reuniones ya agendadas con el comercio · del ${repFecha(A.desde)} al ${repFecha(A.vie)}`,
+    { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
+
+  /* Tres cifras de cabecera: el total y su composición. Una reunión virtual y
+     una visita en el local no cuestan lo mismo ni se agendan igual, así que
+     el total solo no alcanza para saber cómo viene la semana. */
+  const CAB = [
+    { n:String(A.total), et:"visitas y reuniones agendadas",
+      pie:`de hoy al viernes ${repFecha(A.vie)}`, color:"azul" },
+    { n:String(A.presencial), et:"presenciales en el local",
+      pie: A.total ? repPct(A.presencial / A.total * 100) + " de lo agendado" : "—", color:"naranja" },
+    { n:String(A.virtual), et:"reuniones virtuales",
+      pie: A.total ? repPct(A.virtual / A.total * 100) + " de lo agendado" : "—", color:"verde" }
+  ];
+  const WC3 = 3.926;
+  CAB.forEach((x, i) => {
+    const px = 0.57 + i * (WC3 + 0.30);
+    X.caja(s, px, 1.86, WC3, 1.60, "FFFFFF", REP_LINEA);
+    s.addShape(X.pptx.ShapeType.rect, { x:px, y:1.86, w:WC3, h:0.09,
+      fill:{ color:X.H(x.color) }, line:{ type:"none" } });
+    X.T(s, x.n,  { x:px + 0.26, y:2.10, w:WC3 - 0.52, h:0.72, fontSize:40, bold:true,
+      fontFace:X.NEG, color:X.H("navy") });
+    X.T(s, x.et, { x:px + 0.26, y:2.86, w:WC3 - 0.52, h:0.28, fontSize:11.5, color:X.H("gris") });
+    X.T(s, x.pie,{ x:px + 0.26, y:3.14, w:WC3 - 0.52, h:0.24, fontSize:10, color:X.H("gris2") });
+  });
+
+  /* Una columna por día, a la misma escala. El reparto es la mitad del dato:
+     ocho visitas repartidas en cuatro días y ocho el viernes son dos semanas
+     distintas, y solo una de las dos se puede cumplir. */
+  X.T(s, "Cómo se reparten en la semana",
+    { x:0.57, y:3.66, w:6.0, h:0.26, fontSize:11, bold:true, color:X.H("navy") });
+  const GY2 = 4.02, GH2 = 1.42, n = Math.max(1, A.dias.length);
+  /* Las columnas van centradas. Un lunes hay cinco y un jueves quedan dos: si
+     se anclaran a la izquierda, la lámina del jueves se vería rota en vez de
+     corta. El ancho también se adapta, con tope, para que dos columnas no se
+     conviertan en dos paredes. */
+  const WD = Math.min(1.50, (12.38 - (n - 1) * 0.22) / n);
+  const X0 = 0.57 + (12.38 - (n * WD + (n - 1) * 0.22)) / 2;
+  const tope = Math.max(1, ...A.dias.map(d => d.n));
+  A.dias.forEach((d, i) => {
+    const px = X0 + i * (WD + 0.22);
+    /* La pista gris de fondo deja ver los días vacíos: una columna que no está
+       y una columna en cero se leen distinto, y acá el cero es el dato. */
+    X.caja(s, px, GY2, WD, GH2, "EEF2F9");
+    const h = GH2 * d.n / tope;
+    if (d.n) s.addShape(X.pptx.ShapeType.rect, { x:px, y:GY2 + GH2 - h, w:WD, h,
+      fill:{ color:X.H(d.iso === f.hoy ? "naranja" : "azul") }, line:{ type:"none" } });
+    X.T(s, String(d.n), { x:px, y: d.n && h > 0.34 ? GY2 + GH2 - h + 0.06 : GY2 + GH2 - h - 0.28,
+      w:WD, h:0.26, fontSize:12, bold:true, align:"center",
+      color: d.n && h > 0.34 ? "FFFFFF" : X.H("gris2") });
+    X.T(s, d.dia, { x:px, y:GY2 + GH2 + 0.06, w:WD, h:0.22, fontSize:9.5,
+      bold: d.iso === f.hoy, align:"center", color:X.H(d.iso === f.hoy ? "naranja" : "gris") });
+    X.T(s, repFecha(d.iso).slice(0,5), { x:px, y:GY2 + GH2 + 0.28, w:WD, h:0.20,
+      fontSize:8.5, align:"center", color:X.H("gris2") });
+  });
+
+  X.caja(s, 0.57, 6.02, 12.38, 0.76, REP_BANDA);
+  s.addShape(X.pptx.ShapeType.rect, { x:0.57, y:6.02, w:0.10, h:0.76,
+    fill:{ color:X.H("naranja") }, line:{ type:"none" } });
+  X.T(s, A.total
+      ? `${A.total} ${A.total === 1 ? "cita comprometida" : "citas comprometidas"} de acá al viernes`
+        + (A.sinAgendar ? ` · ${A.sinAgendar} comercios ya habilitados y todavía sin cita puesta: ahí está el margen para ensanchar la semana que viene.` : ".")
+      : "Todavía no hay visitas ni reuniones agendadas para esta ventana."
+        + (A.sinAgendar ? ` Hay ${A.sinAgendar} comercios habilitados esperando que se les ponga fecha.` : ""),
+    { x:0.86, y:6.14, w:11.8, h:0.52, fontSize:12, color:X.H("gris") });
+  X.T(s, "Solo citas abiertas: una visita ya realizada deja de contar acá y pasa al embudo.",
+    { x:0.57, y:6.90, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
 }
 
 function repLaminaObjetivos(X, f){
@@ -15001,8 +15228,18 @@ function repLaminaObjetivos(X, f){
       X.T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:X.H("gris") });
       X.T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:X.H("navy"), align:"right" });
     });
+    /* «Se carga en Ajustes › …» es una instrucción para quien opera el CRM, y
+       en un deck de comité con la marca nombra una herramienta que en esa sala
+       no existe. Si el dato falta, se dice que falta y punto. */
+    /* Dos frases que le hablan a quien opera el CRM y no al comité: la que
+       manda a cargar el dato en Ajustes, y la que aclara que falta el desglose
+       por persona. Las dos son ciertas adentro y ninguna corresponde afuera. */
+    const pie = !X.comite ? x.pie
+      : /Ajustes/i.test(x.pie) ? "Dato pendiente de carga"
+      : /por ejecutivo/i.test(x.pie) ? "Total declarado del periodo"
+      : x.pie;
     X.caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, REP_BANDA);
-    X.T(k, x.pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:X.H("navy"), align:"center" });
+    X.T(k, pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:X.H("navy"), align:"center" });
   });
 
   const YB = 6.00;
@@ -15045,7 +15282,7 @@ function armarDirectorio(pptx, fondos){
   };
   const SEM = repSemanal(f);
   const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
-              corte: repEmbudoAl(SEM.corte), corteFecha: SEM.corte };
+              corte: repEmbudoAl(SEM.corte, f), corteFecha: SEM.corte };
 
   /* ---- 1 · Carátula ---------------------------------------------------- */
   const c = lamina(fondos.caratula);
@@ -15065,12 +15302,14 @@ function armarDirectorio(pptx, fondos){
   const CIF = [
     { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
       pie: `${f.restante} días hasta el cierre`, color:"gris" },
-    /* La cifra del comité es la gestión CON correo, no el contacto a secas.
-       Decir «644 comercios contactados» y después mostrar un embudo que
-       arranca en 530 obliga a explicar la diferencia en voz alta cada vez.
-       El contacto sin respaldo sigue existiendo y se declara debajo. */
-    { n: String(f.gestion), et:"comercios con gestión respaldada",
-      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} contactados en total`,
+    /* La cifra del comité es la GESTIÓN, no el contacto a secas: comercios
+       donde quedó un hecho con resultado —correo, contacto efectivo, reunión
+       realizada o cierre—. Decir «644 comercios contactados» y después mostrar
+       un embudo que arranca más abajo obliga a explicar la diferencia en voz
+       alta cada vez. El intento sin resultado sigue existiendo y se declara
+       debajo, en la misma tarjeta. */
+    { n: String(f.gestion), et:"comercios con gestión",
+      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
       color:"azul", mas: SEM.curso ? SEM.curso.contactos : 0 },
     { n: String(f.objetivo), et:"con el objetivo cumplido",
       pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja",
@@ -15107,7 +15346,7 @@ function armarDirectorio(pptx, fondos){
   a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.60, w:0.10, h:1.34,
     fill:{ color:H("naranja") }, line:{ type:"none" } });
   T(a, "La lectura", { x:0.86, y:5.72, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
-  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, ${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} del portafolio tiene una gestión respaldada por correo. `
+  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, ${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} del portafolio tiene una gestión con resultado detrás. `
      + `El tramo que define el resultado es lo que viene después: de esas gestiones, ${repPct(f.gestion ? f.efectividad / f.gestion * 100 : 0)} obtuvo respuesta, ${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} llegó a visita y ${repPct(f.gestion ? f.objetivo / f.gestion * 100 : 0)} cerró con el objetivo cumplido. `
      + `Ahí es donde se decide el número de diciembre.`,
     { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
@@ -15164,20 +15403,54 @@ function armarDirectorio(pptx, fondos){
         w:largo, h:0.042, fill:{ color:H(color), transparency: transp || 0 },
         line:{ type:"none" }, rotate: Math.atan2(dy, dx) * 180 / Math.PI });
     };
-    const linea = (vals, transp, punto) => {
+    /* Cada punto lleva su nodo, y el último de cada línea lleva su cifra. Una
+       curva sin números obliga a estimar la altura contra un eje que no está
+       dibujado; con el valor al final de cada línea, las dos semanas se
+       comparan leyendo, no midiendo. */
+    const linea = (vals, transp, pleno) => {
       for (let k2 = 1; k2 < vals.length; k2++){
         if (vals[k2] === null || vals[k2 - 1] === null) continue;
         tramo(ejeX(k2 - 1), ejeY(vals[k2 - 1]), ejeX(k2), ejeY(vals[k2]), serie.color, transp);
       }
-      if (!punto) return;
+      const R = pleno ? 0.13 : 0.10;
+      vals.forEach((v2, k2) => {
+        if (v2 === null) return;
+        g.addShape(pptx.ShapeType.ellipse, { x:ejeX(k2) - R/2, y:ejeY(v2) - R/2, w:R, h:R,
+          fill:{ color:H(serie.color), transparency: pleno ? 0 : 50 },
+          line:{ color:"FFFFFF", width: pleno ? 1.2 : 0.8 } });
+      });
       const ult = vals.reduce((a, x, k2) => x === null ? a : k2, 0);
-      g.addShape(pptx.ShapeType.ellipse, { x:ejeX(ult) - 0.065, y:ejeY(vals[ult]) - 0.065,
-        w:0.13, h:0.13, fill:{ color:H(serie.color) }, line:{ color:"FFFFFF", width:1.2 } });
+      if (vals[ult] === null || vals[ult] === undefined) return;
+      /* La cifra de esta semana va ARRIBA del nodo y la de la pasada ABAJO.
+         No es capricho: las dos líneas terminan a un día de distancia y con
+         las dos cifras en la misma altura se leían como un solo número de dos
+         dígitos. Si el nodo está pegado al techo, la de arriba baja. */
+      const yv = ejeY(vals[ult]);
+      /* Arriba la de esta semana, abajo la de la pasada… salvo que abajo no
+         quepa: con la línea pegada al piso —una serie en cero— la cifra caía
+         encima de las fechas del eje. Entonces sube. */
+      const cabeArriba = yv - GY > 0.24;
+      const cabeAbajo  = yv + 0.28 <= GY + GH;
+      const arriba = pleno ? cabeArriba : (!cabeAbajo && cabeArriba);
+      T(g, String(vals[ult]), {
+        x: Math.min(GX + GW - 0.46, Math.max(GX - 0.10, ejeX(ult) - 0.23)),
+        y: arriba ? yv - 0.26 : yv + 0.08, w:0.46, h:0.20,
+        fontSize: pleno ? 10 : 8.5, bold:true, align:"center",
+        color: pleno ? H(serie.color) : H("gris2") });
     };
     linea(dd.previa, 62, false);   // la semana pasada, en claro
     linea(dd.actual, 0, true);     // esta semana, en pleno
-    T(g, "D1", { x:GX - 0.20, y:GY + GH + 0.06, w:0.40, h:0.20, fontSize:8, color:H("gris2"), align:"center" });
-    T(g, "D7", { x:GX + GW - 0.20, y:GY + GH + 0.06, w:0.40, h:0.20, fontSize:8, color:H("gris2"), align:"center" });
+    /* El eje lleva fechas, no «D1» y «D7»: nadie tiene por qué traducir un día
+       ordinal a un día del calendario mientras escucha. A la izquierda el
+       jueves de corte, a la derecha hoy —puesto bajo el nodo de hoy y no en el
+       borde, porque la semana en curso casi nunca llega al día siete. */
+    /* Día y mes, sin el año: en una caja de media pulgada «20/08/2026» se parte
+       en dos líneas y deja de leerse. El año ya está en el subtítulo. */
+    const dm = iso => repFecha(iso).slice(0, 5);
+    T(g, dm(DIA.corte), { x:GX - 0.34, y:GY + GH + 0.06, w:0.68, h:0.20,
+      fontSize:8, color:H("gris2"), align:"center" });
+    T(g, dm(f.hoy), { x:Math.min(GX + GW - 0.34, ejeX(DIA.diasAct - 1) - 0.34),
+      y:GY + GH + 0.06, w:0.68, h:0.20, fontSize:8, bold:true, color:H("navy"), align:"center" });
     T(g, "Claro: semana pasada · Pleno: esta semana",
       { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
   });
@@ -15203,7 +15476,14 @@ function armarDirectorio(pptx, fondos){
   repLaminaEmbudo(X, f);
   repLaminaObjetivos(X, f);
 
-  /* ---- 6 · Lámina de cierre --------------------------------------------- */
+  /* ---- 6 · Lo comprometido para esta semana -----------------------------
+     Va acá, después de los objetivos y antes del cierre, y no al principio:
+     las cinco anteriores cuentan lo que ya pasó, y la sala se levanta con la
+     última que vio. Que la última sea lo que está puesto en el calendario
+     convierte el reporte en un compromiso en vez de un balance. */
+  repLaminaAgenda(X, f);
+
+  /* ---- 7 · Lámina de cierre --------------------------------------------- */
   lamina(fondos.cierre);
 
   pptx.writeFile({ fileName: `Directorio_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
