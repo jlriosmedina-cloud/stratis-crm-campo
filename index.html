@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"26/08/2026 22:31", huella:"f427b6" };
+const BUILD = { sello:"27/08/2026 00:43", huella:"c2c166" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14000,7 +14000,10 @@ function fotoReporte(){
   const distritos = new Set(cart.map(c => c.distrito).filter(Boolean)).size;
 
   const pct = n => portafolio ? n / portafolio * 100 : 0;
-  const cnv = (n, d) => d ? n / d * 100 : 0;
+  /* Sin divisor no hay conversión. Devolver 0% cuando el escalón anterior está
+     en cero es una afirmación falsa —«0% de las visitas» al lado de 3
+     retenciones— y encima suena a fracaso donde solo falta el dato. */
+  const cnv = (n, d) => d ? n / d * 100 : null;
 
   /* ---- El embudo, redefinido el 26/08 ---------------------------------
      Antes el segundo escalón era «Contacto»: se registró al menos un intento.
@@ -14040,12 +14043,27 @@ function fotoReporte(){
   const conMonto = FACTURACION.filter(f => f.monto_final !== null && f.monto_final !== undefined);
   const ultimoP = conMonto.map(f => f.periodo).sort().pop() || "";
   const cerrados = conMonto.filter(f => f.periodo === ultimoP);
-  const factActual = cerrados.reduce((n, f) => n + Number(f.monto_final || 0), 0);
+
+  /* ---- El total del periodo, cuando todavía no hay detalle por ejecutivo ---
+     La tabla `facturacion` guarda el monto de CADA ejecutivo, y de ahí sale el
+     incentivo. El comité, en cambio, necesita un total. El 26/08 llegó el
+     total del primer periodo —S/ 27 MM— sin el desglose.
+
+     Repartirlo entre los cuatro por regla de tres sería inventar cuatro
+     números que después alimentan un bono. Así que el total vive aparte, en el
+     relato del reporte, y solo se usa para la lámina: el detalle por ejecutivo
+     sigue vacío hasta que llegue de verdad, y el incentivo no se mueve.
+     Cuando el desglose llegue, manda el desglose. */
+  const totalDeclarado = Number(P.facturacion_periodo) || 0;
+  const factActual = cerrados.length
+    ? cerrados.reduce((n, f) => n + Number(f.monto_final || 0), 0)
+    : totalDeclarado;
+  const factEsDeclarada = !cerrados.length && totalDeclarado > 0;
 
   const oF = repObjetivo("facturacion");
   const metaPct = Number(oF.meta_pct) || 0;
   const metaFact = baseFact * (1 + metaPct / 100);
-  const hayFact = baseFact > 0 && cerrados.length > 0;
+  const hayFact = baseFact > 0 && (cerrados.length > 0 || factEsDeclarada);
   const crecimiento = hayFact ? (factActual - baseFact) / baseFact * 100 : null;
 
   const oR = repObjetivo("reactivacion");
@@ -14059,13 +14077,15 @@ function fotoReporte(){
       sub: hayFact ? "de crecimiento sobre la base" : "falta cargar la facturación del periodo",
       filas: [
         ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
-        [ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado",
+        [factEsDeclarada ? (P.facturacion_periodo_etiqueta || "Facturación del periodo")
+                         : (ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado"),
          hayFact ? repSoles(factActual) : "pendiente"],
         [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
       ],
       pie: hayFact
-        ? (metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
-                                 : "Meta de facturación alcanzada")
+        ? (factEsDeclarada ? "Total del periodo · falta el detalle por ejecutivo"
+           : metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
+                                   : "Meta de facturación alcanzada")
         : "Se carga en Ajustes › Facturación del periodo",
       avance: hayFact && metaPct ? Math.max(0, crecimiento) / metaPct * 100 : null },
 
@@ -14103,7 +14123,7 @@ function fotoReporte(){
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
     diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo,
-    baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento,
+    baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
 
   /* Las vistas y el evolutivo cuelgan de la misma foto, y se calculan después
@@ -14392,6 +14412,78 @@ function repEmbudoAl(fecha){
   };
 }
 
+/* ---- Las dos semanas, día a día ----------------------------------------
+   Una barra por semana dice cuánto se hizo; no dice si vamos mejor o peor,
+   porque la semana en curso siempre es más corta y siempre parece una caída.
+   Dos líneas acumuladas puestas sobre el mismo eje —día 1 a día 7— sí lo
+   dicen: a igual día, la de esta semana está por encima o por debajo de la
+   anterior, y eso se lee sin explicación al lado.
+
+   Se acumula a propósito. El conteo suelto de cada día rebota tanto que la
+   comparación se pierde en el ruido; el acumulado tiene una sola pregunta y
+   la responde con la altura. */
+function repSemanaDia(f){
+  const corte = repJueves(f.hoy);
+  const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
+  const ges = DB.todos().filter(esGestionCliente);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = new Set(cart.map(c => String(c.customer_id)));
+
+  /* El primer toque de cada comercio es su primer CORREO evidenciable —al
+     comercio o al banco—, no su primer contacto de cualquier tipo. Es el mismo
+     conjunto que cuenta el escalón «Gestión» del embudo y la cifra grande de
+     la lámina 2: si acá se contara el contacto a secas, tres láminas del mismo
+     documento estarían contando cosas distintas con el mismo nombre. */
+  const primeraDe = new Map();
+  [...DB.todos(), ...DB.bbva()].filter(esCorreoEvidenciable).forEach(g => {
+    const cid = String(g.Customer_id);
+    if (!enCartera.has(cid)) return;
+    let d = repDia(g.Fecha_Contacto);
+    if (!d) return;
+    if (d < f.ini) d = f.ini;
+    if (d > f.hoy) return;
+    if (!primeraDe.has(cid) || d < primeraDe.get(cid)) primeraDe.set(cid, d);
+  });
+
+  const enDia = (d, k) => {
+    if (k === "contactos"){ let n = 0; primeraDe.forEach(x => { if (x === d) n++; }); return n; }
+    if (k === "visitas")
+      return ges.filter(g => g.Cumple_Visita === "SI" && repDia(g.Fecha_Contacto) === d).length;
+    return cart.filter(c => (esRetencion(c) || esRecuperado(c))
+      && c.cerrado_en && String(c.cerrado_en).slice(0,10) === d).length;
+  };
+
+  /* La semana anterior va del viernes al jueves del corte; la actual arranca
+     el viernes siguiente. Los dos arreglos tienen siete casillas para que el
+     día 3 de una caiga sobre el día 3 de la otra. */
+  const serie = (desde, k, tope) => {
+    const out = [];
+    let acum = 0;
+    for (let i2 = 0; i2 < 7; i2++){
+      const d = mas(desde, i2);
+      if (tope && d > tope){ out.push(null); continue; }
+      acum += enDia(d, k);
+      out.push(acum);
+    }
+    return out;
+  };
+
+  const iniPrev = mas(corte, -6), iniAct = mas(corte, 1);
+  const series = ["contactos", "retenciones", "visitas"].map(k => ({
+    k,
+    previa: serie(iniPrev, k),
+    actual: serie(iniAct, k, f.hoy)
+  }));
+  const diasAct = Math.min(7, Math.round((new Date(f.hoy) - new Date(iniAct)) / 86400000) + 1);
+  return { corte, iniPrev, iniAct, diasAct, series,
+    /* El punto justo de comparación: dónde iba la semana pasada al mismo día
+       en que va la actual. Comparar contra su total sería comparar siete días
+       contra tres. */
+    alMismoDia: series.map(x => ({ k:x.k,
+      previa: x.previa[diasAct - 1] || 0,
+      actual: x.actual[diasAct - 1] || 0 })) };
+}
+
 /* Las tres series que mira el comité, semana a semana. Semanas de viernes a
    jueves; la última, la que va corriendo, se marca como incompleta para que
    nadie lea una caída donde solo faltan días. */
@@ -14401,8 +14493,13 @@ function repSemanal(f){
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const enCartera = new Set(cart.map(c => String(c.customer_id)));
 
+  /* El primer toque de cada comercio es su primer CORREO evidenciable —al
+     comercio o al banco—, no su primer contacto de cualquier tipo. Es el mismo
+     conjunto que cuenta el escalón «Gestión» del embudo y la cifra grande de
+     la lámina 2: si acá se contara el contacto a secas, tres láminas del mismo
+     documento estarían contando cosas distintas con el mismo nombre. */
   const primeraDe = new Map();
-  ges.forEach(g => {
+  [...DB.todos(), ...DB.bbva()].filter(esCorreoEvidenciable).forEach(g => {
     const cid = String(g.Customer_id);
     if (!enCartera.has(cid)) return;
     let d = repDia(g.Fecha_Contacto);
@@ -14462,7 +14559,7 @@ function repSemanal(f){
 
   return { corte, semanas, ultima, previa, curso,
     series: [
-      { k:"contactos",   nombre:"Comercios contactados", color:"azul" },
+      { k:"contactos",   nombre:"Comercios con gestión", color:"azul" },
       { k:"retenciones", nombre:"Retenciones concretadas", color:"naranja" },
       { k:"visitas",     nombre:"Visitas efectivas", color:"verde" }
     ],
@@ -14472,7 +14569,7 @@ function repSemanal(f){
 
 
 const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
-const repPct = n => repNum(n, n < 10 ? 1 : 0) + "%";
+const repPct = n => (n === null || n === undefined) ? "—" : repNum(n, n < 10 ? 1 : 0) + "%";
 const repSoles = n => {
   const v = Number(n || 0);
   return v >= 1000000 ? "S/ " + repNum(v / 1000000, 2) + " MM"
@@ -14816,7 +14913,7 @@ function repLaminaEmbudo(X, f){
      barras y ahí lo tapaban las tarjetas de lectura: una leyenda que no se ve
      convierte un gráfico bien pensado en uno confuso. */
   X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`
-       + (X.corte ? ` · el tono claro es lo ganado desde el jueves ${repFecha(X.corteFecha)}` : ""),
+       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana` : ""),
     { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
 
   const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
@@ -14835,17 +14932,20 @@ function repLaminaEmbudo(X, f){
     if (antes === null || antes >= p.n){
       e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
     } else {
+      /* Claro lo que ya estaba el jueves, pleno lo ganado esta semana. Va así
+         y no al revés porque lo que el comité mira es el avance: el tramo con
+         más peso visual tiene que ser el que se movió, no el que ya estaba. */
       const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
       e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w:wa, h:ALTO,
-        fill:{ color:col }, line:{ type:"none" } });
+        fill:{ color:col, transparency:60 }, line:{ type:"none" } });
       e.addShape(X.pptx.ShapeType.rect, { x:X_BAR + wa, y, w:Math.max(0.03, w - wa), h:ALTO,
-        fill:{ color:col, transparency:55 }, line:{ type:"none" } });
+        fill:{ color:col }, line:{ type:"none" } });
       X.T(e, "+" + (p.n - antes), { x:X_BAR + w + 0.06, y, w:0.52, h:ALTO,
         fontSize:9.5, bold:true, color:X.H("gris2") });
     }
     X.T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
     X.T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:X.H("gris2") });
-    if (i > 0) X.T(e, repPct(p.conv) + " " + p.texto,
+    if (i > 0) X.T(e, (p.conv === null ? "— " : repPct(p.conv) + " ") + p.texto,
       { x:X_CNV, y, w:W_CNV, h:ALTO, fontSize:10.5, color:X.H("gris") });
   });
 
@@ -14965,8 +15065,12 @@ function armarDirectorio(pptx, fondos){
   const CIF = [
     { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
       pie: `${f.restante} días hasta el cierre`, color:"gris" },
-    { n: String(f.contacto), et:"comercios contactados",
-      pie: `${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`,
+    /* La cifra del comité es la gestión CON correo, no el contacto a secas.
+       Decir «644 comercios contactados» y después mostrar un embudo que
+       arranca en 530 obliga a explicar la diferencia en voz alta cada vez.
+       El contacto sin respaldo sigue existiendo y se declara debajo. */
+    { n: String(f.gestion), et:"comercios con gestión respaldada",
+      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} contactados en total`,
       color:"azul", mas: SEM.curso ? SEM.curso.contactos : 0 },
     { n: String(f.objetivo), et:"con el objetivo cumplido",
       pie: f.metaR ? `meta al cierre: ${f.metaR}` : "", color:"naranja",
@@ -15003,8 +15107,8 @@ function armarDirectorio(pptx, fondos){
   a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.60, w:0.10, h:1.34,
     fill:{ color:H("naranja") }, line:{ type:"none" } });
   T(a, "La lectura", { x:0.86, y:5.72, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
-  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, el portafolio va ${repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0)} contactado. `
-     + `El tramo que define el resultado no es el contacto sino lo que sigue: de los comercios contactados, ${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} recibió una visita y ${repPct(f.contacto ? f.objetivo / f.contacto * 100 : 0)} cerró con el objetivo cumplido. `
+  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, ${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} del portafolio tiene una gestión respaldada por correo. `
+     + `El tramo que define el resultado es lo que viene después: de esas gestiones, ${repPct(f.gestion ? f.efectividad / f.gestion * 100 : 0)} obtuvo respuesta, ${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} llegó a visita y ${repPct(f.gestion ? f.objetivo / f.gestion * 100 : 0)} cerró con el objetivo cumplido. `
      + `Ahí es donde se decide el número de diciembre.`,
     { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
 
@@ -15016,6 +15120,7 @@ function armarDirectorio(pptx, fondos){
   titulo(g, "El desarrollo, semana a semana",
     `Semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
 
+  const DIA = repSemanaDia(f);
   const SW = 3.95, SG = 0.28, SY = 1.80, SH = 3.30;
   SEM.series.forEach((serie, i2) => {
     const px = 0.57 + i2 * (SW + SG);
@@ -15025,35 +15130,56 @@ function armarDirectorio(pptx, fondos){
     T(g, serie.nombre, { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
       bold:true, fontFace:NEG, color:H("navy") });
 
-    const ult = SEM.ultima ? SEM.ultima[serie.k] : 0;
-    const pre = SEM.previa ? SEM.previa[serie.k] : null;
-    T(g, String(ult), { x:px + 0.22, y:SY + 0.58, w:1.60, h:0.62, fontSize:32, bold:true,
-      fontFace:NEG, color:H(serie.color) });
-    const v = SEM.variacion[serie.k];
-    T(g, v === null ? "sin semana previa"
-       : Math.round(v) === 0 ? "igual que la anterior"
-       : (v > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(v), 0) + "% vs. la anterior",
-      { x:px + 1.86, y:SY + 0.76, w:SW - 2.08, h:0.28, fontSize:10.5, bold:true,
-        color: v === null || Math.round(v) === 0 ? H("gris2") : H(v > 0 ? "verde" : "naranja") });
-    T(g, "en la última semana cerrada", { x:px + 0.22, y:SY + 1.20, w:SW - 0.44, h:0.24,
-      fontSize:9.5, color:H("gris2") });
+    const dd = DIA.series.find(x => x.k === serie.k) || { previa:[], actual:[] };
+    const comp = DIA.alMismoDia.find(x => x.k === serie.k) || { previa:0, actual:0 };
+    const v = comp.previa ? (comp.actual - comp.previa) / comp.previa * 100
+                          : (comp.actual ? null : 0);
 
-    /* La tendencia: una barra por semana. Con seis semanas de proyecto no hay
-       espacio ni motivo para una curva; lo que importa es la silueta. */
-    const YB2 = SY + 1.50, HB2 = 1.02, n = SEM.semanas.length;
-    const maxS = Math.max(1, ...SEM.semanas.map(x => x[serie.k]));
-    const bw = Math.min(0.56, (SW - 0.56) / Math.max(1, n) - 0.10);
-    SEM.semanas.forEach((sem, k2) => {
-      const bx = px + 0.28 + k2 * ((SW - 0.56) / Math.max(1, n));
-      const bh = Math.max(0.03, HB2 * sem[serie.k] / maxS);
-      g.addShape(pptx.ShapeType.rect, { x:bx, y:YB2 + HB2 - bh, w:bw, h:bh,
-        fill:{ color:H(serie.color), transparency: sem.completa ? 0 : 55 },
-        line:{ type:"none" } });
-      T(g, String(sem[serie.k]), { x:bx - 0.22, y:YB2 + HB2 + 0.04, w:bw + 0.44, h:0.22,
-        fontSize:8.5, color:H("gris2"), align:"center" });
-    });
-    T(g, SEM.curso ? "La última barra, en claro, es la semana en curso" : "Semanas cerradas",
-      { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:9, color:H("gris2") });
+    T(g, String(comp.actual), { x:px + 0.22, y:SY + 0.58, w:1.50, h:0.58, fontSize:30,
+      bold:true, fontFace:NEG, color:H(serie.color) });
+    T(g, v === null ? "sin base para comparar"
+       : Math.round(v) === 0 ? "igual que la semana pasada"
+       : (v > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(v), 0) + "% vs. la semana pasada",
+      { x:px + 1.76, y:SY + 0.74, w:SW - 1.98, h:0.28, fontSize:10, bold:true,
+        color: v === null || Math.round(v) === 0 ? H("gris2") : H(v > 0 ? "verde" : "naranja") });
+    T(g, `al día ${DIA.diasAct} de la semana · la pasada iba en ${comp.previa}`,
+      { x:px + 0.22, y:SY + 1.16, w:SW - 0.44, h:0.24, fontSize:9.5, color:H("gris2") });
+
+    /* Las dos líneas, acumuladas, sobre el mismo eje de siete días. */
+    const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 1.14;
+    const tope = Math.max(1, ...dd.previa.filter(x => x !== null),
+                             ...dd.actual.filter(x => x !== null));
+    g.addShape(pptx.ShapeType.rect, { x:GX, y:GY + GH, w:GW, h:0.015,
+      fill:{ color:"C6D0E6" }, line:{ type:"none" } });
+    const ejeX = k2 => GX + GW * k2 / 6;
+    const ejeY = val => GY + GH * (1 - val / tope);
+    /* pptxgenjs no dibuja líneas sueltas: cada tramo es un rectángulo fino
+       rotado, y se coloca centrado en el punto medio porque PowerPoint rota
+       sobre el centro de la forma y no sobre su esquina. */
+    const tramo = (x1, y1, x2, y2, color, transp) => {
+      const dx = x2 - x1, dy = y2 - y1, largo = Math.sqrt(dx*dx + dy*dy);
+      if (largo < 0.001) return;
+      g.addShape(pptx.ShapeType.rect, {
+        x:(x1 + x2) / 2 - largo / 2, y:(y1 + y2) / 2 - 0.021,
+        w:largo, h:0.042, fill:{ color:H(color), transparency: transp || 0 },
+        line:{ type:"none" }, rotate: Math.atan2(dy, dx) * 180 / Math.PI });
+    };
+    const linea = (vals, transp, punto) => {
+      for (let k2 = 1; k2 < vals.length; k2++){
+        if (vals[k2] === null || vals[k2 - 1] === null) continue;
+        tramo(ejeX(k2 - 1), ejeY(vals[k2 - 1]), ejeX(k2), ejeY(vals[k2]), serie.color, transp);
+      }
+      if (!punto) return;
+      const ult = vals.reduce((a, x, k2) => x === null ? a : k2, 0);
+      g.addShape(pptx.ShapeType.ellipse, { x:ejeX(ult) - 0.065, y:ejeY(vals[ult]) - 0.065,
+        w:0.13, h:0.13, fill:{ color:H(serie.color) }, line:{ color:"FFFFFF", width:1.2 } });
+    };
+    linea(dd.previa, 62, false);   // la semana pasada, en claro
+    linea(dd.actual, 0, true);     // esta semana, en pleno
+    T(g, "D1", { x:GX - 0.20, y:GY + GH + 0.06, w:0.40, h:0.20, fontSize:8, color:H("gris2"), align:"center" });
+    T(g, "D7", { x:GX + GW - 0.20, y:GY + GH + 0.06, w:0.40, h:0.20, fontSize:8, color:H("gris2"), align:"center" });
+    T(g, "Claro: semana pasada · Pleno: esta semana",
+      { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
   });
 
   caja(g, 0.57, 5.36, 12.38, 1.52, REP_BANDA);
@@ -15064,8 +15190,8 @@ function armarDirectorio(pptx, fondos){
       : "La semana en curso",
     { x:0.86, y:5.48, w:6.5, h:0.28, fontSize:11, bold:true, color:H("navy") });
   T(g, SEM.curso
-      ? `${SEM.curso.contactos} comercios contactados · ${SEM.curso.retenciones} retenciones concretadas · ${SEM.curso.visitas} visitas efectivas. `
-        + `Va por la mitad de la semana, así que estas tres cifras todavía no se comparan contra una semana entera: se muestran en tono claro para no leerlas como una caída.`
+      ? `Cada tarjeta compara la semana en curso contra la anterior AL MISMO DÍA — hoy es el día ${DIA.diasAct} de siete—, no contra su total. `
+        + `Comparar tres días contra siete siempre daría una caída, y esa caída no diría nada sobre cómo va la semana.`
       : "Todavía no hay días corridos en la semana en curso.",
     { x:0.86, y:5.78, w:11.8, h:0.98, fontSize:11.5, color:H("gris") });
 
