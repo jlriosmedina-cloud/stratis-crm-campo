@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 05:44", huella:"de5bb2" };
+const BUILD = { sello:"27/08/2026 14:16", huella:"d6a202" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -2950,6 +2950,34 @@ const nombreDiaNoTrabajado = iso => {
 /* La fecha con la que arranca el formulario. En día trabajado, hoy; en sábado,
    domingo o feriado, ninguna: que la escriba. */
 const fechaInicialContacto = () => diaNoTrabajado(hoyISO()) ? "" : hoyISO();
+
+/* ---- Hasta qué día se puede fechar una gestión --------------------------
+   Regla que fijó José el 27/08. En día trabajado el tope es hoy, como
+   siempre. En sábado, domingo o feriado peruano el tope baja al DÍA TRABAJADO
+   ANTERIOR: se puede seguir registrando y poniéndose al día en fin de semana
+   —eso nunca se prohibió—, pero no se puede fechar la gestión ese mismo día.
+
+   El objetivo no es impedir el trabajo del domingo: es impedir que una tanda
+   de regularización quede fechada en domingo. El 22/08 aparecieron 58
+   gestiones fechadas en sábado, 57 de ellas de un solo lote de puesta al día;
+   ninguna estaba manipulada, el formulario regalaba la fecha de hoy y quien
+   registraba la aceptaba. Un sábado no entra en los días trabajados con los
+   que se calcula la meta, así que esas gestiones sumaban al numerador sin
+   sumar al denominador.
+
+   Y el caso legítimo sigue cubierto, que es lo que hace que la regla no
+   estorbe: el que de verdad visitó un comercio abierto el sábado lo registra
+   el lunes con fecha del sábado —el tope es un máximo, y el sábado queda por
+   debajo del lunes—, y ahí el CRM le pregunta una vez si fue ese día. Lo único
+   que se pierde es fechar el sábado ESTANDO en sábado, que es exactamente el
+   caso que producía las fechas irreales. */
+const topeFechaContacto = () => {
+  const hoy = hoyISO();
+  return diaNoTrabajado(hoy) ? (diaTrabajadoAnterior(hoy) || hoy) : hoy;
+};
+/* «Fuera de rango» pasa a medirse contra el tope y no contra hoy: en domingo,
+   fechar en domingo es adelantarse a un día que no existe para la campaña. */
+const fechaSobreElTope = fecha => !!fecha && String(fecha).slice(0,10) > topeFechaContacto();
 
 /* ---- Cuándo empieza a correr el plazo de registro ------------------------
 
@@ -4415,7 +4443,13 @@ function modoDemo(){
 const NAV = [
   { id:"cartera",  ic:"◱", label:"Cartera" },
   { id:"agenda",   ic:"◷", label:"Calendario" },
-  { id:"registros",ic:"≡", label:"Registros" },
+  /* Registros pasó a supervisión el 27/08. Es la vista agregada de los
+     indicadores de una persona —puntualidad, efectividad, fuera de plazo— y
+     dársela a quien es medido por ellos invita a trabajar para el número.
+     El ejecutivo sigue viendo cada gestión suya en la ficha del comercio, que
+     es donde la necesita para trabajar; lo que deja de tener es el tablero de
+     su propio desempeño. */
+  { id:"registros",ic:"≡", label:"Registros", soloMando:true },
   { id:"panel",    ic:"◕", label:"Panel" },
   { id:"actividad",ic:"◎", label:"Actividad", soloMando:true },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
@@ -4426,9 +4460,29 @@ const NAV = [
    ni siquiera se le ofrece la pestaña. Y a BBVA se le retiran tres: incentivos
    —retribución de otra empresa—, reporte —material que se prepara para él— y
    ajustes, donde viven los parámetros y las descargas. */
+/* «Ver el CRM como» tiene que ser completo: si supervisión mira como Aníbal y
+   sigue viendo Reporte, Incentivos y Actividad, no está viendo lo que ve él —
+   está viendo su cartera con el menú de otro—. Y la pregunta que se hace al
+   entrar a esa vista es justamente «¿qué ve exactamente esta persona?».
+   `vistaDeCampo()` es cierta tanto para un ejecutivo como para supervisión
+   mirando como uno, así que la misma línea resuelve los dos casos.
+   Se sale por el botón del banner o por el selector del rail, que no forman
+   parte de la navegación y por eso siguen ahí. */
 const navVisible = () => NAV
-  .filter(n => !n.soloMando || (S.user && S.user.rol !== "Ejecutivo"))
+  .filter(n => !n.soloMando || !vistaDeCampo())
   .filter(n => puedeVerTab(n.id));
+
+/* La misma regla, pero preguntable por una pestaña suelta —la usa la puerta de
+   `go()`—. `puedeVerTab` sola no alcanza: solo sabe de BBVA, y «Registros» se
+   le esconde al ejecutivo por `soloMando`, no por perfil. Sin esta línea el
+   menú no ofrecía Registros pero `go("registros")` sí entraba, que es la misma
+   pantalla por otra puerta. Las pantallas que no están en el menú —fichas,
+   formularios— no llevan guarda acá; las suyas están en su sitio. */
+const tabPermitida = tab => {
+  if (!puedeVerTab(tab)) return false;
+  const n = NAV.find(x => x.id === tab);
+  return !n || !n.soloMando || !vistaDeCampo();
+};
 
 function renderNav(){
   $("#nav").innerHTML = navVisible().map(n => `
@@ -4450,8 +4504,8 @@ function renderNav(){
  * 1100 px. Debajo de ese ancho manda la fila de abajo, que está a un pulgar.
  * El ejecutivo no la recibe nunca: su navegación no cambia en este tramo. */
 const RAIL = [
-  { g:"Campaña", items:["panel","cartera","agenda","registros"] },
-  { g:"Solo supervisión", items:["actividad","bono","reporte","ayuda"] }
+  { g:"Campaña", items:["panel","cartera","agenda"] },
+  { g:"Solo supervisión", items:["registros","actividad","bono","reporte","ayuda"] }
 ];
 const ETIQUETA_RAIL = { panel:"Tablero", agenda:"Calendario de visitas" };
 
@@ -4586,7 +4640,7 @@ function go(tab, cid){
   /* La puerta, y va acá porque acá pasa TODO: el menú, los botones de la
      ficha, los enlaces internos y cualquier llamada suelta. Filtrar solo la
      navegación dejaría abiertas las otras tres. */
-  if (!puedeVerTab(tab)){
+  if (!tabPermitida(tab)){
     toast("Este perfil no tiene acceso a esa sección");
     tab = "cartera"; cid = null;
   }
@@ -4703,6 +4757,15 @@ function bindComunes(){
   document.querySelectorAll("[data-verges]").forEach(el => el.onclick = e => {
     e.stopPropagation(); verGestiones(el.dataset.verges, el.dataset.verejec || "");
   });
+  /* Registros dejó de estar en la vista de campo el 27/08, así que los atajos
+     que llevan ahí no se dibujan en ella. La guarda va acá además de en cada
+     vista porque acá pasan todos: si mañana alguien pone un atajo nuevo en una
+     pantalla de campo, no manda a nadie a una pestaña que no existe. */
+  if (vistaDeCampo())
+    document.querySelectorAll("[data-verges]").forEach(el => {
+      el.onclick = null;
+      if (el.tagName === "BUTTON" && el.classList.contains("btn")) el.remove();
+    });
   /* La alerta del panel lleva a SU lista, que es lo que la hace útil: sin el
      salto es un número que informa y no ayuda. Va a la Cartera con el filtro
      de lo que falta por gestionar, sobre la cartera de quien está mirando. */
@@ -5556,6 +5619,11 @@ function mirarComo(correo){
   S.cid = null; S.q = ""; S.qReg = ""; S.limite = 40; S.limiteReg = 40;
   S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = S.fEjecutivo = S.fCierre = "todos";
   S.fResultado = S.fMedio = S.fEjecReg = "todos";
+  /* Si la pestaña abierta deja de existir en la vista a la que se entra o de
+     la que se sale, hay que moverse. Entrar a «ver como» desde Reporte dejaba
+     la pantalla de Reporte pintada con el menú del ejecutivo detrás: la vista
+     decía una cosa y el contenido otra. */
+  if (!navVisible().some(n => n.id === S.tab)) S.tab = "cartera";
   window.scrollTo(0,0);
   render();
   const q = ejecObservado();
@@ -7294,18 +7362,23 @@ function renderFormulario(){
   <div class="card">
     <h3>Fecha y hora del contacto</h3>
     <div class="row2">
-      <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
+      <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${topeFechaContacto()}"></div>
       <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
     </div>
     ${!f.Fecha_Contacto ? `
     <div class="note crit" style="margin-top:8px">
       <b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}, así que la fecha no viene puesta.</b>
-      Escribe el día en que de verdad ocurrió el contacto. Si estás poniendo al día el trabajo de
-      la semana, esa es la fecha que va — no la de hoy.
-    </div>` : fechaFutura(f.Fecha_Contacto) ? `
+      Escribe el día en que de verdad ocurrió el contacto — como máximo el
+      <b>${esc(fmtFecha(topeFechaContacto()))}</b>, que fue el último día trabajado.
+      Puedes registrar hoy sin problema; lo que no va es fechar la gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.
+    </div>` : fechaSobreElTope(f.Fecha_Contacto) ? `
     <div class="note crit" style="margin-top:8px">
-      <b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
-      Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.
+      ${diaNoTrabajado(hoyISO())
+        ? `<b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))} y no se puede fechar una gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.</b>
+           El último día trabajado fue el <b>${esc(fmtFecha(topeFechaContacto()))}</b>: esa es la fecha
+           más reciente que se puede poner. Registrar hoy está bien; lo que se pide es la fecha real del contacto.`
+        : `<b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
+           Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.`}
     </div>` : diaNoTrabajado(f.Fecha_Contacto) ? `
     <div class="note warn" style="margin-top:8px">
       <b>Ese día fue ${esc(nombreDiaNoTrabajado(f.Fecha_Contacto))}.</b> Se puede registrar —hay comercios que
@@ -7331,12 +7404,14 @@ function renderFormulario(){
     ${mandoTotal() ? `
     <div class="row2">
       <div class="field"><label>Fecha</label>
-        <input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${hoyISO()}"></div>
+        <input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${topeFechaContacto()}"></div>
       <div class="field" style="margin-bottom:0"><label>Hora</label>
         <input type="time" data-f="Hora_Contacto" value="${esc(String(f.Hora_Contacto||"").slice(0,5))}"></div>
     </div>
-    ${fechaFutura(f.Fecha_Contacto) ? `<div class="note crit" style="margin-top:8px">
-      Esa fecha todavía no llega. Hoy es ${esc(fmtFecha(hoyISO()))}.</div>` : ""}`
+    ${fechaSobreElTope(f.Fecha_Contacto) ? `<div class="note crit" style="margin-top:8px">
+      ${diaNoTrabajado(hoyISO())
+        ? `Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}: la fecha más reciente que se puede poner es el ${esc(fmtFecha(topeFechaContacto()))}.`
+        : `Esa fecha todavía no llega. Hoy es ${esc(fmtFecha(hoyISO()))}.`}</div>` : ""}`
     : `<div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>`}
 
     <h3 style="margin-top:15px">¿Cómo se contactó al cliente?</h3>
@@ -7785,8 +7860,13 @@ async function guardar(c){
   }
   if (S.editId && volverPresencialProhibido(f))
     errores.push(`No puedes cambiar el medio a ${nomTipo(f.Tipo_Contacto).toLowerCase()}: una gestión presencial necesita la ubicación capturada en el momento, y esa no se modifica. Elimina el registro y créalo de nuevo desde el local.`);
-  if (fechaFutura(f.Fecha_Contacto))
-    errores.push(`No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
+  /* El `max` del selector no alcanza: la fecha se puede teclear a mano y en
+     móvil algunos navegadores lo ignoran. La regla se comprueba también al
+     guardar, que es donde de verdad importa. */
+  if (fechaSobreElTope(f.Fecha_Contacto))
+    errores.push(diaNoTrabajado(hoyISO())
+      ? `No se puede fechar una gestión el ${fmtFecha(f.Fecha_Contacto)}: hoy es ${nombreDiaNoTrabajado(hoyISO())} y el último día trabajado fue el ${fmtFecha(topeFechaContacto())}. Puedes registrar hoy, pero con la fecha real del contacto.`
+      : `No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
   if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
   if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
@@ -8678,10 +8758,17 @@ function bloqueActividad(r, regs){
     <div><b>La actividad</b><span>${esc(r.detalle)} — todo contado en gestiones</span></div>
   </div>
   <div class="stat-row">
-    <button class="stat stat-link" data-verges="todos"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
-      <div class="sub">intentos de comunicación — <b>ver la lista</b></div></button>
-    <button class="stat stat-link" data-verges="efectivos"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
-      <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo — <b>ver cuáles</b></div></button>
+    ${/* Sin salto a Registros en la vista de campo: esa pestaña es de
+          supervisión desde el 27/08. La cifra se queda; el enlace no. */
+      vistaDeCampo()
+      ? `<div class="stat"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
+          <div class="sub">intentos de comunicación</div></div>
+         <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
+          <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo</div></div>`
+      : `<button class="stat stat-link" data-verges="todos"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
+          <div class="sub">intentos de comunicación — <b>ver la lista</b></div></button>
+         <button class="stat stat-link" data-verges="efectivos"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
+          <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo — <b>ver cuáles</b></div></button>`}
     <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${efectivas}</div>
       <div class="sub">gestiones que cumplen visita</div></div>
     <div class="stat"><div class="lbl">Comercios tocados</div><div class="val">${comercios}</div>
@@ -9348,8 +9435,8 @@ function bloqueMiRegistro(){
       y ya no se pueden recuperar.
     </div>` : ""}
 
-    ${fuera ? `<div style="margin-top:11px">
-      <button class="btn ghost sm" data-verges="fuera_plazo">Ver tus ${fuera} fuera de plazo</button>
+    ${fuera && !vistaDeCampo() ? `<div style="margin-top:11px">
+      <button class="btn ghost sm" data-verges="fuera_plazo">Ver las ${fuera} fuera de plazo</button>
     </div>` : ""}
 
     <details class="explica" style="margin-top:11px"><summary>Cómo se cuenta el plazo</summary>
