@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 18:43", huella:"001482" };
+const BUILD = { sello:"27/08/2026 19:04", huella:"0c3025" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -15789,10 +15789,15 @@ function repAgenda(f){
   const desde = f.hoy;
 
   const cart = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
-  const citas = citasTodas().filter(s => !s.cerrado_en).filter(s => {
-    const fe = String(s.fecha_objetivo || "").slice(0,10);
-    return fe >= desde && fe <= vie;
-  });
+  /* Solo cartera: lo comprometido que muestra este deck es de retención. Una
+     reunión agendada con un lead de venta es trabajo real y se ve en el CRM,
+     pero acá inflaría una lámina que dice medir otra cosa. */
+  const citas = citasTodas().filter(s => !s.cerrado_en)
+    .filter(s => cart.has(String(s.customer_id)))
+    .filter(s => {
+      const fe = String(s.fecha_objetivo || "").slice(0,10);
+      return fe >= desde && fe <= vie;
+    });
 
   const dias = [];
   for (let x = new Date(desde + "T12:00:00Z"); x.toISOString().slice(0,10) <= vie;
@@ -15808,7 +15813,8 @@ function repAgenda(f){
   /* Comercios habilitados y sin cita puesta. Es el otro lado de la misma
      lámina: lo comprometido dice qué va a pasar, esto dice cuánto todavía
      puede entrar. Sin ese contraste, «12 visitas» no se sabe si es mucho. */
-  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en)
+    .filter(s => cart.has(String(s.customer_id))).map(s => String(s.customer_id)));
   const sinAgendar = CLIENTES.filter(c => !esClienteNuevo(c)
     && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
     && habilitadoEn(c.customer_id) && !conCita.has(String(c.customer_id))).length;
@@ -15870,8 +15876,12 @@ function repEmbudoAl(fecha, f){
 function repSemanaDia(f){
   const corte = repJueves(f.hoy);
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
-  const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  /* Solo cartera, por lo mismo que en `repSemanal`: la curva de la tarjeta y
+     su cifra tienen que contar el mismo universo. */
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const ges = DB.todos().filter(esGestionCliente)
+                        .filter(g => idsCart.has(String(g.Customer_id)));
 
   /* La serie cuenta comercios TRABAJADOS en la ventana. Ver
      `repTrabajadosEntre`: contar el primer toque hacía que la tarjeta dijera 3
@@ -15927,8 +15937,16 @@ function repSemanaDia(f){
    nadie lea una caída donde solo faltan días. */
 function repSemanal(f){
   const corte = repJueves(f.hoy);
-  const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  /* SOLO CARTERA. Este deck mide retención: la venta nueva se menciona al pie
+     del embudo y no entra en ningún conteo. Hasta el 27/08 `ges` traía TODAS
+     las gestiones, así que «Visitas realizadas» sumaba las visitas hechas a
+     leads de venta: 16 esa semana, de las cuales 6 eran de venta. La lámina 2
+     decía «+9 comercios visitados» y la 3 «16 visitas», y la diferencia no era
+     la unidad —que también— sino que estaban contando universos distintos. */
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const ges = DB.todos().filter(esGestionCliente)
+                        .filter(g => idsCart.has(String(g.Customer_id)));
 
   /* Comercios trabajados en cada semana, con la misma regla que la lámina del
      día a día: la última actividad DENTRO de la semana tiene que calificar. Un
@@ -15952,6 +15970,8 @@ function repSemanal(f){
       desde, hasta: fin, completa: true,
       contactos: repTrabajadosEntre(act, desde, fin),
       visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
+        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
     };
@@ -15966,6 +15986,8 @@ function repSemanal(f){
       dias: dias(desdeC, f.hoy) + 1,
       contactos: repTrabajadosEntre(act, desdeC, f.hoy),
       visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
+        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
     });
@@ -16790,10 +16812,15 @@ function armarDirectorio(pptx, fondos){
     /* Sin el año: la fecha completa hacía que «sin cambios desde el jueves
        20/08/2026» se partiera en dos líneas y se montara sobre la cifra. El
        año ya está en el subtítulo de la lámina. */
-    const jueves = " desde el jueves " + repFecha(X.corteFecha).slice(0, 5);
+    /* Con la unidad escrita. «+9 desde el jueves» al lado de «16 visitas
+       realizadas» en la lámina siguiente se lee como una contradicción, y no lo
+       es: acá se cuentan COMERCIOS que entraron al escalón y allá VISITAS
+       hechas. Las dos cifras son ciertas y miden cosas distintas; lo único que
+       faltaba era decir cuál es cuál. */
+    const jueves = " comercios desde el jueves " + repFecha(X.corteFecha).slice(0, 5);
     if (x.mas !== null && x.mas !== undefined)
       T(a, x.mas ? (x.mas > 0 ? "+" : "\u2212") + Math.abs(x.mas) + jueves
-                 : "sin cambios" + jueves,
+                 : "sin cambios desde el jueves " + repFecha(X.corteFecha).slice(0, 5),
         { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold: !!x.mas,
           color: !x.mas ? H("gris2") : x.mas > 0 ? H(x.color) : H("naranja") });
     T(a, x.et,  { x:px + 0.22, y:3.20, w:WC2 - 0.44, h:0.24, fontSize:11.5, color:H("gris") });
@@ -16895,7 +16922,13 @@ function armarDirectorio(pptx, fondos){
       const v2 = (dd.previa || []).filter(x => x !== null && x !== undefined);
       return v2.length ? v2[v2.length - 1] : null;
     })();
-    T(g, `al día ${DIA.diasAct} de la semana · la pasada iba en ${comp.previa}`
+    /* Y sobre cuántos comercios cayeron. «16 visitas» y «+9 comercios visitados»
+       en la lámina anterior solo cierran si se dice que 16 visitas pueden caer
+       sobre 10 comercios, y que de esos 10 hay 9 que nunca se habían visitado. */
+    const sobre = serie.k === "visitas" && SEM.curso
+      && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
+      ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
+    T(g, `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
        + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : "")
        + (prom ? ` · promedio semanal ${repNum(prom, prom < 10 ? 1 : 0)}` : ""),
       /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
