@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 01:47", huella:"fc32d4" };
+const BUILD = { sello:"27/08/2026 02:26", huella:"835637" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3844,7 +3844,16 @@ function pantallaPegar(estado){
 /* ---- Sesión ------------------------------------------------------------- */
 async function comprobarSesion(){
   if (!sb) return renderLogin();
-  const { data:{ session } } = await sb.auth.getSession();
+  /* Incluso leer la sesión guardada puede quedarse esperando —lo hace contra
+     el servidor cuando el token está por vencer—. Sin límite, el CRM se queda
+     en blanco antes de llegar siquiera a la pantalla de carga. */
+  let session = null;
+  try {
+    const r = await conLimite(sb.auth.getSession(), "tu sesión", 12000);
+    session = ((r || {}).data || {}).session || null;
+  } catch (e){
+    return pantallaFalloCarga(e);
+  }
   if (!session) return renderLogin();
   await entrar(session);
 }
@@ -3855,8 +3864,16 @@ async function entrar(session){
   try {
     const correo = (session.user.email || "").toLowerCase();
     pantallaCarga("Verificando tu acceso…");
-    const { data: yo, error } = await sb.from("usuarios").select("*").eq("correo", correo).maybeSingle();
-    if (error || !yo || !yo.activo){
+    const { data: yo, error } = await conLimite(
+      sb.from("usuarios").select("*").eq("correo", correo).maybeSingle(), "tu usuario");
+    /* Un error de la consulta NO es «esta cuenta no existe». Hasta el 27/08 los
+       dos casos caían en la misma rama: si la consulta fallaba por red, el CRM
+       cerraba la sesión y le decía a la persona que su cuenta no figuraba en la
+       lista. Eso es acusar a alguien de algo que no pasó y encima dejarlo
+       afuera. La falla técnica va a la pantalla de reintento; la sesión se
+       queda como está. */
+    if (error) throw new Error(error.message || "No se pudo verificar tu acceso.");
+    if (!yo || !yo.activo){
       await sb.auth.signOut();
       return renderLogin({ error: yo && !yo.activo
         ? `Tu acceso al CRM está desactivado. Comunícate con el administrador.`
@@ -3867,16 +3884,86 @@ async function entrar(session){
 
     if ((session.user.user_metadata || {}).debe_cambiar) return pantallaClaveInicial();
     await abrirApp();
+  } catch (e){
+    /* La red de seguridad final. Cualquier cosa que se escape de acá dejaba la
+       pantalla de carga girando sin fin, porque este `try` tenía `finally`
+       pero no `catch`: no había nadie más arriba para atraparla. */
+    S.user = null;
+    pantallaFalloCarga(e);
   } finally { S.entrando = false; }
 }
 
 async function abrirApp(){
-  await cargarDatos();
+  /* Si la carga falla, el CRM tiene que DECIRLO.
+   *
+   * Hasta el 27/08 esto era `await cargarDatos()` a secas. `cargarDatos` puede
+   * lanzar —una consulta con error, la sesión caducada— y arriba, en `entrar`,
+   * hay un `try/finally` sin `catch`: la excepción se escapaba hasta el borde
+   * del programa y no la atrapaba nadie. Resultado: la pantalla se quedaba en
+   * «Cargando tu cartera…» con la barra girando para siempre, sin un mensaje,
+   * sin un botón y sin nada en la consola. El usuario no puede distinguir eso
+   * de «está tardando», así que espera, y sigue esperando.
+   *
+   * Peor todavía: `S.user` ya estaba puesto, y la guarda de `entrar` es
+   * `if (S.entrando || S.user) return`. Aunque la red volviera, ningún
+   * reintento hacía nada. La única salida era recargar a mano.
+   *
+   * Ahora el fallo se atrapa, se deja el estado como para volver a intentar, y
+   * se muestra qué pasó con un botón. Una pantalla de carga que no puede
+   * terminar en error no es una pantalla de carga: es una trampa. */
+  try {
+    await cargarDatos();
+  } catch (e){
+    S.user = null; S.entrando = false;
+    return pantallaFalloCarga(e);
+  }
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   S.tab = "cartera"; S.cid = null;
   render();
   arrancarSync();
+}
+
+/* La salida del callejón. Dice qué falló, tranquiliza sobre lo guardado —que
+   es la primera pregunta de cualquiera al ver un error de carga— y ofrece el
+   reintento, que ahora sí funciona porque el estado quedó limpio. */
+function pantallaFalloCarga(e){
+  const msg = (e && e.message) || "No se pudo traer la información.";
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo">
+      <div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div>
+    </div>
+    <div class="err"><b>No se pudo cargar tu cartera.</b><br>${esc(msg)}</div>
+    <div class="note">Lo que está registrado no se tocó: esto es un problema para
+      traer la información, no con la información. Vuelve a intentarlo; si se
+      repite, revisa tu conexión y avísale a José.</div>
+    <button class="btn block" id="reintentarCarga" style="margin-top:12px">Volver a intentar</button>
+  </div>`;
+  $("#login").classList.remove("hidden");
+  $("#app").classList.add("hidden");
+  const b = $("#reintentarCarga");
+  if (b) b.onclick = () => { S.user = null; S.entrando = false; comprobarSesion(); };
+}
+
+/* Un `fetch` que no vuelve NUNCA es el peor caso de todos: no lanza, no
+   resuelve, y `Promise.all` se queda esperando en silencio. Sin esto, la
+   pantalla de carga giraba indefinidamente incluso con el `catch` de arriba
+   puesto, porque nunca llegaba a haber un error que atrapar.
+   Cada consulta del arranque lleva su propio límite y dice cuál fue. */
+const LIMITE_CARGA = 20000;
+function conLimite(p, que, ms){
+  let t = null;
+  const corte = new Promise((_, rechazar) => {
+    t = setTimeout(() => rechazar(new Error(
+      `La consulta de ${que} no respondió en ${Math.round((ms || LIMITE_CARGA) / 1000)} segundos.`)),
+      ms || LIMITE_CARGA);
+  });
+  const limpia = x => { clearTimeout(t); return x; };
+  return Promise.race([
+    Promise.resolve(p).then(limpia, e => { clearTimeout(t); throw e; }),
+    corte
+  ]);
 }
 
 function pantallaCarga(msg){
@@ -3935,10 +4022,27 @@ async function traerTodo(tabla, llave){
   const TECHO = 200000;              // fusible, por si algo sale mal
   const filas = [];
   for (let desde = 0; desde < TECHO; desde += TRAMO){
-    const { data, error } = await sb.from(tabla).select("*")
-      .order(llave, { ascending: true })
-      .range(desde, desde + TRAMO - 1);
-    if (error) return { data: null, error };
+    const pedir = () => conLimite(
+      sb.from(tabla).select("*").order(llave, { ascending: true })
+        .range(desde, desde + TRAMO - 1), tabla);
+    /* Un tramo que falla se reintenta UNA vez antes de tumbar la carga entera.
+       En celular, con la señal que hay en calle, una petición suelta se cae
+       cada tanto y no es motivo para dejar a nadie sin CRM. Dos fallos
+       seguidos ya son otra cosa y se reportan como error de verdad. */
+    let data, error;
+    try {
+      ({ data, error } = await pedir());
+      if (error) throw new Error(error.message);
+    } catch (primero){
+      try {
+        await new Promise(r => setTimeout(r, 1200));
+        ({ data, error } = await pedir());
+        if (error) throw new Error(error.message);
+      } catch (segundo){
+        return { data: null, error: { message:
+          `${tabla}: ${(segundo && segundo.message) || "no se pudo traer"}` } };
+      }
+    }
     const lote = data || [];
     filas.push(...lote);
     if (lote.length < TRAMO) break;
@@ -3948,16 +4052,23 @@ async function traerTodo(tabla, llave){
 
 async function cargarDatos(){
   pantallaCarga("Cargando tu cartera…");
+  /* `traerTodo` ya trae su propio límite y su reintento. Las cuatro consultas
+     sueltas van envueltas acá por lo mismo: una sola que no vuelva bastaba
+     para dejar el `Promise.all` colgado y la pantalla girando. */
   const [cli, inter, usr, cfg, rub, acc, seg] = await Promise.all([
     traerTodo("clientes", "customer_id"),
     traerTodo("interacciones", "id"),
-    sb.from("usuarios").select("*").order("rol"),
-    sb.from("config").select("*"),
-    sb.from("rubros").select("*").order("orden"),
-    sb.from("acciones_seguimiento").select("*").order("orden"),
+    conLimite(sb.from("usuarios").select("*").order("rol"), "usuarios"),
+    conLimite(sb.from("config").select("*"), "configuración"),
+    conLimite(sb.from("rubros").select("*").order("orden"), "rubros"),
+    conLimite(sb.from("acciones_seguimiento").select("*").order("orden"), "acciones"),
     traerTodo("seguimientos", "id")
   ]);
-  const fallo = [cli, inter, usr].find(r => r.error);
+  /* Los rubros entran a la lista de imprescindibles: si no llegan, la
+     comprobación de sesión de más abajo leería «vacío» y cerraría la sesión de
+     alguien que solo tuvo un problema de red. Echar a la calle a quien tenía
+     la sesión buena es un error más caro que pedirle que reintente. */
+  const fallo = [cli, inter, usr, rub].find(r => r.error);
   if (fallo) throw new Error(fallo.error.message);
 
   /* La lista de rubros la ve cualquier sesión válida, siempre. Si vuelve
@@ -13975,28 +14086,86 @@ const repNota = k => (REPORTE.notas || {})[k] || "";
    La regla la fijó José el 27/08: cuenta el correo al banco o al comercio, el
    contacto efectivo, la reunión o visita realizada y el cierre registrado.
    El intento sin resultado no cuenta. Ver `esGestionValida` en el core. */
-function repGestionados(f){
+/* La línea de tiempo de gestión de cada comercio.
+   Cada hecho registrado, con su fecha y si CALIFICA como gestión. De acá salen
+   las tres respuestas que el reporte necesita, y las tres con la misma regla:
+   el acumulado del embudo, el corte de un jueves y los trabajados de una
+   semana. Escribir la definición más de una vez ya provocó que el corte del
+   jueves superara al acumulado (71 contra 52); ahora hay una sola. */
+function repLineaGestion(f){
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const enCartera = new Set(cart.map(c => String(c.customer_id)));
   const m = new Map();
-  const poner = (cid, d) => {
-    if (!enCartera.has(cid) || !d) return;
+  const poner = (cid, d, orden, ok) => {
+    if (!enCartera.has(cid) || !d || d > f.hoy) return;
+    /* Una fecha anterior al arranque se pega al arranque en vez de tirarse: el
+       dedazo del 13 de febrero es un dato mal tecleado, no un dato falso, y se
+       corrige en su ficha. Acá solo se le impide mover el periodo. */
     if (d < f.ini) d = f.ini;
-    if (d > f.hoy) return;
-    if (!m.has(cid) || d < m.get(cid)) m.set(cid, d);
+    if (!m.has(cid)) m.set(cid, []);
+    m.get(cid).push({ d, orden, ok });
   };
-  [...DB.todos(), ...DB.bbva()].filter(esGestionValida)
-    .forEach(g => poner(String(g.Customer_id), repDia(g.Fecha_Contacto)));
-  /* El cierre no es una interacción: vive en la ficha. Si no quedó fecha de
-     cierre se ancla al arranque del periodo —nunca a hoy—, para que un dato
-     incompleto no se disfrace de avance de esta semana. */
-  cart.filter(tieneCierreRegistrado).forEach(c =>
-    poner(String(c.customer_id), c.cerrado_en ? String(c.cerrado_en).slice(0,10) : f.ini));
+  [...DB.todos(), ...DB.bbva()].filter(r => !esReconstruida(r)).forEach(g =>
+    poner(String(g.Customer_id), repDia(g.Fecha_Contacto),
+      String(g.Hora_Contacto || "") + "|" + String(g.Creado_En || ""),
+      esGestionValida(g)));
+  /* El cierre no es una interacción: vive en la ficha. Entra a la línea de
+     tiempo como el hecho que terminó el caso, en su fecha de cierre, para que
+     compita por «la última actividad» igual que todo lo demás. */
+  const sinFecha = new Set();
+  cart.filter(tieneCierreRegistrado).forEach(c => {
+    const d = c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "";
+    if (d) poner(String(c.customer_id), d, "zzzz", true);
+    else    sinFecha.add(String(c.customer_id));   // cerrado, pero sin cuándo
+  });
+  m.forEach(a => a.sort((x, y) => x.d.localeCompare(y.d) || x.orden.localeCompare(y.orden)));
+  m.sinFechaDeCierre = sinFecha;
   return m;
 }
-/* El conjunto de gestionados a una fecha. Con `hasta` vacío, el de hoy. */
-const repIdsGestionados = (m, hasta) => new Set([...m]
-  .filter(([, d]) => !hasta || d <= hasta).map(([cid]) => cid));
+
+/* ¿La ÚLTIMA actividad del comercio dentro de la ventana califica?
+ *
+ * Regla que fijó José el 27/08: «se tomará la actividad más reciente». No
+ * basta con que en algún momento haya habido un correo; lo que decide es en
+ * qué quedó el comercio. Un correo del 14 seguido de una llamada sin
+ * respuesta del 25 dice que el caso se enfrió, y el embudo tiene que decirlo.
+ *
+ * Con `desde` vacío mira toda la historia hasta `hasta`: eso es el acumulado.
+ * Con los dos puestos mira solo esa semana: eso es «trabajados». */
+function repUltimaCalifica(linea, desde, hasta){
+  let ult = null;
+  for (let i = 0; i < linea.length; i++){
+    const x = linea[i];
+    if (desde && x.d < desde) continue;
+    if (hasta && x.d > hasta) continue;
+    ult = x;                                  // la línea viene ordenada
+  }
+  return !!ult && ult.ok;
+}
+
+/* Los comercios gestionados hasta una fecha. Sin fecha, los de hoy. */
+function repIdsGestionados(linea, hasta){
+  const out = new Set();
+  linea.forEach((hist, cid) => { if (repUltimaCalifica(hist, null, hasta)) out.add(cid); });
+  /* Un cierre sin fecha no se puede ubicar en el tiempo, pero el hecho es
+     cierto: cuenta en el acumulado y nunca como avance de una semana. */
+  (linea.sinFechaDeCierre || new Set()).forEach(cid => out.add(cid));
+  return out;
+}
+
+/* Cuántos comercios se TRABAJARON entre dos fechas.
+ *
+ * No es lo mismo que «cuántos entraron a gestión»: el 26/08 la tarjeta decía 3
+ * esta semana contra 467 la anterior —un 99% de caída— porque contaba el
+ * PRIMER toque de cada comercio. Con el portafolio ya cubierto casi ningún
+ * comercio es nuevo, así que esa cifra se desploma sola aunque el equipo
+ * trabaje más que nunca. Un indicador que baja cuando el trabajo sube no es un
+ * indicador. Un comercio retomado esta semana es trabajo de esta semana. */
+function repTrabajadosEntre(linea, desde, hasta){
+  let n = 0;
+  linea.forEach(hist => { if (repUltimaCalifica(hist, desde, hasta)) n++; });
+  return n;
+}
 
 function fotoReporte(){
   const P = repProyecto();
@@ -14029,8 +14198,8 @@ function fotoReporte(){
   const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
   /* Los gestionados salen de una sola función compartida con las láminas
      semanales, para que las tres digan el mismo número. */
-  const mapaGestion = repGestionados({ ini, hoy });
-  const conGestion  = repIdsGestionados(mapaGestion);
+  const linea      = repLineaGestion({ ini, hoy });
+  const conGestion = repIdsGestionados(linea);
 
   const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
   /* Cada escalón sigue siendo parte del anterior, y con la regla ancha del
@@ -14216,7 +14385,7 @@ function fotoReporte(){
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
-    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, mapaGestion,
+    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
 
@@ -14521,7 +14690,7 @@ function repAgenda(f){
     /* Cuántas de esas citas son de comercios que ya están gestionados: mide si
        lo comprometido continúa un trabajo o abre uno nuevo. */
     deGestionados: citas.filter(s => cart.has(String(s.customer_id))
-      && (f.mapaGestion || new Map()).has(String(s.customer_id))).length };
+      && repIdsGestionados(f.linea || new Map()).has(String(s.customer_id))).length };
 }
 
 /* El embudo tal como estaba a una fecha. Cada escalón cuenta comercios, no
@@ -14536,7 +14705,7 @@ function repEmbudoAl(fecha, f){
      superar al de hoy lo agarró dando 71 contra 52. Ahora hay una sola
      definición y no se puede volver a desalinear. */
   const conGestion = repIdsGestionados(
-    (f && f.mapaGestion) || repGestionados(f || { ini:"0000-01-01", hoy:fecha }), fecha);
+    (f && f.linea) || repLineaGestion(f || { ini:"0000-01-01", hoy:fecha }), fecha);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const enCartera = s2 => cart.filter(c => s2.has(String(c.customer_id))).length;
   const idsDe = f2 => new Set(ges.filter(f2).map(g => String(g.Customer_id)));
@@ -14574,16 +14743,12 @@ function repSemanaDia(f){
   const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
 
-  /* El primer toque de cada comercio es la fecha en que pasó a contar como
-     GESTIONADO con la regla del 27/08 —correo, contacto efectivo, reunión
-     realizada o cierre—, no su primer intento de cualquier tipo. Sale del
-     mismo mapa que alimenta el escalón «Gestión» del embudo y la cifra grande
-     de la lámina 2: si acá se contara otra cosa, tres láminas del mismo
-     documento estarían contando cosas distintas con el mismo nombre. */
-  const primeraDe = f.mapaGestion || repGestionados(f);
+  /* La serie cuenta comercios TRABAJADOS en la ventana. Ver
+     `repTrabajadosEntre`: contar el primer toque hacía que la tarjeta dijera 3
+     contra 467 el 26/08. */
+  const act = f.linea || repLineaGestion(f);
 
   const enDia = (d, k) => {
-    if (k === "contactos"){ let n = 0; primeraDe.forEach(x => { if (x === d) n++; }); return n; }
     if (k === "visitas")
       return ges.filter(g => g.Cumple_Visita === "SI" && repDia(g.Fecha_Contacto) === d).length;
     return cart.filter(c => (esRetencion(c) || esRecuperado(c))
@@ -14592,15 +14757,21 @@ function repSemanaDia(f){
 
   /* La semana anterior va del viernes al jueves del corte; la actual arranca
      el viernes siguiente. Los dos arreglos tienen siete casillas para que el
-     día 3 de una caiga sobre el día 3 de la otra. */
+     día 3 de una caiga sobre el día 3 de la otra.
+
+     «contactos» no se acumula sumando días: un comercio trabajado el lunes y
+     otra vez el miércoles es UN comercio trabajado en la semana, no dos. Por
+     eso su acumulado se recalcula sobre la ventana [desde, día] en vez de ir
+     sumando. Los otros dos sí son hechos que no se repiten sobre el mismo
+     comercio dentro de la semana y se pueden acumular. */
   const serie = (desde, k, tope) => {
     const out = [];
     let acum = 0;
     for (let i2 = 0; i2 < 7; i2++){
       const d = mas(desde, i2);
       if (tope && d > tope){ out.push(null); continue; }
-      acum += enDia(d, k);
-      out.push(acum);
+      if (k === "contactos") out.push(repTrabajadosEntre(act, desde, d));
+      else { acum += enDia(d, k); out.push(acum); }
     }
     return out;
   };
@@ -14629,13 +14800,11 @@ function repSemanal(f){
   const ges = DB.todos().filter(esGestionCliente);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
 
-  /* El primer toque de cada comercio es la fecha en que pasó a contar como
-     GESTIONADO con la regla del 27/08 —correo, contacto efectivo, reunión
-     realizada o cierre—, no su primer intento de cualquier tipo. Sale del
-     mismo mapa que alimenta el escalón «Gestión» del embudo y la cifra grande
-     de la lámina 2: si acá se contara otra cosa, tres láminas del mismo
-     documento estarían contando cosas distintas con el mismo nombre. */
-  const primeraDe = f.mapaGestion || repGestionados(f);
+  /* Comercios trabajados en cada semana, con la misma regla que la lámina del
+     día a día: la última actividad DENTRO de la semana tiene que calificar. Un
+     comercio puede aparecer en dos semanas si se trabajó en las dos, y eso es
+     correcto: la serie mide actividad semanal, no cobertura acumulada. */
+  const act = f.linea || repLineaGestion(f);
 
   const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
@@ -14649,11 +14818,9 @@ function repSemanal(f){
   const semanas = bordes.map((fin, i) => {
     const desde = i === 0 ? f.ini : mas(bordes[i - 1], 1);
     const enRango = d => d && d >= desde && d <= fin;
-    let contactos = 0;
-    primeraDe.forEach(d => { if (enRango(d)) contactos++; });
     return {
       desde, hasta: fin, completa: true,
-      contactos,
+      contactos: repTrabajadosEntre(act, desde, fin),
       visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
@@ -14664,12 +14831,10 @@ function repSemanal(f){
   const desdeC = mas(corte, 1);
   if (desdeC <= f.hoy){
     const enRango = d => d && d >= desdeC && d <= f.hoy;
-    let contactos = 0;
-    primeraDe.forEach(d => { if (enRango(d)) contactos++; });
     semanas.push({
       desde: desdeC, hasta: f.hoy, completa: false,
       dias: dias(desdeC, f.hoy) + 1,
-      contactos,
+      contactos: repTrabajadosEntre(act, desdeC, f.hoy),
       visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
@@ -14685,9 +14850,39 @@ function repSemanal(f){
     ? (ultima[k] - previa[k]) / previa[k] * 100
     : (ultima && ultima[k] ? null : null);
 
+  /* ---- El promedio, y el pico que lo distorsiona -----------------------
+     Comparar solo contra la semana anterior funciona hasta que la semana
+     anterior fue excepcional. El 26/08 lo fue: entre el 17 y el 18 de agosto
+     salió el envío masivo del cierre del primer periodo y la semana llegó a
+     480 comercios trabajados contra un promedio de 146. Leído contra esa
+     semana, cualquier semana normal parece un derrumbe.
+
+     Se agrega el promedio de las semanas cerradas como segunda referencia, y
+     se detecta el pico con la cuenta —no con una fecha escrita a mano—: una
+     semana que más que duplica el promedio de las demás es un pico y la
+     lámina lo dice. Así la advertencia sigue valiendo el mes que viene, cuando
+     el pico sea otro y en otra fecha. */
+  const promedioDe = k => {
+    if (!cerradas.length) return null;
+    return cerradas.reduce((n, x) => n + (x[k] || 0), 0) / cerradas.length;
+  };
+  /* El promedio contra el que se juzga a la semana previa se calcula SIN ella:
+     si no, el propio pico se sube su vara y deja de detectarse. */
+  const picoDe = k => {
+    const otras = cerradas.slice(0, -1);
+    if (!previa || otras.length < 2) return null;
+    const prom = otras.reduce((n, x) => n + (x[k] || 0), 0) / otras.length;
+    if (!prom || previa[k] < prom * 2) return null;
+    return { semana: previa, veces: previa[k] / prom, promedioOtras: prom };
+  };
+
   return { corte, semanas, ultima, previa, curso,
+    promedio: { contactos: promedioDe("contactos"), retenciones: promedioDe("retenciones"),
+                visitas: promedioDe("visitas") },
+    pico: { contactos: picoDe("contactos"), retenciones: picoDe("retenciones"),
+            visitas: picoDe("visitas") },
     series: [
-      { k:"contactos",   nombre:"Comercios con gestión", color:"azul" },
+      { k:"contactos",   nombre:"Comercios trabajados", color:"azul" },
       { k:"retenciones", nombre:"Retenciones concretadas", color:"naranja" },
       { k:"visitas",     nombre:"Visitas efectivas", color:"verde" }
     ],
@@ -15048,7 +15243,7 @@ function repLaminaEmbudo(X, f){
      barras y ahí lo tapaban las tarjetas de lectura: una leyenda que no se ve
      convierte un gráfico bien pensado en uno confuso. */
   X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`
-       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana` : ""),
+       + (X.corte ? ` · claro: al jueves ${repFecha(X.corteFecha)} · pleno: esta semana · contorno: casos que se enfriaron` : ""),
     { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
 
   const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
@@ -15064,7 +15259,23 @@ function repLaminaEmbudo(X, f){
        misma barra de siempre —el largo total no cambia— y responde la pregunta
        que un acumulado nunca responde solo: ¿esto se movió esta semana? */
     const antes = X.corte ? (X.corte[p.k] !== undefined ? X.corte[p.k] : p.n) : null;
-    if (antes === null || antes >= p.n){
+    if (antes !== null && antes > p.n){
+      /* El escalón BAJÓ desde el jueves. Con la regla del 27/08 —manda la
+         actividad más reciente— eso puede pasar de verdad: un comercio que la
+         semana pasada tenía un correo como último hecho y esta semana acumuló
+         una llamada sin respuesta deja de contar. Es información, no un error
+         de cuenta, y por eso se dibuja en vez de recortarse en silencio: la
+         barra llena es lo que queda y el contorno vacío es lo que se enfrió.
+         Esconderlo dejaría un acumulado que solo sabe subir, que es la clase
+         de gráfico que nadie vuelve a mirar. */
+      const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w:Math.max(0.03, w), h:ALTO,
+        fill:{ color:col }, line:{ type:"none" } });
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR + w, y, w:Math.max(0.03, wa - w), h:ALTO,
+        fill:{ color:"FFFFFF" }, line:{ color:col, width:0.75, dashType:"dash" } });
+      X.T(e, "\u2212" + (antes - p.n), { x:X_BAR + wa + 0.06, y, w:0.60, h:ALTO,
+        fontSize:9.5, bold:true, color:X.H("naranja") });
+    } else if (antes === null || antes >= p.n){
       e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
     } else {
       /* Claro lo que ya estaba el jueves, pleno lo ganado esta semana. Va así
@@ -15381,8 +15592,15 @@ function armarDirectorio(pptx, fondos){
        : (v > 0 ? "\u25B2 " : "\u25BC ") + repNum(Math.abs(v), 0) + "% vs. la semana pasada",
       { x:px + 1.76, y:SY + 0.74, w:SW - 1.98, h:0.28, fontSize:10, bold:true,
         color: v === null || Math.round(v) === 0 ? H("gris2") : H(v > 0 ? "verde" : "naranja") });
-    T(g, `al día ${DIA.diasAct} de la semana · la pasada iba en ${comp.previa}`,
-      { x:px + 0.22, y:SY + 1.16, w:SW - 0.44, h:0.24, fontSize:9.5, color:H("gris2") });
+    /* Dos referencias, no una: contra la semana pasada al mismo día —que es la
+       comparación honesta— y contra el promedio semanal, que es la que
+       sobrevive a una semana excepcional. */
+    const prom = (SEM.promedio || {})[serie.k];
+    T(g, `al día ${DIA.diasAct} de la semana · la pasada iba en ${comp.previa}`
+       + (prom ? ` · promedio semanal ${repNum(prom, prom < 10 ? 1 : 0)}` : ""),
+      /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
+         una sola y sin sitio se montaba sobre la curva. */
+      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
 
     /* Las dos líneas, acumuladas, sobre el mismo eje de siete días. */
     const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 1.14;
@@ -15462,10 +15680,24 @@ function armarDirectorio(pptx, fondos){
       ? `La semana en curso, del ${repFecha(SEM.curso.desde)} al ${repFecha(f.hoy)} — ${SEM.curso.dias} días`
       : "La semana en curso",
     { x:0.86, y:5.48, w:6.5, h:0.28, fontSize:11, bold:true, color:H("navy") });
+  /* Si la semana con la que se compara fue un pico, hay que decirlo en la
+     misma lámina y con la cuenta a la vista. Un −92% sin esa línea se lee como
+     un derrumbe del equipo cuando lo que hubo fue una semana excepcional. */
+  const picos = ["contactos", "retenciones", "visitas"]
+    .map(k => ({ k, p:(SEM.pico || {})[k],
+                 nombre:(SEM.series.find(x => x.k === k) || {}).nombre }))
+    .filter(x => x.p);
+  const avisoPico = picos.length
+    ? ` La semana del ${repFecha(picos[0].p.semana.desde)} al ${repFecha(picos[0].p.semana.hasta)} `
+      + `llegó a ${picos[0].p.semana[picos[0].k]} en «${String(picos[0].nombre).toLowerCase()}», `
+      + `${repNum(picos[0].p.veces, 1)} veces el promedio de las demás: es un pico y no la referencia normal, `
+      + `así que la variación contra ella se lee junto al promedio semanal de cada tarjeta.`
+    : "";
   T(g, SEM.curso
       ? `Cada tarjeta compara la semana en curso contra la anterior AL MISMO DÍA — hoy es el día ${DIA.diasAct} de siete—, no contra su total. `
         + `Comparar tres días contra siete siempre daría una caída, y esa caída no diría nada sobre cómo va la semana.`
-      : "Todavía no hay días corridos en la semana en curso.",
+        + avisoPico
+      : "Todavía no hay días corridos en la semana en curso." + avisoPico,
     { x:0.86, y:5.78, w:11.8, h:0.98, fontSize:11.5, color:H("gris") });
 
   /* ---- 4 y 5 · El embudo con el corte, y los tres objetivos --------------
