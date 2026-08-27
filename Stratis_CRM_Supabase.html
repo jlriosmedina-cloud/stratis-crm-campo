@@ -1424,7 +1424,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 02:26", huella:"835637" };
+const BUILD = { sello:"27/08/2026 02:40", huella:"6b273b" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -14866,14 +14866,20 @@ function repSemanal(f){
     if (!cerradas.length) return null;
     return cerradas.reduce((n, x) => n + (x[k] || 0), 0) / cerradas.length;
   };
-  /* El promedio contra el que se juzga a la semana previa se calcula SIN ella:
-     si no, el propio pico se sube su vara y deja de detectarse. */
+  /* La semana bajo sospecha es la ÚLTIMA CERRADA —la que termina en el corte—,
+     porque es contra ella que se compara la semana en curso en cada tarjeta.
+     La primera versión miraba `previa`, que es una semana antes, y por eso el
+     pico real del 14 al 20/08 no se detectaba: la advertencia no salía justo
+     cuando hacía falta.
+
+     El promedio contra el que se la juzga se calcula SIN ella: si se incluyera,
+     el propio pico se subiría la vara y dejaría de detectarse. */
   const picoDe = k => {
     const otras = cerradas.slice(0, -1);
-    if (!previa || otras.length < 2) return null;
+    if (!ultima || otras.length < 2) return null;
     const prom = otras.reduce((n, x) => n + (x[k] || 0), 0) / otras.length;
-    if (!prom || previa[k] < prom * 2) return null;
-    return { semana: previa, veces: previa[k] / prom, promedioOtras: prom };
+    if (!prom || ultima[k] < prom * 2) return null;
+    return { semana: ultima, veces: ultima[k] / prom, promedioOtras: prom };
   };
 
   return { corte, semanas, ultima, previa, curso,
@@ -15690,7 +15696,8 @@ function armarDirectorio(pptx, fondos){
   const avisoPico = picos.length
     ? ` La semana del ${repFecha(picos[0].p.semana.desde)} al ${repFecha(picos[0].p.semana.hasta)} `
       + `llegó a ${picos[0].p.semana[picos[0].k]} en «${String(picos[0].nombre).toLowerCase()}», `
-      + `${repNum(picos[0].p.veces, 1)} veces el promedio de las demás: es un pico y no la referencia normal, `
+      + `${repNum(picos[0].p.veces, 1)} veces el promedio de las semanas anteriores `
+      + `(${repNum(picos[0].p.promedioOtras, 0)}): es un pico y no la referencia normal, `
       + `así que la variación contra ella se lee junto al promedio semanal de cada tarjeta.`
     : "";
   T(g, SEM.curso
