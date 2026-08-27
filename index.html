@@ -1469,7 +1469,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 04:34", huella:"29ed24" };
+const BUILD = { sello:"27/08/2026 05:05", huella:"3b2958" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -9675,11 +9675,32 @@ function viewTablero(){
    No la ve ningún ejecutivo.
    ========================================================================= */
 
+/* ---- Un solo reloj, el de Lima ------------------------------------------
+   Los sellos de tiempo llegan en UTC y las fechas que teclea la gente son del
+   calendario de Lima, que va cinco horas atrás. Cortar un UTC con `slice(0,10)`
+   —que es lo obvio y lo que hacía la primera versión— manda al día siguiente
+   TODO lo que se registró después de las 19:00: la gestión de las 20:00 del
+   miércoles aparecía el jueves, con la hora «20:00» al lado, y encima con un
+   día de desfase inventado.
+
+   Es el mismo error de siempre en este proyecto: dos relojes y una sola
+   etiqueta. Acá se resuelve pasando cada sello por el reloj de Lima antes de
+   preguntarle en qué día cae. */
+const diaLima = t => {
+  const d = new Date(new Date(t).toLocaleString("en-US", { timeZone: TZ }));
+  return isNaN(d) ? "" : `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+};
+const horaLima = t => {
+  const d = new Date(new Date(t).toLocaleString("en-US", { timeZone: TZ }));
+  return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 /* Cuántos días hay entre la fecha con la que se registró algo y el día en que
-   de verdad se grabó. Positivo = la fecha escrita quedó ATRÁS de la real. */
+   de verdad se grabó. Positivo = la fecha escrita quedó ATRÁS de la real.
+   Las dos se miden en el calendario de Lima o la cuenta no significa nada. */
 function desfaseDias(fechaRegistrada, cuandoSeGrabo){
   const f = String(fechaRegistrada || "").slice(0,10);
-  const c = String(cuandoSeGrabo || "").slice(0,10);
+  const c = diaLima(cuandoSeGrabo);
   if (!f || !c) return null;
   return Math.round((new Date(c) - new Date(f)) / 86400000);
 }
@@ -9878,8 +9899,7 @@ function viewActividad(){
   const rango = RANGOS.find(r => r[0] === S.fActRango) || RANGOS[0];
   const desde = menos(rango[2]);
 
-  const todos = actividadEventos()
-    .filter(e => new Date(e.ts).toISOString().slice(0,10) >= desde);
+  const todos = actividadEventos().filter(e => diaLima(e.ts) >= desde);
 
   let lista = todos;
   if (S.fActEjec !== "todos") lista = lista.filter(e => e.correo === S.fActEjec);
@@ -9907,16 +9927,17 @@ function viewActividad(){
      «las últimas cien filas». */
   let filas = "", diaActual = "";
   mostrar.forEach(e => {
-    const iso = new Date(e.ts).toISOString().slice(0,10);
+    const iso = diaLima(e.ts);
     if (iso !== diaActual){
       diaActual = iso;
-      const n = lista.filter(x => new Date(x.ts).toISOString().slice(0,10) === iso).length;
+      const n = lista.filter(x => diaLima(x.ts) === iso).length;
       filas += `<tr class="act-dia"><td colspan="5">
         <b>${esc(fechaLarga(iso))}</b><span>${n} ${n === 1 ? "evento" : "eventos"}</span></td></tr>`;
     }
     const t = actTipo(e.tipo);
-    const hora = new Date(e.ts).toLocaleTimeString("es-PE",
-      { hour:"2-digit", minute:"2-digit", hour12:false });
+    /* La hora también en Lima: si el supervisor abre el CRM desde otro huso, la
+       columna tiene que seguir diciendo la hora a la que trabajó el equipo. */
+    const hora = horaLima(e.ts);
 
     /* La columna que motivó la pantalla: con qué fecha se registró, y a qué
        distancia de cuándo se registró de verdad. */
