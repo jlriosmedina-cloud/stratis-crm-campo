@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 17:57", huella:"8ce3bc" };
+const BUILD = { sello:"27/08/2026 18:43", huella:"001482" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -1908,9 +1908,24 @@ function ultimoDiaConActividad(regs, hasta, extraDia){
 const ultimaActividad = (c, regs, hasta) => ultimoDiaConActividad(
   regs, hasta, tieneCierreRegistrado(c) && c.cerrado_en ? c.cerrado_en : null);
 
+/* ¿El titular ya contestó, y a qué altura? La negociación no es un hecho con
+   fecha propia sino un ESTADO: nace del primer contacto efectivo y vive hasta
+   que alguien cierra el caso. Por eso se pregunta «¿había contacto efectivo al
+   día X?» y no «¿cuál fue el último hecho?». */
+const huboContactoEfectivo = (regs, hasta) => (regs || []).some(r =>
+  !esReconstruida(r) && esEfectivo(r.Resultado)
+  && (!hasta || String(r.Fecha_Contacto || "").slice(0,10) <= hasta));
+
 function comercioGestionado(c, regs, hasta){
   /* Cerrado sin fecha de cierre: no se puede ubicar, pero pasó. */
   if (tieneCierreRegistrado(c) && !c.cerrado_en) return true;
+  /* Negociación vigente (José, 27/08): el cliente contestó y el caso sigue
+     abierto. Eso cuenta como gestionado aunque después nadie haya atendido una
+     llamada, y la asimetría con el correo es deliberada: un correo enviado
+     prueba que se intentó, una respuesta prueba que hay conversación. Lo
+     primero se enfría con el silencio; lo segundo ya ocurrió y no se
+     desanda —hasta que el ejecutivo cierre el caso—. */
+  if (!tieneCierreRegistrado(c) && huboContactoEfectivo(regs, hasta)) return true;
   const u = ultimaActividad(c, regs, hasta);
   return !!u && u.ok;
 }
@@ -15115,8 +15130,25 @@ function repLineaGestion(f){
     if (d) poner(String(c.customer_id), d, "zzzz", true);
     else    sinFecha.add(String(c.customer_id));   // cerrado, pero sin cuándo
   });
+  /* La negociación no es un hecho con fecha sino un ESTADO: nace con el primer
+     contacto efectivo y vive hasta que alguien cierra el caso. Se guarda esa
+     fecha —no un evento más— para poder contestar «¿estaba en negociación al
+     jueves?» sin que la negociación compita por ser «la última actividad».
+     Es la misma regla que `comercioGestionado` en el core; acá se necesita
+     ubicada en el tiempo porque el embudo se dibuja también a una fecha de
+     corte. */
+  const negocia = new Map();
+  const cerrado = new Set(cart.filter(tieneCierreRegistrado).map(c => String(c.customer_id)));
+  DB.todos().filter(r => !esReconstruida(r) && esEfectivo(r.Resultado)).forEach(r => {
+    const cid = String(r.Customer_id);
+    if (!enCartera.has(cid) || cerrado.has(cid)) return;
+    const d = repDia(r.Fecha_Contacto);
+    if (!d || d > f.hoy) return;
+    if (!negocia.has(cid) || d < negocia.get(cid)) negocia.set(cid, d);
+  });
   m.forEach(a => a.sort((x, y) => x.d.localeCompare(y.d) || x.orden.localeCompare(y.orden)));
   m.sinFechaDeCierre = sinFecha;
+  m.negociaDesde = negocia;
   return m;
 }
 
@@ -15154,6 +15186,13 @@ function repIdsGestionados(linea, hasta){
   /* Un cierre sin fecha no se puede ubicar en el tiempo, pero el hecho es
      cierto: cuenta en el acumulado y nunca como avance de una semana. */
   (linea.sinFechaDeCierre || new Set()).forEach(cid => out.add(cid));
+  /* Negociación vigente a esa fecha. Va SOLO en el acumulado y nunca en
+     `repTrabajadosEntre`: una negociación abierta es un caso gestionado, pero
+     no es trabajo de esta semana si esta semana nadie lo tocó. Meterla en la
+     serie semanal inflaría la actividad con casos que nadie miró. */
+  (linea.negociaDesde || new Map()).forEach((desde, cid) => {
+    if (!hasta || desde <= hasta) out.add(cid);
+  });
   return out;
 }
 
@@ -15216,14 +15255,23 @@ function fotoReporte(){
   const y = (a, b) => new Set([...a].filter(x => b.has(x)));
   const contacto    = enCartera(conAlguna);
   const gestion     = enCartera(conGestion);
-  const efectividad = enCartera(y(conRespuesta, conGestion));
+  /* Efectividad = el cliente respondió de verdad, y eso incluye la visita: una
+     reunión realizada ES una respuesta concreta, más fuerte que una llamada
+     atendida. Contar solo los contactos efectivos dejaba la posibilidad de que
+     un comercio visitado no apareciera en el escalón de arriba, y entonces el
+     embudo se ensanchaba hacia abajo. Hoy no hay ninguno así —las 27 visitas
+     tienen contacto efectivo detrás—, y justamente por eso conviene fijarlo
+     ahora: la unión hace que el anidamiento sea cierto por construcción y no
+     por suerte. (José, 27/08: «se contará contactos y visitas concretadas».) */
+  const respondio   = new Set([...conRespuesta, ...conVisita]);
+  const efectividad = enCartera(y(respondio, conGestion));
   const visita      = enCartera(y(conVisita, conGestion));
   /* Lo que quedaba fuera del embudo por no tener correo detrás. Con la regla
      ancha ya no queda nada afuera; se sigue calculando —y declarando si
      apareciera— porque una cifra que se borra es una cifra que nadie vuelve a
      mirar el día que deja de ser cero. */
   const sinRespaldo = {
-    efectivos: enCartera(conRespuesta) - efectividad,
+    efectivos: enCartera(respondio) - efectividad,
     visitas:   enCartera(conVisita) - visita
   };
 
@@ -15510,9 +15558,18 @@ const repRespaldada = r => r.Tipo_Contacto === "correo";
 function repFunnelDe(fichas, ges, ejecutivos){
   const ids = new Set(fichas.map(c => String(c.customer_id)));
   const mias = ges.filter(g => ids.has(String(g.Customer_id)));
+  /* «Trabajados» acá tiene que ser la MISMA gestión que en el embudo y en la
+     Cartera. Hasta el 27/08 era `tocados` —comercios con al menos un intento
+     registrado—, que es la definición que se retiró esa mañana: daba 834 de
+     841 donde la regla da 617, y dejaba a dos ejecutivos en 100% de cobertura
+     con casos suyos sin gestionar. Un tercer número para la misma palabra, en
+     el mismo documento. */
+  const gestionado = c => comercioGestionado(c, DB.historiaDe(c.customer_id), null);
+  const gestionados = new Set(fichas.filter(gestionado).map(c => String(c.customer_id)));
 
   const fila = (nombre, cartera, gs) => {
-    const tocados  = new Set(gs.map(g => String(g.Customer_id)));
+    const tocados  = new Set([...new Set(gs.map(g => String(g.Customer_id)))]
+                       .filter(cid => gestionados.has(cid)));
     const respald  = gs.filter(repRespaldada);
     const visitas  = gs.filter(g => g.Cumple_Visita === "SI");
     return {
@@ -16367,23 +16424,22 @@ function repLaminaEmbudo(X, f){
   if (X.corte){
     muestra(0, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:X.H("azul2"), transparency:60 }, line:{ type:"none" } }),
-      `al jueves ${repFecha(X.corteFecha).slice(0,5)}`);
+      `al jueves ${repFecha(X.corteFecha)}`);
     muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:X.H("azul2") }, line:{ type:"none" } }), "ganado esta semana");
     if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:"FFFFFF" }, line:{ color:X.H("naranja"), width:0.75, dashType:"dash" } }),
       "casos que se enfriaron");
-  } else if (X.reglaCambio){
-    /* Sin comparación semanal, y hay que decir por qué: el número del jueves y
-       el de hoy están medidos con reglas distintas, así que su resta no es un
-       avance ni un retroceso. Callarlo dejaría al comité restando de memoria. */
-    e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y:1.60, w:0.08, h:0.36,
-      fill:{ color:X.H("naranja") }, line:{ type:"none" } });
-    X.T(e, "Sin comparación contra la semana pasada: el "
-       + repFecha(X.reglaDesde) + " cambió el criterio de medición —ahora manda la actividad "
-       + "más reciente de cada comercio— y las dos cifras no miden lo mismo.",
-      { x:X_BAR + 0.18, y:1.60, w:8.90, h:0.36, fontSize:9.5, color:X.H("naranja"), valign:"top" });
   }
+  /* La variación de la barra es honesta —los dos lados salen de la misma regla
+     sobre la misma historia—, pero contra el DECK de la semana pasada no lo es:
+     ese se imprimió con el criterio viejo. Se dice, para que nadie reste de
+     memoria contra el número que recuerda. */
+  if (X.reglaCambio)
+    X.T(e, "Criterio de medición cambiado el " + repFecha(X.reglaDesde)
+       + ": estas cifras no son comparables con el deck de la semana pasada. La variación de las "
+       + "barras sí — las dos fechas están medidas con el criterio de hoy.",
+      { x:0.57, y:7.16, w:12.38, h:0.20, fontSize:8, color:X.H("naranja"), valign:"top" });
   f.embudo.forEach((p, i) => {
     const y = Y0 + i * (ALTO + GAP), col = X.H(p.color);
     /* Con sub-rótulo el nombre sube y la explicación se le acuesta debajo; sin
@@ -16633,12 +16689,19 @@ function armarDirectorio(pptx, fondos){
     T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
   };
   const SEM = repSemanal(f);
-  /* Sin corte anterior no hay barra en dos tonos ni «+N desde el jueves»: la
-     regla está arriba, en `repReglaCambio`. */
+  /* La comparación contra el jueves SÍ se dibuja —tono claro lo que ya estaba,
+     tono pleno lo ganado esta semana—, porque los dos lados se recalculan acá
+     con la MISMA regla sobre la misma historia: es una comparación honesta.
+
+     Lo que no es comparable es contra el deck que el comité vio la semana
+     pasada, impreso con el criterio viejo. Eso se declara al pie y no se
+     resuelve escondiendo la variación: `reglaCambio` ya no suprime nada,
+     solo enciende la nota. Se apaga sola cuando el corte del jueves cae bajo
+     la regla nueva. */
   const reglaCambio = repReglaCambio(SEM.corte);
   const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
               reglaCambio, reglaDesde: REGLA_GESTION_DESDE,
-              corte: reglaCambio ? null : repEmbudoAl(SEM.corte, f),
+              corte: repEmbudoAl(SEM.corte, f),
               corteFecha: SEM.corte };
 
   /* ---- 1 · Carátula ---------------------------------------------------- */
@@ -16656,10 +16719,7 @@ function armarDirectorio(pptx, fondos){
   /* Cuánto se movió cada escalón del acumulado desde el corte del jueves. Sale
      del MISMO objeto que usa la barra del embudo, no de una cuenta paralela:
      dos láminas que dicen lo mismo tienen que leerlo del mismo lugar. */
-  /* `null` = esta tarjeta no tiene movimiento que declarar. Es lo que pasa
-     cuando el criterio de medición cambió después del jueves: la resta no
-     mide avance, mide el cambio de regla, y decir «sin cambios desde el
-     jueves» sería peor que no decir nada —afirma algo falso—. */
+  /* `null` = esta tarjeta no tiene movimiento que declarar. */
   const mov = k => (X.corte && X.corte[k] !== undefined) ? f[k] - X.corte[k] : null;
   titulo(a, "Dónde está el proyecto hoy",
     `Acumulado al ${repFechaLarga(f.hoy)} · día ${f.corrido} de ${f.total}, quedan ${f.restante}`);
@@ -16786,10 +16846,10 @@ function armarDirectorio(pptx, fondos){
      comité que la semana pasada vio un número y esta semana ve otro sin
      variación va a restar de memoria, y esa resta no significa nada. */
   if (X.reglaCambio)
-    T(a, "Sin comparación contra la semana pasada: el " + repFecha(X.reglaDesde)
-       + " cambió el criterio de medición —ahora manda la actividad más reciente de cada comercio—, "
-       + "así que la cifra del jueves y la de hoy no miden lo mismo.",
-      { x:0.57, y:7.00, w:12.38, h:0.22, fontSize:8.5, color:H("naranja"), valign:"top" });
+    T(a, "Criterio de medición cambiado el " + repFecha(X.reglaDesde)
+       + ": estas cifras no son comparables con el deck de la semana pasada. El movimiento desde "
+       + "el jueves sí — las dos fechas están medidas con el criterio de hoy.",
+      { x:0.57, y:7.06, w:12.38, h:0.20, fontSize:8, color:H("naranja"), valign:"top" });
 
   /* ---- 3 · El desarrollo semanal ----------------------------------------
      Tres series y su comparación contra la semana anterior. No es la misma
