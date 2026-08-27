@@ -1563,7 +1563,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"27/08/2026 20:53", huella:"5483a8" };
+const BUILD = { sello:"27/08/2026 21:57", huella:"57ab34" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -15357,16 +15357,39 @@ function fotoReporte(){
      tienen contacto efectivo detrás—, y justamente por eso conviene fijarlo
      ahora: la unión hace que el anidamiento sea cierto por construcción y no
      por suerte. (José, 27/08: «se contará contactos y visitas concretadas».) */
-  const respondio   = new Set([...conRespuesta, ...conVisita]);
-  const efectividad = enCartera(y(respondio, conGestion));
-  const visita      = enCartera(y(conVisita, conGestion));
+  /* LA CADENA SE ARMA HACIA ABAJO, cada escalón desde el de arriba. Es la
+     regla que confirmó José el 27/08: gestión son los leads de retención que
+     cuentan; efectividad es la respuesta DE ESA gestión; visitas son las
+     concretadas DE ESA efectividad; y la retención es el resultado final.
+
+     Hasta esa tarde cada escalón se intersectaba contra `conGestion` por
+     separado. Hoy da el mismo número —las 27 visitas tienen contacto efectivo
+     detrás y las 6 retenciones tienen visita—, pero «da lo mismo hoy» no es lo
+     mismo que «no se puede romper»: bastaba una visita sin respuesta
+     registrada para que el embudo se ensanchara hacia abajo. Ahora cada
+     conjunto es subconjunto del anterior por construcción. */
+  const respondio    = new Set([...conRespuesta, ...conVisita]);
+  const gestionSet   = y(conGestion, new Set(cart.map(c => String(c.customer_id))));
+  const efectivoSet  = y(respondio, gestionSet);
+  const visitaSet    = y(conVisita, efectivoSet);
+  const objetivoSet  = new Set(cart.filter(c => esRetencion(c) || esRecuperado(c))
+                                   .map(c => String(c.customer_id)));
+
+  const efectividad = enCartera(efectivoSet);
+  const visita      = enCartera(visitaSet);
   /* Lo que quedaba fuera del embudo por no tener correo detrás. Con la regla
      ancha ya no queda nada afuera; se sigue calculando —y declarando si
      apareciera— porque una cifra que se borra es una cifra que nadie vuelve a
      mirar el día que deja de ser cero. */
+  /* Lo que queda FUERA de la cadena. No se recorta en silencio: un comercio
+     retenido sin visita registrada es un resultado real —o una visita que
+     nadie anotó—, y en los dos casos hay que verlo. Hoy los tres son cero;
+     se calculan igual, porque una cifra que se borra es una cifra que nadie
+     vuelve a mirar el día que deja de ser cero. */
   const sinRespaldo = {
-    efectivos: enCartera(respondio) - efectividad,
-    visitas:   enCartera(conVisita) - visita
+    efectivos:   enCartera(respondio)  - efectividad,
+    visitas:     enCartera(conVisita)  - visita,
+    retenciones: objetivoSet.size - y(objetivoSet, visitaSet).size
   };
 
   const retenidos   = cart.filter(esRetencion).length;
@@ -15585,6 +15608,13 @@ function fotoReporte(){
     metaR, metaV, metaPct,
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
+    /* Los conjuntos, no solo sus tamaños. Las láminas usan los números; esto
+       existe para que una prueba pueda comprobar el ANIDAMIENTO comercio por
+       comercio y no solo que las cuentas vayan de mayor a menor —dos escalones
+       pueden ir en orden y aun así contener comercios distintos, y ahí el
+       embudo deja de ser un embudo sin que ninguna cifra se vea rara—. */
+    cadena: { gestion:[...gestionSet], efectividad:[...efectivoSet],
+              visita:[...visitaSet],   objetivo:[...objetivoSet] },
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
     diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
     porDiaGestion, faltanGestionar,
@@ -16167,13 +16197,23 @@ const repSoles = n => {
    le falta el respaldo, y esconderlo sería quedarse con un embudo más prolijo
    y menos cierto. */
 const repAparte = f => {
-  const sr = f.sinRespaldo || { efectivos:0, visitas:0 };
+  const sr = f.sinRespaldo || { efectivos:0, visitas:0, retenciones:0 };
   const falta = [];
   if (sr.efectivos) falta.push(`${sr.efectivos} ${sr.efectivos === 1 ? "contacto efectivo" : "contactos efectivos"}`);
   if (sr.visitas)   falta.push(`${sr.visitas} ${sr.visitas === 1 ? "visita" : "visitas"}`);
+  /* Y la retención cerrada sin visita registrada. Es la única de las tres que
+     no se puede leer como «trabajo sin respaldo»: o el comercio se retuvo por
+     teléfono —resultado real— o hubo una visita que nadie anotó. Las dos
+     cosas hay que verlas, así que se declara aparte y con sus palabras en vez
+     de sumarse a la lista de arriba. */
+  const ret = sr.retenciones
+    ? ` · ${sr.retenciones} ${sr.retenciones === 1
+        ? "retención cerrada sin visita registrada"
+        : "retenciones cerradas sin visita registrada"}`
+    : "";
   return `${f.ventasNuevas} ${f.ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas"} ` +
     `fuera del portafolio · ${f.perdidos} ${f.perdidos === 1 ? "comercio perdido" : "comercios perdidos"}` +
-    (falta.length ? ` · ${falta.join(" y ")} sin correo de respaldo, fuera del embudo` : "");
+    (falta.length ? ` · ${falta.join(" y ")} sin correo de respaldo, fuera del embudo` : "") + ret;
 };
 const repFecha = iso => fmtFecha(String(iso || "").slice(0,10));
 /* En una lámina el 13/08/2026 se lee como un dato de sistema; el 13 de agosto
