@@ -1,0 +1,17954 @@
+
+/* =========================================================================
+   STRATIS CRM — Campaña BBVA Adquirencia
+   Núcleo: conexión a Supabase, reglas de negocio y estado
+
+   v3 — cartera en campo y sin datos sensibles. El único dato que viene de
+   BBVA es el customer_id; el nombre del comercio lo escribe el ejecutivo.
+   ========================================================================= */
+"use strict";
+
+const SUPABASE_URL      = "https://xwvpnagvdrjffayzsnke.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";  // publishable — pública por diseño
+
+const CONFIG = {
+  dominio: "mystratis.com",
+  cumpleVisitaHistorico: true,
+  /* El flujo nuevo —la coordinación con BBVA como interacción con fecha, y los
+     estados calculados— no se enciende publicando la app: se enciende cuando
+     llega esta fecha, que vive en la base. Así el cambio entra a una hora
+     elegida y no en el momento en que alguien recarga la página, y si algo no
+     cuadra se corre la fecha desde Ajustes sin volver a publicar nada. */
+  flujoBbvaDesde: ""
+};
+const flujoBbva = () => !!CONFIG.flujoBbvaDesde && new Date() >= new Date(CONFIG.flujoBbvaDesde);
+
+let sb = null;
+
+/* ---- Medio de contacto (los ids coinciden con el trigger en SQL) -------- */
+const TIPOS_CONTACTO = [
+  { id:"visita_presencial", label:"Visita presencial",   desc:"En el local del comercio",                 modo:"presencial", cumple:true,  gps:true  },
+  { id:"reunion_presencial",label:"Reunión presencial",  desc:"Reunión fuera del local (oficina, café)",  modo:"presencial", cumple:true,  gps:true  },
+  { id:"reunion_virtual",   label:"Reunión virtual",     desc:"Teams, Meet o Zoom con cámara",            modo:"virtual",    cumple:true,  gps:false },
+  { id:"videollamada",      label:"Videollamada",        desc:"Videollamada por WhatsApp u otro",         modo:"virtual",    cumple:true,  gps:false },
+  { id:"llamada",           label:"Llamada telefónica",  desc:"Solo audio — no califica como visita",     modo:"otro",       cumple:false, gps:false },
+  { id:"whatsapp",          label:"Mensaje WhatsApp",    desc:"Chat — no califica como visita",           modo:"otro",       cumple:false, gps:false },
+  { id:"correo",            label:"Correo electrónico",  desc:"No califica como visita",                  modo:"otro",       cumple:false, gps:false }
+];
+const tipoById = id => TIPOS_CONTACTO.find(t => t.id === id) || null;
+
+/* ---- Resultado del intento — es lo que separa intentar de lograr -------
+   Ojo con la palabra: acá "logrado" es que el cliente respondió, no que se
+   haya retenido. Si el objetivo se cumplió o no, eso lo dice el cierre de la
+   gestión (Retenido / Venta / Perdido), que es otra cosa y va en otra columna.
+   Enviar un correo o un WhatsApp no es una respuesta: es un intento. */
+const RESULTADOS = [
+  { id:"efectivo",        label:"El cliente respondió",  desc:"Contestó la llamada, respondió el mensaje o te atendió en el local", ok:true  },
+  { id:"no_contesta",     label:"No respondió",          desc:"Llamaste o escribiste y no hubo respuesta", ok:false },
+  { id:"local_cerrado",   label:"Local cerrado",         desc:"Fue al local y estaba cerrado",      ok:false },
+  { id:"titular_ausente", label:"Titular ausente",       desc:"Atendió otra persona, no el contacto", ok:false },
+  { id:"datos_errados",   label:"Datos errados",         desc:"Teléfono o dirección equivocada",    ok:false },
+  { id:"rechazo",         label:"No quiso atender",      desc:"Se negó a la conversación",          ok:false }
+];
+const resultadoById = id => RESULTADOS.find(r => r.id === id) || null;
+const esEfectivo = id => id === "efectivo";
+
+/* Medios donde el mensaje sale sin que nadie lo conteste todavía. Ahí decir
+   que el cliente respondió obliga a transcribir su respuesta: si respondió,
+   hay algo que citar. La base aplica la misma regla. */
+const MEDIOS_ASINCRONICOS = ["correo", "whatsapp"];
+/* Desde el 23/08/2026 esto se pide en CUALQUIER medio, y no solo donde el
+   mensaje sale sin que nadie lo conteste.
+
+   El razonamiento viejo era bueno y la conclusión se quedó corta: en una
+   llamada o una visita pasa exactamente lo mismo —decir que el cliente
+   respondió obliga a poder citar algo—, y por ese hueco entraron 43 gestiones
+   que dicen que respondió sin una sola palabra suya. 30 son del mismo
+   ejecutivo, así que no es despiste: es una forma de registrar que se aprendió
+   porque el CRM la permitía.
+
+   Las 43 ya registradas no se tocan. Están en «Respuestas sin transcribir»,
+   en el tablero, para que las mire quien las registró. */
+const pruebaDeRespuesta = f => esEfectivo(f.Resultado);
+
+/* Una gestión se registra el día que ocurrió o después —nunca antes—. Hacia
+   atrás no hay tope: sirve para poner al día lo que se quedó sin registrar. */
+const fechaFutura = fecha => !!fecha && String(fecha) > hoyISO();
+const diasDeAtraso = fecha => {
+  if (!fecha) return 0;
+  const d = (new Date(hoyISO()) - new Date(String(fecha))) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+};
+const textoDias = n => n === 1 ? "1 día" : n + " días";
+
+/* Ventana temporal de corrección. La fecha vive en la base (config), así que
+   se cierra sola: acá solo se lee para saber qué mostrar. */
+let EDICION_HASTA = null;
+const edicionLibre = () => !!EDICION_HASTA && new Date() < new Date(EDICION_HASTA);
+function textoVentana(){
+  if (!edicionLibre()) return "";
+  const d = new Date(EDICION_HASTA);
+  return `Hoy hasta las ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+
+/* La ubicación de un registro presencial tiene cuatro estados, y confundirlos
+   costaba caro: una gestión con la coordenada escrita a mano aparecía igual
+   que una sin ninguna ubicación.
+
+     gps        el equipo la midió en el local y en el momento — es la que
+                respalda la visita ante BBVA
+     declarada  alguien la escribió después: sirve para ubicar el comercio en
+                el mapa, pero no prueba que se estuvo ahí
+     exenta     la visita ya pasó y la coordenada no se puede recuperar; la
+                supervisión lo aceptó por escrito, con motivo y firma
+     falta      no hay ninguna coordenada y nadie la eximió
+
+   «Sin ubicación» a secas significa el último. Los otros dos se cuentan
+   aparte: ninguno vale como respaldo de GPS, pero tampoco son un descuido. */
+function estadoUbicacion(r){
+  if (!RULES.requiereUbicacion(r.Tipo_Contacto)) return "";
+  if (r.Ubicacion_Verificada === true) return "gps";
+  if (String(r.Ubicacion || "").trim()) return "declarada";
+  /* La visita ya pasó y la coordenada no se puede recuperar. La supervisión
+     lo aceptó por escrito: no es un hueco, es una excepción con motivo. Se
+     cuenta aparte de las que sí trajeron GPS, nunca junto a ellas. */
+  return r.Ubicacion_Exenta === true ? "exenta" : "falta";
+}
+const sinUbicacion         = r => estadoUbicacion(r) === "falta";
+const ubicacionDeclarada   = r => estadoUbicacion(r) === "declarada";
+const ubicacionExenta      = r => estadoUbicacion(r) === "exenta";
+/* Sigue existiendo para lo que de verdad mide respaldo de GPS: una declarada
+   no cuenta como verificada. */
+const sinUbicacionVerificada = r =>
+  RULES.requiereUbicacion(r.Tipo_Contacto) && r.Ubicacion_Verificada !== true
+  && !ubicacionExenta(r);
+
+const CALIFICACIONES = [
+  { id:"A", label:"A — Muy interesado", desc:"Cliente receptivo, alta probabilidad de retención" },
+  { id:"B", label:"B — Interesado",     desc:"Abierto a la propuesta, requiere seguimiento" },
+  { id:"C", label:"C — Neutral",        desc:"Escucha pero no se compromete" },
+  { id:"D", label:"D — En riesgo",      desc:"Manifiesta molestia o evalúa a la competencia" },
+  { id:"E", label:"E — Perdido",        desc:"Decidido a retirarse o ya migró" }
+];
+
+/* Cómo se contactó al ejecutivo de BBVA para confirmar los datos del comercio.
+   Un comercio de cartera no aparece solo: alguien coordinó con el banco antes
+   de registrarlo. Sin este dato no se puede dar de alta. No aplica a ventas
+   nuevas: ahí todavía no hay ejecutivo BBVA de por medio.
+
+   Una de las opciones se llamaba «Visita presencial» y se leía como haber
+   visitado al CLIENTE, cuando lo que describe es al ejecutivo yendo a la
+   agencia a reunirse con los ejecutivos del banco. Por eso ahora dice «Visita
+   a la agencia»: todo lo de esta lista pasa entre Stratis y el banco, y el
+   contacto con el cliente vive en otro campo y se mide aparte. */
+const CONTACTO_BBVA = [
+  { id:"CORREO",   label:"Correo a BBVA",       desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos del comercio" },
+  /* El otro correo. Solo se puede escribir si los datos del cliente YA
+     llegaron, así que el caso deja de esperar al banco y pasa a la calle: por
+     eso fuerza «Por contactar» aunque el banco no haya contestado nada más. */
+  { id:"CORREO_CC", label:"Correo al cliente con copia a BBVA",
+    desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA" },
+  { id:"LLAMADA",  label:"Llamada telefónica",  desc:"Se coordinó por teléfono con el ejecutivo de BBVA" },
+  { id:"WHATSAPP", label:"Mensaje WhatsApp",    desc:"Se coordinó por WhatsApp con el ejecutivo de BBVA" },
+  { id:"VISITA",   label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco" },
+  { id:"CHAT",     label:"Chat BBVA",           desc:"Se coordinó por el chat interno del banco" }
+];
+const nomContactoBBVA = id => (CONTACTO_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* ---- De dónde salió un lead de venta nueva ------------------------------
+   El reporte separa los leads de venta en dos vistas —los que salieron de un
+   comercio de la base congelada y los que son de afuera— y hasta el 26/08 no
+   había forma de saberlo: las fichas de cartera no traen RUC, así que no hay
+   nada contra qué cruzar el RUC del lead. Lo marca quien lo trabajó.
+
+   Sin marcar NO es lo mismo que «de afuera». Una ficha sin marcar se cuenta
+   aparte, como pendiente; meterla en una de las dos vistas por descarte sería
+   inventar el dato que este campo existe para no inventar. */
+const ORIGEN_LEAD = [
+  { id:"DENTRO", label:"De un comercio de la base",
+    desc:"El lead salió de un comercio que ya estaba en la cartera asignada por BBVA" },
+  { id:"FUERA",  label:"De afuera de la base",
+    desc:"Es un comercio que no forma parte de la cartera asignada" }
+];
+const nomOrigenLead = id => (ORIGEN_LEAD.find(x => x.id === id) || {}).label || "";
+const leadDentroDeBase = c => !!c && esClienteNuevo(c) && c.origen_lead === "DENTRO";
+const leadFueraDeBase  = c => !!c && esClienteNuevo(c) && c.origen_lead === "FUERA";
+const leadSinMarcar    = c => !!c && esClienteNuevo(c) && !c.origen_lead;
+
+/* ---- La coordinación con el ejecutivo de BBVA, ahora como interacción ----
+   Hasta acá el banco vivía en un sello: un campo con un valor, puesto al crear
+   la ficha y nunca más. Servía para decir por dónde se coordinó, pero no
+   cuándo, ni si el ejecutivo contestó, ni qué se coordinó. Y en esta campaña
+   —donde el comercio ya tenía el servicio y sus datos los entrega el banco—
+   ahí es justamente donde se está yendo el volumen: 841 asignados, 601 con
+   respuesta, 82 contactados.
+
+   La decisión de forma: las coordinaciones con BBVA viven en la MISMA tabla
+   que las gestiones con el cliente, para que cada comercio tenga una sola
+   línea de tiempo del registro al cierre. Y para que ninguna cuenta de la
+   campaña se mueva sola, usan un vocabulario propio en las mismas columnas:
+   medios que empiezan con «bbva_» y resultados que ningún cálculo existente
+   reconoce. Así el trigger que decide si una gestión cumple visita nunca las
+   ve como visita, el que exige respaldo para cerrar nunca las cuenta como
+   contacto logrado, y la tasa de respuesta al cliente sigue midiendo clientes.
+   Nada de eso hubo que tocarlo: simplemente no coinciden. */
+/* Todo lo que no es un correo exige después un correo al ejecutivo del banco.
+   La razón es una sola y vale para los cuatro: un chat interno, un WhatsApp,
+   una llamada y una reunión en la agencia no dejan constancia que otro pueda
+   consultar. Si el banco después dice que nunca le pidieron los datos, lo
+   único que se puede poner sobre la mesa es un correo.
+
+   No es burocracia añadida: es lo que la campaña ya pedía y el CRM solo
+   reclamaba para el chat. Desde el 23/08/2026 lo reclama para los cuatro. */
+const MEDIOS_BBVA = [
+  { id:"bbva_correo",     label:"Correo a BBVA",      desc:"Se le escribió al ejecutivo de BBVA pidiéndole los datos" },
+  /* Escribirle al cliente con copia al banco no es pedirle nada al banco: es
+     avisarle que ya salimos. Distinguirlo es lo que permite responder la
+     pregunta que abre cada reunión —si el caso está trabado del lado del
+     banco o del nuestro—, que con un solo «correo» no se podía contestar. */
+  { id:"bbva_correo_cliente", label:"Correo al cliente con copia a BBVA",
+    desc:"Se le escribió al cliente y se copió al ejecutivo de BBVA", yaHayDatos:true },
+  { id:"bbva_chat",       label:"Chat BBVA",          desc:"Se coordinó por el chat interno del banco", exigeCorreo:true },
+  { id:"bbva_llamada",    label:"Llamada telefónica", desc:"Se coordinó por teléfono", exigeCorreo:true },
+  { id:"bbva_whatsapp",   label:"Mensaje WhatsApp",   desc:"Se coordinó por WhatsApp", exigeCorreo:true },
+  { id:"bbva_presencial", label:"Visita a la agencia", desc:"Se fue a la agencia de BBVA a reunirse con los ejecutivos del banco", exigeCorreo:true }
+];
+const esMedioBBVA  = id => String(id || "").startsWith("bbva_");
+
+/* ---- Qué cuenta como gestión, y de quién --------------------------------
+   Dos filtros que van juntos y que hasta el 23/08/2026 no existían. Sin ellos
+   ninguna cifra del embudo era defendible, y el CRM las mostraba igual.
+
+   PRIMERO: una fila RECONSTRUIDA no es una gestión. La escribió una migración
+   a partir del canal que el ejecutivo había declarado en el alta —842 de las
+   1943 que hay— poniéndole la fecha del alta porque el CRM guardaba el medio y
+   no la fecha. En 507 de ellas además quedó escrito que el banco respondió,
+   cosa que no consta en ninguna parte; una de las tres plantillas lo dice con
+   todas sus letras: «consta el envío, no la respuesta».
+
+   No se borran: son el rastro de que alguien declaró un canal, y borrarlas
+   sería perder eso. Pero no cuentan como trabajo ni miden a nadie.
+
+   SEGUNDO: el DESTINATARIO real. El medio dice el canal, no a quién se le
+   escribió. En 186 gestiones anotadas como «correo» al cliente el comentario
+   dice que el correo fue al funcionario de BBVA —«se envió correo al
+   funcionario, de no tener respuesta se enviará al cliente»—, que es el paso
+   de coordinación con el banco, no el contacto con el comercio. Contarlas del
+   lado del cliente infla un lado del embudo y vacía el otro a la vez.
+
+   La base guarda el destinatario corregido en su propia columna desde la
+   migración 59. Acá se recalcula igual como respaldo, para que la aplicación
+   diga lo mismo aunque le toque una fila vieja. */
+const esReconstruida = r => r.Inferida === true;
+
+const RE_AL_FUNCIONARIO = /correo\s+a(?:l)?\s+funcionario/i;
+function destinatarioDe(r){
+  if (r.Destinatario === "cliente" || r.Destinatario === "bbva") return r.Destinatario;
+  if (esMedioBBVA(r.Tipo_Contacto)) return "bbva";
+  return RE_AL_FUNCIONARIO.test(r.Comentario_Ejecutivo || "") ? "bbva" : "cliente";
+}
+const esAlCliente = r => destinatarioDe(r) === "cliente";
+const esAlBanco   = r => destinatarioDe(r) === "bbva";
+
+/* Una gestión de campo: la escribió un ejecutivo Y fue dirigida al comercio.
+   Es la unidad con la que se cuenta cobertura, efectividad y visitas. */
+const esGestionCliente = r => !esReconstruida(r) && esAlCliente(r);
+
+/* ---- Lo que deja constancia ---------------------------------------------
+   Acuerdo del 26/08: una gestión cuenta cuando existe un correo que se puede
+   poner sobre la mesa. Chat, llamada y visita son trabajo real y se registran
+   igual —siguen en la línea de tiempo y en el historial del ejecutivo—, pero
+   no sostienen nada frente al banco: si mañana BBVA dice que nunca le pidieron
+   los datos de un comercio, un chat no se le puede mostrar a nadie.
+
+   Cuenta el correo de los dos lados, al banco y al comercio, porque los dos
+   dejan un rastro consultable y los dos son trabajo del ejecutivo. */
+const MEDIOS_CON_CORREO = ["correo", "bbva_correo", "bbva_correo_cliente"];
+const esCorreoEvidenciable = r => !esReconstruida(r) && MEDIOS_CON_CORREO.includes(r.Tipo_Contacto);
+
+/* ---- Qué cuenta como comercio GESTIONADO (regla del 27/08) --------------
+   El correo sigue siendo la mejor prueba, pero no es la única. La regla que
+   rige desde el 27/08 es más ancha y más justa: un comercio está gestionado
+   cuando quedó al menos UN hecho con resultado detrás — un correo al banco o
+   al comercio, un contacto efectivo, una reunión o visita que se realizó, o
+   un cierre registrado (ganado o perdido).
+
+   Lo que NO cuenta es el intento sin nada detrás: la llamada que nadie
+   contestó, el chat sin respuesta, la visita fallida. Ese trabajo se registra
+   igual y se ve en la línea de tiempo, pero no mueve el escalón.
+
+   El cierre no vive en una interacción sino en la ficha, así que se pregunta
+   aparte con `tieneCierreRegistrado`: un comercio cerrado es trabajo
+   terminado aunque no haya quedado ninguna fila de gestión detrás. */
+const esGestionValida = r => !esReconstruida(r) &&
+  (esCorreoEvidenciable(r) || esEfectivo(r.Resultado) || r.Cumple_Visita === "SI");
+const CIERRES_REGISTRADOS = ["RETENIDO", "VENTA", "PERDIDO"];
+const tieneCierreRegistrado = c => !!c && CIERRES_REGISTRADOS.includes(c.resultado_gestion);
+
+/* ---- «La actividad más reciente», en un solo lugar -----------------------
+   La otra mitad de la regla del 27/08, y la que se quedó fuera el primer día:
+   «se tomará la actividad más reciente; aplícalo para todo lo que es gestión».
+   No basta con que en algún momento haya habido un correo —lo que decide es en
+   qué quedó el comercio—. Un correo del 14 seguido de una llamada sin
+   respuesta del 24 dice que el caso se enfrió.
+
+   El 27/08 el Reporte ya contaba así y la Cartera no: preguntaba `some()`, o
+   sea «¿alguna vez?». Vanessa veía 6 pendientes donde la regla daba 38, y los
+   32 que faltaban eran justamente los peores —los que se ven trabajados y no
+   lo están—. Dos definiciones de una palabra dan dos números; por eso esto
+   vive acá, en singular, y el filtro de la Cartera, el panel del ejecutivo y
+   el embudo del reporte preguntan todos lo mismo.
+
+   El cierre no es una interacción: vive en la ficha. Entra a la línea de
+   tiempo en su fecha de cierre —y de último en su día, que para eso es el
+   hecho que terminó el caso— y compite por «la más reciente» como todo lo
+   demás. Un cierre sin fecha no se puede ubicar en el tiempo, pero el hecho es
+   cierto: cuenta igual. */
+/* ---- La unidad es el DÍA, no la fila ------------------------------------
+   Segunda corrección del 27/08, y salió de mirar por qué se caían los que se
+   caían. A Alfredo se le cayeron 43 comercios: el 17/08 mandó el correo y esa
+   misma tarde —15:03, 15:25, 16:44…— mandó un WhatsApp que nadie contestó. El
+   WhatsApp era más tarde en el día, se convertía en «la actividad más
+   reciente» y tumbaba al correo de horas antes.
+
+   Eso castiga el seguimiento: el comercio con correo MÁS insistencia contaba
+   peor que el mismo comercio con solo el correo. Está al revés, y ninguna
+   regla que premie no insistir puede quedarse.
+
+   Lo que enfría un comercio es el silencio de los días siguientes, no el
+   intento del mismo día. Así que un día cuenta como trabajado si ESE DÍA pasó
+   algo que califica, sin importar qué más se registró después dentro del
+   mismo día; y lo que decide es el último día con actividad.
+
+   La distinción es la correcta: a Alfredo, cuyos seguimientos fueron la misma
+   tarde, le devuelve 40 comercios; a Vanessa, cuyos seguimientos del 24/08
+   fueron seis días después del correo del 18, le devuelve 3. Esos 16 de
+   Vanessa sí se enfriaron. */
+function ultimoDiaConActividad(regs, hasta, extraDia){
+  let dia = null, ok = false;
+  const ver = (d, califica) => {
+    if (!d || (hasta && d > hasta)) return;
+    if (dia === null || d > dia){ dia = d; ok = califica; }
+    else if (d === dia) ok = ok || califica;
+  };
+  (regs || []).forEach(r => {
+    if (esReconstruida(r)) return;
+    ver(String(r.Fecha_Contacto || "").slice(0,10), esGestionValida(r));
+  });
+  /* El cierre no es una interacción: vive en la ficha y entra por su fecha. */
+  if (extraDia) ver(String(extraDia).slice(0,10), true);
+  return dia === null ? null : { d: dia, ok };
+}
+
+const ultimaActividad = (c, regs, hasta) => ultimoDiaConActividad(
+  regs, hasta, tieneCierreRegistrado(c) && c.cerrado_en ? c.cerrado_en : null);
+
+/* ¿El titular ya contestó, y a qué altura? La negociación no es un hecho con
+   fecha propia sino un ESTADO: nace del primer contacto efectivo y vive hasta
+   que alguien cierra el caso. Por eso se pregunta «¿había contacto efectivo al
+   día X?» y no «¿cuál fue el último hecho?». */
+const huboContactoEfectivo = (regs, hasta) => (regs || []).some(r =>
+  !esReconstruida(r) && esEfectivo(r.Resultado)
+  && (!hasta || String(r.Fecha_Contacto || "").slice(0,10) <= hasta));
+
+function comercioGestionado(c, regs, hasta){
+  /* Cerrado sin fecha de cierre: no se puede ubicar, pero pasó. */
+  if (tieneCierreRegistrado(c) && !c.cerrado_en) return true;
+  /* Negociación vigente (José, 27/08): el cliente contestó y el caso sigue
+     abierto. Eso cuenta como gestionado aunque después nadie haya atendido una
+     llamada, y la asimetría con el correo es deliberada: un correo enviado
+     prueba que se intentó, una respuesta prueba que hay conversación. Lo
+     primero se enfría con el silencio; lo segundo ya ocurrió y no se
+     desanda —hasta que el ejecutivo cierre el caso—. */
+  if (!tieneCierreRegistrado(c) && huboContactoEfectivo(regs, hasta)) return true;
+  const u = ultimaActividad(c, regs, hasta);
+  return !!u && u.ok;
+}
+
+/* ---- La última gestión, escrita ------------------------------------------
+   Pedido de José el 27/08, y nace de un problema concreto: la hoja que se
+   exporta para BBVA no llevaba ninguna columna que dijera CUÁL es la última
+   gestión de cada comercio. Sin ella, cualquier fórmula del lado de Sheets
+   tiene que reconstruirla —y no puede: `Ultimo_Resultado` solo distingue
+   cuatro valores, `Fecha_Ultima_Gestion` viene vacía en varias filas, y un
+   comercio tiene muchas filas sin nada que marque cuál manda—. El resultado
+   eran fórmulas que contaban «alguna» gestión donde la regla dice «la última»,
+   y de ahí las contradicciones entre la hoja y el CRM.
+
+   Así que el CRM lo escribe. La hoja deja de deducir y pasa a leer: una
+   columna con el veredicto (`SI`/`NO`), otra con la categoría en palabras y
+   otra con el medio, para poder excluir a mano lo que se quiera —«si la última
+   fue solo chat, no la cuentes»— sin volver a implementar la regla.
+
+   El orden de prioridad es el mismo que el de `comercioGestionado`, y tiene
+   que seguir siéndolo: si alguna vez esta función y aquella dijeran cosas
+   distintas, volveríamos justo al problema que vino a resolver. Hay una prueba
+   que las compara comercio por comercio. */
+const CAT_CIERRE = { RETENIDO:"Retención concretada", VENTA:"Venta concretada",
+                     PERDIDO:"Perdido" };
+
+function ultimaGestionDe(c, regs, hasta){
+  const tope = hasta || hoyISO();
+  const dia = d => String(d || "").slice(0, 10);
+  const reales = (regs || []).filter(r => !esReconstruida(r)
+    && dia(r.Fecha_Contacto) && dia(r.Fecha_Contacto) <= tope);
+  const cerrado    = tieneCierreRegistrado(c);
+  const cerradoEl  = cerrado && c.cerrado_en ? dia(c.cerrado_en) : "";
+  const etiqueta   = () => CAT_CIERRE[c.resultado_gestion] || "Cerrado";
+
+  /* Cerrado sin fecha: pasó, pero no se puede ubicar en el tiempo. */
+  if (cerrado && !c.cerrado_en)
+    return { dia:"", categoria:etiqueta(), medio:"", cuenta:"SI" };
+
+  let ultDia = "";
+  reales.forEach(r => { const d = dia(r.Fecha_Contacto); if (d > ultDia) ultDia = d; });
+  if (cerradoEl && cerradoEl > ultDia) ultDia = cerradoEl;
+
+  if (!ultDia) return { dia:"", categoria:"Sin gestiones", medio:"", cuenta:"NO" };
+
+  /* El cierre es el hecho que terminó el caso: manda en su día. */
+  if (cerradoEl === ultDia)
+    return { dia:ultDia, categoria:etiqueta(), medio:"", cuenta:"SI" };
+
+  /* Dentro del último día manda lo que califica —esa es la regla del día como
+     unidad—, y entre varias, la más tardía. */
+  const delDia  = reales.filter(r => dia(r.Fecha_Contacto) === ultDia);
+  const validas = delDia.filter(esGestionValida);
+  const grupo   = validas.length ? validas : delDia;
+  const orden   = r => String(r.Hora_Contacto || "") + "|" + String(r.Creado_En || "");
+  const r = grupo.slice().sort((a, b) => orden(a).localeCompare(orden(b)))[grupo.length - 1];
+
+  if (validas.length){
+    const cat = r.Cumple_Visita === "SI" ? "Visita realizada"
+              : esEfectivo(r.Resultado)  ? "Cliente respondió"
+              : "Correo enviado";
+    return { dia:ultDia, categoria:cat, medio:r.Tipo_Contacto || "", cuenta:"SI" };
+  }
+  /* No calificó el día, pero el titular ya había contestado antes y el caso
+     sigue abierto: es negociación vigente y cuenta. */
+  if (huboContactoEfectivo(regs, tope))
+    return { dia:ultDia, categoria:"Negociación vigente", medio:r.Tipo_Contacto || "", cuenta:"SI" };
+
+  return { dia:ultDia, categoria:"Intento sin respuesta", medio:r.Tipo_Contacto || "", cuenta:"NO" };
+}
+
+/* La misma pregunta, acotada a una ventana y a un montón de filas que ya
+   vienen filtradas por comercio, por ejecutivo y por periodo. Es lo que
+   necesitan el Tablero y el Panel para «Gestionados en el periodo». */
+const ultimoDiaCalifica = filas => {
+  const u = ultimoDiaConActividad(filas, null, null);
+  return !!u && u.ok;
+};
+/* Coordinación con el banco, registrada por alguien. */
+const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
+const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
+/* Chat, WhatsApp, llamada y visita a la agencia no dejan rastro consultable,
+   así que la campaña exige mandar después un correo de respaldo. El CRM no se
+   limita a permitirlo: lo reclama. */
+const exigeRespaldo = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).exigeCorreo;
+/* Escribirle al cliente prueba que sus datos ya están en nuestras manos:
+   nadie manda un correo a una dirección que no tiene. */
+const yaHayDatosDelCliente = id => !!(MEDIOS_BBVA.find(x => x.id === id) || {}).yaHayDatos;
+
+/* Lo mismo, pero preguntándoselo al registro completo y no solo al medio.
+   El correo del destrabe se marca con Copia_BBVA sobre un correo al cliente,
+   así que el medio por sí solo no alcanza para reconocerlo. Se sigue mirando
+   el medio antiguo porque la opción existe en la lista del banco desde julio;
+   hoy no la usa nadie, y esta función es el único lugar donde eso importa. */
+const traeDatosDelCliente = r =>
+  r.Copia_BBVA === true || yaHayDatosDelCliente(r.Tipo_Contacto);
+
+const RESULTADOS_BBVA = [
+  { id:"bbva_respondio",     label:"Respondió",     desc:"El ejecutivo de BBVA contestó y confirmó los datos del comercio", ok:true },
+  { id:"bbva_sin_respuesta", label:"Sin respuesta", desc:"Todavía no ha contestado", ok:false }
+];
+const respondioBBVA = r => r === "bbva_respondio";
+const nomResultadoBBVA = id => (RESULTADOS_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* Para qué fue la interacción. Sin esto, «2do contacto» significa dos cosas
+   opuestas —que el banco no contestó y hubo que insistir, o que el ejecutivo
+   cumplió con el correo de respaldo del chat— y sumadas en una sola columna no
+   dicen nada. */
+const PROPOSITOS_BBVA = [
+  { id:"primer_contacto", label:"Primer contacto",    desc:"La primera vez que se le escribe por este comercio" },
+  /* El propio Jose lo describió así: «al registrar un customer id se marca el
+     medio de contacto con el ejecutivo BBVA; luego, la 2da interacción debería
+     ser si el ejecutivo respondió». La respuesta es un hecho aparte, con su
+     propia fecha —contactar no es que te contesten—, así que se registra como
+     una interacción y no como una casilla del primer contacto. */
+  { id:"respuesta",       label:"Respuesta del banco", desc:"El ejecutivo contestó un contacto anterior y entregó los datos" },
+  { id:"respaldo_chat",   label:"Respaldo del chat",  desc:"El correo que deja constancia de lo coordinado por chat" },
+  /* Se llamaba «Insistencia». El nombre describía bien el hecho y mal la
+     pantalla: el ejecutivo que acababa de registrar un correo veía la ficha
+     con el mismo botón y el mismo rótulo de antes, y lo leía como que no se
+     había guardado nada. «Reintento de contacto» dice las dos cosas a la vez
+     —que el anterior quedó registrado y que este es uno más—, que es
+     justamente lo que faltaba decir. */
+  { id:"insistencia",     label:"Reintento de contacto", desc:"Se vuelve a escribir porque no ha respondido" },
+  { id:"negociacion",     label:"Negociación",        desc:"Consulta al banco por tasa, POS, equipos o comisión" }
+];
+const nomProposito = id => (PROPOSITOS_BBVA.find(x => x.id === id) || {}).label || "";
+
+/* Por qué se está negociando. Lista cerrada, como los motivos de pérdida: un
+   campo libre se llena de textos que después no se pueden agrupar. */
+const MOTIVOS_NEGOCIACION = [
+  { id:"TASA",     label:"Tasa",             desc:"El comercio pide una tasa menor" },
+  { id:"POS",      label:"POS adicional",    desc:"Pide más terminales" },
+  { id:"EQUIPO",   label:"Cambio de equipo", desc:"Pide reemplazo o actualización del terminal" },
+  { id:"COMISION", label:"Comisión",         desc:"Discusión por comisiones o cobros" },
+  { id:"OTRO",     label:"Otro",             desc:"Otra condición en discusión" }
+];
+const nomMotivoNeg = id => (MOTIVOS_NEGOCIACION.find(x => x.id === id) || {}).label || id || "";
+
+/* Próximas acciones. El catálogo vive en la base y lo mantiene el Analista
+   desde Ajustes: acá solo se guarda lo que llegó, para no clavar en el código
+   una lista que la campaña va a cambiar. */
+let ACCIONES = [], SEGUIMIENTOS = [];
+const accionesActivas = () => ACCIONES.filter(a => a.activo !== false);
+const nomAccion = cod => (ACCIONES.find(a => a.codigo === cod) || {}).nombre || cod || "";
+
+/* La acción abierta de un comercio: la que dice qué sigue */
+const seguimientoDe = cid =>
+  SEGUIMIENTOS.find(x => String(x.customer_id) === String(cid) && !x.cerrado_en) || null;
+const diasParaAccion = s => s ? Math.round((new Date(String(s.fecha_objetivo).slice(0,10)) - new Date(hoyISO())) / 86400000) : null;
+function estadoAccion(s){
+  if (!s) return "";
+  const d = diasParaAccion(s);
+  if (d < 0)  return "vencida";
+  if (d === 0) return "hoy";
+  if (d <= 7) return "semana";
+  return "despues";
+}
+const ETIQUETA_PLAZO = { vencida:"Vencida", hoy:"Para hoy", semana:"Esta semana", despues:"Más adelante" };
+
+/* =========================================================================
+   EL CALENDARIO DE VISITAS
+   =========================================================================
+
+   Una CITA es un compromiso con el cliente: fecha, hora, y si es en el local o
+   por videollamada. Se distingue de una próxima acción suelta por tener
+   modalidad — «llamar el lunes» no va al calendario, «visitar el jueves a las
+   3» sí.
+
+   Lo que se mide acá no es actividad: es LATENCIA. El hueco más caro de la
+   campaña está entre dos hechos que el CRM ya registra —el banco confirmó los
+   datos, o el cliente respondió— y el momento en que hay una visita puesta en
+   el calendario. Ese hueco no aparecía en ninguna pantalla.
+   ========================================================================= */
+const MODALIDADES = [
+  { id:"PRESENCIAL", label:"Visita en el local", corto:"Presencial", min:60, ic:"◎" },
+  { id:"VIRTUAL",    label:"Reunión virtual",    corto:"Virtual",    min:30, ic:"▷" }
+];
+const nomModalidad = id => (MODALIDADES.find(m => m.id === id) || {}).label || "";
+const cortoModalidad = id => (MODALIDADES.find(m => m.id === id) || {}).corto || "";
+const duracionDe = id => (MODALIDADES.find(m => m.id === id) || {}).min || 60;
+
+const esCita = s => !!(s && s.modalidad);
+const citasTodas = () => SEGUIMIENTOS.filter(esCita);
+/* La cita abierta de un comercio. Una a la vez: si hubiera dos, ninguna sería
+   «la próxima». La base lo garantiza con un índice único. */
+const citaDe = cid =>
+  SEGUIMIENTOS.find(x => esCita(x) && String(x.customer_id) === String(cid) && !x.cerrado_en) || null;
+
+const horaCorta = h => String(h || "").slice(0,5);
+/* Minutos desde medianoche. Es la unidad con la que se comparan dos citas para
+   saber si se pisan: comparar cadenas de hora funciona hasta que alguien
+   escribe «9:30» en vez de «09:30». */
+function minutosDe(h){
+  const [hh, mm] = horaCorta(h).split(":");
+  const n = Number(hh) * 60 + Number(mm);
+  return isNaN(n) ? null : n;
+}
+const finDeCita = s => {
+  const ini = minutosDe(s && s.hora_inicio);
+  return ini === null ? null : ini + (Number(s.duracion_min) || duracionDe(s.modalidad));
+};
+const rangoCita = s => {
+  const ini = minutosDe(s && s.hora_inicio), fin = finDeCita(s);
+  if (ini === null) return "";
+  const dosDig = n => String(Math.floor(n / 60)).padStart(2,"0") + ":" + String(n % 60).padStart(2,"0");
+  return `${dosDig(ini)}–${dosDig(fin)}`;
+};
+
+/* ---- T0 · Cuándo quedó habilitado el caso -------------------------------
+   Es el momento en que el comercio pasó a ser contactable. Se DEDUCE con la
+   misma regla con la que `estadoDerivado` lo mueve a «Por contactar»: si
+   hubiera dos definiciones de «el caso está listo», tarde o temprano darían
+   números distintos y no habría forma de saber cuál miente.
+
+   Devuelve la fecha más temprana entre:
+     · una coordinación con BBVA que el banco respondió,
+     · un correo al cliente con copia al banco (solo posible con los datos), y
+     · el primer contacto logrado con el cliente, que prueba que los datos
+       estaban aunque nadie anotara la coordinación. */
+function habilitadoEn(cid){
+  const fechas = [];
+  /* Las mismas dos puertas de `estadoDerivado`, y por la misma razón: si
+     hubiera dos definiciones de «el caso está listo», tarde o temprano darían
+     números distintos y no habría forma de saber cuál miente.
+
+     Solo coordinaciones reales. 494 comercios traían un «BBVA respondió»
+     puesto por la migración: si contara, la fecha en que el caso quedó
+     habilitado sería la del alta para casi toda la cartera, y el reloj de la
+     visita arrancaría de un hecho que no ocurrió. */
+  DB.bbvaDe(cid).filter(r => !esReconstruida(r)).forEach(r => {
+    if (respondioBBVA(r.Resultado) || traeDatosDelCliente(r))
+      fechas.push(String(r.Fecha_Contacto).slice(0,10));
+  });
+  DB.delCliente(cid).filter(esGestionCliente).forEach(r => {
+    /* El correo al comercio —con copia al banco o no— es el paso del
+       destrabe, y el primer contacto logrado prueba que los datos estaban
+       aunque nadie anotara la coordinación. */
+    if (r.Tipo_Contacto === "correo" || traeDatosDelCliente(r) || esEfectivo(r.Resultado))
+      fechas.push(String(r.Fecha_Contacto).slice(0,10));
+  });
+  /* El sello del alta —«el correo fue al cliente con copia»— no trae fecha
+     propia: se toma la de creación de la ficha, que es cuando se declaró. */
+  const c = byId[String(cid)];
+  if (c && c.contacto_bbva === "CORREO_CC" && c.creado_en)
+    fechas.push(String(c.creado_en).slice(0,10));
+  return fechas.length ? fechas.sort()[0] : "";
+}
+
+/* ---- El estado de una cita ----------------------------------------------
+   La regla que acordamos: lo que decide si la reunión se concretó es la FECHA
+   EN QUE OCURRIÓ, no la fecha en que se registró. Si el ejecutivo la registra
+   tres días después, eso ya se le descuenta en la puntualidad del registro;
+   descontárselo otra vez acá sería castigar dos veces el mismo retraso. */
+const TOLERANCIA_CITA = 1;      // días trabajados de gracia sobre la fecha pactada
+
+function estadoCita(s){
+  if (!esCita(s)) return "";
+  if (s.cerrado_motivo === "REAGENDADA") return "reagendada";
+
+  const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
+  if (g){
+    const ocurrio = String(g.Fecha_Contacto).slice(0,10);
+    const pactada = String(s.fecha_objetivo).slice(0,10);
+    if (ocurrio <= pactada) return "cumplida";
+    const fer = feriadosDe(periodoDe(pactada));
+    let n = 0;
+    for (let d = new Date(pactada + "T12:00:00Z"); ; ){
+      d = new Date(d.getTime() + 86400000);
+      const iso = d.toISOString().slice(0,10);
+      if (esDiaTrabajado(iso, fer)) n++;
+      if (iso >= ocurrio || n > 60) break;
+    }
+    return n <= TOLERANCIA_CITA ? "cumplida_tarde" : "corrida";
+  }
+  if (s.cerrado_en) return "descartada";
+
+  const d = diasParaAccion(s);
+  if (d < 0)   return "vencida";
+  if (d === 0) return "hoy";
+  return "programada";
+}
+
+const ESTADO_CITA = {
+  programada:     { label:"Programada",      tono:"no",   dice:"Todavía no llega la fecha" },
+  hoy:            { label:"Es hoy",          tono:"warn", dice:"Toca hoy" },
+  vencida:        { label:"No concretada",   tono:"crit", dice:"Pasó la fecha y no hay visita registrada" },
+  cumplida:       { label:"Concretada",      tono:"ok",   dice:"La visita ocurrió el día pactado" },
+  cumplida_tarde: { label:"Concretada tarde",tono:"warn", dice:"Ocurrió dentro del día trabajado siguiente" },
+  corrida:        { label:"Concretada, otro día", tono:"warn", dice:"La visita ocurrió, pero fuera de la fecha pactada" },
+  reagendada:     { label:"Reagendada",      tono:"no",   dice:"Se movió a otra fecha antes de vencer" },
+  descartada:     { label:"Descartada",      tono:"no",   dice:"Se cerró sin visita" }
+};
+const seConcreto = e => e === "cumplida" || e === "cumplida_tarde" || e === "corrida";
+const cuentaCumplimiento = e => seConcreto(e) || e === "vencida";
+
+/* ---- Demora en agendar (T0 → T1) ----------------------------------------
+   Días trabajados entre que el caso quedó habilitado y que alguien puso la
+   visita en el calendario. Es la métrica del embudo: no dice cuánto se
+   trabajó, dice cuánto se tardó en comprometerse. */
+function demoraEnAgendar(cid){
+  const t0 = habilitadoEn(cid);
+  if (!t0) return null;
+  const citas = SEGUIMIENTOS.filter(x => esCita(x) && String(x.customer_id) === String(cid))
+    .map(x => String(x.creado_en || "").slice(0,10)).filter(Boolean).sort();
+  if (!citas.length) return null;
+  const t1 = citas[0];
+  if (t1 <= t0) return 0;
+  const fer = feriadosDe(periodoDe(t0));
+  let n = 0;
+  for (let d = new Date(t0 + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= t1 || n > 400) break;
+  }
+  return n;
+}
+
+/* Anticipación: días corridos entre crear la cita y la fecha pactada. Cero
+   significa «agendó hoy para hoy», que es registrar, no planificar. Sin esta
+   métrica la demora en agendar se cumple al 100% agendando el mismo día. */
+function anticipacionDe(s){
+  const creada = String(s && s.creado_en || "").slice(0,10);
+  const pactada = String(s && s.fecha_objetivo || "").slice(0,10);
+  if (!creada || !pactada) return null;
+  return Math.round((new Date(pactada) - new Date(creada)) / 86400000);
+}
+
+/* La mediana y no el promedio: un caso agendado cuarenta días tarde arrastra
+   el promedio y esconde a los quince que se agendaron al día siguiente. */
+function mediana(nums){
+  const l = nums.filter(n => n !== null && !isNaN(n)).sort((a,b) => a - b);
+  if (!l.length) return null;
+  const m = Math.floor(l.length / 2);
+  return l.length % 2 ? l[m] : Math.round((l[m-1] + l[m]) / 2 * 10) / 10;
+}
+
+/* ---- Disponibilidad -----------------------------------------------------
+   Para la reunión de equipo: quién tiene el rango libre. Una cita ocupa desde
+   su hora hasta su hora más la duración; dos citas se pisan cuando cada una
+   empieza antes de que termine la otra. */
+/* ---- Aritmética de calendario -------------------------------------------
+   Todo se hace con cadenas «AAAA-MM-DD» y números, nunca sumando milisegundos
+   a un Date: eso arrastra la zona horaria del navegador y un día de más o de
+   menos según a qué hora se abra la pantalla. */
+const pad2 = n => String(n).padStart(2, "0");
+const mesDe = iso => String(iso || "").slice(0,7);
+const isoYMD = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+const diasDelMes = ym => {
+  const [y, m] = String(ym).split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+};
+/* Lunes = 0. La semana laboral peruana empieza el lunes y un calendario que
+   empieza el domingo obliga a contar dos veces. */
+const diaSemana = iso => {
+  const [y,m,d] = String(iso).slice(0,10).split("-").map(Number);
+  return (new Date(Date.UTC(y, m-1, d)).getUTCDay() + 6) % 7;
+};
+const mesMas = (ym, n) => {
+  const [y, m] = String(ym).split("-").map(Number);
+  const t = (y * 12 + (m - 1)) + n;
+  return `${Math.floor(t / 12)}-${pad2(t % 12 + 1)}`;
+};
+const NOMBRE_MES = ["enero","febrero","marzo","abril","mayo","junio",
+  "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const mesLargo = ym => {
+  const [y, m] = String(ym).split("-").map(Number);
+  return `${NOMBRE_MES[m-1]} ${y}`;
+};
+const DIAS_CORTOS = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+
+function ocupacionDe(correo, fecha){
+  return citasTodas()
+    .filter(s => s.correo_stratis === correo
+      && String(s.fecha_objetivo).slice(0,10) === String(fecha).slice(0,10)
+      && !["reagendada","descartada"].includes(estadoCita(s)))
+    .sort((a,b) => (minutosDe(a.hora_inicio) || 0) - (minutosDe(b.hora_inicio) || 0));
+}
+function chocaCon(s, desdeMin, hastaMin){
+  const ini = minutosDe(s.hora_inicio), fin = finDeCita(s);
+  if (ini === null) return false;
+  return ini < hastaMin && desdeMin < fin;
+}
+
+const ESTADOS_CLIENTE = ["ACTIVO","DE BAJA"];
+
+/* Cierre de la gestión. Es lo que alimenta la columna "Gestión" del archivo
+   de BBVA: SI cuando se retuvo o se vendió, NO en cualquier otro caso. */
+const RESULTADOS_GESTION = [
+  { id:"PENDIENTE", label:"Pendiente", desc:"Todavía se está trabajando", bbva:"NO" },
+  { id:"RETENIDO",  label:"Retenido",  desc:"El comercio ya operaba y se queda con BBVA", bbva:"SI" },
+  { id:"VENTA",     label:"Venta",     desc:"Reactivación de un servicio dado de baja, o cliente nuevo", bbva:"SI" },
+  { id:"PERDIDO",   label:"Perdido",   desc:"Se fue a la competencia o cerró", bbva:"NO" }
+];
+const gestionCumplida = c => c && (c.resultado_gestion === "RETENIDO" || c.resultado_gestion === "VENTA");
+
+/* Los cierres que puede tener un comercio dependen de su origen. Un RUC que
+   Stratis trae de cero no puede ser «retenido»: no había nada que retener, no
+   era cliente del banco. Sus dos salidas son la venta o el no. */
+const resultadosPara = c =>
+  esClienteNuevo(c) ? RESULTADOS_GESTION.filter(g => g.id !== "RETENIDO")
+                    : RESULTADOS_GESTION;
+
+/* ---- El estado del comercio, calculado y no tecleado -------------------
+   Nadie guarda «34 años» en una ficha: se guarda la fecha de nacimiento y la
+   edad se calcula, porque una edad guardada miente en el próximo cumpleaños y
+   nadie se entera. Con el estado del comercio pasaba exactamente eso: era un
+   campo que alguien escribía y que se quedaba escrito hasta que alguien más lo
+   cambiara. Un comercio que empezó a negociar el martes seguía figurando como
+   pendiente, y por lo tanto no aparecía en ninguna alarma —justo el caso que
+   se enfría.
+
+   Los tres estados intermedios son hechos que ya están en la línea de tiempo,
+   así que se deducen de ella:
+
+     · sin respuesta de BBVA           → POR VALIDAR   (insistir con el banco)
+     · con respuesta, sin conversación → POR CONTACTAR (salir a la calle)
+     · hubo conversación, sin cierre   → EN NEGOCIACIÓN
+
+   Los cierres siguen siendo un campo, porque son una decisión de una persona y
+   no se deducen de nada. Y el estado se puede fijar a mano, con motivo escrito
+   y marcado como excepción, para el caso raro que siempre existe.
+
+   Ojo con el umbral de la negociación: empieza cuando se HABLÓ con el titular,
+   no cuando se intentó. Si empezara con el intento, el comercio al que se llamó
+   tres veces sin respuesta entraría al mismo balde que aquel donde se está
+   discutiendo una tasa, y se perdería justo lo que hace útil al estado:
+   distinguir el caso vivo del caso mudo. */
+const ESTADOS_DERIVADOS = [
+  { id:"POR_VALIDAR",   label:"Por validar",    corto:"Por validar",
+    desc:"Falta que el ejecutivo de BBVA entregue o confirme los datos",
+    hacer:"Insistir con el banco", chip:"warn" },
+  { id:"POR_CONTACTAR", label:"Por contactar",  corto:"Por contactar",
+    desc:"BBVA respondió y todavía nadie habló con el titular",
+    hacer:"Salir a contactar al comercio", chip:"info" },
+  { id:"EN_NEGOCIACION",label:"En negociación", corto:"Negociando",
+    desc:"Se conversó con el titular y el caso sigue abierto",
+    hacer:"Seguir el caso hasta cerrarlo", chip:"neg" },
+  { id:"RETENIDO",      label:"Retenido",       corto:"Retenido",   desc:"Ya operaba y se quedó",        hacer:"", chip:"ok" },
+  { id:"RECUPERADO",    label:"Recuperado",     corto:"Recuperado", desc:"Estaba de baja y volvió",      hacer:"", chip:"ok" },
+  { id:"VENTA",         label:"Venta",          corto:"Venta",      desc:"Lead de venta que cerró",      hacer:"", chip:"ok" },
+  { id:"PERDIDO",       label:"Perdido",        corto:"Perdido",    desc:"Se fue o cerró",               hacer:"", chip:"crit" }
+];
+const estadoDerivadoById = id => ESTADOS_DERIVADOS.find(e => e.id === id) || null;
+
+function estadoDerivado(c){
+  if (!c) return "POR_VALIDAR";
+  /* El cierre manda sobre todo lo demás: es lo único que decidió una persona. */
+  if (esRetencion(c))   return "RETENIDO";
+  if (esRecuperado(c))  return "RECUPERADO";
+  if (esVentaNueva(c))  return "VENTA";
+  if (c.resultado_gestion === "PERDIDO") return "PERDIDO";
+  /* La excepción de supervisión, con su motivo escrito. */
+  if (c.estado_fijado && estadoDerivadoById(c.estado_fijado)) return c.estado_fijado;
+
+  /* Solo lo que se le hizo AL COMERCIO: ni las coordinaciones con el banco ni
+     las 842 filas que fabricó una migración. */
+  const gestiones = DB.delCliente(c.customer_id).filter(esGestionCliente);
+
+  /* El titular contestó. Da igual cómo se llegó hasta ahí: hay conversación
+     abierta y el caso ya no está esperando a nadie. */
+  if (gestiones.some(r => esEfectivo(r.Resultado))) return "EN_NEGOCIACION";
+
+  /* Acá había un atajo: «un RUC que trajo Stratis no espera nada del banco»,
+     así que todo lead de venta abierto salía directo a «Por contactar».
+     Retirado el 23/08/2026, y era falso en los dos sentidos.
+
+     Un RUC que no está en la cartera hay que darlo de alta con el banco antes
+     de venderlo, y los números lo decían: de los 56 leads de venta, 35 tienen
+     coordinación con BBVA registrada —proporcionalmente MÁS que la cartera— y
+     el banco respondió en 8. El atajo hacía que esos 35 figuraran como listos
+     para salir mientras esperaban al banco igual que cualquier otro caso.
+
+     Y del otro lado, la venta salía del recorrido apenas se marcaba: nunca se
+     podía ver por dónde había pasado antes de cerrar. El cierre sigue siendo
+     el cierre —lo marca el ejecutivo, y manda sobre todo lo demás—, pero
+     ahora es el final de un camino y no un atajo que lo saltea.
+
+     El flujo es el mismo para los dos tipos de lead. Lo que cambia es a qué se
+     juega: uno cierra en Retenido y el otro en Venta. */
+
+  /* ---- Las dos únicas puertas a «Por contactar» ------------------------
+     Regla del 22/08/2026, y corrige lo que hacía que el indicador no sirviera.
+
+     Antes bastaba con tener CUALQUIER gestión al comercio: una llamada, un
+     WhatsApp, lo que fuera. Y el resultado era este —Juan Torres, 313
+     comercios abiertos—:
+
+         En negociación   32      Por contactar  281      Por validar   0
+
+     Cero. De sus 315 fichas de cartera, 285 declaran «Chat BBVA» al dar de
+     alta y solo 11 tienen una coordinación registrada de verdad. Los chats
+     existen, pero están en su chat, no en el CRM; y aun así los 281 figuraban
+     como listos para salir a la calle.
+
+     El ciclo de la campaña tiene una sola forma de habilitar un caso: o el
+     ejecutivo de BBVA confirma los datos, o —si no contesta— se le escribe al
+     comercio por correo copiando al banco. Cualquier otra cosa deja el caso
+     donde estaba: esperando al banco.
+
+     Con esta regla los mismos 313 quedan 31 / 62 / 220, y esos 220 son los que
+     de verdad están parados del lado de BBVA. */
+  const k = bbvaDe(c.customer_id);
+
+  /* Puerta 1 · el banco confirmó los datos. Real, no la fila del alta. */
+  if (k.respondio) return "POR_CONTACTAR";
+
+  /* Puerta 2 · se le escribió al comercio. El correo es el paso del destrabe
+     y el único que deja constancia de haber salido sin el banco. */
+  if (gestiones.some(r => r.Tipo_Contacto === "correo")) return "POR_CONTACTAR";
+  if (gestiones.some(traeDatosDelCliente)) return "POR_CONTACTAR";
+  if (k.contactos.some(traeDatosDelCliente)) return "POR_CONTACTAR";
+
+  /* El sello del alta que declara ese mismo correo. */
+  if (c.contacto_bbva === "CORREO_CC") return "POR_CONTACTAR";
+
+  return "POR_VALIDAR";
+}
+const estadoFijadoAMano = c => !!(c && c.estado_fijado);
+
+/* ---- En qué punto del recorrido está el comercio ------------------------
+   Nueve escalones, en el orden real de la campaña: se registra el comercio,
+   se le piden los datos a BBVA, el banco contesta, se sale a contactar al
+   cliente, el cliente responde, y el caso cierra —retenido, vendido o
+   perdido—.
+
+   Sustituye a las dos columnas que se venían llevando en el Excel, que eran
+   «Contactado Si/No» y el conteo de gestiones. Ninguna de las dos contestaba
+   la pregunta de la reunión. «Contactado = Si» era verdad para un comercio
+   que recibió un correo sin respuesta y para uno que ya está en negociación,
+   y el contador de gestiones subía igual mandando ocho correos al vacío que
+   consiguiendo una reunión.
+
+   Es la misma escalera que calcula la vista v_linea_tiempo en la base. Las
+   dos se escribieron juntas y a propósito: si un día dan resultados
+   distintos, es que alguien cambió una sola.
+
+   Un comercio NO llega a «Perdido» por cálculo. Solo si el ejecutivo lo
+   marcó: mientras nadie lo marque, el caso sigue vivo. */
+const ETAPAS = [
+  { id:1, label:"1 Registrado sin tocar",      desc:"Está en el CRM y nadie lo ha tocado todavía" },
+  { id:2, label:"2 Con actividad",             desc:"Tiene alguna gestión, sin destinatario claro" },
+  { id:3, label:"3 Esperando a BBVA",          desc:"Se le pidieron los datos al banco y no ha contestado" },
+  { id:4, label:"4 Habilitado por el banco",   desc:"BBVA contestó; falta salir a contactar al comercio" },
+  { id:5, label:"5 En contacto",               desc:"Se le escribió, llamó o visitó, y todavía no responde" },
+  { id:6, label:"6 Respondió",                 desc:"El titular contestó: hay conversación abierta" },
+  { id:7, label:"7 Retenido",                  desc:"Cerrado con retención" },
+  { id:8, label:"8 Venta",                     desc:"Cerrado con venta" },
+  { id:9, label:"9 Perdido",                   desc:"El ejecutivo lo marcó como perdido" }
+];
+const nomEtapa = id => (ETAPAS.find(e => e.id === id) || {}).label || "";
+
+function etapaDe(c){
+  if (!c) return 1;
+  if (c.resultado_gestion === "VENTA")    return 8;
+  if (c.resultado_gestion === "RETENIDO") return 7;
+  if (c.resultado_gestion === "PERDIDO")  return 9;
+  /* La historia completa: la etapa mira los dos lados del caso, y desde que
+     `delCliente` devuelve solo lo dirigido al comercio, las coordinaciones con
+     el banco hay que ir a buscarlas a la historia. */
+  const regs = DB.historiaDe(c.customer_id);
+  const gest = regs.filter(esGestionCliente);
+  if (gest.some(r => esEfectivo(r.Resultado))) return 6;
+  if (gest.length) return 5;
+  const banco = regs.filter(esGestionBanco);
+  if (banco.some(r => respondioBBVA(r.Resultado))) return 4;
+  if (banco.length) return 3;
+  if (regs.some(r => !esReconstruida(r))) return 2;
+  return 1;
+}
+
+/* ---- Lo que hay que revisar, no lo que hay que corregir -----------------
+   Tres comprobaciones que salieron de leer la base comercio por comercio el
+   23/08/2026. Ninguna cambia nada por su cuenta: marcan la gestión para que
+   la mire quien la registró. Es la misma regla que rige toda la limpieza —el
+   CRM no decide por el ejecutivo—, y acá pesa más que en ningún otro sitio,
+   porque «el cliente respondió» es lo que separa una conversación de un
+   mensaje enviado y de ahí cuelga el embudo entero.
+
+   1 · Dijo que respondió y no escribió qué respondió.
+       43 gestiones. 30 son del mismo ejecutivo, así que no es despiste
+       general: es una forma de registrar que se aprendió y se repite.
+
+   2 · Lo que se transcribe lo dijo otra persona, no el titular.
+       «Encargado indica que volvamos a comunicarnos», «Administrador indico
+       llamar por la tarde». Para eso está «Titular ausente», que es un
+       resultado distinto y no cuenta como contacto logrado.
+
+   3 · Lo que se transcribe es un aplazamiento, no una respuesta.
+       «Cliente indico que volvamos a comunicarnos», «Comercio indica que no
+       puede atendernos». Eso último es un rechazo con todas las letras. */
+const RE_HABLO_UN_TERCERO =
+  /encargad|administrador|recepci|personal del local|cajer|vendedor|secretari/i;
+const RE_QUEDO_APLAZADO =
+  /volvamos a comunicar|volver a llamar|llamar (por la|m[aá]s) tarde|no puede atender|no se encuentra|no est[aá] el|indic[oó] que llame/i;
+
+const textoDe = r => `${r.Comentario_Ejecutivo || ""} ${r.Comentario_Cliente || ""} ${r.Espera || ""}`;
+
+/* Una respuesta que nadie puede verificar: se marcó que el cliente contestó y
+   no quedó ni una palabra suya. */
+const respuestaSinVoz = r =>
+  !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
+  && !String(r.Comentario_Cliente || "").trim();
+
+/* Una respuesta que, leída, no parece del titular o no parece una respuesta. */
+const respuestaDudosa = r =>
+  !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
+  && (RE_HABLO_UN_TERCERO.test(textoDe(r)) || RE_QUEDO_APLAZADO.test(textoDe(r)));
+
+/* Una gestión fechada en sábado, domingo o feriado. No es una falta —hay
+   comercios que abren— pero sí algo que mirar: el sábado no entra en los días
+   trabajados con los que se calcula la meta, así que suma al numerador sin
+   sumar al denominador. Las 58 que había el 22/08/2026 eran todas del mismo
+   ejecutivo y ninguna tenía la fecha elegida a mano. */
+const gestionEnDiaNoTrabajado = r =>
+  !!r && esGestionCliente(r) && diaNoTrabajado(r.Fecha_Contacto);
+
+/* Un comercio de cartera al que nunca se le escribió, llamó ni visitó. Pedirle
+   los datos al banco no es haber salido: son 159 de 800, y hasta hoy 152 de
+   ellos figuraban como «Por contactar», que se lee como lo contrario. */
+const carteraSinSalir = c =>
+  !!c && !esClienteNuevo(c) && DB.delCliente(c.customer_id).filter(esGestionCliente).length === 0;
+
+/* Dado de baja por el banco y sin ningún cierre marcado. No se cierra solo:
+   se le muestra a quien lo tiene asignado. */
+const bajaSinCierre = c =>
+  !!c && c.estado === "DE BAJA" && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE";
+
+/* Efectividad del contacto: de cada diez veces que se le escribió, llamó o
+   visitó, en cuántas contestó el titular. Es lo que el conteo de gestiones no
+   decía. Sin gestiones no es 0%: es que todavía no se midió, y devuelve null
+   para que ningún promedio lo arrastre hacia abajo. */
+function efectividadDe(c){
+  const gest = DB.delCliente(c.customer_id).filter(esGestionCliente);
+  if (!gest.length) return null;
+  return Math.round(gest.filter(r => esEfectivo(r.Resultado)).length * 100 / gest.length);
+}
+
+/* Los cuatro cierres que de verdad se miran, cada uno con su nombre propio.
+   «Venta» en la base cubre dos cosas distintas —un comercio de cartera que
+   estaba de baja y volvió, y un RUC que Stratis trajo de cero— y contarlas
+   juntas escondía justo lo que se quiere ver por separado. */
+const esVentaNueva = c => esClienteNuevo(c) && c.resultado_gestion === "VENTA";
+/* Los test van envueltos en una función y no como referencia directa: varias
+   de estas se declaran más abajo en el archivo, y apuntarlas acá reventaría
+   al cargar. Envueltas, se resuelven recién cuando se llaman. */
+const CIERRES = [
+  { id:"cumplido",   label:"Objetivo cumplido", desc:"Retenidos, recuperados y ventas nuevas", test:c => gestionCumplida(c) },
+  /* El mismo nombre para dos números distintos era el peor enredo del Panel:
+     salía «Objetivo cumplido 1» y «Objetivo cumplido 4» en la misma pantalla.
+     Uno medía sobre la cartera asignada y el otro sobre todo lo registrado.
+     Ahora cada uno tiene su nombre y su lista. */
+  { id:"cumplido_cartera", label:"Objetivo cumplido en cartera",
+    desc:"Retenidos y recuperados; la venta nueva no salía de la cartera asignada",
+    test:c => esRetencion(c) || esRecuperado(c) },
+  { id:"retenido",   label:"Retenidos",         desc:"Ya operaban y se quedaron",     test:c => esRetencion(c) },
+  { id:"recuperado", label:"Recuperados",       desc:"Estaban de baja y volvieron",   test:c => esRecuperado(c) },
+  { id:"venta",      label:"Ventas nuevas",     desc:"RUC que trajo Stratis",         test:c => esVentaNueva(c) },
+  { id:"perdido",    label:"Perdidos",          desc:"Se fueron o cerraron",          test:c => c.resultado_gestion === "PERDIDO" },
+  { id:"pendiente",  label:"Pendientes",        desc:"Todavía en trabajo",
+    test:c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" }
+];
+const cierreById = id => CIERRES.find(x => x.id === id) || null;
+const pasaCierre = (c, id) => { const f = cierreById(id); return !f || f.test(c); };
+
+/* Por qué se perdió. Lista cerrada a propósito: un campo libre se llena de
+   textos que después no se pueden agrupar, y el motivo solo sirve si se puede
+   contar. Se pide en el momento del cierre, que es cuando está fresco. */
+const MOTIVOS_NO_RETENCION = [
+  { id:"TASA",           label:"Tasa o comisión",        desc:"Le ofrecieron mejor precio, o la comisión le parece alta" },
+  { id:"SERVICIO",       label:"Servicio o soporte",     desc:"Problemas con el POS, la atención o los tiempos de respuesta" },
+  { id:"COMPETENCIA",    label:"Se fue a la competencia",desc:"Ya migró o firmó con otro operador" },
+  { id:"CERRO",          label:"Cerró el negocio",       desc:"El comercio dejó de operar" },
+  { id:"NO_DECIDE",      label:"No decide el contacto",  desc:"Quien atiende no es quien decide, y no se llegó al titular" },
+  { id:"NO_CONTACTABLE", label:"No se pudo contactar",   desc:"Datos errados o nunca hubo respuesta" },
+  { id:"OTRO",           label:"Otro motivo",            desc:"Escríbelo en el comentario del ejecutivo" }
+];
+const nomMotivo = id => (MOTIVOS_NO_RETENCION.find(m => m.id === id) || {}).label || "";
+
+/* Retenido y recuperado no valen lo mismo para el banco: uno ya operaba y se
+   quedó, el otro estaba de baja y volvió. La columna Gestión los junta; esta
+   los separa. */
+function tipoCierre(c){
+  if (!c) return "";
+  const g = c.resultado_gestion || "PENDIENTE";
+  if (g === "RETENIDO") return "Retenido";
+  /* «Venta» a secas. Antes decía «Venta nueva», y el adjetivo abría la puerta
+     a una tercera categoría —«venta fuera de cartera»— que no era un tipo de
+     comercio sino el resultado de compararlo contra la base del banco. Esa
+     comparación se hace en el archivo de BBVA, no acá. */
+  if (g === "VENTA")    return esClienteNuevo(c) ? "Venta" : "Recuperado";
+  if (g === "PERDIDO")  return "Perdido";
+  return "Pendiente";
+}
+
+/* Dos orígenes posibles: la cartera que entrega BBVA, o una venta nueva que
+   trae Stratis y que el banco todavía no tiene afiliada. */
+/* Cómo se reconoce un comercio que trajo Stratis.
+
+   Lo dice su tipo_registro… o su identificador. Un Customer ID de BBVA tiene 8
+   dígitos —los 801 de la cartera, salvo uno de 9— y un RUC tiene exactamente
+   11: no se pisan. Mirar el número además del tipo recoge los RUC que se
+   registraron por el panel de Customer ID antes de que el formulario supiera
+   distinguirlos, y que hasta ahora viajaban dentro del archivo de la cartera
+   como si fueran comercios afiliados. */
+const RUC_RE = /^\d{11}$/;
+const esRucValido = v => RUC_RE.test(String(v || "").replace(/[^0-9]/g, ""));
+const esClienteNuevo = c => !!c && (c.tipo_registro === "NUEVO" || esRucValido(c.customer_id));
+/* El RUC, venga de su columna o del identificador con el que se registró. */
+const rucDe = c => !c ? "" : (c.ruc || (esRucValido(c.customer_id) ? String(c.customer_id) : ""));
+const claveCliente   = c => esClienteNuevo(c) ? ("RUC " + (c.ruc || "")) : ("ID " + (c ? c.customer_id : ""));
+
+/* Sugerencias de distrito — el campo acepta cualquier texto */
+const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO","CARABAYLLO",
+ "CERCADO DE LIMA","CHACLACAYO","CHORRILLOS","CIENEGUILLA","COMAS","EL AGUSTINO","INDEPENDENCIA",
+ "JESUS MARIA","LA MOLINA","LA PERLA","LA PUNTA","LA VICTORIA","LINCE","LOS OLIVOS","LURIGANCHO",
+ "LURIN","MAGDALENA DEL MAR","MIRAFLORES","PACHACAMAC","PUEBLO LIBRE","PUENTE PIEDRA","PUNTA HERMOSA",
+ "RIMAC","SAN BARTOLO","SAN BORJA","SAN ISIDRO","SAN JUAN DE LURIGANCHO","SAN JUAN DE MIRAFLORES",
+ "SAN LUIS","SAN MARTIN DE PORRES","SAN MIGUEL","SANTA ANITA","SANTIAGO DE SURCO","SURQUILLO",
+ "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO"];
+
+/* ---- Datos en memoria --------------------------------------------------- */
+/* CLIENTES es la POBLACIÓN: sobre esta lista se cuenta todo —cobertura,
+   visitas, ventas, incentivo, el Excel del banco—. byId es el índice, para
+   abrir una ficha por su llave sin recorrer la lista. Buscar uno es una cosa,
+   contar todos es otra. */
+let CLIENTES = [], byId = {}, USUARIOS = [], RUBROS = [], METAS = [];
+
+/* ---- Metas: la cartera que BBVA asignó a cada quien, mes a mes ----------
+   Es el denominador del alcance. Sin él, once comercios trabajados se ven
+   igual de bien con veinte asignados que con doscientos. */
+const mesISO = f => String(f || "").slice(0, 7);
+const mesHoy = () => mesISO(hoyISO());
+
+const MESES_ES = ["enero","febrero","marzo","abril","mayo","junio",
+                  "julio","agosto","septiembre","octubre","noviembre","diciembre"];
+function nombreMes(p){
+  const [a, m] = String(p || "").split("-");
+  return m ? `${MESES_ES[Number(m) - 1]} ${a}` : "";
+}
+function mesAnterior(p){
+  let [a, m] = String(p).split("-").map(Number);
+  m -= 1; if (m === 0){ m = 12; a -= 1; }
+  return `${a}-${String(m).padStart(2, "0")}`;
+}
+/* Lo que se cargó para ese mes exacto. Es lo que se edita en Ajustes. */
+const metaDe = (correo, periodo) => {
+  const m = METAS.find(x => x.correo === correo && x.periodo === periodo);
+  return m ? m.asignada : 0;
+};
+/* Lo que rige. Con la base congelada por el acuerdo del 12/08, la cartera de
+   un ejecutivo no cambia mes a mes: si nadie cargó la del periodo nuevo, se
+   hereda la última cargada en vez de contar cero y hacer ver el alcance como
+   si no hubiera denominador. La herencia se dice en pantalla, no se esconde. */
+function metaVigente(correo, periodo){
+  const propia = metaDe(correo, periodo);
+  if (propia > 0) return { n: propia, heredada: false, de: periodo };
+  const previas = METAS.filter(x => x.correo === correo && x.asignada > 0
+                                 && String(x.periodo) <= String(periodo))
+                       .sort((a,b) => String(a.periodo).localeCompare(String(b.periodo)));
+  const u = previas.pop();
+  return u ? { n: u.asignada, heredada: true, de: u.periodo } : { n: 0, heredada: false, de: "" };
+}
+/* Meses con meta cargada, del más reciente al más antiguo, y siempre el actual */
+function mesesConMeta(){
+  const s = new Set(METAS.map(m => m.periodo));
+  s.add(mesHoy());
+  return [...s].sort().reverse();
+}
+
+/* Un cierre pertenece al mes en que se decidió, no al mes en que se registró
+   la primera gestión. La base sella esa fecha al cerrar. */
+const mesDelCierre = c => mesISO(c && c.cerrado_en);
+const cerroEn = (c, periodo) => !!c.cerrado_en && mesDelCierre(c) === periodo;
+
+/* Lo que suma a la meta: el comercio activo que se quedó, y el que estaba de
+   baja y volvió. Los dos salían de la cartera asignada. La venta nueva por RUC
+   no: esa nunca estuvo en la cartera de nadie. */
+/* UN CASO CERRADO NO RECIBE INSTRUCCIONES.
+ *
+ * La ficha de un comercio que ya vendió mostraba, en el elemento más visible
+ * de la pantalla, «El caso está parado hasta coordinar con BBVA · sin los
+ * datos que entrega el banco no hay a quién llamar ni dónde ir». Abajo, en la
+ * misma pantalla, decía Venta, Visita cumplida y dos intentos con respuesta.
+ *
+ * El aviso no estaba mal escrito: estaba mal condicionado. Se dispara cuando
+ * no hay coordinación registrada con el banco, y eso es cierto en ese caso —y
+ * da igual, porque el caso terminó—. Un aviso que aparece donde no hay nada
+ * que hacer entrena a la gente a no leer los avisos, y entonces tampoco lee el
+ * que sí importaba.
+ *
+ * Cerrado es lo que decidió una persona: retenido, recuperado, venta o
+ * perdido. Mientras el resultado sea PENDIENTE el caso sigue abierto y los
+ * avisos corresponden. */
+const CERRADOS = ["RETENIDO", "RECUPERADO", "VENTA", "PERDIDO"];
+const casoCerrado = c => !!c && CERRADOS.includes(estadoDerivado(c));
+
+const esRetencion  = c => !esClienteNuevo(c) && c.resultado_gestion === "RETENIDO";
+const esRecuperado = c => !esClienteNuevo(c) && c.resultado_gestion === "VENTA";
+/* =========================================================================
+   El modelo de incentivos
+
+   El bono tiene dos capas y conviene no mezclarlas. La primera es una llave:
+   tres mínimos de gestión que, cumplidos, habilitan el cálculo — no suman
+   nada al monto. La segunda son los objetivos del proyecto, que sí deciden
+   cuánto. Se puede tener un cumplimiento excelente y no cobrar nada porque
+   la llave no abrió, y se puede tener la llave abierta y no cobrar porque el
+   cumplimiento quedó bajo 80%.
+
+   El mes del bono tampoco es el del calendario: corta el 18 y arranca el 19
+   del mes anterior. Un periodo se nombra por el mes en que cierra, que es el
+   mes en que se paga.
+   ========================================================================= */
+const PROYECTO = { inicio:"2026-07-20", fin:"2026-12-18", corte:18 };
+
+/* Los parámetros no están clavados en el código: la revisión de octubre
+   estaba prevista desde el principio. Viven en config y se editan en Ajustes. */
+/* El calendario de días no trabajados del proyecto. Va antes de BONO_DEF
+   porque BONO_DEF lo usa al construirse: declararlo después lo dejaría en la
+   zona muerta y la aplicación no cargaría. */
+const FERIADOS_DEF = [
+  "2026-07-23",  // Día de la Fuerza Aérea del Perú
+  "2026-07-28", "2026-07-29",  // Fiestas Patrias
+  "2026-08-06",  // Batalla de Junín
+  "2026-08-30",  // Santa Rosa de Lima
+  "2026-10-08",  // Combate de Angamos
+  "2026-11-01",  // Todos los Santos
+  "2026-12-08",  // Inmaculada Concepción
+  "2026-12-09",  // Batalla de Ayacucho
+  "2026-12-25"   // Navidad
+];
+
+const BONO_DEF = {
+  metas:      { reactivacion_pp:20, facturacion_pct:15, ventas_mes:7 },
+  /* La ruta mensual hacia la meta. No es la meta del proyecto dividida entre
+     cinco: es una curva. Los valores son ACUMULADOS —al mes 3 se esperan 10
+     p.p. en total, no 10 adicionales— y el último punto tiene que coincidir
+     con la meta del proyecto.
+
+     Reajustada el 20/08/2026 con el cierre del primer periodo a la vista. La
+     reactivación arranca en 0 porque el mes 1 terminó en 0,36 p.p. y sube 5
+     por mes hasta 20. La facturación arranca en el mes 3 y no en el 1: el
+     dato del banco llega un periodo desfasado, así que exigir crecimiento en
+     el mes 1 era pedir cuentas de algo que todavía no se puede medir. */
+  curva:      { reactivacion_pp:[0, 5, 10, 15, 20], facturacion_pct:[0, 0, 5, 10, 15] },
+  pesos:      { reactivacion:30, facturacion:50, venta:20 },
+  /* cobertura_base decide qué cuenta como cartera cubierta:
+       · «registro» — la ficha cargada, sobre la cartera asignada.
+       · «gestion»  — el comercio con contacto o intento, sobre la asignada.
+       · «contacto» — el comercio con un contacto LOGRADO —correo al ejecutivo
+                      de BBVA o gestión efectiva con el cliente—, sobre los
+                      Customer ID registrados, y con la carga de la cartera
+                      completa como segunda condición.
+     El primer mes fue por registro: el cuello estaba en la respuesta del
+     banco. De ahí en adelante rige «contacto». Se cambia por periodo desde
+     Ajustes, y cambiarlo no reescribe los meses ya medidos. */
+  /* visitas_periodo manda sobre visitas_semana; la semanal queda para leer
+     las versiones viejas —el periodo 1— sin reescribirlas. Ver reglaVisitas. */
+  requisitos: { cobertura_pct:90, visitas_semana:25, visitas_periodo:40,
+                puntualidad_pct:95, cobertura_base:"contacto" },
+  /* Los días que no son de trabajo, además de sábados y domingos. Se editan
+     en Ajustes y viajan con la versión de parámetros. */
+  feriados:   FERIADOS_DEF,
+  piso:80, base_incumple_uno:15, pago_en_piso:15, pago_en_meta:25,
+  sobre:110, tope:30, pago_mensual:80,
+  /* La escala del incentivo gradual, como TABLA y no como fórmula: pares
+     [cumplimiento, % del sueldo base]. Entre dos puntos se interpola en
+     línea recta; bajo el primero no hay gradual, sobre el último se paga el
+     último valor.
+
+     Los dos puntos del acuerdo —80% paga 15%, 110% paga 30%— reproducen
+     exactamente los números que el CRM venía calculando con los cuatro
+     parámetros de arriba: la pendiente era 0,5 puntos de sueldo por punto de
+     cumplimiento en los dos tramos, así que la recta única pasa por el mismo
+     25% al 100%. Migrar a tabla no movió a nadie de su número; lo que gana es
+     que mañana la curva puede dejar de ser recta sin tocar el código. */
+  escala: [[80, 15], [110, 30]],
+  /* ---- La bolsa retenida ------------------------------------------------
+     Cada periodo se paga el 80% del incentivo y se retiene el 20%. Esas
+     retenciones NO se liquidan una por una: forman una sola bolsa que se
+     evalúa una vez, al cierre del proyecto, y se duplica si se cumplió la
+     condición.
+
+     `criterio` dice CONTRA QUÉ se evalúa, y cambió el 23/08/2026. La primera
+     versión contaba periodos con la llave abierta y quedó en 5 de 5; con el
+     periodo 1 cerrado en 2 de 3 para los cuatro, eso dejaba la duplicación
+     fuera del alcance de todo el equipo desde el primer mes.
+
+     Dirección lo resolvió al revés: «cumplimiento como un todo, sin importar
+     el mes a mes». Así que lo que se mira es el logro ACUMULADO contra la
+     meta final del proyecto, con los mismos pesos, y un mes flojo al
+     principio —cuando el banco todavía no soltaba los datos— no deja a nadie
+     fuera. El equipo sigue optando a la duplicación.
+
+     `cumplimiento_pct` es el umbral con el que la bolsa se duplica, y todavía
+     no está fijado: en null el CRM muestra en cuánto va cada uno y no emite
+     veredicto, en vez de inventar un número. Se carga en Ajustes cuando
+     dirección lo defina.
+
+     `periodos_con_llave` se deja escrito para poder releer lo que se conversó
+     con la regla vieja puesta. No rige mientras `criterio` diga otra cosa. */
+  bolsa: { factor:2, criterio:"cumplimiento", cumplimiento_pct:null,
+           periodos_con_llave:5 }
+};
+/* Los parámetros no son uno solo: son una lista de versiones, cada una
+   vigente desde un periodo del bono. Un periodo se calcula con la versión que
+   regía entonces, y por eso cambiar una meta en octubre ya no reescribe el
+   cumplimiento de agosto. La revisión de octubre entra como una versión más.
+
+   La vigencia se dice en periodos, no en fechas: un parámetro no empieza a
+   regir un martes a las tres de la tarde. */
+let PARAMS = [];                 // [{ vigente_desde, valor, creado_por, creado_en, nota }]
+let BONO = JSON.parse(JSON.stringify(BONO_DEF));   // los del periodo que corre
+let FACTURACION = [];
+let FACT_BASE = [];              // la base del proyecto, congelada por acuerdo
+let CIERRES_PERIODO = [];        // sellos de periodos ya liquidados
+
+function paramsDe(p){
+  const base = JSON.parse(JSON.stringify(BONO_DEF));
+  if (!p || !PARAMS.length) return base;
+  const v = PARAMS.filter(x => String(x.vigente_desde) <= String(p))
+                  .sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
+                  .pop();
+  return v ? Object.assign(base, v.valor) : base;
+}
+/* Qué versión rigió un periodo, para poder decirlo en pantalla */
+const versionDe = p => PARAMS.filter(x => String(x.vigente_desde) <= String(p))
+  .sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde))).pop() || null;
+
+/* Un sello es una foto firmada: mientras exista, el periodo no se recalcula */
+const selloDe = p => CIERRES_PERIODO.find(x => x.periodo === p && !x.anulado_en) || null;
+const periodoSellado = p => !!selloDe(p);
+
+function ventanaPeriodo(p){
+  const [a, m] = String(p || "").split("-").map(Number);
+  if (!a || !m) return { ini:"", fin:"" };
+  let am = m - 1, aa = a; if (am === 0){ am = 12; aa -= 1; }
+  let ini = `${aa}-${pad(am)}-${pad(PROYECTO.corte + 1)}`;
+  if (ini < PROYECTO.inicio) ini = PROYECTO.inicio;   // el primero arranca con el proyecto
+  return { ini, fin: `${a}-${pad(m)}-${pad(PROYECTO.corte)}` };
+}
+/* «enPeriodo» ya está tomado por el filtro de fechas de Registros; esta es la
+   ventana del bono, que es otra cosa. */
+const enVentana = (fecha, p) => {
+  const f = String(fecha || "").slice(0,10), v = ventanaPeriodo(p);
+  return !!f && !!v.ini && f >= v.ini && f <= v.fin;
+};
+/* ---- El corte de registro del periodo ------------------------------------
+
+   Una gestión entra al periodo si se hicieron DOS cosas dentro de él: ocurrir
+   y quedar registrada. `enVentana` mira lo primero; esto mira lo segundo.
+
+   Sin esta segunda condición, el periodo nunca terminaba de cerrarse. En el
+   primer cierre había 52 gestiones fechadas dentro de la ventana —del 20/07 al
+   18/08— que entraron al CRM el 19 y el 21 de agosto, con el periodo ya
+   vencido, y estaban contando. Todas ellas, por definición, fuera de plazo:
+   hundían la puntualidad de un periodo que ya había cerrado, y la seguirían
+   hundiendo con cada carga tardía que apareciera después. Aníbal Reyes pasaba
+   de 90,7% a 73,8% por trabajo que cargó tres días tarde.
+
+   La consecuencia hay que decirla completa, porque es dura y es a propósito:
+   lo que no está cargado el día del cierre NO CUENTA EN NINGÚN PERIODO. No se
+   arrastra al siguiente —su fecha de gestión pertenece a este— ni vuelve más
+   tarde. Registrar a tiempo deja de ser un porcentaje y pasa a ser la puerta.
+
+   Para el periodo en curso esto no cambia nada: el cierre todavía no llegó, así
+   que todo lo que se registra hoy pasa. Solo congela los periodos vencidos, que
+   es justamente lo que un cierre firmado necesita. */
+function registradaEnPeriodo(r, p){
+  const v = ventanaPeriodo(p);
+  const c = String((r && r.Creado_En) || "").slice(0,10);
+  /* Sin sello de creación no se puede afirmar que llegó tarde. Se deja pasar:
+     la duda no puede convertirse en un descuento. */
+  return !c || !v.fin || c <= v.fin;
+}
+/* Las dos condiciones juntas, que es como se debe preguntar siempre. */
+const gestionDelPeriodo = (r, p) =>
+  enVentana(r && r.Fecha_Contacto, p) && registradaEnPeriodo(r, p);
+
+/* A qué periodo pertenece un día: hasta el 18 cierra este mes, del 19 en
+   adelante ya cuenta para el siguiente. */
+function periodoDe(iso){
+  const f = String(iso || "").slice(0,10); if (!f) return "";
+  let [a, m, d] = f.split("-").map(Number);
+  if (d > PROYECTO.corte){ m += 1; if (m === 13){ m = 1; a += 1; } }
+  return `${a}-${pad(m)}`;
+}
+const periodoHoy = () => periodoDe(hoyISO());
+/* En qué mes del proyecto estamos: 1 para el primer periodo del bono, 5 para
+   el último. Es el índice con el que se lee la curva. */
+const indicePeriodo = p => periodosProyecto().indexOf(String(p)) + 1;
+
+/* La meta que corresponde a ese mes. Si el periodo cae fuera del proyecto
+   —una corrección tardía, una prórroga— se usa la meta final: exigir la de un
+   mes que no existe sería inventar. */
+function metaPeriodo(p, params){
+  const B = params || BONO;
+  const total = periodosProyecto().length;
+  const i = indicePeriodo(p);
+  const punto = (lista, fin) => {
+    const c = Array.isArray(lista) ? lista : [];
+    if (i < 1) return fin;
+    return Number(c[Math.min(i, c.length) - 1] !== undefined ? c[Math.min(i, c.length) - 1] : fin);
+  };
+  const cur = B.curva || {};
+  return {
+    i, total,
+    reactivacion_pp: punto(cur.reactivacion_pp, B.metas.reactivacion_pp),
+    facturacion_pct: punto(cur.facturacion_pct, B.metas.facturacion_pct),
+    ventas_mes: B.metas.ventas_mes,
+    esUltimo: i === total
+  };
+}
+
+/* Reactivación y facturación se miden por avance ACUMULADO desde el arranque
+   del proyecto, no por lo que pasó dentro del mes. Un comercio recuperado en
+   agosto sigue recuperado en octubre: contarlo solo en agosto haría que el
+   avance bajara solo. */
+const hastaPeriodo = (fecha, p) => {
+  const f = String(fecha || "").slice(0,10), v = ventanaPeriodo(p);
+  return !!f && !!v.fin && f >= PROYECTO.inicio && f <= v.fin;
+};
+
+function periodosProyecto(){
+  const l = []; let p = periodoDe(PROYECTO.inicio); const ult = periodoDe(PROYECTO.fin);
+  while (p <= ult){ l.push(p); const [a,m] = p.split("-").map(Number);
+    p = m === 12 ? `${a+1}-01` : `${a}-${pad(m+1)}`; }
+  return l;
+}
+const diasPeriodo = p => {
+  const v = ventanaPeriodo(p); if (!v.ini) return 0;
+  return Math.round((new Date(v.fin) - new Date(v.ini)) / 86400000) + 1;
+};
+/* Las semanas no se redondean: 31 días son 4,43 semanas y el mínimo de
+   visitas se escala igual. Redondear a 4 regalaría diez visitas. */
+const semanasPeriodo = p => diasPeriodo(p) / 7;
+function textoPeriodo(p){
+  const v = ventanaPeriodo(p); if (!v.ini) return "";
+  return `${fmtFecha(v.ini)} al ${fmtFecha(v.fin)}`;
+}
+/* El periodo se nombra por el mes en que cierra y se paga. */
+const nombrePeriodo = p => nombreMes(p);
+
+/* =========================================================================
+   El reloj del Panel
+
+   Antes cada pantalla medía con su propio calendario: la Cartera sin ventana,
+   Registros con su filtro, el Panel con el mes y el bono con el corte del 18.
+   Los mismos hechos daban cuatro números y ninguno estaba mal. Acá hay un solo
+   selector y tres relojes declarados, y toda métrica dice contra cuál se midió.
+   ========================================================================= */
+const VENTANAS_PANEL = [
+  /* El rótulo se adapta a quién mira. Para BBVA es la ventana de medición de
+     la campaña y nada más: la palabra «bono» nombra la retribución del equipo
+     de Stratis, que no es asunto del banco ni aparece en ninguna otra parte de
+     su vista. La ventana es la misma; lo que cambia es cómo se llama. */
+  { id:"bono",     get label(){ return esBBVA() ? "Periodo de campaña" : "Periodo del bono"; } },
+  { id:"mes",      label:"Mes calendario" },
+  { id:"proyecto", label:"Todo el proyecto" }
+];
+function finDeMes(p){
+  const [a, m] = String(p || "").split("-").map(Number);
+  if (!a || !m) return "";
+  return `${a}-${pad(m)}-${pad(new Date(Date.UTC(a, m, 0)).getUTCDate())}`;
+}
+/* Meses del proyecto, del más reciente al más antiguo */
+function mesesProyecto(){
+  const l = []; let p = mesISO(PROYECTO.inicio); const ult = mesISO(PROYECTO.fin);
+  while (p <= ult){ l.push(p); const [a,m] = p.split("-").map(Number);
+    p = m === 12 ? `${a+1}-01` : `${a}-${pad(m+1)}`; }
+  return l.reverse();
+}
+function rangoPanel(){
+  const v = S.vPanel || "bono";
+  if (v === "proyecto")
+    return { id:"proyecto", ini:PROYECTO.inicio, fin:PROYECTO.fin, periodo:"",
+             label:"todo el proyecto",
+             detalle:`${fmtFecha(PROYECTO.inicio)} al ${fmtFecha(PROYECTO.fin)}` };
+  if (v === "mes"){
+    const p = mesesProyecto().includes(S.pPanel) ? S.pPanel : mesHoy();
+    return { id:"mes", periodo:p, ini:`${p}-01`, fin:finDeMes(p),
+             label:nombreMes(p),
+             detalle:`${fmtFecha(`${p}-01`)} al ${fmtFecha(finDeMes(p))}` };
+  }
+  const p = periodosProyecto().includes(S.pPanel) ? S.pPanel : periodoHoy();
+  const w = ventanaPeriodo(p);
+  return { id:"bono", periodo:p, ini:w.ini, fin:w.fin,
+           label:`periodo ${nombrePeriodo(p)}`, detalle:textoPeriodo(p) };
+}
+const enRango = (fecha, r) => {
+  const f = String(fecha || "").slice(0,10);
+  return !!f && !!r.ini && f >= r.ini && f <= r.fin;
+};
+const semanasRango = r => {
+  if (!r.ini || !r.fin) return 0;
+  const fin = r.fin > hoyISO() ? hoyISO() : r.fin;      // no se exige por días que no han pasado
+  if (fin < r.ini) return 0;
+  return (Math.round((new Date(fin) - new Date(r.ini)) / 86400000) + 1) / 7;
+};
+
+/* Cuánto lleva corrido el proyecto. No depende del selector: el proyecto es
+   uno solo, del 20 de julio al 18 de diciembre. */
+function avanceProyecto(){
+  const ini = new Date(PROYECTO.inicio), fin = new Date(PROYECTO.fin), hoy = new Date(hoyISO());
+  const total = Math.round((fin - ini) / 86400000) + 1;
+  const corrido = Math.min(total, Math.max(0, Math.round((hoy - ini) / 86400000) + 1));
+  return { total, corrido, restante: Math.max(0, total - corrido),
+           pct: total ? corrido / total * 100 : 0 };
+}
+
+/* Demora en días trabajados.
+
+   Lo acordado es «el mismo día trabajado o máximo el siguiente día
+   trabajado». La primera versión de esto solo saltaba el domingo, así que el
+   sábado contaba como día de trabajo: una gestión del viernes registrada el
+   lunes salía con dos días de demora y caía como fuera de plazo, cuando el
+   lunes ES el siguiente día trabajado. Con eso la puntualidad del equipo
+   quedaba por debajo de la mitad por una regla que nadie había acordado.
+
+   Ahora no cuentan los sábados, los domingos ni los feriados. Los feriados
+   viven en los parámetros del periodo —no en el código— porque el calendario
+   cambia de un año a otro y porque una empresa puede tener sus propios días
+   libres. Se leen los del periodo al que pertenece la gestión, no los de hoy:
+   corregir el calendario en noviembre no debe reescribir agosto. */
+const feriadosDe = p => {
+  const f = (paramsDe(p) || {}).feriados;
+  return new Set(Array.isArray(f) ? f : FERIADOS_DEF);
+};
+/* Sábado y domingo nunca; el resto depende del calendario del periodo. */
+function esDiaTrabajado(iso, fer){
+  if (!iso) return false;
+  const d = new Date(iso + "T12:00:00Z").getUTCDay();
+  return d !== 0 && d !== 6 && !(fer && fer.has(iso));
+}
+const esFeriado = (iso, p) => feriadosDe(p || periodoDe(iso)).has(String(iso).slice(0,10));
+
+/* ---- El día no trabajado, dicho con su nombre ---------------------------
+   Existe por lo que apareció el 22/08/2026: 58 gestiones fechadas en sábado,
+   las 58 del mismo ejecutivo, y las 58 registradas ese mismo sábado sin que
+   nadie eligiera la fecha. 57 de ellas cayeron todas en el sábado 15/08 —un
+   lote de puesta al día del trabajo de la semana— y una hoy.
+
+   Ninguna estaba back-dateada: el formulario le regalaba la fecha de hoy y él
+   la aceptaba, que es lo que cualquiera hace. El problema es que el sábado no
+   entra en los días trabajados con los que se calcula la meta, así que esas
+   gestiones sumaban al numerador sin sumar al denominador.
+
+   No se prohíbe: hay comercios que abren sábado y esa visita es trabajo real.
+   Lo que se quita es que la fecha venga puesta. */
+const diaNoTrabajado = iso => !!iso && !esDiaTrabajado(String(iso).slice(0,10), feriadosDe(periodoDe(iso)));
+
+/* El día trabajado anterior a una fecha. Es la respuesta a «¿qué vence hoy?»:
+   el plazo de registro es un día trabajado, así que lo que se hizo el día
+   trabajado anterior tiene que estar cargado antes de que termine este. */
+function diaTrabajadoAnterior(iso){
+  const s = String(iso || "").slice(0,10);
+  if (!s) return "";
+  const fer = feriadosDe(periodoDe(s));
+  let d = new Date(s + "T12:00:00Z");
+  for (let i = 0; i < 14; i++){
+    d = new Date(d.getTime() - 86400000);
+    const x = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(x, fer)) return x;
+  }
+  return "";
+}
+
+const nombreDiaNoTrabajado = iso => {
+  if (!iso) return "";
+  const s = String(iso).slice(0,10);
+  if (esFeriado(s)) return "feriado";
+  const d = new Date(s + "T12:00:00Z").getUTCDay();
+  return d === 6 ? "sábado" : d === 0 ? "domingo" : "";
+};
+
+/* La fecha con la que arranca el formulario. En día trabajado, hoy; en sábado,
+   domingo o feriado, ninguna: que la escriba. */
+const fechaInicialContacto = () => diaNoTrabajado(hoyISO()) ? "" : hoyISO();
+
+/* ---- Hasta qué día se puede fechar una gestión --------------------------
+   Regla que fijó José el 27/08. En día trabajado el tope es hoy, como
+   siempre. En sábado, domingo o feriado peruano el tope baja al DÍA TRABAJADO
+   ANTERIOR: se puede seguir registrando y poniéndose al día en fin de semana
+   —eso nunca se prohibió—, pero no se puede fechar la gestión ese mismo día.
+
+   El objetivo no es impedir el trabajo del domingo: es impedir que una tanda
+   de regularización quede fechada en domingo. El 22/08 aparecieron 58
+   gestiones fechadas en sábado, 57 de ellas de un solo lote de puesta al día;
+   ninguna estaba manipulada, el formulario regalaba la fecha de hoy y quien
+   registraba la aceptaba. Un sábado no entra en los días trabajados con los
+   que se calcula la meta, así que esas gestiones sumaban al numerador sin
+   sumar al denominador.
+
+   Y el caso legítimo sigue cubierto, que es lo que hace que la regla no
+   estorbe: el que de verdad visitó un comercio abierto el sábado lo registra
+   el lunes con fecha del sábado —el tope es un máximo, y el sábado queda por
+   debajo del lunes—, y ahí el CRM le pregunta una vez si fue ese día. Lo único
+   que se pierde es fechar el sábado ESTANDO en sábado, que es exactamente el
+   caso que producía las fechas irreales. */
+const topeFechaContacto = () => {
+  const hoy = hoyISO();
+  return diaNoTrabajado(hoy) ? (diaTrabajadoAnterior(hoy) || hoy) : hoy;
+};
+/* «Fuera de rango» pasa a medirse contra el tope y no contra hoy: en domingo,
+   fechar en domingo es adelantarse a un día que no existe para la campaña. */
+const fechaSobreElTope = fecha => !!fecha && String(fecha).slice(0,10) > topeFechaContacto();
+
+/* ---- Cuándo empieza a correr el plazo de registro ------------------------
+
+   No cuando ocurrió el contacto: cuando el contacto SE PUDO REGISTRAR.
+
+   Es una distinción que costó ver y que estaba dando un número falso. La
+   puntualidad medía los días entre la fecha del contacto y la fecha en que se
+   tecleó, y castigaba por igual dos cosas muy distintas: al que gestionó el
+   lunes y registró el jueves, y al que gestionó un comercio que todavía no
+   estaba cargado en el CRM. El segundo no llegó tarde a nada — no tenía dónde
+   escribir.
+
+   El caso que lo destapó: las 45 gestiones «fuera de plazo» de Anibal Reyes en
+   el primer periodo. LAS 45 se registraron el mismo día en que se creó la
+   ficha del comercio, algunas dos minutos después. No hay una sola en la que
+   la ficha existiera y él tardara. Lo mismo con los otros tres: descontando el
+   alta, los cuatro pasan de 74–98% a 96,5–100%.
+
+   Así que el reloj arranca en el más tardío de los dos: la fecha del contacto,
+   o la fecha en que el comercio entró al CRM. Lo que se mide es la disciplina
+   de registro, que es lo que el requisito dice medir.
+
+   Y la demora en CARGAR la cartera no queda sin medir, que sería el hueco
+   evidente: eso ya lo mira la cobertura, que en la regla de régimen exige
+   tener cargada toda la cartera asignada antes de dar el requisito por
+   cumplido. Cada cosa en su métrica y ninguna contada dos veces. */
+/* ---- Desde cuándo corre el plazo de registro ----------------------------
+
+   Desde la fecha de la gestión. Punto.
+
+   Entre el 24/08/2026 y esta línea, el plazo arrancaba en el más tardío entre
+   la gestión y el ALTA DE LA FICHA, con el argumento de que nadie puede
+   registrar en una ficha que todavía no existe. El argumento es cierto y la
+   regla estaba mal, porque el alta la crea el mismo ejecutivo: bastaba con no
+   cargar la ficha para que el plazo no empezara a correr nunca. No es una
+   hipótesis —así salió—:
+
+     · las 800 fichas de cartera no entraron de golpe. Entraron de a pocas
+       desde el 07/08 y después 324 el 17 y 137 el 18, los dos últimos días
+       del periodo que cerraba el 18;
+     · con el alta como arranque, esas 461 gestiones daban «0 días · Sí»
+       automáticamente, y los cuatro ejecutivos terminaban con 100%, 100%,
+       100% y 96,5% de puntualidad;
+     · un requisito que nadie puede fallar no es un requisito.
+
+   Medido desde la gestión, que es lo que pidió la campaña —«máximo 1 día útil
+   entre la última interacción registrada y la fecha de registro real»—, el
+   número vuelve a distinguir: 97,6 · 73,8 · 84,5 · 94,7.
+
+   Lo que sí es cierto del argumento viejo se conserva en otro lado: la fecha
+   del alta sigue viajando en su propia columna en el libro y en la descarga,
+   y `cargadaConLaFicha` sigue marcando el caso. Explica una demora; ya no la
+   borra. */
+function inicioPlazo(r){
+  return String(r.Fecha_Contacto || "").slice(0,10);
+}
+/* La gestión se registró el mismo día en que se creó la ficha, después de que
+   ocurriera. No cambia el plazo —el alta también la hace el ejecutivo— pero
+   explica la demora, y por eso se expone donde se muestra el número. */
+const cargadaConLaFicha = r => {
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const alta = String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10);
+  return !!alta && alta > f;
+};
+
+function demoraHabil(r){
+  const f = inicioPlazo(r);
+  const c = String(r.Creado_En || "").slice(0,10);
+  if (!f || !c || c <= f) return 0;
+  const fer = feriadosDe(periodoDe(f));
+  let n = 0;
+  for (let d = new Date(f + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= c) break;
+    if (n > 400) break;                        // red de seguridad, nunca debería llegar
+  }
+  return n;
+}
+const aTiempo = r => demoraHabil(r) <= 1;
+
+/* Días trabajados entre una fecha y hoy. Es la misma cuenta que `demoraHabil`
+   —sin sábados, sin domingos, sin feriados— pero con el otro extremo abierto:
+   sirve para saber cuánto plazo le queda a alguien, no cuánto tardó.
+
+   Se usa para la ventana de corrección del ejecutivo. Va en días trabajados y
+   no en días corridos por la misma razón que la puntualidad: registrar el
+   viernes y corregir el lunes es corregir al día siguiente, no tres días
+   después. Un plazo que corre los domingos castiga por descansar. */
+function habilesDesde(iso){
+  const desde = String(iso || "").slice(0,10);
+  if (!desde) return 0;
+  const hoy = hoyISO();
+  if (hoy <= desde) return 0;
+  const fer = feriadosDe(periodoDe(desde));
+  let n = 0;
+  for (let d = new Date(desde + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso2 = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso2, fer)) n++;
+    if (iso2 >= hoy) break;
+    if (n > 400) break;
+  }
+  return n;
+}
+
+/* Los días trabajados que tiene un periodo del bono. Se cuentan de verdad
+   —sin sábados, sin domingos, sin los feriados de ese periodo— porque es la
+   base sobre la que se dice «dos visitas al día»: repartir 40 visitas entre
+   30 días corridos daría 1,3 y no es lo que se le pide a nadie. */
+function diasTrabajadosEntre(ini, fin, fer){
+  const a = String(ini || "").slice(0,10), b = String(fin || "").slice(0,10);
+  if (!a || !b || b < a) return 0;
+  let n = 0, guarda = 0;
+  for (let d = new Date(a + "T12:00:00Z"); ; ){
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= b || ++guarda > 400) break;
+    d = new Date(d.getTime() + 86400000);
+  }
+  return n;
+}
+function diasTrabajadosPeriodo(p){
+  const v = ventanaPeriodo(p);
+  return v.ini ? diasTrabajadosEntre(v.ini, v.fin, feriadosDe(p)) : 0;
+}
+
+/* ---- El mínimo de visitas -----------------------------------------------
+   Cambió de unidad el 19 de agosto de 2026, al terminar la marcha blanca:
+   antes eran 25 efectivas POR SEMANA —que escaladas al periodo daban 107 por
+   ejecutivo, y ninguno llegó— y ahora son 40 EN EL PERIODO, medidas del 19 al
+   18. La semana y el día pasan a ser referencia, no requisito.
+
+   Las dos reglas conviven a propósito. El periodo 1 ya está medido con la
+   vieja y reescribirlo cambiaría un resultado cerrado hacia atrás; por eso la
+   versión de agosto no lleva `visitas_periodo` y la de setiembre sí. Cuando
+   existe, manda; cuando falta, rige la semanal de siempre.
+
+   Las referencias no se escriben a mano: se dividen. Si un periodo tiene 21
+   días trabajados salen 1,9 al día, y si tiene 23 salen 1,7. Poner «2 al día»
+   fijo sería mentir en los periodos que no midan 21 días. */
+function reglaVisitas(req, p){
+  const r = req || {};
+  const sem  = semanasPeriodo(p) || 0;
+  const dias = diasTrabajadosPeriodo(p);
+  const porPeriodo = r.visitas_periodo !== undefined && r.visitas_periodo !== null;
+  const pide = porPeriodo
+    ? Math.round(Number(r.visitas_periodo) || 0)
+    : Math.round((Number(r.visitas_semana) || 0) * sem);
+  return {
+    porPeriodo, pide, dias, semanas: sem,
+    /* Con qué se compara en pantalla y contra qué número */
+    meta:   porPeriodo ? pide : (Number(r.visitas_semana) || 0),
+    unidad: porPeriodo ? "periodo" : "semana",
+    /* Las referencias, solo para orientar */
+    porSemana: sem  ? Math.round(pide / sem * 10) / 10 : 0,
+    porDia:    dias ? Math.round(pide / dias * 10) / 10 : 0,
+    corto: porPeriodo ? `${pide} en el periodo` : `${Number(r.visitas_semana) || 0} por semana`,
+    largo: porPeriodo
+      ? `${pide} efectivas en el periodo · referencia ${sem ? Math.round(pide / sem * 10) / 10 : 0} por semana y ${dias ? Math.round(pide / dias * 10) / 10 : 0} por día trabajado`
+      : `${Number(r.visitas_semana) || 0} por semana · ${pide} en el periodo`
+  };
+}
+
+/* Lo que un tramo de tiempo alcanza a exigir. El Panel y el tablero no miran
+   siempre el periodo completo —se puede mirar hoy, la semana o lo que va del
+   mes— y exigir el mínimo entero por tres días sería inventar un
+   incumplimiento. Con la regla semanal se escala por semanas corridas; con la
+   del periodo, por los días trabajados que YA pasaron sobre los que tiene el
+   periodo. Nunca pasa del 100%: un tramo no puede pedir más que el periodo. */
+/* Los días no trabajados en los que una persona SÍ trabajó: sábados, domingos
+   o feriados dentro del tramo en los que dejó al menos una gestión real al
+   comercio.
+
+   Existe por lo que se decidió el 22/08/2026. La meta se reparte entre los
+   días trabajados del periodo, y el sábado no es uno; así que una gestión
+   fechada en sábado sumaba arriba sin sumar abajo, y un sábado de trabajo
+   bajaba la exigencia del resto del periodo. Eran 58 gestiones, todas del
+   mismo ejecutivo.
+
+   La salida no es descontarle el sábado —salir un sábado porque el comercio
+   abría es trabajo real— sino contarlo de los dos lados: la gestión cuenta y
+   el día entra en SU calendario. Cada persona lleva el suyo. */
+function diasExtraTrabajados(correo, r, fer){
+  if (!correo || !r || !r.ini) return 0;
+  const hasta = r.fin > hoyISO() ? hoyISO() : r.fin;
+  const dias = new Set();
+  DB.todos().forEach(x => {
+    if (x.Correo_Stratis !== correo) return;
+    if (!esGestionCliente(x)) return;
+    const d = String(x.Fecha_Contacto || "").slice(0,10);
+    if (!d || d < r.ini || d > hasta) return;
+    if (!esDiaTrabajado(d, fer)) dias.add(d);
+  });
+  return dias.size;
+}
+
+function pideVisitasRango(req, r, personas, correos){
+  const p  = (r && r.periodo) || periodoHoy();
+  const rv = reglaVisitas(req, p);
+  const n  = Math.max(1, personas || 1);
+  if (!rv.porPeriodo) return Math.round(rv.meta * semanasRango(r) * n);
+  if (!r || !r.ini || !rv.dias) return rv.pide * n;
+  const hasta = r.fin > hoyISO() ? hoyISO() : r.fin;
+  const fer = feriadosDe(p);
+  const corridos = diasTrabajadosEntre(r.ini, hasta, fer);
+  /* Sin lista de personas se prorratea con el calendario, como siempre. Es lo
+     que corresponde cuando no se sabe de quién se está hablando. */
+  if (!Array.isArray(correos) || !correos.length)
+    return Math.round(rv.pide * Math.min(1, corridos / rv.dias) * n);
+  /* Con lista, cada uno lleva su propio calendario: el que trabajó el sábado
+     tiene un día más corrido y por tanto se le pide un poco más, en la misma
+     proporción. Nunca pasa del mínimo del periodo: los 40 son los 40, y un
+     sábado no los convierte en 42. */
+  return Math.round(correos.reduce((tot, correo) =>
+    tot + rv.pide * Math.min(1, (corridos + diasExtraTrabajados(correo, r, fer)) / rv.dias), 0));
+}
+
+const factDe = (correo, p) =>
+  FACTURACION.find(x => x.correo === correo && x.periodo === p) || null;
+
+/* La base del proyecto quedó congelada por el acuerdo del 12/08: se carga una
+   vez y todos los periodos crecen contra ella. Si nadie la fijó todavía, se
+   usa el monto inicial que se hubiera cargado en ese periodo, que era como
+   funcionaba antes. */
+const baseFactDe = correo => {
+  const b = FACT_BASE.find(x => x.correo === correo);
+  return b && Number(b.monto) > 0 ? Number(b.monto) : null;
+};
+function inicioFact(correo, p){
+  const b = baseFactDe(correo);
+  if (b !== null) return { monto:b, fuente:"base" };
+  const f = factDe(correo, p);
+  return f && Number(f.monto_inicial) > 0
+    ? { monto:Number(f.monto_inicial), fuente:"periodo" } : { monto:null, fuente:"falta" };
+}
+function crecimientoFact(correo, p){
+  const ini = inicioFact(correo, p);
+  const f = factDe(correo, p);
+  if (ini.monto === null || !f || f.monto_final === null || f.monto_final === undefined) return null;
+  return (Number(f.monto_final) - ini.monto) / ini.monto * 100;
+}
+
+/* Tramos: bajo el piso no hay incentivo; del piso a la meta sube parejo, y de
+   la meta al sobrecumplimiento sigue subiendo hasta el tope. Pasado el tope
+   no paga más: 200% de cumplimiento paga lo mismo que 110%. */
+/* La escala vigente, siempre como tabla de puntos. Una versión de parámetros
+   vieja —de antes de que la escala fuera tabla— no se queda sin escala: se le
+   arma la equivalente con sus cuatro números. Así un periodo ya liquidado
+   sigue dando el mismo resultado que dio el día que se liquidó, que es la
+   única razón por la que los parámetros se versionan. */
+function escalaDe(params){
+  const b = params || BONO;
+  const e = Array.isArray(b.escala) ? b.escala.filter(x => Array.isArray(x) && x.length === 2) : [];
+  if (e.length >= 2) return e.slice().sort((x, y) => x[0] - y[0]);
+  return [[b.piso, b.pago_en_piso], [100, b.pago_en_meta], [b.sobre, b.tope]];
+}
+
+/* El tramo gradual. Bajo el primer punto no hay gradual —lo que se pague ahí
+   lo decide la llave, no la escala—; sobre el último se paga el último valor,
+   que es lo que hace del tope un tope. */
+function tramoIncentivo(pct, params){
+  const e = escalaDe(params);
+  if (!(pct >= e[0][0])) return 0;
+  for (let i = 1; i < e.length; i++){
+    if (pct <= e[i][0]){
+      const [x0, y0] = e[i-1], [x1, y1] = e[i];
+      return x1 === x0 ? y1 : y0 + (pct - x0) / (x1 - x0) * (y1 - y0);
+    }
+  }
+  return e[e.length - 1][1];
+}
+const nombreTramo = (pct, params) => { const e = escalaDe(params), b = params || BONO;
+  return !(pct >= e[0][0]) ? "Sin incentivo"
+    : pct < 100    ? "Progresión"
+    : pct < e[e.length - 1][0] ? "Sobrecumplimiento" : "Tope"; };
+
+/* =========================================================================
+   El reporte de avance — el relato vive en la base, los números se calculan
+
+   La presentación que va a BBVA y a Mastercard tenía dos mitades que se
+   armaban en lugares distintos: los números, que salen de acá, y el relato
+   —hitos, lecturas, notas, metas—, que vivía en un script que solo se podía
+   correr desde afuera. Con reporte_config el relato pasa a ser un dato: se
+   edita en Ajustes, queda en la bitácora, y el reporte se arma leyendo la
+   tabla. Lo que se calcula no se escribe; lo que se escribe no se calcula.
+
+   REPORTE_DEF es la red de seguridad: si la tabla no respondió —o si alguien
+   entra en modo demostración— el reporte igual se arma, con el relato con el
+   que arrancó el proyecto, en vez de mostrar una pantalla vacía.
+   ========================================================================= */
+const REPORTE_DEF = {
+  proyecto: {
+    cliente:"Campaña BBVA Adquirencia",
+    subtitulo:"Reporte de avance del proyecto",
+    inicio:PROYECTO.inicio, fin:PROYECTO.fin,
+    base_comercios:0, base_facturacion:0
+  },
+  hitos: [],
+  relato: { hitos:"" },
+  /* Los acuerdos vigentes, en una sola lámina. Viven acá y no en el código
+     porque son texto que cambia cada vez que hay una reunión, y porque quien
+     los acordó tiene que poder corregirlos sin pedirle a nadie que toque un
+     archivo. Una columna sin puntos se muestra igual, con su pendiente
+     escrito: un acuerdo que falta traer es información, no un hueco. */
+  acuerdos: [
+    { titulo:"Con Ana María", color:"azul2", puntos:[],
+      pendiente:"Faltan traer los acuerdos de esa reunión a este marco" },
+    { titulo:"Con Gerald", color:"azul", puntos:[
+      "Tres vistas separadas: retención, leads dentro de cartera y leads fuera",
+      "El funnel de cada vista, con los cuatro ejecutivos",
+      "Las visitas con visibilidad propia",
+      "Foco principal en retención"], pendiente:"" },
+    { titulo:"Definido hoy", color:"naranja", puntos:[
+      "Hay gestión cuando ya hubo un intento de contacto con el cliente",
+      "Solo se contabilizan las respaldadas por correo al cliente, con nosotros en copia",
+      "Llamada, WhatsApp y reuniones se pueden usar; el correo es el respaldo formal",
+      "Un resumen de dónde se concentran gestiones y visitas",
+      "Una sola presentación para gestión interna, BBVA y Mastercard"], pendiente:"" }
+  ],
+  cierre_acuerdos:"El acuerdo que ordena a los otros: esta misma presentación se usa para la gestión interna y para los reportes a BBVA y Mastercard. No se mantienen formatos paralelos.",
+  lecturas: { embudo:[] },
+  notas: { hitos:"", embudo:"", kpis:"" },
+  objetivos: [
+    { id:"facturacion",  nombre:"Facturación", peso:50, color:"naranja",
+      tipo:"monto",  meta_pct:15, etiqueta_meta:"Meta al cierre  ·  +15%" },
+    { id:"reactivacion", nombre:"Reactivación del portafolio", peso:30, color:"azul",
+      tipo:"conteo", meta:151, etiqueta_meta:"Meta al cierre  ·  +18 p.p." },
+    { id:"venta",        nombre:"Venta · afiliación nueva", peso:20, color:"verde",
+      tipo:"conteo", meta:140, etiqueta_meta:"Meta al cierre  ·  7 por ejecutivo/mes" }
+  ]
+};
+let REPORTE = JSON.parse(JSON.stringify(REPORTE_DEF));
+
+const COLORES = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s1)","var(--s2)"];
+
+const rubroLabel = c => {
+  if (!c) return "";
+  if (c.rubro === "otro" && c.rubro_otro) return c.rubro_otro;
+  const r = RUBROS.find(x => x.codigo === c.rubro);
+  return r ? r.nombre : (c.rubro || "");
+};
+
+/* Acá está la defensa entera del cambio, y conviene entender por qué está acá
+   y no repartida por veinte pantallas.
+
+   Todo lo que la campaña cuenta —gestiones, cobertura, puntualidad, visitas
+   efectivas, tasa de respuesta, el ritmo semanal, la llave del bono— sale de
+   `DB.todos()`. Si las coordinaciones con BBVA entraran por ahí, cada uno de
+   esos números subiría solo de un día para otro y nadie sabría por qué.
+
+   Por eso `todos()` sigue significando exactamente lo que significaba: las
+   gestiones con el cliente. Las coordinaciones con el banco entran por
+   `bbva()`, que es una puerta nueva. Ninguna pantalla vieja cambió de sentido;
+   las nuevas piden lo que necesitan. */
+const DB = {
+  /* La misma distinción que en CLIENTES, y por la misma razón.
+
+     `visitas` y `crudo` son la POBLACIÓN —lo que cuentan el Panel, el bono,
+     el reporte y el Excel— y no contienen ni una gestión del apartado de
+     pruebas. `todo` las tiene todas, y de ahí leen las consultas por
+     comercio, que necesitan ver la línea de tiempo completa de la ficha que
+     se está mirando, sea de la cartera o del apartado. */
+  visitas: [],
+  crudo: [],
+  todo: [],
+  todos(){ return this.visitas; },
+  bbva(){ return this.crudo.filter(esAlBanco); },
+  /* Los dos montones se parten por DESTINATARIO y no por la columna `Con`.
+     Suena a detalle y no lo es: hasta el 23/08/2026 se partían por `Con`, y
+     los 183 correos que la migración 59 reclasificó —los que iban al
+     funcionario de BBVA anotados como correo al cliente— llevan
+     destinatario='bbva' pero conservaron con='CLIENTE'.
+
+     El efecto era que esas 183 gestiones se caían de los DOS lados: llegaban
+     por `delCliente` pero `esGestionCliente` las descartaba por su
+     destinatario, y `bbvaDe` no las veía porque miraba `Con`. Desaparecían.
+     En la descarga se veía así: 19 comercios con coordinación registrada
+     cuando hay 170.
+
+     `destinatarioDe` es la única definición de a quién fue cada gestión.
+     Partir por otra cosa era tener dos, y dos definiciones dan dos números. */
+  delCliente(cid){
+    return this.todo.filter(r => esAlCliente(r) && String(r.Customer_id) === String(cid))
+                    .sort((a,b) => ts(b) - ts(a));
+  },
+  /* Las coordinaciones de un comercio, de la más vieja a la más nueva: acá el
+     orden importa al revés que en las gestiones, porque «primer contacto» y
+     «segundo contacto» son posiciones en el tiempo. */
+  bbvaDe(cid){
+    return this.todo.filter(r => esAlBanco(r) && String(r.Customer_id) === String(cid))
+                    .sort((a,b) => ts(a) - ts(b));
+  },
+  /* La ficha del comercio muestra una sola historia, con las dos clases
+     mezcladas en orden y distinguidas en pantalla. */
+  historiaDe(cid){
+    return this.todo.filter(r => String(r.Customer_id) === String(cid)).sort((a,b) => ts(b) - ts(a));
+  },
+  buscar(id){ return this.todo.find(r => r._id === id) || null; },
+  /* `todo` manda: `crudo` y `visitas` se derivan de él, siempre por acá.
+
+     Tres arreglos que tienen que concordar son una fábrica de errores —basta
+     que alguien asigne uno solo y las consultas por comercio dejan de
+     encontrar nada, sin ruido—. Por eso no se asignan por separado en ningún
+     sitio: se siembra la lista completa y las otras dos salen de ella. */
+  /* Y la población se parte igual. Hasta el 23/08/2026 `visitas` se armaba con
+     `Con !== "BBVA"`, así que los 183 correos al funcionario —destinatario
+     'bbva', con 'CLIENTE'— entraban al montón del cliente y de ahí al bono, al
+     reporte y al libro: contaban como cobertura y como gestión de campo un
+     correo que nunca salió al comercio. Del otro lado `bbva()` no los veía, así
+     que la hoja de coordinaciones traía 25 filas donde hay 244.
+
+     Es la misma corrección que ya tenían `delCliente` y `bbvaDe`, aplicada
+     donde se decide quién cobra. */
+  sembrar(filas){
+    this.todo    = filas;
+    this.crudo   = this.todo;
+    this.visitas = this.crudo.filter(esAlCliente);
+  },
+  cargar(filas){ this.sembrar(filas.map(deDB)); }
+};
+
+/* ---- Lo que se deriva de la coordinación con BBVA -----------------------
+   Nada de esto se teclea: sale de la línea de tiempo. Si mañana alguien
+   registra una insistencia, estos números cambian solos. */
+/* Lo que el banco tiene de este comercio, separando dos cosas que hasta el
+   23/08/2026 estaban juntas y no son lo mismo:
+
+     · una COORDINACIÓN, que alguien hizo y registró, y
+     · el SELLO DEL ALTA, que es el medio que el ejecutivo declaró al crear la
+       ficha y que una migración convirtió en una fila con fecha.
+
+   Contarlas juntas es lo que hacía que 645 comercios —de 843— mostraran una
+   coordinación con BBVA que nadie hizo, y que 494 dijeran «BBVA respondió»
+   cuando la respuesta la puso la migración, no el banco. Con una fila real hay
+   28. La tarjeta llegaba a decir «1er contacto: Correo a BBVA · 1 contacto sin
+   respuesta» de un comercio al que nadie le escribió nunca.
+
+   El sello no se tira: para la mayoría de las fichas es el único rastro que
+   hay del alta. Pero se muestra como lo que es —una declaración— y no suma en
+   ningún contador. */
+function bbvaDe(cid){
+  const todas = DB.bbvaDe(cid);
+  const medioAlta = (byId[String(cid)] || {}).contacto_bbva || "";
+  const co = todas.filter(r => !esReconstruida(r));
+  const sello = todas.find(esReconstruida) || null;
+  const resp = co.find(r => respondioBBVA(r.Resultado)) || null;
+  const chat = [...co].reverse().find(r => exigeRespaldo(r.Tipo_Contacto));
+  return {
+    n: co.length,
+    contactos: co,
+    primero: co[0] || null,
+    segundo: co[1] || null,
+    respondio: !!resp,
+    respuesta: resp,
+    fechaRespuesta: resp ? resp.Fecha_Contacto : "",
+    /* Cuántos intentos hicieron falta hasta que el banco contestó. Es el
+       número que dice si el problema es de Stratis o del banco. */
+    intentosHasta: resp ? co.indexOf(resp) + 1 : co.length,
+    /* Chat sin correo de respaldo: la constancia que la campaña exige y que
+       hoy no se estaba pidiendo en ninguna parte. */
+    /* El respaldo escrito puede ser el correo al ejecutivo o el correo al
+       cliente con copia al banco: los dos dejan constancia consultable, que
+       es lo único que la campaña exige después de un chat. */
+    /* Se mira la ÚLTIMA coordinación que pide respaldo, no la primera. Con un
+       solo medio en la lista daba igual; con cuatro, mirar la primera dejaría
+       pasar una llamada de ayer solo porque hubo un correo la semana pasada. */
+    faltaRespaldo: !!chat && !co.some(r =>
+      (r.Tipo_Contacto === "bbva_correo" || r.Tipo_Contacto === "bbva_correo_cliente")
+      && ts(r) >= ts(chat)),
+    /* Cuál fue, para poder nombrarla. */
+    medioSinRespaldo: chat ? (nomMedioBBVA(chat.Tipo_Contacto) || chat.Tipo_Contacto) : "",
+    fechaSinRespaldo: chat ? chat.Fecha_Contacto : "",
+    ultima: co.length ? co[co.length - 1] : null,
+    /* Lo que se declaró al dar de alta, aparte y sin sumar. `selloAmbiguo` es
+       el caso que hay que preguntar: el alta dice «correo» y nadie ha dicho
+       todavía si fue al banco o al cliente con copia. */
+    sello,
+    reconstruidas: todas.filter(esReconstruida).length,
+    selloAmbiguo: !!sello && !co.length,
+    /* ---- El medio declarado al alta, tratado como lo que es --------------
+       Hasta el 26/08 una ficha sin coordinación registrada era, sin más, un
+       «caso parado hasta coordinar con BBVA». Y eso era falso en la mitad de
+       los casos: el ejecutivo YA había mandado el correo —por eso el alta dice
+       «correo»—, solo que ese correo no quedó como una gestión aparte. La
+       pantalla le pedía hacer de nuevo lo que ya había hecho, y le escondía
+       las dos salidas que sí necesitaba.
+
+       Así que el medio del alta decide, y la regla es la de la campaña:
+
+         · Declarado por CORREO —al banco o al cliente con copia— hay
+           constancia escrita. El caso no está parado: está esperando al banco,
+           y las dos salidas se habilitan igual que con una coordinación
+           registrada.
+         · Declarado por cualquier otro medio —llamada, WhatsApp, chat, visita
+           a la agencia— no hay nada que otro pueda consultar. Ahí sí falta
+           algo, y lo que falta es el correo de confirmación, no «coordinar».
+
+       Las dos ramas solo aplican mientras no haya ninguna coordinación
+       registrada: en cuanto la hay, manda la coordinación. */
+    altaCorreo:    (medioAlta === "CORREO" || medioAlta === "CORREO_CC") && !co.length,
+    altaOtroMedio: !!medioAlta && medioAlta !== "CORREO" && medioAlta !== "CORREO_CC" && !co.length,
+    medioAlta
+  };
+}
+
+/* ---- Conversión entre la fila de Postgres y el objeto de la interfaz ---- */
+function deDB(f){
+  const c = byId[String(f.customer_id)] || {};
+  return {
+    _id: f.id,
+    Fecha_Contacto: f.fecha_contacto, Hora_Contacto: (f.hora_contacto || "").slice(0,5),
+    Ejecutivo: f.ejecutivo, Correo_Stratis: f.correo_stratis,
+    Customer_id: f.customer_id,
+    Nombre_Comercio: c.nombre_comercio || "", Rubro: rubroLabel(c), Distrito: c.distrito || "",
+    Con: f.con === "BBVA" ? "BBVA" : "CLIENTE",
+    Proposito: f.proposito || "",
+    /* Las coordinaciones que el CRM dedujo del histórico al migrar, no las que
+       alguien registró. Se marcan para que nunca se lean como declaradas. */
+    Inferida: f.inferida === true,
+    /* A quién fue dirigida de verdad. Lo corrige la migración 59 para las 186
+       gestiones anotadas como correo al cliente cuyo comentario dice que el
+       correo fue al funcionario del banco. Si la fila todavía no lo trae,
+       `destinatarioDe` lo recalcula con la misma regla. */
+    Destinatario: f.destinatario || "",
+    Tipo_Contacto: f.tipo_contacto,
+    Resultado: f.resultado || "efectivo",
+    Visita_Presencial: f.visita_presencial, Visita_virtual: f.visita_virtual,
+    Cumple_Visita: f.cumple_visita, Fecha_Visita_Actualizada: f.fecha_visita_actualizada,
+    Ubicacion: f.ubicacion || "",
+    Ubicacion_Verificada: f.ubicacion_verificada === true,
+    Ubicacion_Exenta: f.ubicacion_exenta === true,
+    Ubicacion_Exenta_Motivo: f.ubicacion_exenta_motivo || "",
+    /* La ruta se sigue leyendo porque sigue en la base y en la exportación
+       interna; la imagen ya no se trae ni se muestra en ninguna pantalla. */
+    Evidencia_Path: f.evidencia_path || "",
+    Calificacion: f.calificacion || "",
+    Comentario_Ejecutivo: f.comentario_ejecutivo || "", Comentario_Cliente: f.comentario_cliente || "",
+    /* «En qué quedó» vive aparte desde la migración 63. Antes 174 gestiones
+       guardaban ahí «A la espera de respuesta» y el CRM lo mostraba como
+       «Lo que dijo el cliente», en gestiones donde el cliente no había dicho
+       nada. Comentario_Cliente es ahora solo la voz del cliente. */
+    Espera: f.espera || "",
+    /* El correo del destrabe: se le escribió al cliente y se copió al
+       ejecutivo de BBVA. Es una gestión AL CLIENTE —llega al cliente— que
+       además deja rastro del lado del banco. Por eso es una marca sobre el
+       correo y no un medio aparte: como medio «bbva_» habría contado como
+       coordinación con el banco y habría dejado de contar como contacto. */
+    Copia_BBVA: f.copia_bbva === true,
+    /* Cuándo se grabó, que no es lo mismo que cuándo se gestionó: la distancia
+       entre ambas fechas dice si el CRM se usa en campo o se llena después. */
+    Creado_En: f.creado_en || "",
+  };
+}
+
+/* Días entre el día que se gestionó y el día que se registró */
+const demoraRegistro = r => {
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  const c = String(r.Creado_En || "").slice(0,10);
+  if (!f || !c) return 0;
+  const d = (new Date(c) - new Date(f)) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+};
+
+function aDB(f, c){
+  const base = {
+    customer_id: String(c.customer_id),
+    correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+    fecha_contacto: f.Fecha_Contacto, hora_contacto: f.Hora_Contacto,
+    tipo_contacto: f.Tipo_Contacto,
+    resultado: f.Resultado || "efectivo",
+    ubicacion: f.Ubicacion || null,
+    ubicacion_verificada: !!f.Ubicacion_Verificada,
+    evidencia_path: f.Evidencia_Path || null,
+    calificacion: f.Calificacion || null,
+    comentario_ejecutivo: f.Comentario_Ejecutivo,
+    comentario_cliente: f.Comentario_Cliente || null,
+    espera: f.Espera || null,
+    copia_bbva: !!f.Copia_BBVA
+  };
+  return base;
+}
+
+/* =========================================================================
+   Utilidades de fecha
+   ========================================================================= */
+const TZ = "America/Lima";
+const pad = n => String(n).padStart(2,"0");
+const ahoraLima = () => new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+const fmtLima = d => d.toLocaleString("es-PE", { timeZone: TZ });
+const hoyISO = () => { const d = ahoraLima(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const horaISO = () => { const d = ahoraLima(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const parseDT = (f,h) => new Date(`${f}T${(h||"00:00")}:00`);
+const ts = r => parseDT(r.Fecha_Contacto, r.Hora_Contacto).getTime();
+const fmtFecha = f => { if(!f) return "—"; const [y,m,d] = String(f).slice(0,10).split("-"); return `${d}/${m}/${y}`; };
+const fmtDT = (f,h) => `${fmtFecha(f)}${h ? " · " + h : ""}`;
+
+/* Encabezado de día para la bitácora de gestiones: «martes 4 de agosto» */
+const DIAS_ES = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+function fechaLarga(iso){
+  const s = String(iso || "").slice(0,10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "—";
+  const [y,m,d] = s.split("-").map(Number);
+  const f = new Date(y, m-1, d);
+  const hoy = hoyISO();
+  if (s === hoy) return "hoy";
+  const ayer = new Date(new Date(hoy).getTime() - 86400000).toISOString().slice(0,10);
+  if (s === ayer) return "ayer";
+  const base = `${DIAS_ES[f.getDay()]} ${d} de ${MESES_ES[m-1]}`;
+  return s.slice(0,4) === hoy.slice(0,4) ? base : `${base} de ${y}`;
+}
+const isoDe = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+
+/* =========================================================================
+   REGLAS DE NEGOCIO
+   Las autoritativas viven en Postgres. Estas son el espejo en pantalla.
+   ========================================================================= */
+const RULES = {
+  /* Espejo de fn_reglas_interaccion. La visita PRESENCIAL cumple solo si queda
+     respaldada —GPS, o exención escrita por supervisión con su motivo—, porque
+     la visita cumplida es justamente lo que se le evidencia al banco y una sin
+     respaldo no se puede defender. La VIRTUAL no entra: no hay a dónde ir, y
+     pedirle coordenadas a una videollamada es pedir un dato que no significa
+     nada.
+
+     Sin respaldo la gestión igual se guarda: queda como intento. El trabajo se
+     registra; lo que no queda es la visita.
+
+     `r` es opcional para no romper a quien solo pregunta por el medio y el
+     resultado; cuando no llega, se responde como antes. */
+  cumpleVisita(id, resultado, r){
+    const t = tipoById(id);
+    if (!(t && t.cumple && esEfectivo(resultado || "efectivo"))) return "No";
+    if (!r || t.modo !== "presencial") return "SI";
+    const respaldada = r.Ubicacion_Verificada === true || r.Ubicacion_Exenta === true;
+    return respaldada ? "SI" : "No";
+  },
+  visitaPresencial(id){ const t = tipoById(id); return (t && t.modo === "presencial") ? "SI" : "No"; },
+  visitaVirtual(id){ const t = tipoById(id); return (t && t.modo === "virtual") ? "SI" : "No"; },
+  requiereUbicacion(id){ const t = tipoById(id); return !!(t && t.gps); },
+
+
+  /* Resumen por cliente. Cada interacción cuenta como intento; solo cuentan
+     como respuesta aquellas en las que el cliente contestó. Nada de esto dice
+     si se retuvo: eso es el cierre de la gestión. */
+  recomputarBase(cid){
+    const c = byId[String(cid)];
+    if (!c) return null;
+    /* La historia entera: de acá salen los tres montones —lo que se le hizo al
+       comercio, lo que se coordinó con el banco y lo que fabricó la migración—
+       y cada uno se cuenta aparte. Tomar solo `delCliente` dejaría los
+       contadores del banco en cero. */
+    const regs = DB.historiaDe(cid);
+    /* Lo que se cuenta es lo que un ejecutivo le hizo AL COMERCIO. Las filas
+       reconstruidas y las coordinaciones con el banco viajan aparte: siguen
+       disponibles, pero no engordan el contador de gestiones ni la cobertura. */
+    const gest = regs.filter(esGestionCliente);
+    const b = {
+      Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
+      Fecha_Visita_Actualizada:"",
+      Comentario_Ejecutivo:"", Comentario_Cliente:"", Espera:"",
+      _n: gest.length,
+      _intentos: gest.length,
+      _efectivos: gest.filter(r => esEfectivo(r.Resultado)).length,
+      /* ¿Este comercio cuenta como gestionado? Regla del 27/08 completa: la
+         ACTIVIDAD MÁS RECIENTE tiene que ser un hecho con resultado —de
+         cualquiera de los dos montones, al comercio o al banco— o el cierre
+         registrado en la ficha. `comercioGestionado` es la misma función que
+         contesta en el reporte: una sola definición, un solo número.
+
+         Acá decía `regs.some(...)` hasta el 27/08 por la tarde. Preguntaba
+         «¿alguna vez?» donde la regla pregunta «¿en qué quedó?», y por eso la
+         Cartera de Vanessa mostraba 6 pendientes contra los 38 del embudo. */
+      _gestionado: comercioGestionado(c, regs, hoyISO()),
+      /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
+      _banco: regs.filter(esGestionBanco).length,
+      _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
+      _reconstruidas: regs.filter(esReconstruida).length,
+      _todas: regs.length,
+      _ultimo:null
+    };
+    if (!gest.length){
+      /* Sin gestiones al comercio no hay nada que resumir de él, pero sí puede
+         haber última coordinación con el banco: se guarda para la ficha. */
+      b._ultimo = regs.filter(r => !esReconstruida(r))[0] || null;
+      c._base = b; return b;
+    }
+
+    const ult = gest[0];
+    b._ultimo = ult;
+    b.Contactado = b._efectivos > 0 ? "Si" : "Intentado";
+    b.Visita_Presencial = ult.Visita_Presencial || "No";
+    b.Visita_Virtual    = ult.Visita_virtual    || "No";
+    b.Comentario_Ejecutivo = ult.Comentario_Ejecutivo || "";
+    b.Comentario_Cliente   = ult.Comentario_Cliente   || "";
+    b.Espera               = ult.Espera               || "";
+    /* Cuántas veces se destrabó el caso escribiéndole al cliente con copia
+       al banco. Es el paso que antes no dejaba rastro. */
+    b._destrabes = gest.filter(traeDatosDelCliente).length;
+
+    const cumplidas = gest.filter(r => r.Cumple_Visita === "SI");
+    if (CONFIG.cumpleVisitaHistorico){
+      b.Cumple_Visita = cumplidas.length ? "SI" : "No";
+      b.Fecha_Visita_Actualizada = cumplidas.length ? cumplidas[0].Fecha_Contacto : "";
+    } else {
+      b.Cumple_Visita = ult.Cumple_Visita || "No";
+      b.Fecha_Visita_Actualizada = ult.Cumple_Visita === "SI" ? ult.Fecha_Contacto : "";
+    }
+
+    c._base = b;
+    return b;
+  }
+};
+
+/* =========================================================================
+   Estado
+   ========================================================================= */
+/* Cuántas líneas de bitácora se pintan de golpe. El recuadro se desliza por
+   dentro; esto es para que el navegador no arme miles de filas de una vez. */
+const LOTE_BIT = 30;
+
+const S = {
+  user:null, tab:"cartera", cid:null, editId:null, form:null, formCli:null, editCli:null,
+  q:"", fContacto:"todos", fRubro:"todos", fEstadoCli:"todos", fEjecutivo:"todos", fDistrito:"todos",
+  qReg:"", fResultado:"todos", fMedio:"todos", fEjecReg:"todos", limiteReg:40,
+  fEjecAgenda:"todos",   // Agenda: por ejecutivo, solo para supervisión
+  /* Actividad del equipo: el flujo de todo lo que se registra, solo mando */
+  fActRango:"hoy", fActEjec:"todos", fActTipo:"todos", fActDesfase:false,
+  qAct:"", limiteAct:120,
+  fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
+  qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
+  mesPanel:"",   /* mes de la cartera asignada, en Ajustes; vacío = el actual */
+  pBono:"",      /* periodo del bono; vacío = el que corre */
+  vPanel:"bono", /* el reloj del Panel: bono | mes | proyecto */
+  pParam:"",     /* qué versión de los parámetros se está editando */
+  pPanel:"",     /* qué periodo o mes; vacío = el que corre */
+  verTodo:false, /* la tabla por ejecutivo, con todas sus columnas */
+  comoEjec:"",   /* supervisión mirando el CRM con los ojos de un ejecutivo */
+  dispFecha:"", dispDesde:"15:00", dispHasta:"16:00",  /* consulta de disponibilidad */
+  calMes:"", calDia:"", qCal:"", calVista:"mes",       /* el calendario de visitas */
+  repEdit:"",    /* qué bloque del relato se está editando en Ajustes */
+  formBbva:null, /* borrador de la coordinación con el ejecutivo de BBVA */
+  loteBbva:null, /* borrador de la coordinación para varios comercios */
+  filtrosAbiertos:false,        /* los filtros finos de la cartera se piden */
+  fCierre:"todos",              /* retenidos, recuperados, ventas nuevas, perdidos */
+  limite:40, cargando:false
+};
+
+let AUDITORIA = [];
+
+const esc = s => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+const iniciales = n => String(n||"").trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase();
+/* \b de JavaScript no entiende acentos y partía palabras como "doña" en
+   "DoÑA". Capitalizamos solo después de un separador real. */
+/* Montos de viáticos, siempre en soles */
+const soles = n => (n === null || n === undefined || n === "" || isNaN(n)) ? ""
+  : "S/ " + Number(n).toLocaleString("es-PE", { minimumFractionDigits:2, maximumFractionDigits:2 });
+
+const titulo = s => String(s||"").toLowerCase()
+  .replace(/(^|[\s\-—–/(.,;:"'¿¡])([a-záéíóúüñ])/g, (m, sep, l) => sep + l.toUpperCase());
+const userColor = n => { const i = USUARIOS.findIndex(u => u.nombre === n); return COLORES[i < 0 ? 0 : i % COLORES.length]; };
+
+/* Quién es el dueño de un correo. Se usa en la bitácora: ahí lo único fiable
+   sobre QUIÉN hizo el cambio es el correo con el que se hizo. */
+function nombrePorCorreo(correo){
+  const c = String(correo || "").trim().toLowerCase();
+  if (!c) return "";
+  const u = USUARIOS.find(x => String(x.correo || "").toLowerCase() === c);
+  return u ? u.nombre : correo;
+}
+const nombreCliente = c => c ? (c.nombre_comercio || rubroLabel(c) || "Comercio " + c.customer_id) : "";
+
+/* ---- Mirar el CRM con los ojos de un ejecutivo --------------------------
+ *
+ * Supervisión elige a alguien del equipo y ve exactamente lo que ese ejecutivo
+ * ve: su cartera, su avance, sus gestiones. Sirve para dos cosas que antes
+ * obligaban a pedirle una captura de pantalla: entender por qué dice que no
+ * encuentra algo, y corregirle una ficha sin buscarla entre ochocientas.
+ *
+ * Lo que cambia es QUÉ SE VE, nunca QUÉ SE PUEDE HACER. Los permisos siguen
+ * siendo los de quien inició sesión: si Jose corrige una gestión desde acá, el
+ * cambio queda en la bitácora a nombre de Jose y la gestión sigue siendo del
+ * ejecutivo. No es suplantar a nadie; es ponerse a su lado. */
+const ejecObservado = () => {
+  if (!S.user || S.user.rol === "Ejecutivo" || !S.comoEjec) return null;
+  return USUARIOS.find(u => u.correo === S.comoEjec) || null;
+};
+/* La vista es de campo cuando quien mira ES un ejecutivo, o cuando supervisión
+   pidió mirar como uno. Decide contenido, no permisos. */
+const vistaDeCampo = () => esDeCampo() || !!ejecObservado();
+
+function cartera(){
+  if (!S.user) return [];
+  if (S.user.rol === "Ejecutivo") return CLIENTES;      // la base ya filtró por RLS
+  const q = ejecObservado();
+  if (q) return CLIENTES.filter(c => c.asignado_correo === q.correo);
+  if (S.fEjecutivo !== "todos")   return CLIENTES.filter(c => c.asignado === S.fEjecutivo);
+  return CLIENTES;
+}
+function puedeEditar(reg){
+  if (!S.user) return false;
+  return S.user.rol !== "Ejecutivo" || reg.Correo_Stratis === S.user.correo;
+}
+function esMiCliente(c){
+  return !!(S.user && c && c.asignado_correo === S.user.correo);
+}
+
+/* Quién trabaja la calle. El Analista y el Manager supervisan la campaña:
+   ven todo, exportan todo y gestionan el equipo, pero no dan de alta
+   comercios ni registran gestiones. La base también lo impide. */
+function esDeCampo(){
+  return !!(S.user && S.user.rol === "Ejecutivo");
+}
+
+/* ---- El perfil de BBVA --------------------------------------------------
+
+   Un cuarto rol, y el primero que no es de Stratis. El banco entra a ver el
+   trabajo del equipo —la cartera, las fichas, las gestiones, el calendario y
+   el tablero— y nada más. Tres cosas quedan fuera y por motivos distintos:
+
+     · INCENTIVOS, porque es la retribución de personas de otra empresa. No es
+       asunto del cliente y no hay ninguna versión de esto en la que deba
+       serlo.
+     · REPORTE, porque es material que se prepara PARA el banco, con un corte
+       y una narrativa decididos. Que lo vea a medio armar no ayuda a nadie.
+     · AJUSTES, porque ahí viven los parámetros, el equipo y las descargas.
+
+   Y no escribe NADA. Ni una gestión, ni una ficha, ni una cita, ni una
+   corrección. La razón no es desconfianza: es que el CRM mide el trabajo de
+   Stratis, y un dato escrito por el cliente dentro de esa medición la vuelve
+   indefendible ante el propio cliente. Lo que el banco ve, lo escribió el
+   equipo.
+
+   `soloLectura()` se pregunta en el render de cada botón que escribe, y la
+   base lo repite con sus propias políticas: la pantalla puede equivocarse, la
+   política no. */
+function esBBVA(){
+  return !!(S.user && S.user.rol === "BBVA");
+}
+const soloLectura = () => esBBVA();
+
+/* Las pestañas que este perfil no abre, ni desde el menú ni a mano. */
+/* «Actividad» entró a esta lista el 27/08, el mismo día que se creó. Es la
+   pantalla que muestra quién del equipo registró qué y a qué hora: material
+   de supervisión interna, exactamente lo que no puede ver el cliente. La
+   guarda `soloMando` no alcanzaba —solo aparta al Ejecutivo—, así que sin
+   esta línea el perfil de BBVA la habría tenido desde el primer despliegue.
+   Lo agarró la prueba que cuenta las pestañas de ese perfil. */
+const VEDADAS_BBVA = ["actividad", "bono", "reporte", "ayuda"];
+const puedeVerTab = tab =>
+  !(esBBVA() && (VEDADAS_BBVA.includes(tab) || /^form_/.test(String(tab))));
+
+/* =========================================================================
+   Acceso con enlace mágico y carga de datos desde Supabase
+   ========================================================================= */
+const $ = s => document.querySelector(s);
+
+function configurado(){ return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
+
+async function iniciarSupabase(){
+  if (!configurado()) return false;
+  /* Las lecturas van SIEMPRE a la red, nunca al caché del navegador.
+
+     Sin esto, una pestaña abierta desde ayer sigue mostrando los datos de
+     ayer: el navegador responde el mismo GET desde disco y la aplicación no
+     se entera. Se veía feo de una manera muy concreta —la supervisión abría
+     la ficha de un comercio y contaba dos gestiones donde el ejecutivo veía
+     cuatro— y no había forma de distinguirlo de un problema de permisos.
+
+     Un CRM que enseña el trabajo del equipo no puede servir una foto vieja:
+     esa es exactamente la función que viene a cumplir. */
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
+    global: {
+      /* Solo se toca `cache`. Las cabeceras se dejan EXACTAMENTE como vienen:
+         supabase-js las manda como objeto Headers, y copiarlas con
+         Object.assign devuelve {} —se pierden apikey y Authorization— así que
+         toda consulta salía sin credenciales y el CRM respondía que la cuenta
+         no figuraba entre sus usuarios. */
+      fetch: (entrada, opciones) =>
+        fetch(entrada, Object.assign({}, opciones, { cache: "no-store" }))
+    }
+  });
+  return true;
+}
+
+/* ---- Pantalla de acceso ------------------------------------------------- */
+function renderLogin(estado){
+  const tiles = '<span class="ms-tiles"><i style="background:#f25022"></i><i style="background:#7fba00"></i><i style="background:#00a4ef"></i><i style="background:#ffb900"></i></span>';
+  const cab = `
+    <div class="lg-logo">
+      <div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div>
+    </div>`;
+
+  if (!configurado()){
+    $("#login").innerHTML = `<div class="lg-card">${cab}
+      <div class="err"><b>Falta configurar la conexión.</b><br>
+      Abre este archivo con un editor de texto y completa las dos líneas
+      <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> al inicio del bloque
+      &lt;script&gt;. Las encuentras en tu proyecto Supabase, en
+      <b>Project Settings → API</b>.</div>
+      <div class="note">Mientras tanto puedes revisar la interfaz en modo demostración, con datos de prueba que no salen de este navegador.</div>
+      <button class="btn block" id="demo" style="margin-top:12px">Entrar en modo demostración</button>
+    </div>`;
+    $("#demo").onclick = () => modoDemo();
+    return;
+  }
+
+  const e = estado || {};
+  $("#login").innerHTML = `<div class="lg-card">${cab}
+    ${e.error ? `<div class="err">${e.error}</div>` : ""}
+    <div class="field">
+      <label for="mail">Correo corporativo <span class="hint">— solo @${CONFIG.dominio}</span></label>
+      <input type="email" id="mail" placeholder="nombre.apellido@${CONFIG.dominio}"
+             value="${esc(e.mail || "")}"
+             autocomplete="username" inputmode="email" autocapitalize="off">
+    </div>
+    <div class="field">
+      <label for="clave">Contraseña</label>
+      <input type="password" id="clave" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn block" id="doLogin">${tiles} Entrar al CRM</button>
+    <div class="note" style="margin-top:13px">
+      La sesión queda guardada en este dispositivo por varias semanas, así que en la práctica
+      escribes la contraseña una sola vez. En tu primer ingreso el CRM te pedirá cambiarla
+      por una que solo tú conozcas.
+    </div>
+    <div class="note" style="margin-top:9px">
+      ¿Olvidaste tu contraseña? Escríbele a <b>jose.rios@${CONFIG.dominio}</b> y te asigna una nueva.
+    </div>
+  </div>`;
+
+  const entrarConClave = async () => {
+    const m = ($("#mail").value || "").trim().toLowerCase();
+    const p = $("#clave").value || "";
+    if (!m) return renderLogin({ error:"Escribe tu correo corporativo." });
+    if (!m.endsWith("@" + CONFIG.dominio))
+      return renderLogin({ error:`Acceso restringido a cuentas @${CONFIG.dominio}. El correo “${esc(m)}” no pertenece a Stratis.` });
+    if (!p) return renderLogin({ error:"Escribe tu contraseña.", mail:m });
+
+    $("#doLogin").disabled = true; $("#doLogin").textContent = "Entrando…";
+    const { data, error } = await sb.auth.signInWithPassword({ email:m, password:p });
+    if (error){
+      const msg = error.message || "";
+      if (/invalid login credentials/i.test(msg))
+        return renderLogin({ error:"Correo o contraseña incorrectos. Revisa que no haya quedado un espacio al final.", mail:m });
+      if (/email not confirmed/i.test(msg))
+        return renderLogin({ error:`La cuenta ${esc(m)} todavía no está habilitada. Avísale al administrador.`, mail:m });
+      if (/rate limit|too many/i.test(msg))
+        return renderLogin({ error:"Demasiados intentos seguidos. Espera un minuto y vuelve a intentar.", mail:m });
+      return renderLogin({ error:`No se pudo entrar: ${esc(msg)}`, mail:m });
+    }
+    await entrar(data.session).catch(x => renderLogin({ error:x.message, mail:m }));
+  };
+
+  $("#doLogin").onclick = entrarConClave;
+  $("#mail").onkeydown  = ev => { if (ev.key === "Enter") $("#clave").focus(); };
+  $("#clave").onkeydown = ev => { if (ev.key === "Enter") entrarConClave(); };
+}
+
+/* ---- Cambio de contraseña obligatorio en el primer ingreso -------------- */
+function pantallaClaveInicial(estado){
+  const e = estado || {};
+  $("#login").classList.remove("hidden");
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Crea tu contraseña</h1><p>${esc(S.user ? S.user.correo : "")}</p></div></div>
+    ${e.error ? `<div class="err">${esc(e.error)}</div>` : ""}
+    <div class="note" style="margin-bottom:13px">
+      Esta es la primera vez que entras. Elige una contraseña que solo tú conozcas:
+      la que te dieron deja de funcionar en cuanto guardes esta.
+    </div>
+    <div class="field">
+      <label for="cl1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
+      <input type="password" id="cl1" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="cl2">Repítela</label>
+      <input type="password" id="cl2" autocomplete="new-password">
+    </div>
+    <button class="btn block" id="guardarClave">Guardar y entrar</button>
+    <button class="btn ghost block" id="salirClave" style="margin-top:8px">Cerrar sesión</button>
+  </div>`;
+
+  $("#salirClave").onclick = () => salir();
+  const guardar = async () => {
+    const a = $("#cl1").value || "", b = $("#cl2").value || "";
+    if (a.length < 8) return pantallaClaveInicial({ error:"La contraseña debe tener al menos 8 caracteres." });
+    if (a !== b)      return pantallaClaveInicial({ error:"Las dos contraseñas no coinciden." });
+    $("#guardarClave").disabled = true; $("#guardarClave").textContent = "Guardando…";
+    const { error } = await sb.auth.updateUser({ password:a, data:{ debe_cambiar:false } });
+    if (error) return pantallaClaveInicial({ error:"No se pudo guardar: " + error.message });
+    await abrirApp().catch(x => pantallaClaveInicial({ error:x.message }));
+  };
+  $("#guardarClave").onclick = guardar;
+  $("#cl2").onkeydown = ev => { if (ev.key === "Enter") guardar(); };
+}
+
+/* ---- Entrar pegando el enlace del correo -------------------------------
+   Sirve cuando el enlace abre una página en blanco o con texto: basta con
+   copiar la dirección de la barra del navegador y pegarla aquí. --------- */
+function pantallaPegar(estado){
+  const e = estado || {};
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Pegar el enlace</h1><p>Cuando el enlace no abre la aplicación</p></div></div>
+    ${e.error ? `<div class="err">${esc(e.error)}</div>` : ""}
+    <div class="note" style="margin-bottom:13px">
+      Abre el enlace que te llegó al correo. Si ves una página en blanco o con texto raro,
+      <b>copia la dirección completa de la barra del navegador</b> y pégala aquí.
+    </div>
+    <div class="field">
+      <label>Dirección copiada</label>
+      <textarea id="pegado" placeholder="https://…#access_token=…" style="font-size:13px;min-height:96px"></textarea>
+    </div>
+    <button class="btn block" id="entrarPegado">Entrar</button>
+    <button class="btn ghost block" id="volverLogin" style="margin-top:8px">Volver</button>
+  </div>`;
+  $("#volverLogin").onclick = () => renderLogin();
+  $("#entrarPegado").onclick = async () => {
+    const txt = ($("#pegado").value || "").trim();
+    if (!txt) return pantallaPegar({ error:"Pega la dirección que copiaste." });
+    const frag = txt.includes("#") ? txt.slice(txt.indexOf("#") + 1) : txt;
+    const p = new URLSearchParams(frag.replace(/^\/?\??/, ""));
+    const at = p.get("access_token"), rt = p.get("refresh_token");
+    if (!at || !rt){
+      const err = p.get("error_description") || p.get("error");
+      return pantallaPegar({ error: err
+        ? `El enlace trae un error: ${err.replace(/\+/g," ")}. Pide uno nuevo.`
+        : "Esa dirección no contiene los datos de acceso. Debe incluir “access_token”." });
+    }
+    $("#entrarPegado").disabled = true; $("#entrarPegado").textContent = "Entrando…";
+    const { data, error } = await sb.auth.setSession({ access_token: at, refresh_token: rt });
+    if (error || !data.session) return pantallaPegar({ error: (error && error.message) || "No se pudo abrir la sesión. El enlace pudo vencer." });
+    await entrar(data.session).catch(x => pantallaPegar({ error:x.message }));
+  };
+}
+
+/* ---- Sesión ------------------------------------------------------------- */
+async function comprobarSesion(){
+  if (!sb) return renderLogin();
+  /* Incluso leer la sesión guardada puede quedarse esperando —lo hace contra
+     el servidor cuando el token está por vencer—. Sin límite, el CRM se queda
+     en blanco antes de llegar siquiera a la pantalla de carga. */
+  let session = null;
+  try {
+    const r = await conLimite(sb.auth.getSession(), "tu sesión", 12000);
+    session = ((r || {}).data || {}).session || null;
+  } catch (e){
+    return pantallaFalloCarga(e);
+  }
+  if (!session) return renderLogin();
+  await entrar(session);
+}
+
+async function entrar(session){
+  if (S.entrando || S.user) return;      // evita que se ejecute dos veces
+  S.entrando = true;
+  try {
+    const correo = (session.user.email || "").toLowerCase();
+    pantallaCarga("Verificando tu acceso…");
+    const { data: yo, error } = await conLimite(
+      sb.from("usuarios").select("*").eq("correo", correo).maybeSingle(), "tu usuario");
+    /* Un error de la consulta NO es «esta cuenta no existe». Hasta el 27/08 los
+       dos casos caían en la misma rama: si la consulta fallaba por red, el CRM
+       cerraba la sesión y le decía a la persona que su cuenta no figuraba en la
+       lista. Eso es acusar a alguien de algo que no pasó y encima dejarlo
+       afuera. La falla técnica va a la pantalla de reintento; la sesión se
+       queda como está. */
+    if (error) throw new Error(error.message || "No se pudo verificar tu acceso.");
+    if (!yo || !yo.activo){
+      await sb.auth.signOut();
+      return renderLogin({ error: yo && !yo.activo
+        ? `Tu acceso al CRM está desactivado. Comunícate con el administrador.`
+        : `La cuenta ${esc(correo)} no figura en la lista de usuarios del CRM.` });
+    }
+    S.user = { correo: yo.correo, nombre: yo.nombre_corto || yo.nombre,
+               nombreCompleto: yo.nombre, rol: yo.rol };
+
+    if ((session.user.user_metadata || {}).debe_cambiar) return pantallaClaveInicial();
+    await abrirApp();
+  } catch (e){
+    /* La red de seguridad final. Cualquier cosa que se escape de acá dejaba la
+       pantalla de carga girando sin fin, porque este `try` tenía `finally`
+       pero no `catch`: no había nadie más arriba para atraparla. */
+    S.user = null;
+    pantallaFalloCarga(e);
+  } finally { S.entrando = false; }
+}
+
+async function abrirApp(){
+  /* Si la carga falla, el CRM tiene que DECIRLO.
+   *
+   * Hasta el 27/08 esto era `await cargarDatos()` a secas. `cargarDatos` puede
+   * lanzar —una consulta con error, la sesión caducada— y arriba, en `entrar`,
+   * hay un `try/finally` sin `catch`: la excepción se escapaba hasta el borde
+   * del programa y no la atrapaba nadie. Resultado: la pantalla se quedaba en
+   * «Cargando tu cartera…» con la barra girando para siempre, sin un mensaje,
+   * sin un botón y sin nada en la consola. El usuario no puede distinguir eso
+   * de «está tardando», así que espera, y sigue esperando.
+   *
+   * Peor todavía: `S.user` ya estaba puesto, y la guarda de `entrar` es
+   * `if (S.entrando || S.user) return`. Aunque la red volviera, ningún
+   * reintento hacía nada. La única salida era recargar a mano.
+   *
+   * Ahora el fallo se atrapa, se deja el estado como para volver a intentar, y
+   * se muestra qué pasó con un botón. Una pantalla de carga que no puede
+   * terminar en error no es una pantalla de carga: es una trampa. */
+  try {
+    await cargarDatos();
+  } catch (e){
+    S.user = null; S.entrando = false;
+    return pantallaFalloCarga(e);
+  }
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  S.tab = "cartera"; S.cid = null;
+  render();
+  arrancarSync();
+}
+
+/* La salida del callejón. Dice qué falló, tranquiliza sobre lo guardado —que
+   es la primera pregunta de cualquiera al ver un error de carga— y ofrece el
+   reintento, que ahora sí funciona porque el estado quedó limpio. */
+function pantallaFalloCarga(e){
+  const msg = (e && e.message) || "No se pudo traer la información.";
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo">
+      <div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div>
+    </div>
+    <div class="err"><b>No se pudo cargar tu cartera.</b><br>${esc(msg)}</div>
+    <div class="note">Lo que está registrado no se tocó: esto es un problema para
+      traer la información, no con la información. Vuelve a intentarlo; si se
+      repite, revisa tu conexión y avísale a José.</div>
+    <button class="btn block" id="reintentarCarga" style="margin-top:12px">Volver a intentar</button>
+  </div>`;
+  $("#login").classList.remove("hidden");
+  $("#app").classList.add("hidden");
+  const b = $("#reintentarCarga");
+  if (b) b.onclick = () => { S.user = null; S.entrando = false; comprobarSesion(); };
+}
+
+/* Un `fetch` que no vuelve NUNCA es el peor caso de todos: no lanza, no
+   resuelve, y `Promise.all` se queda esperando en silencio. Sin esto, la
+   pantalla de carga giraba indefinidamente incluso con el `catch` de arriba
+   puesto, porque nunca llegaba a haber un error que atrapar.
+   Cada consulta del arranque lleva su propio límite y dice cuál fue. */
+const LIMITE_CARGA = 20000;
+function conLimite(p, que, ms){
+  let t = null;
+  const corte = new Promise((_, rechazar) => {
+    t = setTimeout(() => rechazar(new Error(
+      `La consulta de ${que} no respondió en ${Math.round((ms || LIMITE_CARGA) / 1000)} segundos.`)),
+      ms || LIMITE_CARGA);
+  });
+  const limpia = x => { clearTimeout(t); return x; };
+  return Promise.race([
+    Promise.resolve(p).then(limpia, e => { clearTimeout(t); throw e; }),
+    corte
+  ]);
+}
+
+function pantallaCarga(msg){
+  $("#login").innerHTML = `<div class="lg-card" style="text-align:center;padding:44px 26px">
+    <div class="lg-mark" style="margin:0 auto 16px">S</div>
+    <div style="font-weight:650">${esc(msg)}</div>
+    <div style="margin-top:16px;height:4px;background:var(--grid);border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:40%;background:var(--brand-2);border-radius:3px;animation:barra 1.1s ease-in-out infinite"></div>
+    </div>
+    <style>@keyframes barra{0%{margin-left:-40%}100%{margin-left:100%}}</style>
+  </div>`;
+  $("#login").classList.remove("hidden");
+}
+
+async function salir(){
+  detenerSync();
+  if (sb) await sb.auth.signOut();
+  S.user = null; S.entrando = false; S.comoEjec = "";
+  CLIENTES = []; byId = {}; DB.visitas = []; DB.crudo = []; DB.todo = [];
+  $("#app").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+  renderLogin();
+}
+
+/* ---- Carga de datos ----------------------------------------------------- */
+
+/* La cartera en memoria: la lista sobre la que se cuenta todo, y su índice.
+ *
+ * `_i` es el orden de llegada; se usa para desempatar sin depender del orden
+ * en que la base devolvió las filas. */
+function repartirComercios(filas){
+  CLIENTES = filas.map((c,i) => Object.assign({ _i:i }, c));
+  byId = {}; CLIENTES.forEach(c => byId[String(c.customer_id)] = c);
+}
+
+
+/* Traer una tabla ENTERA, por tramos.
+ *
+ * PostgREST recorta toda respuesta a un tope de filas fijado en el servidor.
+ * El `.limit(20000)` del cliente no lo levanta: pedir veinte mil y que el
+ * servidor devuelva mil no es un error, es una respuesta corta —y sin
+ * `Content-Range` a la vista, indistinguible de «no hay más».
+ *
+ * Un ejecutivo nunca lo notó porque RLS le devuelve solo sus filas, que no
+ * llegan al tope. Al Analista, que las ve todas, le llegaban las primeras y
+ * el resto no existía para el CRM: por eso su pantalla se quedaba en el 18/08
+ * mientras la base ya tenía gestiones del 21, y por eso un comercio con
+ * cuatro intentos se le veía con dos.
+ *
+ * Se pide por tramos hasta que el servidor devuelve menos de lo pedido. El
+ * orden por llave primaria no es decorativo: sin un orden estable, dos tramos
+ * consecutivos pueden repetir una fila y saltarse otra.
+ */
+async function traerTodo(tabla, llave){
+  const TRAMO = 1000;
+  const TECHO = 200000;              // fusible, por si algo sale mal
+  const filas = [];
+  for (let desde = 0; desde < TECHO; desde += TRAMO){
+    const pedir = () => conLimite(
+      sb.from(tabla).select("*").order(llave, { ascending: true })
+        .range(desde, desde + TRAMO - 1), tabla);
+    /* Un tramo que falla se reintenta UNA vez antes de tumbar la carga entera.
+       En celular, con la señal que hay en calle, una petición suelta se cae
+       cada tanto y no es motivo para dejar a nadie sin CRM. Dos fallos
+       seguidos ya son otra cosa y se reportan como error de verdad. */
+    let data, error;
+    try {
+      ({ data, error } = await pedir());
+      if (error) throw new Error(error.message);
+    } catch (primero){
+      try {
+        await new Promise(r => setTimeout(r, 1200));
+        ({ data, error } = await pedir());
+        if (error) throw new Error(error.message);
+      } catch (segundo){
+        return { data: null, error: { message:
+          `${tabla}: ${(segundo && segundo.message) || "no se pudo traer"}` } };
+      }
+    }
+    const lote = data || [];
+    filas.push(...lote);
+    if (lote.length < TRAMO) break;
+  }
+  return { data: filas, error: null };
+}
+
+async function cargarDatos(){
+  pantallaCarga("Cargando tu cartera…");
+  /* `traerTodo` ya trae su propio límite y su reintento. Las cuatro consultas
+     sueltas van envueltas acá por lo mismo: una sola que no vuelva bastaba
+     para dejar el `Promise.all` colgado y la pantalla girando. */
+  const [cli, inter, usr, cfg, rub, acc, seg] = await Promise.all([
+    traerTodo("clientes", "customer_id"),
+    traerTodo("interacciones", "id"),
+    conLimite(sb.from("usuarios").select("*").order("rol"), "usuarios"),
+    conLimite(sb.from("config").select("*"), "configuración"),
+    conLimite(sb.from("rubros").select("*").order("orden"), "rubros"),
+    conLimite(sb.from("acciones_seguimiento").select("*").order("orden"), "acciones"),
+    traerTodo("seguimientos", "id")
+  ]);
+  /* Los rubros entran a la lista de imprescindibles: si no llegan, la
+     comprobación de sesión de más abajo leería «vacío» y cerraría la sesión de
+     alguien que solo tuvo un problema de red. Echar a la calle a quien tenía
+     la sesión buena es un error más caro que pedirle que reintente. */
+  const fallo = [cli, inter, usr, rub].find(r => r.error);
+  if (fallo) throw new Error(fallo.error.message);
+
+  /* La lista de rubros la ve cualquier sesión válida, siempre. Si vuelve
+     vacía es que la sesión caducó: la base no rechaza con error, simplemente
+     no devuelve nada. Sin esta comprobación el CRM se abría en cero —sin
+     comercios, sin equipo, sin rubros— y parecía que se hubiera borrado todo. */
+  if (!(rub.data || []).length){
+    await sb.auth.signOut();
+    S.user = null;
+    throw new Error("Tu sesión caducó. Vuelve a entrar con tu correo y contraseña.");
+  }
+
+  RUBROS = rub.data || [];
+  ACCIONES = acc.data || [];
+  SEGUIMIENTOS = seg.data || [];
+  repartirComercios(cli.data || []);
+  USUARIOS = (usr.data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
+    nombreCompleto: u.nombre, correo:u.correo, rol:u.rol, activo:u.activo }));
+  (cfg.data || []).forEach(({clave, valor}) => {
+    if (clave === "cumple_visita_historico") CONFIG.cumpleVisitaHistorico = valor === "true";
+    if (clave === "dominio_permitido")     CONFIG.dominio = valor;
+    if (clave === "edicion_libre_hasta")   EDICION_HASTA = valor;
+    /* El interruptor del flujo BBVA. Vive en la base a propósito: así la hora
+       del cambio se decide sin volver a publicar la app, y si algo no cuadra
+       se corre la fecha en vez de tener que revertir una publicación. */
+    if (clave === "flujo_bbva_desde")      CONFIG.flujoBbvaDesde = valor;
+  });
+
+  DB.cargar(inter.data || []);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  await cargarAuditoria();
+  await cargarMetas();
+  /* Los parámetros del bono se cargaban recién con la primera sincronización.
+     Mientras tanto el CRM calculaba con los valores del documento, que hasta
+     ahora eran los mismos. Con versiones vigentes ya no da igual: si alguien
+     entra el 19 de octubre, tiene que ver la revisión de octubre desde el
+     primer render, no la de agosto. */
+  await cargarFacturacion();
+  await cargarReporte();
+}
+
+/* Cartera asignada por mes. La base filtra sola: el ejecutivo recibe solo la
+   suya, el Analista y el Manager las de todos. */
+/* La agenda cambia todo el día: se recarga con cada sincronización */
+async function cargarSeguimientos(){
+  if (!S.user || S.demo) return;
+  /* Si esto falla no se cae la sincronización entera: la agenda es una
+     ayuda, no el corazón del CRM. Se queda con lo último que tenía. */
+  try {
+    const [acc, seg] = await Promise.all([
+      sb.from("acciones_seguimiento").select("*").order("orden"),
+      traerTodo("seguimientos", "id")
+    ]);
+    if (!acc.error) ACCIONES = acc.data || [];
+    if (!seg.error) SEGUIMIENTOS = seg.data || [];
+  } catch (e){ /* sin agenda, pero con CRM */ }
+}
+
+/* La facturación la carga el Analista a mano y los parámetros del modelo
+   viven en config. Ninguno de los dos lo ve el ejecutivo: la consulta
+   simplemente vuelve vacía por RLS y la pestaña no existe para él. */
+async function cargarFacturacion(){
+  if (!S.user || S.demo) return;
+  try {
+    const [fac, base, par, cie] = await Promise.all([
+      sb.from("facturacion").select("*"),
+      sb.from("facturacion_base").select("*"),
+      sb.from("bono_parametros").select("*").order("vigente_desde"),
+      sb.from("periodos_cerrados").select("*").order("cerrado_en")
+    ]);
+    if (!fac.error)  FACTURACION = fac.data || [];
+    if (!base.error) FACT_BASE = base.data || [];
+    if (!cie.error)  CIERRES_PERIODO = cie.data || [];
+    if (!par.error && (par.data || []).length){
+      PARAMS = par.data.map(x => ({ vigente_desde: String(x.vigente_desde),
+        valor: typeof x.valor === "string" ? JSON.parse(x.valor) : (x.valor || {}),
+        nota: x.nota, creado_por: x.creado_por, creado_en: x.creado_en }));
+    }
+    /* BONO es el atajo para el periodo que corre: lo usan los formularios y
+       los textos de ayuda. Los cálculos de un periodo piden paramsDe(p). */
+    BONO = paramsDe(periodoHoy());
+  } catch (e){ /* sin incentivos, pero con CRM */ }
+}
+
+/* El relato del reporte. Solo lo devuelve la base a Analista y Manager; para
+   un ejecutivo la consulta vuelve vacía y la pestaña no existe. Si algún
+   bloque falta o falla, se queda el de REPORTE_DEF: el reporte se arma igual,
+   con el relato de arranque, en vez de una pantalla en blanco. */
+async function cargarReporte(){
+  if (!S.user || S.demo) return;
+  try {
+    const { data, error } = await sb.from("reporte_config").select("*");
+    if (error || !data || !data.length) return;
+    REPORTE = aplicarReporte(data);
+  } catch (e){ /* sin relato nuevo, pero con reporte */ }
+}
+
+/* La lectura de las filas vive aparte de la consulta, para que se pueda probar
+   sin una base delante. No es una separación de adorno: el error que motivó
+   esto —una fila que apagaba a las otras seis— era exactamente de esta parte,
+   y no había forma de escribirle una prueba mientras estuviera pegada al
+   `await sb.from(...)`. */
+function aplicarReporte(data){
+  const base = JSON.parse(JSON.stringify(REPORTE_DEF));
+  (data || []).forEach(f => {
+    /* Una fila mal formada no puede apagar a las otras seis.
+       El 26/08 se agregó `cierre_acuerdos`, que guarda una frase suelta. La
+       columna es jsonb y devuelve esa frase como texto plano; el `JSON.parse`
+       de antes reventaba con ella, la excepción salía del forEach, y `REPORTE`
+       se quedaba sin asignar: el reporte perdió los hitos, las lecturas, las
+       notas y la base de 841 comercios de golpe. Todo por una fila que no era
+       ninguna de esas, y sin un solo error a la vista.
+       Ahora cada fila se lee sola, y un texto que no es JSON se guarda como lo
+       que es en vez de tumbar el relato entero. */
+    try {
+      let v = f.valor;
+      if (typeof v === "string"){
+        try { v = JSON.parse(v); } catch (e){ /* era una frase, y así queda */ }
+      }
+      if (v !== null && v !== undefined) base[f.clave] = v;
+      base["_" + f.clave] = { por:f.actualizado_por, cuando:f.actualizado_en, nota:f.nota };
+    } catch (e){ /* esta fila se pierde; las demás no */ }
+  });
+  return base;
+}
+
+async function cargarMetas(){
+  METAS = [];
+  if (!S.user || S.demo) return;
+  const { data, error } = await sb.from("metas").select("*").order("periodo", { ascending:false });
+  if (!error) METAS = (data || []).map(m => ({
+    correo: m.correo, periodo: String(m.periodo).slice(0,7),
+    asignada: Number(m.cartera_asignada) || 0,
+    porQuien: m.actualizado_por || "", cuando: m.actualizado_en
+  }));
+}
+
+/* Bitácora de cambios — la base solo la devuelve a Analista y Manager */
+async function cargarAuditoria(){
+  AUDITORIA = [];
+  if (!S.user || S.user.rol === "Ejecutivo" || S.demo) return;
+  /* La bitácora se lee de lo más nuevo a lo más viejo y el servidor recorta
+     a mil filas: pedir dos mil no traía dos mil, traía mil sin avisar. Se
+     pide lo que de verdad llega, que para una bitácora es lo que se mira. */
+  const { data, error } = await sb.from("auditoria").select("*")
+    .order("creado_en", { ascending:false }).limit(1000);
+  if (!error) AUDITORIA = data || [];
+}
+
+/* Las fotos de evidencia se retiraron del CRM en agosto de 2026. Ya no se
+   piden al registrar ni se muestran al consultar, ni siquiera en las
+   gestiones antiguas que las tienen. Los archivos no se borraron: siguen en
+   el bucket privado y la ruta sigue en cada fila. Lo que se quitó es el
+   pedido de enlaces firmados, que era lo que las traía a la pantalla. */
+
+async function refrescar(){
+  const { data, error } = await traerTodo("interacciones", "id");
+  if (error) return toast("No se pudo actualizar: " + error.message);
+  DB.cargar(data || []);
+  CLIENTES.forEach(c => c._base = null);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+}
+
+/* Recarga la cartera tras un alta, edición o borrado */
+async function recargarCartera(){
+  const cli = await traerTodo("clientes", "customer_id");
+  if (cli.error) throw new Error(cli.error.message);
+  repartirComercios(cli.data || []);
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+}
+
+/* ---- Modo demostración (sin Supabase) ---------------------------------- */
+function modoDemo(){
+  S.demo = true;
+  S.user = { correo:"demo@"+CONFIG.dominio, nombre:"Modo demostración",
+    nombreCompleto:"Modo demostración", rol:"Manager" };
+  USUARIOS = [S.user];
+  RUBROS = [{ codigo:"bodega", nombre:"Bodega / Minimarket", orden:1 },
+            { codigo:"otro", nombre:"Otro", orden:99 }];
+  CLIENTES = [{ _i:0, customer_id:"40000001", nombre_comercio:"Comercio de ejemplo",
+    rubro:"bodega", rubro_otro:null, distrito:"SAN ISIDRO", direccion:"Av. Ejemplo 123",
+    estado:"ACTIVO", asignado:"Modo demostración", asignado_correo:S.user.correo,
+    creado_en:new Date().toISOString() }];
+  byId = { "40000001": CLIENTES[0] };
+  DB.visitas = [];
+  CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  S.tab = "cartera"; render();
+  toast("Modo demostración: nada se guarda");
+}
+
+/* =========================================================================
+   Shell de navegación y pantallas de cartera
+   ========================================================================= */
+const NAV = [
+  { id:"cartera",  ic:"◱", label:"Cartera" },
+  { id:"agenda",   ic:"◷", label:"Calendario" },
+  /* Registros pasó a supervisión el 27/08. Es la vista agregada de los
+     indicadores de una persona —puntualidad, efectividad, fuera de plazo— y
+     dársela a quien es medido por ellos invita a trabajar para el número.
+     El ejecutivo sigue viendo cada gestión suya en la ficha del comercio, que
+     es donde la necesita para trabajar; lo que deja de tener es el tablero de
+     su propio desempeño. */
+  { id:"registros",ic:"≡", label:"Registros", soloMando:true },
+  { id:"panel",    ic:"◕", label:"Panel" },
+  { id:"actividad",ic:"◎", label:"Actividad", soloMando:true },
+  { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
+  { id:"reporte",  ic:"▤", label:"Reporte", soloMando:true },
+  { id:"ayuda",    ic:"⚙", label:"Ajustes" }
+];
+/* El seguimiento del incentivo lo miran el Analista y el Manager; al ejecutivo
+   ni siquiera se le ofrece la pestaña. Y a BBVA se le retiran tres: incentivos
+   —retribución de otra empresa—, reporte —material que se prepara para él— y
+   ajustes, donde viven los parámetros y las descargas. */
+/* «Ver el CRM como» tiene que ser completo: si supervisión mira como Aníbal y
+   sigue viendo Reporte, Incentivos y Actividad, no está viendo lo que ve él —
+   está viendo su cartera con el menú de otro—. Y la pregunta que se hace al
+   entrar a esa vista es justamente «¿qué ve exactamente esta persona?».
+   `vistaDeCampo()` es cierta tanto para un ejecutivo como para supervisión
+   mirando como uno, así que la misma línea resuelve los dos casos.
+   Se sale por el botón del banner o por el selector del rail, que no forman
+   parte de la navegación y por eso siguen ahí. */
+const navVisible = () => NAV
+  .filter(n => !n.soloMando || !vistaDeCampo())
+  .filter(n => puedeVerTab(n.id));
+
+/* La misma regla, pero preguntable por una pestaña suelta —la usa la puerta de
+   `go()`—. `puedeVerTab` sola no alcanza: solo sabe de BBVA, y «Registros» se
+   le esconde al ejecutivo por `soloMando`, no por perfil. Sin esta línea el
+   menú no ofrecía Registros pero `go("registros")` sí entraba, que es la misma
+   pantalla por otra puerta. Las pantallas que no están en el menú —fichas,
+   formularios— no llevan guarda acá; las suyas están en su sitio. */
+const tabPermitida = tab => {
+  if (!puedeVerTab(tab)) return false;
+  const n = NAV.find(x => x.id === tab);
+  return !n || !n.soloMando || !vistaDeCampo();
+};
+
+function renderNav(){
+  $("#nav").innerHTML = navVisible().map(n => `
+    <button data-tab="${n.id}" class="${S.tab === n.id ? "on" : ""}">
+      <span class="ic">${n.ic}</span>${n.label}
+    </button>`).join("");
+  $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => go(b.dataset.tab));
+  renderRail();
+}
+
+/* La barra lateral de supervisión.
+ *
+ * Es la misma navegación de siempre, en otro sitio y agrupada: lo de la
+ * campaña arriba, lo que solo miran el Analista y el Manager abajo. Agruparla
+ * no es decoración —dice de un vistazo qué ve el equipo y qué no, que es una
+ * pregunta que aparece cada vez que alguien pide una pantalla compartida—.
+ *
+ * Solo se dibuja para supervisión, y el CSS solo la muestra a partir de
+ * 1100 px. Debajo de ese ancho manda la fila de abajo, que está a un pulgar.
+ * El ejecutivo no la recibe nunca: su navegación no cambia en este tramo. */
+const RAIL = [
+  { g:"Campaña", items:["panel","cartera","agenda"] },
+  { g:"Solo supervisión", items:["registros","actividad","bono","reporte","ayuda"] }
+];
+const ETIQUETA_RAIL = { panel:"Tablero", agenda:"Calendario de visitas" };
+
+function renderRail(){
+  const el = $("#rail"), app = $("#app");
+  if (!el || !app) return;
+  if (!S.user || S.user.rol === "Ejecutivo"){
+    app.classList.remove("con-rail");
+    el.innerHTML = "";
+    return;
+  }
+  app.classList.add("con-rail");
+
+  const porId = {};
+  navVisible().forEach(n => porId[n.id] = n);
+  const iniciales = String(S.user.nombreCompleto || S.user.nombre || "")
+    .trim().split(/\s+/).slice(0,2).map(p => p[0] || "").join("").toUpperCase();
+
+  /* El contador de correos por aclarar viaja con la Cartera: es la lista que
+     hay que vaciar, y el número al lado del nombre evita tener que entrar a
+     ver si bajó. */
+  const pend = CLIENTES.filter(correoAmbiguo).length;
+
+  el.innerHTML = `
+    <div class="rl-logo"><i>S</i>
+      <div><b>Stratis CRM</b><span>BBVA Adquirencia</span></div></div>
+    ${RAIL.map(gr => {
+      const items = gr.items.map(id => porId[id]).filter(Boolean);
+      if (!items.length) return "";
+      return `<div class="rl-grupo"><p>${esc(gr.g)}</p>
+        ${items.map(n => `<button class="rl-x ${S.tab === n.id ? "on" : ""}" data-tab="${n.id}">
+          <span class="ic">${n.ic}</span>${esc(ETIQUETA_RAIL[n.id] || n.label)}
+          ${n.id === "cartera" && pend ? `<span class="cuenta">${pend}</span>` : ""}
+        </button>`).join("")}
+      </div>`;
+    }).join("")}
+    <div class="rl-como">${selectorComoEjec()}</div>
+    <div class="rl-yo"><i>${esc(iniciales || "··")}</i>
+      <div><b>${esc(S.user.nombreCompleto || S.user.nombre || "")}</b>
+        <span>${esc(S.user.rol || "")}</span></div></div>
+    ${/* La versión cargada, para que caché y bug dejen de parecerse. Si dos
+          personas ven cosas distintas, se comparan estos seis caracteres. */""}
+    <button class="rl-build" data-recargar="1"
+      title="Versión cargada en este navegador. Clic para traer la última.">
+      v ${esc(BUILD.sello)} · ${esc(BUILD.huella)}</button>`;
+
+  el.querySelectorAll("button[data-tab]").forEach(b => b.onclick = () => go(b.dataset.tab));
+  /* Recargar salteando el caché del navegador. Con `max-age=600` en el
+     servidor, una pestaña abierta desde antes del pase sigue con el archivo
+     viejo aunque se le dé F5. El parámetro obliga a pedirlo de nuevo. */
+  el.querySelectorAll("[data-recargar]").forEach(b => b.onclick = () => {
+    const u = new URL(location.href);
+    u.searchParams.set("v", Date.now());
+    location.replace(u.toString());
+  });
+  el.querySelectorAll(".selComoEjec").forEach(sel => { sel.onchange = () => mirarComo(sel.value); });
+}
+/* Llegar a la lista desde cualquier número: abre la Cartera ya filtrada y con
+   los filtros desplegados, para que se vea por qué la lista es esa. */
+function verCierre(id, ejecutivo){
+  S.fCierre = id; S.filtrosAbiertos = true;
+  S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = "todos";
+  S.fEjecutivo = ejecutivo || "todos";
+  go("cartera");
+  const f = cierreById(id);
+  if (f){
+    const n = cartera().filter(c => f.test(c) && (!ejecutivo || c.asignado === ejecutivo)).length;
+    toast(`${f.label}${ejecutivo ? " de " + ejecutivo : ""}: ${n} ${n === 1 ? "comercio" : "comercios"}`);
+  }
+}
+
+/* Del Panel a la bitácora, con el filtro puesto. El número solo no deja hacer
+   nada: la pregunta que sigue siempre es «¿cuáles?». */
+function verGestiones(filtro, ejecutivo){
+  S.qReg = ""; S.fMedio = "todos"; S.limiteReg = 40;
+  S.fResultado  = filtro || "todos";
+  S.fEjecReg    = ejecutivo || "todos";
+  /* La bitácora tiene su propio filtro de fechas y no entiende el periodo del
+     bono. Se abre en «Todo» para que la lista no salga vacía sin explicación. */
+  S.fPeriodoReg = "todo";
+  go("registros");
+}
+/* Del Panel a la cartera, desde las columnas «Registrados» y «Gestionados».
+   Las dos cifras se podían leer pero no abrir, que es donde empieza el trabajo:
+   saber que 27 comercios están gestionados no sirve si no se puede ver cuáles
+   son los otros 117.
+
+   Ojo con el reloj: el Panel cuenta «Gestionados» dentro del rango que se esté
+   mirando, y la Cartera no tiene rango —muestra el estado de hoy—. Un comercio
+   trabajado en julio y no en agosto sale acá y no allá. En vez de dejar que el
+   número baile sin explicación, el aviso dice los dos y por qué difieren. */
+function verCarteraLista(tipo, ejecutivo, esperado){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = tipo; S.fEjecutivo = ejecutivo || "todos";
+  S.filtrosAbiertos = false; S.limite = 40;
+  go("cartera");
+
+  const n = cartera().filter(c => {
+    if (esClienteNuevo(c)) return false;
+    if (ejecutivo && c.asignado !== ejecutivo) return false;
+    if (tipo === "registrado") return true;
+    return (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0;
+  }).length;
+
+  const que = tipo === "registrado" ? "registrados en el CRM" : "gestionados";
+  const dif = esperado != null && Number(esperado) !== n;
+  toast(`${n} ${n === 1 ? "comercio" : "comercios"} ${que}${ejecutivo ? " de " + ejecutivo : ""}` +
+        (dif ? ` · en el Panel dice ${esperado} porque allá se cuenta solo el rango elegido` : ""));
+}
+
+/* Del Panel a la cartera, por el punto en que está parado el comercio */
+function verCarteraEstado(id, ejecutivo){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = "est:" + id; S.fEjecutivo = ejecutivo || "todos";
+  S.filtrosAbiertos = false; S.limite = 40;
+  go("cartera");
+  const e = estadoDerivadoById(id);
+  const n = cartera().filter(c => !esClienteNuevo(c) && estadoDerivado(c) === id
+    && (!ejecutivo || c.asignado === ejecutivo)).length;
+  if (e) toast(`${e.label}${ejecutivo ? " de " + ejecutivo : ""}: ${n} ${
+    n === 1 ? "comercio" : "comercios"}${e.hacer ? " · " + e.hacer.toLowerCase() : ""}`);
+}
+
+/* Del Panel a la cartera, por situación del comercio */
+function verCarteraPor(filtro){
+  S.q = ""; S.fCierre = S.fRubro = S.fDistrito = S.fEstadoCli = "todos";
+  S.fContacto = filtro || "todos"; S.limite = 40; S.filtrosAbiertos = false;
+  go("cartera");
+}
+
+function go(tab, cid){
+  /* La puerta, y va acá porque acá pasa TODO: el menú, los botones de la
+     ficha, los enlaces internos y cualquier llamada suelta. Filtrar solo la
+     navegación dejaría abiertas las otras tres. */
+  if (!tabPermitida(tab)){
+    toast("Este perfil no tiene acceso a esa sección");
+    tab = "cartera"; cid = null;
+  }
+  S.tab = tab; S.cid = cid || null;
+  S.editId = null; S.form = null; S.formCli = null; S.editCli = null; S.limite = 40;
+  /* Los formularios de BBVA se sueltan al salir, como los demás: un borrador a
+     medias que reaparece en otro comercio es peor que no tener borrador. */
+  if (tab !== "form_bbva")      S.formBbva = null;
+  if (tab !== "form_bbva_lote") S.loteBbva = null;
+  window.scrollTo(0,0);
+  render();
+  /* Si mientras se llenaba un formulario llegaron registros de otro, se
+     aplican recién ahora: al salir del formulario no se pisa nada. */
+  if (typeof aplicarPendientes === "function") aplicarPendientes();
+}
+function toast(msg){
+  const old = document.querySelector(".toast"); if (old) old.remove();
+  const el = document.createElement("div");
+  el.className = "toast"; el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2900);
+}
+function modal(html){
+  $("#overlay").innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
+  $("#overlay").querySelector(".modal-bg").onclick = e => { if (e.target.classList.contains("modal-bg")) cerrarModal(); };
+}
+const cerrarModal = () => $("#overlay").innerHTML = "";
+
+
+/* =========================================================================
+   Render principal
+   ========================================================================= */
+/* Pintar la pantalla, y si algo revienta al pintarla, DECIRLO.
+
+   Una excepción acá dejaba `#view` vacío: la barra de arriba se veía y debajo
+   no había nada. Una pantalla en blanco no da ninguna pista —ni al que la
+   sufre ni al que la tiene que arreglar— y es la peor forma de fallar que
+   tiene una aplicación. Ahora se ve qué pasó y hay un botón para recargar. */
+function render(){
+  try { renderInterno(); }
+  catch (e){
+    const v = $("#view");
+    if (v) v.innerHTML = `<div class="card">
+      <div class="err"><b>No se pudo dibujar esta pantalla.</b><br>${esc(String(e && e.message || e))}</div>
+      <div class="note" style="margin-top:10px">Suele arreglarse recargando. Si vuelve a pasar,
+      pásale este mensaje a quien administra el CRM.</div>
+      <button class="btn block" style="margin-top:12px" onclick="location.reload(true)">Recargar</button>
+    </div>`;
+    throw e;                      // que quede en la consola, además de en pantalla
+  }
+}
+
+function renderInterno(){
+  if (!S.user) return renderLogin();
+  $("#topSub").textContent = `${S.user.nombreCompleto || S.user.nombre} · ${S.user.rol}`
+    + (soloLectura() ? " · solo lectura" : "");
+  renderNav();
+  const v = $("#view");
+  /* Ajustes ya no fluye en columnas automáticas: cada bloque decide su ancho.
+     El masonry dejaba huecos largos y hacía zigzaguear la lectura. */
+  v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-ajustes" : "");
+  if (S.tab === "form_cliente")           return renderFormCliente();
+  if (S.tab === "form_bbva")              return renderFormBBVA();
+  if (S.tab === "form_bbva_lote")         return renderLoteBBVA();
+  if (S.cid && S.tab === "cartera")       v.innerHTML = viewFicha(byId[S.cid]);
+  else if (S.tab === "form_visita")       return renderFormulario();
+  else if (S.tab === "cartera")           v.innerHTML = viewCartera();
+  else if (S.tab === "agenda")            v.innerHTML = viewAgenda();
+  else if (S.tab === "bono")              v.innerHTML = viewBono();
+  else if (S.tab === "registros")         v.innerHTML = viewRegistros();
+  else if (S.tab === "actividad")         v.innerHTML = viewActividad();
+  else if (S.tab === "panel")             v.innerHTML = viewPanel();
+  else if (S.tab === "reporte")           v.innerHTML = viewReporte();
+  else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
+  bindComunes();
+}
+
+function bindComunes(){
+  document.querySelectorAll("[data-go]").forEach(el => el.onclick = () => {
+    const [t,c] = el.dataset.go.split("|"); go(t, c || null);
+  });
+  document.querySelectorAll("[data-cid]").forEach(el => el.onclick = () => { S.tab="cartera"; S.cid = el.dataset.cid; window.scrollTo(0,0); render(); });
+  document.querySelectorAll("[data-del]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminar(el.dataset.del); });
+  document.querySelectorAll("[data-edit]").forEach(el => el.onclick = e => { e.stopPropagation(); editarRegistro(el.dataset.edit); });
+  document.querySelectorAll("[data-editcli]").forEach(el => el.onclick = e => { e.stopPropagation(); editarCliente(el.dataset.editcli); });
+  document.querySelectorAll("[data-cbbva-fix]").forEach(el => el.onclick = async e => {
+    e.stopPropagation();
+    const [valor, cid] = el.dataset.cbbvaFix.split("|");
+    const txtBoton = el.textContent;
+    el.disabled = true; el.textContent = "Guardando…";
+    /* El `.select()` otra vez: sin él, un rechazo por permisos vuelve sin
+       error y sin filas, y la pantalla diría que se guardó algo que no. */
+    /* Se guardan las tres cosas juntas. La confirmación es la que hace que el
+       aviso desaparezca, incluso cuando el canal no cambia. */
+    const { data, error } = await sb.from("clientes")
+      .update({ contacto_bbva: valor,
+                canal_confirmado_en: new Date().toISOString(),
+                canal_confirmado_por: S.user.correo })
+      .eq("customer_id", cid).select("customer_id");
+    if (error){ el.disabled = false; el.textContent = txtBoton;
+      return toast("No se pudo guardar: " + error.message); }
+    if (!(data || []).length){ el.disabled = false; el.textContent = txtBoton;
+      return toast("La base no dejó guardar el cambio en este comercio."); }
+    await recargarCartera(); await cargarAuditoria(); render();
+    toast(valor === "CORREO" ? "Anotado: el correo fue al ejecutivo de BBVA"
+                             : "Anotado: el correo fue al cliente, con copia a BBVA");
+  });
+  document.querySelectorAll("[data-delcli]").forEach(el => el.onclick = e => { e.stopPropagation(); confirmarEliminarCliente(el.dataset.delcli); });
+  document.querySelectorAll("[data-segdel]").forEach(el => el.onclick = e => { e.stopPropagation(); descartarSeguimiento(el.dataset.segdel); });
+  document.querySelectorAll("[data-fixid]").forEach(el => el.onclick = e => { e.stopPropagation(); modalCorregirId(el.dataset.fixid); });
+  document.querySelectorAll("[data-vercierre]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCierre(el.dataset.vercierre, el.dataset.verejec || "");
+  });
+  document.querySelectorAll("[data-verges]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verGestiones(el.dataset.verges, el.dataset.verejec || "");
+  });
+  /* Registros dejó de estar en la vista de campo el 27/08, así que los atajos
+     que llevan ahí no se dibujan en ella. La guarda va acá además de en cada
+     vista porque acá pasan todos: si mañana alguien pone un atajo nuevo en una
+     pantalla de campo, no manda a nadie a una pestaña que no existe. */
+  if (vistaDeCampo())
+    document.querySelectorAll("[data-verges]").forEach(el => {
+      el.onclick = null;
+      if (el.tagName === "BUTTON" && el.classList.contains("btn")) el.remove();
+    });
+  /* La alerta del panel lleva a SU lista, que es lo que la hace útil: sin el
+     salto es un número que informa y no ayuda. Va a la Cartera con el filtro
+     de lo que falta por gestionar, sobre la cartera de quien está mirando. */
+  document.querySelectorAll("[data-verfaltan]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    S.fContacto = "sin_gestion"; S.fRubro = S.fEstadoCli = S.fDistrito = "todos";
+    S.q = ""; S.limite = 40;
+    const q = correoObservado();
+    S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    go("cartera");
+  });
+  /* Y los estados derivados, igual: cada cifra del panel abre su lista. */
+  document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    S.fContacto = "est:" + el.dataset.verest;
+    S.fRubro = S.fEstadoCli = S.fDistrito = "todos"; S.q = ""; S.limite = 40;
+    const q = correoObservado();
+    S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    go("cartera");
+  });
+  /* El destrabe, en un toque. Abre el registro de contacto ya puesto en
+     «correo al cliente» y con la copia al banco marcada, que es exactamente
+     lo que el ejecutivo está a punto de escribir. Se le deja el formulario
+     lleno a medias, no se guarda por él. */
+  document.querySelectorAll("[data-destrabe]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const cid = el.dataset.destrabe;
+    go("form_visita", cid);
+    S.form = Object.assign(nuevoForm(), { Tipo_Contacto:"correo", Copia_BBVA:true });
+    render();
+  });
+  document.querySelectorAll("[data-vercartera]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCarteraPor(el.dataset.vercartera);
+  });
+  document.querySelectorAll("[data-verlista]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    verCarteraLista(el.dataset.verlista, el.dataset.verejec || "", el.dataset.vercuantos);
+  });
+  document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); verCarteraEstado(el.dataset.verest, el.dataset.verejec || "");
+  });
+  document.querySelectorAll("[data-comoejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation(); mirarComo(el.dataset.comoejec);
+  });
+  /* Por clase y no por id: el selector aparece en la barra lateral y en la
+     cabecera del tablero a la vez, y dos elementos con el mismo id hacen que
+     el segundo deje de encontrarse. */
+  document.querySelectorAll(".selComoEjec").forEach(sel => {
+    sel.onchange = () => mirarComo(sel.value);
+  });
+  const lote = document.querySelector("#loteBbva");
+  if (lote) lote.onclick = () => abrirLoteBBVA();
+  if (typeof bindExtras === "function") bindExtras();
+
+  /* ---- La red de abajo -------------------------------------------------
+     Las guardas de arriba deciden qué BOTÓN se dibuja. Esto decide qué botón
+     RESPONDE, y existe porque son dos fallas distintas: una pantalla nueva que
+     olvide su guarda dibuja el botón, y sin esto además funcionaría. Con esto,
+     lo peor que pasa es un botón visible que no hace nada y avisa por qué.
+
+     No reemplaza a las políticas de la base, que son las que de verdad
+     impiden escribir: esto es la aplicación siendo coherente consigo misma. */
+  if (soloLectura()){
+    ["data-del","data-edit","data-editcli","data-delcli","data-segdel","data-fixid",
+     "data-cbbva-fix","data-destrabe","data-agendar","data-agendar-dia","data-reag",
+     "data-editmeta","data-verges-fix"].forEach(attr =>
+      document.querySelectorAll(`[${attr}]`).forEach(el => {
+        el.onclick = e => { e.stopPropagation(); toast("Este perfil es de solo lectura"); };
+      }));
+  }
+
+}
+
+/* =========================================================================
+   Pantalla: Cartera
+   ========================================================================= */
+function estadoCliente(c){
+  const b = c._base || RULES.recomputarBase(c.customer_id);
+  if (b.Cumple_Visita === "SI") return { chip:"ok", label:"Visita cumplida" };
+  if (b._efectivos > 0) return { chip:"warn", label:"Respondió" };
+  if (b._intentos > 0)  return { chip:"serious", label:"Solo intentos" };
+  return { chip:"no", label:"Sin contactar" };
+}
+
+/* Mientras la ventana esté abierta el equipo tiene que verlo apenas entra:
+   es un permiso con hora de cierre, no un cambio de reglas. */
+function avisoVentana(){
+  if (!edicionLibre()) return "";
+  return `<div class="card" style="border-left:3px solid var(--warn)">
+    <h3>Ventana de corrección abierta · ${esc(textoVentana().toLowerCase())}</h3>
+    <div class="note" style="margin-bottom:0">
+      Hoy puedes arreglar <b>tus</b> registros sin pedir permiso: el medio y el resultado de cualquier
+      gestión tuya, el Customer ID de los comercios que registraste, y la ubicación de tus gestiones.
+      <b>A partir de mañana vuelve a estar cerrado.</b>
+      ${(() => {
+        /* Solo los que siguen abiertos. A un comercio que ya vendió, se retuvo
+           o se perdió no se le pide completar cómo se contactó al banco: el
+           dato ya no cambia nada y la lista se vuelve una tarea eterna. */
+        const faltan = cartera().filter(c =>
+          !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c)).length;
+        return faltan ? `<div style="margin-top:8px"><b>Te faltan ${faltan} comercio${faltan===1?"":"s"}</b>
+          por indicar cómo se contactó al ejecutivo de BBVA. Se completa entrando al comercio y
+          tocando <b>Editar comercio</b>.
+          <button class="btn ghost sm" id="verFaltanBBVA" style="margin-top:7px">Ver los que faltan</button>
+          </div>` : `<div style="margin-top:8px">Ya no te falta ninguno con el contacto de BBVA.</div>`;
+      })()}
+      <div style="margin-top:6px">Para que una visita cuente con respaldo de GPS hay que capturar la
+      ubicación estando en el local, en el momento. Lo que se escriba hoy ubica el comercio en el mapa.</div>
+    </div>
+  </div>`;
+}
+
+function viewCartera(){
+  let lista = cartera();
+  const q = S.q.trim().toLowerCase();
+  if (q) lista = lista.filter(c =>
+    String(c.customer_id).toLowerCase().includes(q) ||
+    String(c.nombre_comercio||"").toLowerCase().includes(q) ||
+    String(c.distrito||"").toLowerCase().includes(q) ||
+    String(c.direccion||"").toLowerCase().includes(q) ||
+    rubroLabel(c).toLowerCase().includes(q) ||
+    String(c.direccion||"").toLowerCase().includes(q) ||
+    String(c.ruc||"").includes(q) ||
+    String(c.razon_social||"").toLowerCase().includes(q));
+  if (S.fRubro !== "todos")      lista = lista.filter(c => c.rubro === S.fRubro);
+  if (S.fDistrito !== "todos")   lista = lista.filter(c => c.distrito === S.fDistrito);
+  if (S.fEstadoCli !== "todos")  lista = lista.filter(c => (c.estado || "NUEVO") === S.fEstadoCli);
+  if (S.fCierre !== "todos")     lista = lista.filter(c => pasaCierre(c, S.fCierre));
+  if (S.fContacto !== "todos") lista = lista.filter(c => {
+    const b = c._base || RULES.recomputarBase(c.customer_id);
+    if (S.fContacto === "sin")     return b._intentos === 0;
+    if (S.fContacto === "intento") return b._intentos > 0 && b._efectivos === 0;
+    if (S.fContacto === "con")     return b._efectivos > 0;
+    if (S.fContacto === "cumple")  return b.Cumple_Visita === "SI";
+    /* La misma regla que el contador que lleva hasta acá: si el filtro trajera
+       también los cerrados, el número del aviso y el largo de la lista no
+       coincidirían, y quien la abre pensaría que el CRM le miente. */
+    if (S.fContacto === "sin_bbva")
+      return !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c);
+    /* Los correos que no se sabe a quién fueron. Es un filtro de trabajo, no
+       de análisis: existe para vaciarse. */
+    if (S.fContacto === "correo_ambiguo") return correoAmbiguo(c);
+    /* Cartera a la que nunca se salió. Distinto de «sin gestión»: acá puede
+       haber coordinación con el banco —de hecho en 152 de 159 la hay—, y esa
+       es justo la confusión que hacía que figuraran como «Por contactar». */
+    if (S.fContacto === "sin_salir")       return carteraSinSalir(c);
+    /* Dados de baja por el banco y sin cierre marcado. Nadie los cierra solo:
+       el CRM no asume perdido, se lo muestra a quien lo tiene asignado. */
+    if (S.fContacto === "baja_sin_cierre") return bajaSinCierre(c);
+    /* Trabajados y sin una sola palabra escrita. No es lo mismo que «sin
+       gestión»: a estos ya se les dedicó tiempo, y la celda de comentario que
+       BBVA lee se va a llenar sola con lo deducido. Vale la pena pedir la de
+       verdad antes de que salga la otra. */
+    if (S.fContacto === "sin_comentario"){
+      const rs = DB.delCliente(c.customer_id);
+      return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                         || String(x.Espera || "").trim()
+                                         || String(x.Comentario_Ejecutivo || "").trim());
+    }
+    /* Los dos que llegan desde el Panel. Dejan fuera las ventas nuevas a
+       propósito: las columnas «Registrados» y «Gestionados» se miden sobre la
+       cartera que entregó BBVA, y meter acá los RUC que trajo Stratis haría que
+       la lista no cuadrara con el número que se acaba de tocar. */
+    if (S.fContacto === "registrado") return !esClienteNuevo(c);
+    if (S.fContacto === "gestionado") return !esClienteNuevo(c) && !!b._gestionado;
+    /* El complemento: los que TODAVÍA no cuentan. Es la lista a la que lleva
+       la alerta del panel, y es distinta de «sin intentar»: acá entran también
+       los que ya recibieron una llamada que nadie contestó, que son los que se
+       ven trabajados y no lo están. */
+    if (S.fContacto === "sin_gestion") return !esClienteNuevo(c) && !b._gestionado;
+    /* Los estados calculados también filtran, que es para lo que sirven: cada
+       uno responde «qué hago hoy con este comercio». */
+    if (S.fContacto.startsWith("est:")) return estadoDerivado(c) === S.fContacto.slice(4);
+    return true;
+  });
+  lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
+
+  const base = cartera();
+  const total = base.length;
+  const conEf = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id))._efectivos > 0).length;
+  const intentos = base.reduce((n,c) => n + (c._base || RULES.recomputarBase(c.customer_id))._intentos, 0);
+  const cumplen = base.filter(c => (c._base || RULES.recomputarBase(c.customer_id)).Cumple_Visita === "SI").length;
+  const cerrados = base.filter(gestionCumplida).length;
+  /* El mismo número decía «Objetivo cumplido» acá y en el Panel con valores
+     distintos: acá incluye las ventas nuevas, allá no. Se dice cuál es cuál. */
+  const nuevosCumplidos = base.filter(c => esVentaNueva(c)).length;
+  const distritos = [...new Set(base.map(c => c.distrito).filter(Boolean))].sort();
+  const rubrosUsados = RUBROS.filter(r => base.some(c => c.rubro === r.codigo));
+
+  /* Cuántos Customer ID lleva registrado cada quien. Los clientes nuevos van
+     aparte a propósito: no tienen Customer ID, así que sumarlos al mismo
+     número escondería justo lo que se quiere vigilar. */
+  const deCartera = base.filter(c => !esClienteNuevo(c));
+  const nuevos    = base.filter(esClienteNuevo);
+  const idsDe     = nom => deCartera.filter(c => c.asignado === nom).length;
+  const nuevosDe  = nom => nuevos.filter(c => c.asignado === nom).length;
+  const etiquetaEjec = nom => {
+    const n = nuevosDe(nom);
+    return `${nom} · ${idsDe(nom)} ID${n ? " + " + n + " nuevo" + (n === 1 ? "" : "s") : ""}`;
+  };
+  const cuenta = (arr, pred) => arr.filter(pred).length;
+  const mostrar = lista.slice(0, S.limite);
+  const filtrando = q || [S.fContacto,S.fEstadoCli,S.fRubro,S.fDistrito,S.fEjecutivo,S.fCierre].some(x => x !== "todos");
+
+  const opciones = (valor, todos, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>${vistaDeCampo() ? "Mi cartera" : "Cartera de la campaña"}</h2>
+      <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
+    </div>
+    <div class="page-head-acc">
+      ${(flujoBbva() && esDeCampo()) ? `<button class="btn ghost sm" id="loteBbva"
+        title="Un correo con varios Customer ID se escribe una vez">✉ Coordinar en lote<span class="solo-ancho"> con BBVA</span></button>` : ""}
+      ${esDeCampo() ? `<button class="btn" data-go="form_cliente">＋ Registrar nuevo comercio</button>` : ""}
+    </div>
+  </div>
+
+  ${avisoVentana()}
+
+  <!-- Todo lo de esta fila cuenta COMERCIOS. La bitácora cuenta gestiones, y
+       antes las dos pantallas usaban las mismas palabras para las dos unidades:
+       «Con respuesta 29» acá y «Con respuesta 46» allá, sin decir de qué. -->
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
+    <div class="stat"><div class="lbl">Comercios con respuesta</div><div class="val">${conEf}</div><div class="sub">respondieron al menos una vez · ${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
+    <div class="stat"><div class="lbl">Gestiones</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
+    <div class="stat"><div class="lbl">Con visita efectiva</div><div class="val">${cumplen}</div><div class="sub">comercios con al menos una visita cumplida</div></div>
+    <button class="stat stat-link" data-vercierre="cumplido" title="Ver los comercios con objetivo cumplido">
+      <div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div>
+      <div class="sub">${cerrados - nuevosCumplidos} de cartera${nuevosCumplidos ? ` + ${nuevosCumplidos} venta${nuevosCumplidos===1?"":"s"} nueva${nuevosCumplidos===1?"":"s"}` : ""} — <b>ver cuáles</b></div></button>
+  </div>
+
+  <div class="filtros">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
+
+    <!-- «Gestionados» faltaba y era la pregunta más obvia: cuáles ya recibieron
+         trabajo, sin importar si contestaron. Se podía preguntar por los que no
+         se tocaron y por los que respondieron, pero no por el conjunto. -->
+    <div class="seg" role="group" aria-label="Situación del comercio">
+      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],["sin_gestion","Faltan por gestionar"],
+         ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
+        .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
+          k === "gestionado" ? ` title="Comercios cuya ÚLTIMA gestión es un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"`
+          : k === "sin_gestion" ? ` title="Comercios cuya última gestión fue un intento sin respuesta, o que no se han tocado. Los primeros se ven trabajados y no lo están: son los que hay que retomar"` : ""
+        }>${l}</button>`).join("")}
+    </div>
+    ${avisoPorActualizar()}
+    ${S.fContacto === "registrado" ? `<div class="note" style="margin:0">
+      Mostrando los <b>registrados en el CRM</b>: fichas de la cartera de BBVA que alguien
+      ya cargó, se hayan trabajado o no. Las ventas nuevas no entran acá.</div>` : ""}
+
+    <!-- Los cuatro desplegables ocupaban más alto que la lista que filtran.
+         Ahora se piden: quedan plegados, y el botón dice cuántos hay puestos
+         para que nadie los deje activos sin darse cuenta. -->
+    ${(() => {
+      const puestos = [S.fEstadoCli, S.fRubro, S.fDistrito, S.fEjecutivo, S.fCierre].filter(x => x !== "todos").length;
+      const abierto = S.filtrosAbiertos || puestos > 0;
+      return `
+      <div class="filtros-mas">
+        <button class="btn ghost sm" id="masFiltros" aria-expanded="${abierto}">
+          ${abierto ? "Ocultar filtros" : "Más filtros"}${puestos ? ` · ${puestos}` : ""}
+        </button>
+        ${filtrando ? `<span class="filtros-cuenta">${lista.length} de ${total} comercios</span>
+          <button class="btn ghost sm" id="limpiarFiltros">Quitar filtros</button>` : ""}
+      </div>
+      ${abierto ? `<div class="sel-row">
+        <!-- «De qué comercios estamos hablando»: los conteos ya estaban en el
+             Panel, pero no había forma de llegar a la lista. -->
+        <label class="fsel"><span>Resultado de la gestión</span>
+          <select data-f="cierre">${opciones(S.fCierre, `Todo resultado (${total})`,
+            CIERRES.map(x => [x.id, `${x.label} · ${cuenta(base, x.test)}`]))}</select></label>
+        <label class="fsel"><span>Estado</span>
+          <select data-f="estadocli">${opciones(S.fEstadoCli, `Todo estado (${total})`,
+            ESTADOS_CLIENTE.map(e => [e, `${e === "ACTIVO" ? "Activos" : "Dados de baja"} · ${cuenta(base, c => c.estado === e)}`])
+              .concat([["NUEVO", `Ventas nuevas · ${nuevos.length}`]]))}</select></label>
+        <label class="fsel"><span>Rubro</span>
+          <select data-f="rubro">${opciones(S.fRubro, `Todos los rubros (${rubrosUsados.length})`,
+            rubrosUsados.map(r => [r.codigo, `${r.nombre} · ${cuenta(base, c => c.rubro === r.codigo)}`]))}</select></label>
+        <label class="fsel"><span>Distrito</span>
+          <select data-f="distrito">${opciones(S.fDistrito, `Todos los distritos (${distritos.length})`,
+            distritos.map(d => [d, `${titulo(d)} · ${cuenta(base, c => c.distrito === d)}`]))}</select></label>
+        ${S.user.rol !== "Ejecutivo" ? `<label class="fsel"><span>Ejecutivo · Customer ID</span>
+          <select data-f="ejecutivo">${opciones(S.fEjecutivo, `Todo el equipo · ${deCartera.length} ID${nuevos.length ? " + " + nuevos.length + " nuevos" : ""}`,
+            USUARIOS.filter(u=>u.rol==="Ejecutivo").map(u => [u.nombre, etiquetaEjec(u.nombre)]))}</select></label>` : ""}
+      </div>` : ""}`;
+    })()}
+  </div>
+
+  <div class="sec-title">${lista.length} comercio${lista.length===1?"":"s"}</div>
+  ${mostrar.length ? `<div class="cl-grid">${mostrar.map(cardCliente).join("")}</div>`
+    : total === 0
+      ? (esDeCampo()
+          ? `<div class="empty"><div class="big">＋</div>Todavía no has registrado ningún comercio.<br>Empieza con el botón de arriba: solo necesitas el Customer ID.</div>`
+          : `<div class="empty"><div class="big">◱</div>El equipo todavía no ha registrado comercios.<br>Acá vas a ver la cartera completa de la campaña en cuanto empiecen.</div>`)
+      : `<div class="empty"><div class="big">⌕</div>No hay comercios con estos filtros.<br><br>
+         <button class="btn ghost" id="limpiarFiltros2">Quitar filtros</button></div>`}
+  ${lista.length > mostrar.length ? `<button class="btn ghost block" id="mas">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}`;
+}
+
+function cardCliente(c){
+  const b = c._base || RULES.recomputarBase(c.customer_id);
+  const st = estadoCliente(c);
+  const ult = b._ultimo;
+  return `
+  <div class="cl" data-cid="${c.customer_id}">
+    <span class="av" style="background:${userColor(c.asignado)}">${iniciales(nombreCliente(c))}</span>
+    <div class="body">
+      <div class="name">${esc(titulo(nombreCliente(c)))}</div>
+      <div class="sub">${esc(claveCliente(c))}${c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</div>
+      <div class="meta">
+        <span class="chip info">${esc(rubroLabel(c))}</span>
+        <span class="chip ${st.chip}">${st.label}</span>
+        ${c.estado === "DE BAJA" ? `<span class="chip crit">De baja</span>` : ""}
+        ${esClienteNuevo(c) ? `<span class="chip info">Lead de venta</span><span class="chip ok">Derivado a BBVA</span>` : ""}
+        ${!esClienteNuevo(c) && gestionCumplida(c) ? `<span class="chip ok">${c.resultado_gestion === "VENTA" ? "Venta" : "Retenido"}</span>` : ""}
+        ${ult ? `<span class="chip no">${fmtFecha(ult.Fecha_Contacto)}</span>` : ""}
+      </div>
+    </div>
+    <div class="rt">
+      <div class="amt">${b._intentos}<small>INTENTOS</small></div>
+      <div class="amt" style="font-size:11.5px;color:var(--muted)">${b._efectivos} con respuesta</div>
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   Pantalla: Ficha del comercio
+   ========================================================================= */
+function viewFicha(c){
+  if (!c) return `<div class="empty">Comercio no encontrado.</div>`;
+  const b = RULES.recomputarBase(c.customer_id);
+  /* Con el flujo nuevo la ficha muestra UNA historia: la coordinación con el
+     banco y las gestiones con el cliente en el mismo orden en que ocurrieron.
+     Antes del corte sigue mostrando solo las gestiones, igual que siempre. */
+  /* Al ejecutivo no se le muestran las filas reconstruidas: no las escribió
+     él, y en su línea de tiempo se leen como gestiones suyas con un texto que
+     nunca tecleó. Supervisión sí las ve, para poder rastrear de dónde salió
+     el histórico. */
+  /* Con el flujo BBVA encendido la línea de tiempo es una sola historia con las
+     dos clases de gestión; apagado, el concepto de coordinación todavía no
+     existe y no se muestra a nadie. Y en los dos casos, el ejecutivo no ve las
+     filas que fabricó la migración: no son trabajo suyo ni de nadie. */
+  const regs = (flujoBbva() ? DB.historiaDe(c.customer_id) : DB.delCliente(c.customer_id))
+                 .filter(r => !vistaDeCampo() || !esReconstruida(r));
+  const mio = esMiCliente(c);
+
+  return `
+  <button class="back" data-go="cartera">‹ Volver a la cartera</button>
+  <div class="card">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span class="av" style="width:44px;height:44px;font-size:14px;background:${userColor(c.asignado)}">${iniciales(nombreCliente(c))}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:700;letter-spacing:-.3px">${esc(titulo(nombreCliente(c)))}</div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esClienteNuevo(c) ? "RUC " + esc(c.ruc) + " · cliente nuevo" : "Customer ID " + esc(c.customer_id)}</div>
+        <div class="cl-meta" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:9px">
+          <span class="chip info">${esc(rubroLabel(c))}</span>
+          ${flujoBbva() ? (() => { const e = estadoDerivadoById(estadoDerivado(c));
+            return `<span class="chip ${e.chip}" title="${esc(e.desc)}">${e.label}${
+              estadoFijadoAMano(c) ? " ·  fijado" : ""}</span>`; })() : ""}
+          <span class="chip ${estadoCliente(c).chip}">${estadoCliente(c).label}</span>
+          ${c.estado ? `<span class="chip ${c.estado === "ACTIVO" ? "ok" : "crit"}">${esc(c.estado)}</span>` : ""}
+          ${esClienteNuevo(c) ? `<span class="chip info">Lead de venta</span>` : ""}
+        </div>
+      </div>
+    </div>
+    ${/* Quién puede tocar esta ficha.
+
+          Antes la barra entera desaparecía para la supervisión cuando el
+          comercio era una venta nueva —el `!esClienteNuevo` del final—, y con
+          eso el Analista se quedaba mirando un RUC mal cargado sin una sola
+          acción disponible. Ahora:
+
+            · el dueño de la ficha la edita y la elimina, como siempre;
+            · la supervisión edita cualquiera, sea de quien sea y del origen
+              que sea, porque es quien responde por el dato ante el banco;
+            · eliminar sigue siendo solo del dueño. Borrar una ficha se lleva
+              sus gestiones por delante, y esa no es una corrección: es una
+              pérdida. Para lo demás está Editar. */ ""}
+    ${(mio || mandoTotal()) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${(mio || mandoTotal()) ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>` : ""}
+      ${mio ? `<button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+      ${(!esDeCampo() || (edicionLibre() && esMiCliente(c)))
+        ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir ${esClienteNuevo(c) ? "RUC" : "Customer ID"}</button>` : ""}
+    </div>` : ""}
+  </div>
+
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Datos del comercio</h3>
+      ${esClienteNuevo(c) ? `
+        <div class="kv"><dt>RUC</dt><dd class="mono">${esc(c.ruc)}</dd></div>
+        <div class="kv"><dt>Razón social</dt><dd>${esc(c.razon_social) || "—"}</dd></div>
+        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
+        <div class="kv"><dt>Origen del lead</dt><dd>${c.origen_lead
+          ? esc(nomOrigenLead(c.origen_lead))
+          : `<span class="chip warn">Sin marcar</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">El reporte lo cuenta aparte hasta que alguien indique si salió de la base</div>`
+        }</dd></div>`
+      : `
+        <div class="kv"><dt>Customer ID</dt><dd class="mono">${esc(c.customer_id)}</dd></div>
+        <div class="kv"><dt>Nombre</dt><dd>${esc(titulo(c.nombre_comercio)) || '<span style="color:var(--muted)">—</span>'}</dd></div>
+        <div class="kv"><dt>Rubro</dt><dd>${esc(rubroLabel(c))}</dd></div>
+        <div class="kv"><dt>Distrito</dt><dd>${esc(titulo(c.distrito))}</dd></div>
+        <div class="kv"><dt>Dirección</dt><dd>${esc(c.direccion)}</dd></div>
+        <div class="kv"><dt>Estado del cliente</dt><dd><span class="chip ${c.estado==="ACTIVO"?"ok":"crit"}">${esc(c.estado)}</span></dd></div>`}
+      ${/* «Para BBVA · Gestión = SI» es la columna que el banco lee del archivo
+            de LA CARTERA. En una venta nueva no significa nada —el comercio no
+            está en la base del banco— y encima se leía como si registrar el
+            RUC ya contara como venta cerrada. Fuera en ese caso; en la cartera
+            se queda, porque ahí sí es literal. */ ""}
+      <div class="kv"><dt>Resultado de la gestión</dt><dd><span class="chip ${gestionCumplida(c)?"ok":(c.resultado_gestion==="PERDIDO"?"crit":"no")}">${esc((RESULTADOS_GESTION.find(g=>g.id===(c.resultado_gestion||"PENDIENTE"))||{}).label)}</span>
+             ${!esClienteNuevo(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>` : ""}
+             ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? (soloLectura() ? "" : `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>`) : ""}
+             ${esVentaNueva(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div>` : ""}</dd></div>
+      ${(() => {
+        const sg = seguimientoDe(c.customer_id);
+        if (!sg) return "";
+        const est = estadoAccion(sg), d = diasParaAccion(sg);
+        return `<div class="kv"><dt>Qué sigue</dt><dd>
+          <b>${esc(nomAccion(sg.accion))}</b>
+          <span class="chip ${est==="vencida"?"crit":est==="hoy"?"warn":"no"}" style="margin-left:6px">${
+            esc(fmtFecha(sg.fecha_objetivo))}${est==="vencida"?` · venció hace ${esc(textoDias(Math.abs(d)))}`:""}</span>
+          ${sg.comentario ? `<div style="font-size:12.5px;color:var(--muted);margin-top:3px">${esc(sg.comentario)}</div>` : ""}
+        </dd></div>` ; })()}
+      ${(!esClienteNuevo(c) && !flujoBbva()) ? `<div class="kv"><dt>Contacto con BBVA</dt><dd>${
+        c.contacto_bbva
+          ? esc(nomContactoBBVA(c.contacto_bbva))
+          : `<span class="chip warn">Sin indicar</span><div style="font-size:12px;color:var(--muted);margin-top:3px">Se registró antes de que el dato fuera obligatorio</div>`
+      }</dd></div>` : ""}
+      ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
+      <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
+      ${c.direccion ? `<div style="margin-top:11px">
+        <a class="btn ghost sm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((c.direccion||"")+", "+(c.distrito||"")+", Lima, Perú")}" target="_blank" rel="noopener">Ver en el mapa</a>
+      </div>` : ""}
+    </div>
+
+   </div>
+
+   <div>
+    <div class="card nota-ficha">
+      <div class="note">${esClienteNuevo(c)
+        ? `Este es un <b>cliente nuevo que trae Stratis</b>: la ficha guarda solo RUC, razón social y rubro. Se trabaja con el mismo ciclo que un comercio de cartera —gestiones, coordinación con BBVA y cierre— solo que la llave es el RUC. Va en la hoja <b>Ventas nuevas</b> del resumen, no en el archivo de la cartera.`
+        : `Esta ficha <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>. El único dato que viene de BBVA es el Customer ID; si necesitas los del titular, se cruzan por ese código.`}</div>
+    </div>
+    ${(b._efectivos > 0 && (c.resultado_gestion||"PENDIENTE") === "PENDIENTE" && mio && esDeCampo()) ? `
+    <div class="card">
+      <div class="note crit" style="margin:0">
+        <b>Esta gestión sigue abierta.</b> Ya hablaste con el titular, así que puedes cerrarla como
+        ${esClienteNuevo(c) ? "venta" : (c.estado === "ACTIVO" ? "retención" : "venta")} o como perdida. Mientras siga pendiente, a
+        BBVA le llega <b>Gestión = NO</b>.
+        <button class="btn ghost sm block" data-editcli="${c.customer_id}" style="margin-top:9px">Marcar el cierre</button>
+      </div>
+    </div>` : ""}
+    ${flujoBbva() ? cardCoordinacionBBVA(c, mio) : ""}
+    ${cardProximaVisita(c, mio)}
+    <div class="card">
+      <h3>Seguimiento · ${b._intentos} intento${b._intentos===1?"":"s"}</h3>
+      <div class="stat-row" style="margin-bottom:0">
+        <div class="stat"><div class="lbl">Intentos</div><div class="val">${b._intentos}</div><div class="sub">registros de contacto</div></div>
+        <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${b._efectivos}</div><div class="sub">${b._intentos?Math.round(b._efectivos/b._intentos*100):0}% de los intentos obtuvo respuesta</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Línea de tiempo</h3>
+      ${avisoComentario(c, regs)}
+      ${(regs.length || casoCerrado(c))
+        ? `<div class="tl">${itemCierre(c)}${regs.map(itemTimeline).join("")}</div>`
+        : `<div class="empty" style="padding:26px 10px"><div class="big">◷</div>Aún no hay contactos registrados para este comercio.</div>`}
+    </div>
+   </div>
+  </div>
+
+  ${/* Registrar un contacto: el ejecutivo sobre lo suyo, y la supervisión
+        sobre cualquier ficha. La gestión queda a nombre de quien la registra
+        —en la línea de tiempo aparece con su nombre— así que nunca se confunde
+        con trabajo de campo del ejecutivo, y como el Analista y el Manager no
+        entran en el bono, tampoco mueve ningún cumplimiento. */ ""}
+  ${(mio || mandoTotal()) ? `<div class="sticky-actions">
+    <button class="btn" data-go="form_visita|${c.customer_id}">${
+      rotuloContacto(b._intentos, b._efectivos > 0, "＋ Registrar contacto")}</button>
+    ${mio ? botonAgenda(c) : ""}
+  </div>` : ""}`;
+}
+
+/* ---- «El botón no hizo nada» --------------------------------------------
+
+   Un ejecutivo manda el correo al ejecutivo de BBVA, lo registra, vuelve a la
+   ficha y encuentra exactamente el mismo botón que tocó hace un minuto:
+   «＋ Registrar coordinación con BBVA». Nada en la pantalla le dice que su
+   registro entró; el rótulo es el de un comercio en el que nadie hizo nada
+   todavía. Lo mismo del lado del cliente. Y como el banco tampoco contesta al
+   instante, la conclusión razonable —la que se sacó en campo— es que el botón
+   no guardó.
+
+   El arreglo no es un aviso más: es que el rótulo cuente lo que ya pasó. Si
+   hay contactos registrados y todavía no hay respuesta, lo que sigue no es
+   «registrar», es un REINTENTO, y así se lee. El «＋» se vuelve «↻» por la
+   misma razón: son dos gestos distintos y se ven distintos.
+
+   Vale para los dos lados —al banco y al cliente— porque el malentendido es el
+   mismo en los dos. */
+function rotuloContacto(n, respondio, base){
+  return (Number(n) > 0 && !respondio) ? "↻ Reintento de contacto" : base;
+}
+
+/* ---- La reunión, agendada desde la ficha --------------------------------
+
+   Hasta hoy una cita solo podía nacer DENTRO del formulario de gestión: había
+   que registrar un contacto y, al final del formulario, elegir «volver a
+   visitar». Eso calza cuando la visita se pacta durante la llamada que se está
+   registrando, y no calza en el caso más común de la campaña: el cliente
+   escribe por WhatsApp el martes por la tarde y cuadra para el jueves. No hay
+   ninguna gestión nueva que registrar —ese mensaje no es un contacto del
+   ejecutivo— y el compromiso existe igual. El calendario no se enteraba.
+
+   Ahora la ficha tiene el botón y la tarjeta: se agenda día y hora en dos
+   toques, y lo agendado se ve donde se trabaja el comercio, no solo en la
+   pantalla del calendario. */
+function botonAgenda(c){
+  const s = citaDe(c.customer_id);
+  return s
+    ? `<button class="btn ghost" data-reag="${esc(s.id)}">Reagendar la reunión</button>`
+    : `<button class="btn ghost" data-agendar="${esc(c.customer_id)}">📅 Agendar reunión</button>`;
+}
+
+function cardProximaVisita(c, mio){
+  const s = citaDe(c.customer_id);
+  if (!s){
+    if (!mio) return "";
+    /* Sin cita, la tarjeta solo aparece donde ya se puede agendar: cuando el
+       banco confirmó o el cliente respondió. Antes de eso no hay a quién
+       visitar, y ofrecerlo sería mandar al ejecutivo a un callejón. */
+    if (!habilitadoEn(c.customer_id)) return "";
+    /* Y no se le pide una reunión a un caso que ya cerró. Un comercio que
+       vendió no «se puede visitar y no tiene reunión puesta»: terminó. */
+    if (casoCerrado(c)) return "";
+    const d = habilesDesde(habilitadoEn(c.customer_id));
+    return `<div class="card">
+      <h3>Próxima reunión</h3>
+      <div class="note warn" style="margin:0">
+        <b>Este comercio ya se puede visitar y no tiene reunión puesta.</b>
+        ${d ? `Quedó habilitado hace ${esc(textoDias(d))}.` : "Quedó habilitado hoy."}
+        Agéndala con día y hora: sin hora no ocupa franja y nadie puede saber si estás ocupado.
+        <div style="margin-top:10px">
+          <button class="btn sm" data-agendar="${esc(c.customer_id)}">📅 Agendar reunión</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  const e = estadoCita(s), meta = ESTADO_CITA[e] || {};
+  return `<div class="card">
+    <h3>Próxima reunión</h3>
+    <div class="kv"><dt>Cuándo</dt><dd>
+      <b>${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))} · ${esc(rangoCita(s))}</b>
+      <span class="chip ${meta.tono || "no"}" style="margin-left:6px">${esc(meta.label || "")}</span>
+    </dd></div>
+    <div class="kv"><dt>Modalidad</dt><dd>${esc(nomModalidad(s.modalidad))}</dd></div>
+    ${vistaDeCampo() ? "" : `<div class="kv"><dt>Con</dt><dd>${esc(s.ejecutivo || "")}</dd></div>`}
+    ${s.comentario ? `<div class="quote" style="margin-top:8px">${esc(s.comentario)}</div>` : ""}
+    ${movida(s)}
+    ${(mio || mandoTotal()) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+      <button class="btn ghost sm" data-reag="${esc(s.id)}">Reagendar</button>
+      <button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
+        title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>
+    </div>` : ""}
+  </div>`;
+}
+
+/* El escalón que faltaba, dicho en una tarjeta.
+
+   En esta campaña el comercio ya tenía el servicio y sus datos de contacto los
+   entrega el ejecutivo de BBVA: no se puede llamar a alguien cuyo número no se
+   tiene. Por eso este paso no es burocracia, es la puerta. Y hasta ahora vivía
+   en un campo de texto sin fecha. */
+function cardCoordinacionBBVA(c, mio){
+  const k = bbvaDe(c.customer_id);
+  /* Los dos casos donde el siguiente paso NO es coordinar con el banco:
+       · el caso ya cerró —vendió, se retuvo o se perdió—, y
+       · es un cliente nuevo que trajo Stratis, que no espera ningún dato del
+         banco porque no salió de su base.
+     En los dos, todo lo que sigue se muestra como historia y no como tarea. */
+  const cerrado = casoCerrado(c);
+  const propio  = esClienteNuevo(c);
+  const pide    = (mio || mandoTotal()) && !cerrado;
+  const linea = (rot, r) => `<div class="kv"><dt>${rot}</dt><dd>${
+    r ? `${esc(nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto)}
+         <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtFecha(r.Fecha_Contacto)}${
+           r.Proposito ? " · " + esc(nomProposito(r.Proposito)) : ""}${
+           r.Inferida ? " · deducido del histórico" : ""}</div>`
+      : `<span style="color:var(--muted)">—</span>`}</dd></div>`;
+
+  /* Lo que se declaró al dar de alta, dicho como declaración. Es el único
+     rastro que hay en la mayoría de las fichas, así que se muestra; pero no
+     se le pone nombre de destinatario mientras nadie lo haya confirmado. El
+     alta guardaba «CORREO», que servía para las dos cosas opuestas: pedirle
+     los datos al banco, o escribirle al cliente con copia. Decir «Correo a
+     BBVA» era elegir una de las dos por él. */
+  const selloDeclarado = () => {
+    if (!k.sello) return "";
+    const sinConfirmar = c.contacto_bbva === "CORREO" && !c.canal_confirmado_en;
+    const nombre = sinConfirmar
+      ? `Correo <span style="color:var(--warn-ink,var(--muted))">— falta confirmar a quién</span>`
+      : esc(nomContactoBBVA(c.contacto_bbva) || nomMedioBBVA(k.sello.Tipo_Contacto) || "Sin indicar");
+    return `<div class="kv"><dt>Declarado al alta</dt><dd>${nombre}
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${fmtFecha(k.sello.Fecha_Contacto)} ·
+      el medio que se anotó al crear la ficha, sin gestión registrada detrás${
+        c.canal_confirmado_en ? ` · confirmado el ${fmtFecha(c.canal_confirmado_en)}` : ""}</div></dd></div>`;
+  };
+
+  return `
+  <div class="card">
+    <h3>Coordinación con el ejecutivo de BBVA</h3>
+    ${k.n ? `${linea("1er contacto", k.primero)}
+    ${linea("2do contacto", k.segundo)}` : ""}
+    ${selloDeclarado()}
+    <div class="kv"><dt>¿Respondió?</dt><dd>
+      ${k.respondio
+        ? `<span class="chip ok">Sí</span>
+           <div style="font-size:12px;color:var(--muted);margin-top:3px">${fmtFecha(k.fechaRespuesta)} · ${
+             k.intentosHasta === 1 ? "al primer contacto" : "tras " + k.intentosHasta + " contactos"}</div>`
+        : k.n
+          ? `<span class="chip warn">Todavía no</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">${k.n} contacto${k.n===1?"":"s"} sin respuesta</div>`
+          : `<span class="chip ${cerrado ? "" : "warn"}">${
+               cerrado ? "No se registró"
+                       : k.altaCorreo ? "Todavía no" : "Sin coordinar"}</span>
+             <div style="font-size:12px;color:var(--muted);margin-top:3px">${
+               cerrado
+                 ? "El caso cerró sin ninguna coordinación registrada con el banco"
+                 : k.altaCorreo
+                   ? "Se declaró un correo al dar de alta y el banco todavía no ha respondido"
+                   : k.altaOtroMedio
+                     ? "El alta declara " + esc(String(nomContactoBBVA(k.medioAlta) || k.medioAlta).toLowerCase()) + ", que no deja constancia consultable"
+                     : k.sello ? "El alta declara un medio, pero no hay ninguna coordinación registrada con el banco"
+                               : "Este comercio todavía no se le ha pedido a BBVA"}</div>`}
+    </dd></div>
+    ${k.faltaRespaldo ? `<div class="note crit" style="margin-top:10px">
+      <b>Falta el correo de respaldo.</b> La última coordinación fue por
+      ${esc(String(k.medioSinRespaldo).toLowerCase())}${k.fechaSinRespaldo ? ` (${esc(fmtFecha(k.fechaSinRespaldo))})` : ""},
+      que no deja constancia que otro pueda consultar. Si el banco después dice que nunca le
+      pidieron los datos, lo único que se puede poner sobre la mesa es un correo. Mándalo con lo
+      acordado y regístralo acá.
+      ${(mio || mandoTotal()) ? `<div style="margin-top:10px">
+        <button class="btn sm" data-go="form_bbva|${c.customer_id}">Registrar el correo de respaldo</button>
+      </div>` : ""}</div>` : ""}
+
+    ${/* ---- El siguiente paso, acotado a dos ----------------------------
+          Cuando hay una coordinación registrada y el banco no ha contestado,
+          el caso solo puede ir a dos sitios: el ejecutivo de BBVA valida los
+          datos, o se le escribe igual al cliente copiando al banco. Dejarlo
+          como una pantalla en blanco es lo que tenía 178 comercios parados
+          sin que nadie supiera de quién era el turno.
+
+          Las dos salidas se registran, y por eso están las dos acá: la
+          segunda es el destrabe, que hasta el 23/08/2026 no dejaba rastro. */
+      (k.altaCorreo && pide) ? `
+      <div class="note warn" style="margin-top:11px">
+        <b>El correo salió y el banco todavía no responde.</b> Al dar de alta este comercio se
+        declaró que se coordinó por correo, así que hay constancia: el caso no está parado
+        esperando que alguien escriba, está esperando al banco. Desde acá tiene las mismas dos
+        salidas de siempre, y las dos se registran.
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+          <button class="btn sm ghost" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
+        </div>
+      </div>`
+      : (k.n === 1 && !k.respondio && pide) ? `
+      <div class="note warn" style="margin-top:11px">
+        <b>El banco todavía no responde.</b> Desde acá el caso solo tiene dos salidas, y las dos
+        se registran para que no quede la duda de quién tiene el turno.
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+          <button class="btn sm ghost" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
+        </div>
+      </div>`
+      /* A partir del segundo contacto el recuadro grande sale sobrando: quien
+         ya insistió una vez conoce las dos salidas, y un aviso que aparece
+         siempre deja de leerse y empieza a estorbar. Las dos salidas siguen
+         estando —el caso tiene que poder destrabarse en el contacto quince
+         igual que en el primero— pero como una línea de botones, no como una
+         advertencia repetida. */
+      : (k.n > 1 && !k.respondio && pide) ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;align-items:center">
+        <span class="pie" style="margin:0;flex:1 1 160px">${k.n} contactos sin respuesta.</span>
+        <button class="btn ghost sm" data-go="form_bbva|${c.customer_id}">BBVA validó los datos</button>
+        <button class="btn ghost sm" data-destrabe="${c.customer_id}">Le escribí al cliente con copia</button>
+      </div>` : ""}
+    ${avisoCorreoAmbiguo(c, k, mio)}
+    ${/* El jalavistas. Un comercio recién registrado que no tiene ni una
+          coordinación es un caso parado: sin los datos del banco no hay a
+          quién llamar. Antes eso se leía como un guion en una fila y se
+          quedaba ahí semanas. Ahora el siguiente paso es el elemento más
+          visible de la tarjeta, y dice qué pasa si no se da. */
+      (k.altaOtroMedio && pide && !propio) ? `
+      <div class="note crit" style="margin-top:11px">
+        <b>Falta el correo de confirmación.</b> Al dar de alta se declaró que la coordinación fue
+        por ${esc(String(nomContactoBBVA(k.medioAlta) || k.medioAlta).toLowerCase())}, que no deja
+        constancia que otro pueda consultar. La campaña pide que el correo sea el respaldo formal:
+        mándalo con lo acordado, regístralo acá, y desde ese momento el caso puede seguir su
+        camino. Mientras no exista, no hay con qué sostener que a este comercio se le pidieron
+        los datos.
+        <div style="margin-top:10px">
+          <button class="btn sm" data-go="form_bbva|${c.customer_id}">Registrar el correo de confirmación</button>
+        </div>
+      </div>`
+      : (!k.n && !k.altaCorreo && pide && !propio) ? `
+      <div class="cta-bbva">
+        <div class="cta-bbva-txt">
+          <b>El caso está parado hasta coordinar con BBVA</b>
+          <span>Sin los datos que entrega el banco no hay a quién llamar ni dónde ir.
+          Es el primer paso del ciclo y hoy este comercio no lo tiene.</span>
+        </div>
+        <button class="btn" data-go="form_bbva|${c.customer_id}">Coordinar ahora</button>
+      </div>`
+      /* Un cliente nuevo sin coordinación no está parado: la trajo Stratis y
+         se puede trabajar. Al banco se le avisa para el alta, que es otra
+         cosa y no bloquea. */
+      : (!k.n && pide && propio) ? `
+      <div class="note" style="margin-top:11px">
+        <b>Este comercio lo trajo Stratis.</b> No espera datos del banco para trabajarse; la
+        coordinación con BBVA es para el alta de la afiliación.
+        <div style="margin-top:9px"><button class="btn ghost sm"
+          data-go="form_bbva|${c.customer_id}">Registrar la coordinación</button></div>
+      </div>`
+      : ((mio || mandoTotal()) ? `<button class="btn ghost sm block" style="margin-top:11px"
+          data-go="form_bbva|${c.customer_id}">${
+            rotuloContacto(k.n, k.respondio, "＋ Registrar coordinación")} con BBVA</button>` : "")}
+  </div>`;
+}
+
+/* Los 408 correos que no se sabe a quién fueron.
+ *
+ * Hasta la versión de hoy «correo enviado» era un solo valor, y ahí caben dos
+ * cosas opuestas: pedirle los datos al banco —el caso espera— o escribirle al
+ * cliente con copia al banco —el caso ya está en la calle—. No se puede
+ * adivinar cuál fue: lo sabe quien lo mandó.
+ *
+ * Se pregunta en la ficha, con las dos respuestas a un clic, y no se toca
+ * nada hasta que alguien responda. Un dato inventado acá cambiaría de lado la
+ * culpa de cada caso trabado, que es exactamente lo que se está tratando de
+ * medir. */
+/* El recordatorio de los correos por aclarar.
+ *
+ * Son 408 fichas repartidas entre cuatro personas, y pedirlas de a una desde
+ * la ficha sería condenar a Aníbal a 185 clics buscando cuál le falta. El
+ * aviso vive arriba de la lista, dice cuántas quedan y lleva directo a ellas:
+ * el trabajo se hace de corrido, y el contador baja a la vista.
+ *
+ * Desaparece solo cuando llega a cero. No hay nada que apagar ni recordar. */
+function avisoPorActualizar(){
+  const mios = cartera().filter(correoAmbiguo);
+  if (!mios.length) return "";
+  if (S.fContacto === "correo_ambiguo")
+    return `<div class="note crit" style="margin:0">
+      <b>Quedan ${mios.length}.</b> Abre cada comercio y dime si el correo fue al ejecutivo de BBVA
+      o al cliente con copia. La lista se acorta sola a medida que respondes.</div>`;
+  return `<div class="note crit" style="margin:0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1 1 260px;min-width:0">
+      <b>${mios.length} comercio${mios.length===1?"":"s"} con el correo sin aclarar.</b>
+      <span class="solo-ancho">Antes «correo enviado» servía para dos cosas opuestas: pedirle los
+      datos al banco, o escribirle al cliente con copia al banco. De esto depende saber si el
+      caso está trabado del lado de BBVA o del nuestro.</span>
+    </div>
+    <button class="btn sm" data-f="contacto" data-v="correo_ambiguo">Ver ${
+      esDeCampo() ? "los míos" : "la lista"}</button>
+  </div>`;
+}
+
+/* El aviso se va cuando una PERSONA responde, no cuando el dato cambia.
+   Antes se iba solo si la respuesta era «fue al cliente con copia», porque esa
+   sí cambiaba el valor guardado. Responder «fue a BBVA» escribía el mismo
+   CORREO que ya estaba: la base no tenía nada que registrar, la pantalla se
+   redibujaba igual y el aviso seguía ahí. Desde fuera se veía como un botón
+   que no hace nada, y en realidad hacía exactamente lo que se le pidió.
+
+   Ahora la confirmación se guarda con su fecha y su autor, que es lo que de
+   verdad faltaba: una cosa es que el dato diga CORREO porque nadie lo revisó y
+   otra que alguien lo haya mirado y dicho que está bien. */
+function correoAmbiguo(c){
+  if (!c || c.contacto_bbva !== "CORREO") return false;
+  /* Alguien ya lo miró y respondió. */
+  if (c.canal_confirmado_en) return false;
+  /* Y si hay una coordinación con el banco registrada de verdad, la pregunta
+     ya está contestada por los hechos: consta que se le escribió a BBVA. Solo
+     se pregunta cuando el único rastro es el sello del alta —que era el caso
+     de la tarjeta que mostraba «1er contacto: Correo a BBVA» y debajo pedía
+     que le dijeran a quién había ido ese correo—. */
+  if (bbvaDe(c.customer_id).n > 0) return false;
+  /* Y se pregunta donde la respuesta cambia algo: en un caso que hoy figura
+     esperando al banco. Si el correo fue al cliente con copia, el caso estaba
+     habilitado y nadie lo sabía; si fue al banco, sigue esperando y al menos
+     queda dicho. En un caso que ya está por contactar o en negociación la
+     respuesta no mueve nada, y preguntar por preguntar es ruido.
+
+     Hasta el 22/08/2026 esto exigía justo lo contrario —POR_CONTACTAR— y tenía
+     sentido con la regla vieja, donde casi todo lo tocado caía ahí. Con la
+     regla nueva ahí ya no hay nada que aclarar. */
+  return estadoDerivado(c) === "POR_VALIDAR";
+}
+function avisoCorreoAmbiguo(c, k, mio){
+  if (!correoAmbiguo(c)) return "";
+  if (esDeCampo() && !mio) return "";
+  return `<div class="note crit" style="margin-top:11px">
+    <b>¿A quién fue ese correo?</b> Del alta de este comercio solo quedó anotado «correo», que
+    antes servía para las dos cosas, y no hay ninguna coordinación con el banco registrada
+    detrás. De esto depende saber si el caso está trabado del lado del banco o del nuestro.
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn sm" data-cbbva-fix="CORREO|${c.customer_id}">Fue correo a BBVA</button>
+      <button class="btn sm" data-cbbva-fix="CORREO_CC|${c.customer_id}">Fue correo al cliente con copia</button>
+    </div>
+  </div>`;
+}
+
+/* La coordinación con el banco se ve distinta en la línea de tiempo, y a
+   propósito: es la misma historia del comercio pero con otro interlocutor.
+   Mezclarlas sin distinguirlas sería tan confuso como tenerlas separadas. */
+/* Mirar el CRM con los ojos de un ejecutivo, anunciado sin sutileza.
+ *
+ * Una pantalla que muestra los datos de otra persona y no lo dice es una
+ * trampa: basta un momento de distracción para leer «6 comercios gestionados»
+ * como si fuera el equipo entero. Por eso la franja ocupa el ancho completo,
+ * dice de quién es lo que se está viendo, y aclara lo que más se malinterpreta
+ * de esta función: que los permisos no cambiaron. */
+function bannerComoEjec(){
+  const q = ejecObservado();
+  if (!q) return "";
+  return `<div class="note info como-ejec">
+    <div>
+      <b>Estás viendo el CRM como ${esc(q.nombre)}.</b>
+      La cartera, el avance y las gestiones son los suyos, tal cual los ve él.
+      <span class="solo-ancho">Tus permisos no cambian: si corriges algo desde acá, el cambio
+      queda en la bitácora a tu nombre y la gestión sigue siendo de ${esc(q.nombre)}.</span>
+    </div>
+    <button class="btn ghost sm" data-comoejec="">Volver a mi vista</button>
+  </div>`;
+}
+
+/* Entrar y salir de esa vista. Los filtros no cruzan la puerta: los de la
+   cartera completa no significan lo mismo dentro de la de una persona, y al
+   volver conviene ver todo otra vez. */
+function mirarComo(correo){
+  const antes = S.comoEjec;
+  S.comoEjec = correo || "";
+  S.cid = null; S.q = ""; S.qReg = ""; S.limite = 40; S.limiteReg = 40;
+  S.fContacto = S.fEstadoCli = S.fRubro = S.fDistrito = S.fEjecutivo = S.fCierre = "todos";
+  S.fResultado = S.fMedio = S.fEjecReg = "todos";
+  /* Si la pestaña abierta deja de existir en la vista a la que se entra o de
+     la que se sale, hay que moverse. Entrar a «ver como» desde Reporte dejaba
+     la pantalla de Reporte pintada con el menú del ejecutivo detrás: la vista
+     decía una cosa y el contenido otra. */
+  if (!navVisible().some(n => n.id === S.tab)) S.tab = "cartera";
+  window.scrollTo(0,0);
+  render();
+  const q = ejecObservado();
+  if (q) toast(`Viendo el CRM como ${q.nombre}`);
+  else if (antes) toast("De vuelta en tu vista de supervisión");
+}
+
+/* El selector, para la barra lateral y para la cabecera del tablero. */
+function selectorComoEjec(){
+  if (!mandoTotal()) return "";
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  if (!ejec.length) return "";
+  return `<label class="fsel como-sel"><span>Ver el CRM como</span>
+    <select class="selComoEjec">
+      <option value=""${S.comoEjec ? "" : " selected"}>Yo · supervisión</option>
+      ${ejec.map(u => `<option value="${esc(u.correo)}"${
+        S.comoEjec === u.correo ? " selected" : ""}>${esc(u.nombre)}</option>`).join("")}
+    </select></label>`;
+}
+
+/* BBVA pide que ningún comercio llegue sin comentario. Cuando nadie anotó
+   nada, el archivo del banco no sale en blanco: lleva una frase que el CRM
+   deduce de la línea de tiempo. Esto muestra esa frase acá, tal cual la va a
+   leer el banco, por dos razones: que el ejecutivo sepa qué se está diciendo
+   de su comercio, y que tenga la ocasión de reemplazarla por lo que de verdad
+   pasó —que siempre vale más que una deducción—. */
+function avisoComentario(c, regs){
+  /* Solo avisa cuando NO hay nada escrito por nadie. Si el ejecutivo anotó lo
+     suyo aunque el cliente no haya dicho nada, eso ya viaja al banco con su
+     nombre y no hay nada que reclamarle. */
+  if (regs.some(r => String(r.Comentario_Cliente || "").trim()
+                  || String(r.Espera || "").trim()
+                  || String(r.Comentario_Ejecutivo || "").trim())) return "";
+  const efectivos = regs.filter(r => esEfectivo(r.Resultado));
+  return `<div class="note" style="margin-bottom:12px">
+    <b>Sin comentario escrito.</b> BBVA exige que la celda no llegue vacía, así que en el
+    archivo del banco va esto, marcado como deducido por el CRM:
+    <div style="margin-top:7px;font-style:italic">«${esc(relatoCliente(c, regs, efectivos))}»</div>
+    <div style="margin-top:7px;font-size:11.5px;color:var(--muted)">
+      Si registras el comentario en una gestión, el tuyo reemplaza a este y esta nota desaparece.
+    </div></div>`;
+}
+
+/* ---- El sello del alta, que no es una gestión ----------------------------
+
+   Una fila RECONSTRUIDA no la registró nadie: la escribió una migración a
+   partir del medio que el ejecutivo declaró al crear la ficha, y le puso la
+   fecha del alta porque el CRM guardaba el medio y no la fecha.
+
+   Se mostraba como cualquier otra coordinación, con su chip de «Respondió» y
+   sus dos recuadros de comentario. Los dos mentían. El chip afirmaba una
+   respuesta del banco que no consta en ninguna parte, y los recuadros citaban
+   como palabras de alguien un texto que había escrito la migración —
+   «Coordinacion deducida al migrar la base…», «Se deduce que el ejecutivo de
+   BBVA respondio porque…»—. En la misma ficha, el recuadro de la derecha decía
+   «Sin coordinar» y la línea de tiempo decía «Respondió».
+
+   Acá se muestra por lo que es: una línea que dice qué medio se declaró y
+   nada más. El texto de la migración sigue en la base como rastro de lo que
+   hizo, pero no se le pone delante a nadie ni se lo hace pasar por una
+   gestión. */
+function selloDelAlta(r){
+  return `
+  <div class="tl-item tl-bbva">
+    <div class="card" style="margin-bottom:0;opacity:.82">
+      <div class="tl-h">
+        <div>
+          <div class="who">Medio declarado al alta${
+            nomMedioBBVA(r.Tipo_Contacto) ? " · " + esc(nomMedioBBVA(r.Tipo_Contacto)) : ""}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}${
+            r.Ejecutivo ? " · " + esc(r.Ejecutivo) : ""}</div>
+        </div>
+        <span class="chip">Sin gestión detrás</span>
+      </div>
+      <div class="pie" style="margin-top:6px">Es el canal que se anotó al crear la ficha, con la
+        fecha del alta. No hay ninguna coordinación registrada detrás, así que no dice si el banco
+        respondió ni qué se conversó.</div>
+    </div>
+  </div>`;
+}
+
+function itemTimelineBBVA(r){
+  if (esReconstruida(r)) return selloDelAlta(r);
+  const resp = respondioBBVA(r.Resultado);
+  /* Los 183 correos al funcionario que la migración reclasificó llegan acá con
+     un medio del catálogo del cliente —«correo»—, no con uno de la lista del
+     banco. El rótulo sale del que corresponda, y lo que no puede faltar es a
+     quién se le escribió. */
+  const medio = nomMedioBBVA(r.Tipo_Contacto)
+             || ((tipoById(r.Tipo_Contacto) || {}).label)
+             || r.Tipo_Contacto;
+  return `
+  <div class="tl-item tl-bbva">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">Ejecutivo BBVA · ${esc(medio)}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
+        </div>
+        <span class="chip ${resp ? "ok" : "warn"}">${resp ? "Respondió" : "Sin respuesta"}</span>
+      </div>
+      ${r.Proposito ? `<div style="margin-top:7px"><span class="chip info">${esc(nomProposito(r.Proposito))}</span></div>` : ""}
+      ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Qué se coordinó</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
+      ${r.Comentario_Cliente ? `<div class="quote"><b>Qué respondió BBVA</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+/* EL CIERRE, EN LA LÍNEA DE TIEMPO.
+ *
+ * La línea contaba los contactos y se detenía ahí. Un comercio que vendió
+ * terminaba su historia en «visita presencial» y el resultado —lo único que de
+ * verdad pasó— vivía en otra tarjeta, arriba, como un chip suelto. Quien
+ * bajaba a leer la historia no encontraba el final.
+ *
+ * Va primero porque la línea está ordenada de lo nuevo a lo viejo, y el cierre
+ * es lo último que ocurrió. */
+const CIERRE_TL = {
+  RETENIDO:  { rot:"Cliente retenido",   tono:"ok",
+               por:"El comercio se queda. Cuenta para la reactivación del portafolio." },
+  VENTA:     { rot:"Venta cerrada",      tono:"ok",
+               por:"La afiliación la confirma BBVA; se ve en la cartera del siguiente corte." },
+  RECUPERADO:{ rot:"Venta cerrada",      tono:"ok",
+               por:"La afiliación la confirma BBVA; se ve en la cartera del siguiente corte." },
+  PERDIDO:   { rot:"Comercio perdido",   tono:"no",
+               por:"Se fue o cerró. Deja de contar para la cobertura del portafolio." }
+};
+function itemCierre(c){
+  if (!casoCerrado(c)) return "";
+  const m = CIERRE_TL[estadoDerivado(c)];
+  if (!m) return "";
+  const f = String(c.cerrado_en || "").slice(0,10);
+  return `
+  <div class="tl-item tl-cierre">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">${esc(m.rot)}</div>
+          <div class="dt">${f ? esc(fmtFecha(f)) : "sin fecha de cierre registrada"}${
+            c.asignado ? " · " + esc(c.asignado) : ""}</div>
+        </div>
+        <span class="chip ${m.tono}">Caso cerrado</span>
+      </div>
+      <div class="pie" style="margin:7px 0 0">${esc(m.por)}</div>
+    </div>
+  </div>`;
+}
+
+function itemTimeline(r){
+  /* Por DESTINATARIO, no por la columna `Con`. Es el mismo arreglo que ya
+     tienen las consultas y el bono: los correos al funcionario reclasificados
+     conservan con='CLIENTE', así que acá se pintaban como gestiones con el
+     comercio y decían «No respondió» — de un cliente al que nadie escribió. */
+  if (esAlBanco(r)) return itemTimelineBBVA(r);
+  const t = tipoById(r.Tipo_Contacto);
+  const res = resultadoById(r.Resultado);
+  const editable = puedeEditar(r);
+  return `
+  <div class="tl-item">
+    <div class="card" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who">${esc(t ? t.label : r.Tipo_Contacto || "Contacto")}</div>
+          <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
+        </div>
+        <span class="chip ${r.Cumple_Visita === "SI" ? "ok" : "no"}">${r.Cumple_Visita === "SI" ? "Cumple visita" : "No cumple"}</span>
+      </div>
+      <div style="margin-top:7px">
+        <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res ? res.label : r.Resultado)}</span>
+      </div>
+      ${r.Ubicacion_Verificada
+        ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)} <span class="chip ok" style="font-size:10px">GPS verificado</span></div>`
+        : ubicacionDeclarada(r)
+          ? `<div style="font-size:12.5px;color:var(--muted);margin-top:6px">📍 ${esc(r.Ubicacion)}</div>`
+        : ubicacionExenta(r)
+          ? `<div class="pie" style="margin-top:6px">Ubicación no exigible${
+              r.Ubicacion_Exenta_Motivo ? " — " + esc(r.Ubicacion_Exenta_Motivo) : ""}</div>`
+        : sinUbicacion(r)
+          ? `<div style="margin-top:7px"><span class="chip crit">📍 Sin ubicación</span></div>` : ""}
+      ${r.Calificacion ? `<div style="margin-top:7px"><span class="chip info">Calificación ${esc(r.Calificacion)}</span></div>` : ""}
+      ${r.Comentario_Ejecutivo ? `<div class="quote"><b>Comentario del ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>` : ""}
+      ${r.Comentario_Cliente ? `<div class="quote"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>` : ""}
+      ${r.Espera ? `<div class="quote"><b>En qué quedó</b>${esc(r.Espera)}</div>` : ""}
+      ${traeDatosDelCliente(r) ? `<div style="margin-top:7px"><span class="chip ok">Con copia al ejecutivo BBVA</span></div>` : ""}
+      ${editable && (corregible(r) || borrable(r)) ? `<div style="display:flex;gap:7px;margin-top:11px">
+        ${corregible(r) ? `<button class="btn ghost sm" data-edit="${r._id}">Editar</button>` : ""}
+        ${borrable(r)   ? `<button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+      </div>` : editable ? `<div class="pie" style="margin-top:9px">${esc(plazoCorreccion(r))}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+
+/* =========================================================================
+   Alta y edición del comercio — la cartera se construye en campo
+
+   Modelo sin datos sensibles: el único dato que viene de BBVA es el
+   customer_id, que el ejecutivo digita. El nombre lo pone él mismo para
+   reconocer el local; no es la razón social.
+   ========================================================================= */
+function nuevoFormCliente(){
+  return {
+    tipo_registro:"CARTERA", customer_id:"", ruc:"", razon_social:"",
+    nombre_comercio:"", rubro:"", rubro_otro:"",
+    distrito:"", direccion:"", estado:"ACTIVO",
+    resultado_gestion:"PENDIENTE", motivo_no_retencion:"", observacion:"",
+    contacto_bbva:"", origen_lead:""
+  };
+}
+
+function formDeCliente(c){
+  return {
+    tipo_registro: c.tipo_registro || "CARTERA",
+    customer_id: c.customer_id,
+    ruc: c.ruc || "", razon_social: c.razon_social || "",
+    nombre_comercio: c.nombre_comercio || "",
+    rubro: c.rubro, rubro_otro: c.rubro_otro || "",
+    distrito: c.distrito || "", direccion: c.direccion || "",
+    estado: c.estado || "ACTIVO",
+    resultado_gestion: c.resultado_gestion || "PENDIENTE",
+    motivo_no_retencion: c.motivo_no_retencion || "",
+    observacion: c.observacion || "",
+    contacto_bbva: c.contacto_bbva || "",
+    origen_lead: c.origen_lead || ""
+  };
+}
+
+function editarCliente(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  /* El ejecutivo edita lo suyo; la supervisión edita cualquiera, porque es
+     quien responde por el dato frente al banco y no debería depender de que
+     el ejecutivo esté disponible para arreglar un dedazo. */
+  if (esDeCampo() && !esMiCliente(c))
+    return toast("Solo puedes editar los comercios que tú registraste");
+  S.editCli = String(cid);
+  S.formCli = formDeCliente(c);
+  S.tab = "form_cliente";
+  window.scrollTo(0,0);
+  render();
+}
+
+function renderFormCliente(){
+  /* El alta es trabajo de campo. La supervisión entra acá solo para corregir
+     una ficha existente; la base rechaza cualquier alta desde el escritorio,
+     así que acá no se está confiando en la pantalla. */
+  if (!esDeCampo() && !S.editCli){
+    S.tab = "cartera";
+    return toast("El alta de comercios la hacen los ejecutivos en campo");
+  }
+  if (!S.formCli) S.formCli = nuevoFormCliente();
+  const f = S.formCli, editando = !!S.editCli;
+
+  $("#view").innerHTML = `
+  <button class="back" data-backcli>‹ ${editando ? "Volver al comercio" : "Volver a la cartera"}</button>
+
+  <div class="card">
+    <h3 style="margin-bottom:4px">${editando ? "Editar comercio" : "Registrar nuevo comercio"}</h3>
+    <div style="font-size:13px;color:var(--muted)">
+      ${editando ? "El identificador y el ejecutivo asignado no se cambian desde acá: para eso está «Corregir identificador» en la ficha."
+                 : "El comercio queda a tu nombre. Escribe el Customer ID si ya está afiliado, o el RUC si lo estás trayendo tú: el formulario reconoce cuál es. Un mismo identificador solo puede estar registrado una vez en toda la campaña."}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Identificación</h3>
+    <div id="boxIdent"></div>
+    <div class="field" id="fldNombre">
+      <label>Nombre del comercio <span class="req">*</span> <span class="hint">— el que tú uses para reconocerlo</span></label>
+      <input type="text" data-c="nombre_comercio" value="${esc(f.nombre_comercio)}"
+             placeholder="Ej.: Bodega de la esquina, Av. Perú">
+    </div>
+    <div class="field">
+      <label>Rubro del comercio <span class="req">*</span></label>
+      <select data-c="rubro">
+        <option value="">Seleccionar…</option>
+        ${RUBROS.map(r => `<option value="${r.codigo}" ${f.rubro===r.codigo?"selected":""}>${esc(r.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <div id="rubroOtro"></div>
+    <div class="field" id="fldEstado">
+      <label>Estado del cliente <span class="req">*</span></label>
+      <div class="opts">
+        ${ESTADOS_CLIENTE.map(e => `
+          <div class="opt ${f.estado===e?"on":""}" data-estado="${e}">
+            <span class="rd"></span><span><b>${e === "ACTIVO" ? "Activo" : "Dado de baja"}</b>
+            <span>${e === "ACTIVO" ? "Opera con normalidad" : "Ya no opera o se retiró del servicio"}</span></span>
+          </div>`).join("")}
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="cardContactoBBVA">
+    <h3>¿Cómo se contactó al ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Este comercio llega porque alguien coordinó con el banco y el ejecutivo de BBVA
+      confirmó los datos del cliente. Indica por dónde fue esa coordinación:
+      es lo que sostiene que el caso viene de una gestión real y no de una lista suelta.
+      Todo lo de acá pasa <b>entre tú y la agencia</b> — el contacto con el cliente se
+      registra después, como gestión.
+    </div>
+    <div class="opts">
+      ${CONTACTO_BBVA.map(x => `
+        <div class="opt ${f.contacto_bbva===x.id?"on":""}" data-cbbva="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card" id="cardOrigenLead">
+    <h3>¿De dónde salió este lead?</h3>
+    <div class="note" style="margin-bottom:11px">
+      El reporte separa los leads de venta en dos: los que nacieron de un comercio que
+      ya estaba en la cartera que asignó BBVA, y los que son de afuera. El CRM no puede
+      deducirlo —los comercios de cartera no tienen RUC cargado, así que no hay contra
+      qué cruzarlo—, y quien lo sabe eres tú, que lo trabajaste.
+      <b>Si no estás seguro, déjalo sin marcar</b>: el reporte lo cuenta aparte como
+      pendiente, y eso es más útil que una marca inventada.
+    </div>
+    <div class="opts">
+      ${ORIGEN_LEAD.map(x => `
+        <div class="opt ${f.origen_lead===x.id?"on":""}" data-origlead="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card" id="cardUbicacion">
+    <h3>Ubicación del comercio</h3>
+    <div class="field">
+      <label>Distrito <span class="req">*</span></label>
+      <input type="text" data-c="distrito" list="dlDistritos" value="${esc(f.distrito)}"
+             autocapitalize="characters" placeholder="Ej.: SAN MIGUEL">
+      <datalist id="dlDistritos">${DISTRITOS_LIMA.map(d => `<option value="${d}">`).join("")}</datalist>
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Dirección <span class="req">*</span></label>
+      <input type="text" data-c="direccion" value="${esc(f.direccion)}" placeholder="Ej.: Av. La Marina 1520, int. 3">
+    </div>
+  </div>
+
+  <div class="card" id="cardGestion">
+    <h3>Resultado de la gestión</h3>
+    <div class="note" style="margin-bottom:11px">
+      Márcalo cuando cierres con el comercio. Es lo que BBVA lee como
+      <b>objetivo cumplido</b> en su archivo; mientras esté pendiente va como NO.
+    </div>
+    <div id="boxGestion"></div>
+  </div>
+
+  <div class="card" id="cardCierre">
+    <h3>¿Cómo se cerró la venta? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Una afiliación nueva se cierra en el local o en una reunión. Esta gestión se guarda
+      junto con el comercio: no puede quedar una venta sin la visita que la produjo.
+    </div>
+    <div class="opts" id="optsCierre"></div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+
+  <div id="boxGps"></div>
+
+
+  <div class="card">
+    <h3 id="tituloNotas">Observación</h3>
+    <div id="boxNotas"></div>
+    <div id="notaDatos" style="margin-top:11px"></div>
+  </div>
+
+  <div id="errCli"></div>
+  <div class="sticky-actions">
+    <button class="btn" id="guardarCli">${editando ? "Guardar cambios" : "Registrar comercio"}</button>
+    <button class="btn ghost" data-backcli>Cancelar</button>
+  </div>
+  `;
+
+  $("#view").querySelectorAll("[data-cbbva]").forEach(el => el.onclick = () => {
+    f.contacto_bbva = el.dataset.cbbva;
+    $("#view").querySelectorAll("[data-cbbva]").forEach(x =>
+      x.classList.toggle("on", x.dataset.cbbva === f.contacto_bbva));
+  });
+  /* Se puede desmarcar: si alguien eligió por apurarse, volver a tocar la
+     misma opción la apaga y la ficha queda otra vez en «sin marcar», que es
+     un estado honesto. Sin esto la única salida sería dejar puesta la marca
+     equivocada. */
+  $("#view").querySelectorAll("[data-origlead]").forEach(el => el.onclick = () => {
+    f.origen_lead = (f.origen_lead === el.dataset.origlead) ? "" : el.dataset.origlead;
+    $("#view").querySelectorAll("[data-origlead]").forEach(x =>
+      x.classList.toggle("on", x.dataset.origlead === f.origen_lead));
+  });
+  $("#view").querySelectorAll("[data-backcli]").forEach(b => b.onclick = () => {
+    const volver = S.editCli;
+    S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = volver || null;
+    render();
+  });
+  $("#view").querySelectorAll("[data-c]").forEach(el => {
+    el.oninput = el.onchange = () => {
+      f[el.dataset.c] = el.value;
+      if (el.dataset.c === "rubro") pintarRubroOtro();
+    };
+  });
+  $("#view").querySelectorAll("[data-estado]").forEach(el => el.onclick = () => {
+    f.estado = el.dataset.estado;
+    $("#view").querySelectorAll("[data-estado]").forEach(x => x.classList.toggle("on", x.dataset.estado === f.estado));
+    pintarGestion();   // el estado decide si el cierre puede ser retención o venta
+  });
+  $("#guardarCli").onclick = guardarCliente;
+  pintarRubroOtro(); pintarIdentificacion();
+}
+
+/* ---------------------------------------------------------------------------
+   Qué cierres puede elegir el ejecutivo
+
+   Dos reglas, las mismas que vigila la base:
+   · Retenido y Venta solo existen si ya hubo un contacto logrado. Sin eso,
+     BBVA recibiría un objetivo cumplido con cero visitas y cero llamadas.
+   · Retenido es para un comercio activo; si al gestionarlo figuraba dado de
+     baja y se recuperó, eso es una venta y se deriva al ejecutivo de BBVA.
+   --------------------------------------------------------------------------- */
+function hayContactoLogrado(cid){
+  return !!cid && DB.delCliente(cid).some(r => esEfectivo(r.Resultado));
+}
+
+function gestionesPosibles(){
+  const f = S.formCli;
+  const logrado = hayContactoLogrado(S.editCli);
+  const nuevo = f.tipo_registro === "NUEVO";
+  return RESULTADOS_GESTION.filter(g => {
+    if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
+    if (!logrado) return false;
+    if (g.id === "RETENIDO") return !nuevo && f.estado === "ACTIVO";
+    if (g.id === "VENTA")    return nuevo || f.estado === "DE BAJA";
+    return true;
+  });
+}
+
+function pintarGestion(){
+  const f = S.formCli, box = $("#boxGestion");
+  if (!box) return;
+  const posibles = gestionesPosibles();
+  if (!posibles.some(g => g.id === f.resultado_gestion)) f.resultado_gestion = "PENDIENTE";
+  const logrado = hayContactoLogrado(S.editCli);
+  const aviso = !logrado
+    ? `Todavía no hay ningún contacto logrado con este comercio, así que el cierre no se puede marcar.
+       Registra la gestión en la que hablaste con el titular y después vuelve acá.`
+    : f.estado === "ACTIVO"
+      ? `El comercio figura <b>activo</b>: si se queda con BBVA es una <b>retención</b>.`
+      : `El comercio figura <b>dado de baja</b>: si lo recuperaste es una <b>venta</b>, y se deriva al
+         ejecutivo de BBVA. Si no lo recuperaste, no hay retención que contar.`;
+  box.innerHTML = `
+    <div class="field" style="margin-bottom:0">
+      <select data-c="resultado_gestion">
+        ${posibles.map(g => `<option value="${g.id}" ${f.resultado_gestion===g.id?"selected":""}>${esc(g.label)} — ${esc(g.desc)}</option>`).join("")}
+      </select>
+    </div>
+    ${f.resultado_gestion === "PERDIDO" ? `
+    <div class="field" style="margin:12px 0 0">
+      <label>¿Por qué no se retuvo? <span class="req">*</span>
+        <span class="hint">— es lo que le falta al reporte de BBVA para poder actuar</span></label>
+      <select data-c="motivo_no_retencion">
+        <option value="">Seleccionar…</option>
+        ${MOTIVOS_NO_RETENCION.map(m => `<option value="${m.id}" ${f.motivo_no_retencion===m.id?"selected":""}>${esc(m.label)} — ${esc(m.desc)}</option>`).join("")}
+      </select>
+    </div>` : ""}
+    <div class="note ${logrado ? "" : "warn"}" style="margin:11px 0 0">${aviso}</div>`;
+  box.querySelectorAll("[data-c]").forEach(el => el.onchange = () => {
+    f[el.dataset.c] = el.value;
+    if (el.dataset.c === "resultado_gestion"){
+      if (el.value !== "PERDIDO") f.motivo_no_retencion = "";
+      pintarGestion();
+    }
+  });
+}
+
+/* El origen ya no se elige en una pantalla aparte: lo dice el número.
+
+   Un Customer ID de BBVA tiene 8 dígitos —los 801 de la cartera, salvo uno de
+   9— y un RUC tiene exactamente 11. No se pisan, así que preguntar «¿de dónde
+   sale este comercio?» antes de dejar escribir era un paso de más: el
+   ejecutivo ya tiene el número en la mano y el formulario puede deducirlo.
+
+   Lo que sí hace falta es DECIRLO en voz alta. Un formulario que cambia solo
+   sin explicar por qué desconcierta, y acá el cambio no es cosmético: decide
+   si el registro cuenta como venta nueva. Por eso la detección se muestra. */
+function pintarIdentificacion(){
+  const f = S.formCli, box = $("#boxIdent"), editando = !!S.editCli;
+  if (!box) return;
+  const nuevo = f.tipo_registro === "NUEVO";
+  /* Al editar, la llave ya está decidida y no se toca desde acá: para eso
+     está «Corregir identificador» en la ficha, que mueve las gestiones. */
+  const valor = editando ? (nuevo ? f.ruc : f.customer_id) : (f._ident || "");
+
+  /* Un solo generador para el cartel, así el nodo que se repinta al teclear es
+     siempre el mismo y el swap encuentra a quién reemplazar. */
+  const detectado = detectadoHTML(valor);
+
+  box.innerHTML = `
+    <div class="field">
+      <label>Customer ID o RUC <span class="req">*</span>
+        <span class="hint">— el código del comercio en BBVA, o el RUC si todavía no está afiliado</span></label>
+      <input type="text" data-ident value="${esc(valor)}" ${editando ? "disabled" : ""}
+             inputmode="numeric" autocapitalize="characters" maxlength="11"
+             placeholder="Ej.: 40218755  ·  20123456789">
+      ${detectado}
+    </div>
+    ${nuevo ? `
+      <div class="field">
+        <label>Razón social <span class="req">*</span></label>
+        <input type="text" data-c="razon_social" value="${esc(f.razon_social)}"
+               placeholder="Tal como figura en SUNAT">
+        <div style="font-size:11.5px;color:var(--muted);margin-top:4px">
+          Con este nombre aparecerá el comercio en tu cartera.
+        </div>
+      </div>` : ""}`;
+
+  const inp = box.querySelector("[data-ident]");
+  if (inp && !editando) inp.oninput = () => {
+    const v = inp.value;
+    f._ident = v;
+    const soloNum = String(v).replace(/[^0-9]/g, "");
+    const antes = f.tipo_registro;
+    f.tipo_registro = esRucValido(v) ? "NUEVO" : "CARTERA";
+    if (f.tipo_registro === "NUEVO"){ f.ruc = soloNum; f.customer_id = ""; }
+    else { f.customer_id = String(v).trim().toUpperCase(); f.ruc = ""; }
+    /* Repintar entero solo cuando el veredicto cambia; si no, el cursor se
+       pierde en cada tecla. */
+    if (antes !== f.tipo_registro){ pintarIdentificacion(); box.querySelector("[data-ident]").focus(); }
+    else { const n = box.querySelector(".note"); if (n) n.outerHTML = detectadoHTML(v); }
+  };
+  box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
+  camposSegunOrigen();
+  pintarNotas();
+  pintarNotaDatos();
+}
+
+/* El mismo cartel de la detección, para refrescarlo sin repintar el campo y
+   perder el cursor. */
+function detectadoHTML(valor){
+  if (esRucValido(valor))
+    return `<div class="note" style="margin:7px 0 0;padding:8px 11px">
+              <b>Detectado: RUC</b> — 11 dígitos. Se registrará como <b>venta nueva</b>,
+              y la venta se cierra después desde una gestión.</div>`;
+  if (String(valor).trim().length >= 3)
+    return `<div class="note" style="margin:7px 0 0;padding:8px 11px">
+              <b>Detectado: Customer ID</b> — comercio de la cartera de BBVA.</div>`;
+  return `<div class="note" style="margin:7px 0 0;padding:8px 11px;background:transparent;border:0;color:var(--muted);font-size:11.5px">
+            8 dígitos es un Customer ID de la cartera; 11 es un RUC, y entonces
+            el registro cuenta como venta nueva.</div>`;
+}
+
+/* Una venta nueva se registra con lo mínimo: RUC, razón social y rubro. La
+   dirección, el distrito y el estado son de la cartera de BBVA — un comercio
+   que recién se afilia todavía no tiene estado que reportar. */
+/* Medios con los que se puede cerrar una afiliación nueva. Por teléfono,
+   correo o WhatsApp no se cierra una venta: hay que estar ahí o verse la cara. */
+const MEDIOS_VENTA = ["visita_presencial","reunion_presencial","reunion_virtual","videollamada"];
+
+function camposSegunOrigen(){
+  const nuevo = S.formCli.tipo_registro === "NUEVO";
+  /* El alta es el mismo paso para los dos orígenes: se identifica el comercio
+     y se dice cómo se coordinó con el ejecutivo de BBVA. Nada más.
+
+     El resultado de la gestión NO se pide acá, y esa es la corrección: un
+     desplegable de cierre en el formulario de alta hace pensar que registrar
+     el comercio es registrar la venta. El cierre es el final del ciclo, no el
+     principio, y vive en la gestión donde se cerró.
+
+     Lo que un RUC no tiene todavía —nombre comercial, estado, ubicación— lo
+     pone BBVA al afiliarlo o se captura en la primera visita. */
+  [["#fldNombre", nuevo], ["#fldEstado", nuevo], ["#cardUbicacion", nuevo],
+   ["#cardContactoBBVA", false], ["#cardCierre", true], ["#cardGestion", !S.editCli],
+   /* El origen del lead solo tiene sentido en una venta nueva: una ficha de
+      cartera ES la base, preguntarle si viene de la base no significa nada.
+      La restricción de la tabla lo impide igual, pero un campo que no se
+      puede llenar mal es mejor que uno que se rechaza al guardar. */
+   ["#cardOrigenLead", !nuevo]]
+    .forEach(([sel, ocultar]) => { const el = $(sel); if (el) el.style.display = ocultar ? "none" : ""; });
+
+  if (nuevo){
+    /* Antes el RUC nacía vendido: se registraba y en el mismo acto quedaba
+       como VENTA. Eso producía una venta sin ciclo detrás, que es justo lo
+       que BBVA reclama. Ahora entra como prospecto —igual que un comercio de
+       cartera entra pendiente— y la venta se cierra desde una gestión, con
+       su fecha, su medio y su evidencia. */
+    if (!S.formCli.resultado_gestion) S.formCli.resultado_gestion = "PENDIENTE";
+    pintarGestion();
+  } else {
+    ["#derivado","#boxGps"].forEach(sel => { const el = $(sel); if (el) el.innerHTML = ""; });
+    pintarGestion();
+  }
+}
+
+function pintarMediosVenta(){
+  const f = S.form, box = $("#optsCierre");
+  if (!box) return;
+  box.innerHTML = TIPOS_CONTACTO.filter(t => MEDIOS_VENTA.includes(t.id)).map(t => `
+    <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-medio="${t.id}">
+      <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+    </div>`).join("");
+  box.querySelectorAll("[data-medio]").forEach(el => el.onclick = () => {
+    f.Tipo_Contacto = el.dataset.medio;
+    box.querySelectorAll("[data-medio]").forEach(x => x.classList.toggle("on", x.dataset.medio === f.Tipo_Contacto));
+    pintarDerivado(); pintarGps();
+  });
+  pintarDerivado(); pintarGps();
+}
+
+/* Los dos orígenes usan la misma nota interna. Antes el RUC pedía acá los
+   comentarios de la gestión que lo cerraba, porque la venta se registraba de
+   un golpe; ahora esa gestión se registra aparte y pide sus comentarios
+   donde corresponde. */
+function pintarNotas(){
+  const f = S.formCli, box = $("#boxNotas"), tit = $("#tituloNotas");
+  if (!box) return;
+  const nuevo = f.tipo_registro === "NUEVO";
+  if (tit) tit.textContent = "Observación";
+  box.innerHTML = `
+    <div class="field" style="margin-bottom:0">
+      <label>Nota interna <span class="hint">— opcional</span></label>
+      <textarea data-c="observacion" placeholder="${nuevo
+        ? "Ej.: Bodega de la esquina, sin POS. El dueño atiende de mañana."
+        : "Ej.: El local abre solo por las tardes; conviene ir después de las 3."}">${esc(f.observacion)}</textarea>
+    </div>`;
+  box.querySelectorAll("[data-c]").forEach(el => el.oninput = el.onchange = () => f[el.dataset.c] = el.value);
+}
+
+function pintarNotaDatos(){
+  const f = S.formCli, box = $("#notaDatos");
+  if (!box) return;
+  box.innerHTML = f.tipo_registro === "NUEVO"
+    ? `<div class="note">De un <b>cliente nuevo</b> solo se guardan RUC, razón social y rubro.
+       El resto del onboarding —representante legal, DNI, cuenta y POS— lo hace BBVA por su canal.
+       <br><br>El RUC entra <b>en negociación</b>, no vendido. La venta se cierra desde una gestión,
+       igual que en la cartera: con su fecha, su medio y su evidencia.</div>`
+    : `<div class="note">Esta base <b>no guarda razón social, RUC, teléfonos ni personas de contacto</b>
+       de la cartera de BBVA. Si los necesitas, están en la base del banco y se cruzan por Customer ID.</div>`;
+}
+
+function pintarRubroOtro(){
+  const f = S.formCli, box = $("#rubroOtro");
+  if (!box) return;
+  if (f.rubro !== "otro"){ box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="field">
+    <label>¿Qué rubro? <span class="req">*</span></label>
+    <input type="text" id="rubroOtroTxt" value="${esc(f.rubro_otro)}" placeholder="Escribe el rubro del comercio">
+  </div>`;
+  $("#rubroOtroTxt").oninput = e => f.rubro_otro = e.target.value;
+}
+
+/* ---- Guardar ------------------------------------------------------------ */
+async function guardarCliente(){
+  const f = S.formCli, editando = !!S.editCli, errores = [];
+  const nuevo = f.tipo_registro === "NUEVO";
+  const cid = String(f.customer_id || "").trim().toUpperCase();
+  const ruc = String(f.ruc || "").replace(/[^0-9]/g, "");
+
+  if (!editando){
+    if (nuevo){
+      if (ruc.length !== 11) errores.push("El RUC debe tener 11 dígitos.");
+      if (CLIENTES.some(c => c.ruc === ruc)) errores.push(`El RUC ${ruc} ya está registrado en la campaña.`);
+    } else {
+      if (cid.length < 3) errores.push("Escribe el Customer ID del comercio (mínimo 3 caracteres).");
+      if (byId[cid]) errores.push(`El Customer ID ${cid} ya está registrado en tu cartera.`);
+    }
+  }
+  if (!nuevo && f.resultado_gestion === "PERDIDO" && !f.motivo_no_retencion)
+    errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
+  if (nuevo){
+    if (!String(f.razon_social).trim()) errores.push("Escribe la razón social: BBVA la necesita para afiliarlo.");
+  } else {
+    if (!String(f.nombre_comercio).trim()) errores.push("Ponle un nombre al comercio para poder reconocerlo.");
+    if (!String(f.distrito).trim()) errores.push("Indica el distrito.");
+    if (!String(f.direccion).trim()) errores.push("Indica la dirección.");
+  }
+  /* La coordinación con el ejecutivo de BBVA se pide en los dos casos: en la
+     cartera porque sin el banco no hay datos del titular, y en un RUC porque
+     sin el banco no hay afiliación. Es el mismo paso del mismo flujo. */
+  if (!editando && !f.contacto_bbva)
+    errores.push("Indica cómo se contactó al ejecutivo de BBVA. Sin ese dato no se puede registrar el comercio.");
+  /* Dar de alta es trabajo de campo. Se avisa acá con todas las letras en vez
+     de dejar que la base responda con un error de permisos que no le dice a
+     nadie qué hacer. */
+  if (!editando && !esDeCampo() && !soloLectura())
+    errores.push("El alta de comercios la hacen los ejecutivos en campo. Desde supervisión se corrigen fichas, no se crean.");
+  if (!f.rubro) errores.push("Selecciona el rubro del comercio.");
+  if (f.rubro === "otro" && !String(f.rubro_otro).trim()) errores.push("Escribe cuál es el rubro.");
+
+  if (errores.length){
+    $("#errCli").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    $("#errCli").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarCli");
+  btn.disabled = true; btn.textContent = "Guardando…";
+
+  const fila = {
+    tipo_registro: f.tipo_registro,
+    rubro: f.rubro,
+    rubro_otro: f.rubro === "otro" ? String(f.rubro_otro).trim() : null,
+    /* Último resto de «un RUC nace vendido»: acá decía `nuevo ? "VENTA" : …`,
+       y como esta fila también es la que se usa al EDITAR, cualquier arreglo
+       sobre una venta nueva —corregir el rubro, la razón social— la devolvía a
+       VENTA y borraba el ciclo que se acababa de registrar. El cierre lo
+       decide la gestión donde se cerró, no el formulario del comercio. */
+    resultado_gestion: f.resultado_gestion || "PENDIENTE",
+    motivo_no_retencion: (!nuevo && f.resultado_gestion === "PERDIDO") ? (f.motivo_no_retencion || null) : null
+  };
+  if (nuevo){
+    // Ficha mínima: el resto del onboarding lo hace BBVA por su canal.
+    fila.ruc             = ruc;
+    fila.razon_social    = String(f.razon_social).trim();
+    fila.nombre_comercio = String(f.razon_social).trim();
+    fila.distrito = null; fila.direccion = null; fila.estado = null;
+    fila.observacion     = String(f.observacion || "").trim() || null;
+    /* El medio con el que se coordinó con BBVA se guarda igual que en cartera:
+       es el mismo paso del mismo flujo, y al editar tiene que poder corregirse. */
+    fila.contacto_bbva   = f.contacto_bbva || null;
+    /* Vacío se guarda como null y no como cadena vacía: la restricción de la
+       tabla solo admite null, DENTRO o FUERA, y «sin marcar» tiene que poder
+       distinguirse de «marcado». */
+    fila.origen_lead     = f.origen_lead || null;
+    /* La llave sigue siendo el RUC; el customer_id es su forma dentro de la
+       tabla, para que las gestiones cuelguen del mismo sitio que en cartera.
+       Es la misma convención que ya usaba «crear_venta_nueva». */
+    if (!editando) fila.customer_id = "NUEVO-" + ruc;
+  } else {
+    fila.nombre_comercio = String(f.nombre_comercio).trim();
+    fila.distrito        = String(f.distrito).trim().toUpperCase();
+    fila.direccion       = String(f.direccion).trim();
+    fila.estado          = f.estado;
+    fila.observacion     = String(f.observacion).trim() || null;
+    fila.contacto_bbva   = f.contacto_bbva || null;
+    /* Una ficha de cartera nunca lleva origen del lead. Se manda null en vez
+       de omitirlo: si una ficha cambiara de venta nueva a cartera, omitirlo
+       dejaría la marca vieja pegada y la restricción rechazaría el guardado
+       con un mensaje que no le dice nada a nadie. */
+    fila.origen_lead     = null;
+    if (!editando) fila.customer_id = cid;
+  }
+
+  try {
+    if (editando){
+      const { error } = await sb.from("clientes").update(fila).eq("customer_id", S.editCli);
+      if (error) throw error;
+    } else if (nuevo){
+      /* Un RUC entra solo, sin gestión pegada. La atomicidad que daba
+         «crear_venta_nueva» ya no hace falta: no hay dos cosas que guardar. */
+      fila.asignado = S.user.nombre;
+      fila.asignado_correo = S.user.correo;
+      const { error } = await sb.rpc("crear_prospecto", {
+        p_ruc:          ruc,
+        p_razon_social: fila.razon_social,
+        p_rubro:        fila.rubro,
+        p_rubro_otro:   fila.rubro_otro,
+        p_observacion:  fila.observacion
+      });
+      if (error) throw error;
+      /* El medio con el que se coordinó con BBVA, igual que en la cartera. */
+      /* `crear_prospecto` no recibe estos dos, así que se ponen enseguida.
+         Van juntos en un solo update para no pegarle dos veces a la fila. */
+      const extra = {};
+      if (f.contacto_bbva) extra.contacto_bbva = f.contacto_bbva;
+      if (f.origen_lead)   extra.origen_lead   = f.origen_lead;
+      if (Object.keys(extra).length){
+        await sb.from("clientes").update(extra).eq("customer_id", "NUEVO-" + ruc);
+      }
+    } else {
+      fila.asignado = S.user.nombre;
+      fila.asignado_correo = S.user.correo;
+      const { error } = await sb.from("clientes").insert(fila);
+      if (error) throw error;
+    }
+    const destino = editando ? S.editCli : (nuevo ? "NUEVO-" + ruc : cid);
+    await recargarCartera(); await refrescar(); await cargarAuditoria();
+    toast(editando ? "Comercio actualizado" : (nuevo ? "RUC registrado · ahora trabájalo con gestiones" : "Comercio registrado"));
+    S.formCli = null; S.editCli = null; S.form = null; S.tab = "cartera"; S.cid = destino;
+    window.scrollTo(0,0);
+    render();
+  } catch (err){
+    btn.disabled = false; btn.textContent = editando ? "Guardar cambios" : "Registrar comercio";
+    const msg = String(err.message || err);
+    const amable = /duplicate key|clientes_pkey|23505/i.test(msg)
+      ? `${nuevo ? "El RUC <b>"+esc(ruc)+"</b>" : "El Customer ID <b>"+esc(cid)+"</b>"} ya está registrado por otro ejecutivo de la campaña. Cada comercio pertenece a quien lo registró primero — coordínalo con tu supervisor.`
+      : /violates row-level security|permission/i.test(msg)
+      ? "La base rechazó el registro: solo puedes crear y editar comercios a tu propio nombre."
+      : esc(msg);
+    $("#errCli").innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${amable}</div>`;
+    $("#errCli").scrollIntoView({ behavior:"smooth", block:"center" });
+  }
+}
+
+function confirmarEliminarCliente(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  if (!esMiCliente(c)) return toast("Solo puedes eliminar los comercios que tú registraste");
+  /* TODAS las filas que cuelgan del Customer ID, no solo las dirigidas al
+     comercio. La función de la base mueve `interacciones` entera, así que
+     contar solo las del cliente hacía que el diálogo dijera «todavía no tiene
+     gestiones» en una ficha con dos coordinaciones con el banco — y después la
+     base abortaba diciendo «2 de 2 gestiones no siguieron al comercio». Dos
+     mensajes del mismo sistema contándose historias distintas. */
+  const n = DB.historiaDe(cid).length;
+  modal(`
+    <h3>Eliminar comercio</h3>
+    <p>Se eliminará <b>${esc(titulo(nombreCliente(c)))}</b> (ID ${esc(c.customer_id)})
+    ${n ? `junto con sus <b>${n}</b> registro${n===1?"":"s"} de contacto` : ""}.
+    Esta acción no se puede deshacer.</p>
+    <div style="display:flex;gap:9px">
+      <button class="btn danger" id="okDelCli" style="flex:1">Eliminar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Conservar</button>
+    </div>`);
+  $("#okDelCli").onclick = async () => {
+    const { error } = await sb.from("clientes").delete().eq("customer_id", String(cid));
+    if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
+    await recargarCartera(); await cargarAuditoria();
+    cerrarModal(); toast("Comercio eliminado");
+    S.cid = null; S.tab = "cartera"; render();
+  };
+}
+
+/* -------------------------------------------------------------------------
+   Corregir un Customer ID mal tipeado
+
+   La llave con la que se cruza contra la cartera del banco. Si se registró
+   con un dedazo, el comercio no le pega a nada en el archivo de BBVA, y hasta
+   ahora la única salida era borrarlo —perdiendo sus gestiones—
+   y volver a empezar. La corrección la hacen el Analista y el Manager: el
+   error lo comete quien registra, así que no debería revisarse a sí mismo.
+   ------------------------------------------------------------------------- */
+function modalCorregirId(cid){
+  const c = byId[String(cid)];
+  if (!c) return;
+  /* Antes esto lo hacían solo el Analista y el Manager, con el argumento de
+     que quien comete el error no debería revisarse a sí mismo. En la práctica
+     el dedazo lo descubre el ejecutivo en la calle, y hacerlo esperar a que
+     alguien de oficina lo corrija dejaba el comercio sin poder gestionarse.
+     Se abre al dueño de la ficha; la bitácora sigue registrando quién lo hizo. */
+  const nuevoCli = esClienteNuevo(c);
+  const ROT = nuevoCli ? "RUC" : "Customer ID";
+  const actual = nuevoCli ? (c.ruc || "") : c.customer_id;
+  if (esDeCampo()){
+    if (!esMiCliente(c))
+      return toast(`Solo puedes corregir el ${ROT} de los comercios que registraste`);
+    /* Se respeta la misma ventana de edición que gobierna el resto de sus
+       cambios: una regla, no dos. Cerrada la ventana queda el camino de
+       siempre, que es pedírselo al Analista o al Manager. */
+    if (!edicionLibre())
+      return toast(`La ventana de edición del periodo ya cerró: pídele al Analista que corrija el ${ROT}`);
+  }
+  const n = DB.delCliente(cid).length;
+
+  modal(`
+    <h3>Corregir el ${ROT}</h3>
+    <p><b>${esc(titulo(nombreCliente(c)))}</b> — registrado por ${esc(c.asignado)}.</p>
+    <div class="kv" style="border:0;padding:0 0 12px"><dt>${ROT} actual</dt>
+      <dd class="mono">${esc(actual)}</dd></div>
+    <div class="field">
+      <label for="fixNuevo">${ROT} correcto <span class="req">*</span></label>
+      <input type="text" id="fixNuevo" inputmode="numeric" autocomplete="off"
+             ${nuevoCli ? 'maxlength="11"' : ""}
+             placeholder="${esc(actual)}" value="">
+    </div>
+    <div class="note" style="margin-bottom:12px">
+      ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} —con el comercio y con el banco—
+             se mueven con él; no se pierde nada. `
+          : "El comercio todavía no tiene ninguna gestión registrada. "}
+      La corrección queda en la bitácora con tu nombre.
+    </div>
+    <div id="fixMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="fixOk" style="flex:1">Corregir</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  const caja = $("#fixNuevo");
+  caja.focus();
+  caja.oninput = () => $("#fixMsg").innerHTML = "";
+
+  $("#fixOk").onclick = async () => {
+    const nuevo = caja.value.trim();
+    const msg = $("#fixMsg");
+    if (!nuevo) return msg.innerHTML = `<div class="err">Escribe el ${esc(ROT)} correcto.</div>`;
+    if (nuevo === String(actual))
+      return msg.innerHTML = `<div class="err">Ese es el mismo que ya tiene.</div>`;
+    if (nuevoCli && !esRucValido(nuevo))
+      return msg.innerHTML = `<div class="err">El RUC debe tener 11 dígitos.</div>`;
+    if (!nuevoCli && !/^[A-Za-z0-9._-]{3,30}$/.test(nuevo))
+      return msg.innerHTML = `<div class="err">Entre 3 y 30 caracteres, sin espacios ni símbolos raros.</div>`;
+    /* La llave dentro de la tabla es el customer_id en los dos casos; para un
+       RUC es su forma «NUEVO-…», la misma convención con la que se creó. */
+    const destino = nuevoCli ? "NUEVO-" + nuevo : nuevo;
+    if (nuevoCli && CLIENTES.some(o => o.ruc === nuevo && o.customer_id !== c.customer_id))
+      return msg.innerHTML = `<div class="err">El RUC ${esc(nuevo)} ya está registrado en la campaña.</div>`;
+    if (byId[destino])
+      return msg.innerHTML = `<div class="err">El ${esc(nuevo)} ya lo tiene <b>${esc(titulo(nombreCliente(byId[destino])))}</b>.</div>`;
+
+    const b = $("#fixOk"); b.disabled = true; b.textContent = "Corrigiendo…";
+    try {
+      /* Para un RUC hay dos cosas que mover —la llave y la columna `ruc`— y
+         tienen que ir juntas o el comercio queda diciendo dos números
+         distintos. La base ya trae `corregir_ruc` para eso: mueve la ficha,
+         sus gestiones y la columna en una sola transacción. */
+      const { error } = nuevoCli
+        ? await sb.rpc("corregir_ruc", { p_customer_id: String(c.customer_id), p_ruc: nuevo })
+        : await sb.rpc("corregir_customer_id", { p_actual: String(c.customer_id), p_nuevo: destino });
+      if (error) throw new Error(error.message);
+      await recargarCartera(); await cargarAuditoria();
+      cerrarModal(); toast(`${ROT} corregido`);
+      S.cid = destino; render();
+    } catch (e) {
+      b.disabled = false; b.textContent = "Corregir";
+      msg.innerHTML = `<div class="err">${esc(String(e.message).replace(/^.*?:\s*/, ""))}</div>`;
+    }
+  };
+}
+
+/* =========================================================================
+   Registrar una coordinación con el ejecutivo de BBVA
+
+   Por qué existe esta pantalla y no bastaba el campo que ya había:
+
+   La campaña es de reactivación. El comercio YA tenía el servicio, y sus datos
+   de contacto —celular, correo, persona a quien buscar— los tiene el banco, no
+   Stratis. Así que antes de poder llamar a nadie hay que pedírselos al
+   ejecutivo de BBVA y esperar que conteste. Ese paso no es un trámite: es la
+   puerta, y es donde se está quedando el volumen de la campaña.
+
+   Hasta ahora el CRM lo guardaba como un sello: un campo con un valor, puesto
+   al crear la ficha y nunca más. Sin fecha, sin lugar para un segundo intento,
+   sin decir si el ejecutivo contestó, y sin una línea de lo que se coordinó.
+   Un sello no puede responder «¿cuántas veces tuvimos que insistir?».
+
+   Dos cosas que esta pantalla hace y conviene no perder de vista:
+
+   · **La respuesta y los datos llegan juntos.** Cuando el ejecutivo contesta,
+     lo que llega es el celular y el correo del titular. No hay un paso aparte
+     donde alguien declare «los datos están correctos»: los datos están porque
+     BBVA los entregó, o no están. Un dato que el sistema puede comprobar no se
+     le pregunta a la persona.
+
+   · **El chat obliga a un correo.** El chat interno del banco no deja
+     constancia consultable, así que la campaña pide mandar después un correo
+     con lo acordado. El CRM no se limita a permitirlo: lo reclama en la ficha
+     hasta que aparezca.
+   ========================================================================= */
+
+const FB_VACIO = () => ({
+  Fecha: hoyISO(),
+  Hora: new Date().toTimeString().slice(0,5),
+  Medio: "",
+  Proposito: "",
+  Respondio: "",
+  Comentario: "",
+  Respuesta: ""
+});
+
+/* El propósito se propone solo, según dónde esté parado el comercio:
+
+     sin ningún contacto        → primer contacto
+     un chat sin su correo      → respaldo del chat
+     contactos sin respuesta    → respuesta del banco (lo más probable que venga)
+     ya respondió               → insistencia
+
+   Proponerlo bien es lo que hace que el dato se llene de verdad: si el valor
+   que aparece es casi siempre el correcto, nadie lo deja en cualquier cosa. */
+function fbNuevo(cid){
+  const k = bbvaDe(cid);
+  const p = k.n === 0        ? "primer_contacto"
+          : k.faltaRespaldo  ? "respaldo_chat"
+          : !k.respondio     ? "respuesta"
+                             : "insistencia";
+  return Object.assign(FB_VACIO(), {
+    Proposito: p,
+    /* Si lo que viene es la respuesta del banco, el resultado ya se propone:
+       nadie registra «respuesta» para decir que no le contestaron. */
+    Respondio: p === "respuesta" ? "bbva_respondio" : ""
+  });
+}
+
+function abrirFormBBVA(cid){
+  S.cid = String(cid);
+  S.formBbva = fbNuevo(S.cid);
+  S.tab = "form_bbva";
+  window.scrollTo(0,0);
+  render();
+}
+
+function renderFormBBVA(){
+  const c = byId[S.cid];
+  const v = $("#view");
+  if (!c){ v.innerHTML = `<div class="empty">Comercio no encontrado.</div>`; return; }
+  const f = S.formBbva || (S.formBbva = fbNuevo(c.customer_id));
+  const k = bbvaDe(c.customer_id);
+
+  v.innerHTML = `
+  <button class="back" data-go="cartera|${c.customer_id}">‹ Volver a la ficha</button>
+
+  <div class="page-head"><div>
+    <h2>Coordinación con BBVA</h2>
+    <div class="sub">${esc(titulo(nombreCliente(c)))} · ${esc(c.customer_id)}</div>
+  </div></div>
+
+  <div id="errBox"></div>
+
+  ${k.n ? `<div class="card"><div class="note" style="margin:0">
+    Este comercio ya tiene <b>${k.n} coordinación${k.n===1?"":"es"}</b> registrada${k.n===1?"":"s"}.
+    ${k.respondio
+      ? `El ejecutivo de BBVA <b>ya respondió</b> el ${fmtFecha(k.fechaRespuesta)}.`
+      : `Todavía <b>no ha respondido</b>.`}
+  </div></div>` : ""}
+
+  <div class="card">
+    <h3>¿Cuándo fue?</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label>
+        <input type="date" data-b="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+      <div class="field"><label>Hora</label>
+        <input type="time" data-b="Hora" value="${esc(f.Hora)}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Por dónde se coordinó? <span class="req">*</span></h3>
+    <div class="opts">
+      ${MEDIOS_BBVA.map(m => `
+        <div class="opt ${f.Medio===m.id?"on":""}" data-bmedio="${m.id}">
+          <span class="rd"></span><span><b>${m.label}</b><span>${m.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    ${exigeRespaldo(f.Medio) ? `<div class="note crit" style="margin-top:11px">
+      El chat no deja constancia consultable. Después de esta coordinación
+      <b>envía un correo con lo acordado</b> y regístralo acá como segundo contacto:
+      la ficha va a pedirlo hasta que aparezca.</div>` : ""}
+  </div>
+
+  <div class="card">
+    <h3>¿Para qué fue este contacto? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      No es lo mismo insistir porque no contestan que mandar el correo de respaldo del chat.
+      Contarlos juntos haría que «2 contactos» no signifique nada.
+    </div>
+    <div class="opts">
+      ${PROPOSITOS_BBVA.map(p => `
+        <div class="opt ${f.Proposito===p.id?"on":""}" data-bprop="${p.id}">
+          <span class="rd"></span><span><b>${p.label}</b><span>${p.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Respondió el ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="opts">
+      ${RESULTADOS_BBVA.map(r => `
+        <div class="opt ${f.Respondio===r.id?"on":""}" data-bresp="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Qué se coordinó <span class="req">*</span></h3>
+    <div class="field">
+      <textarea data-b="Comentario" rows="3"
+        placeholder="Qué se le pidió al ejecutivo de BBVA">${esc(f.Comentario)}</textarea>
+      <div class="hint">Obligatorio. Dentro de tres meses nadie va a acordarse de qué se pidió acá.</div>
+    </div>
+    ${respondioBBVA(f.Respondio) ? `<div class="field">
+      <label>Qué respondió <span class="req">*</span></label>
+      <textarea data-b="Respuesta" rows="3"
+        placeholder="Qué contestó el ejecutivo: datos entregados, observaciones, condiciones">${esc(f.Respuesta)}</textarea>
+      <div class="hint">Si dices que respondió, tiene que haber algo que citar.</div>
+    </div>` : ""}
+  </div>
+
+  <div class="sticky-actions">
+    <button class="btn ghost" data-go="cartera|${c.customer_id}">Cancelar</button>
+    <button class="btn" id="guardarBbva">Registrar coordinación</button>
+  </div>`;
+
+  bindFormBBVA();
+}
+
+function bindFormBBVA(){
+  const f = S.formBbva;
+  document.querySelectorAll("[data-b]").forEach(el => {
+    el.oninput = () => { f[el.dataset.b] = el.value; };
+  });
+  const pick = (attr, campo, repinta) => document.querySelectorAll(`[data-${attr}]`).forEach(el => {
+    el.onclick = () => {
+      f[campo] = el.dataset[attr];
+      if (repinta) renderFormBBVA();
+      else document.querySelectorAll(`[data-${attr}]`).forEach(x =>
+        x.classList.toggle("on", x.dataset[attr] === f[campo]));
+    };
+  });
+  pick("bmedio", "Medio",     true);
+  pick("bprop",  "Proposito", false);
+  pick("bresp",  "Respondio", true);
+  const g = $("#guardarBbva");
+  if (g) g.onclick = guardarBBVA;
+}
+
+async function guardarBBVA(){
+  const f = S.formBbva, c = byId[S.cid];
+  const errores = [];
+  if (!f.Fecha) errores.push("Indica la fecha de la coordinación.");
+  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura: no se puede registrar algo que todavía no pasó.");
+  if (!f.Medio) errores.push("Indica por dónde se coordinó con el ejecutivo de BBVA.");
+  if (!f.Proposito) errores.push("Indica para qué fue este contacto.");
+  if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
+  if (!String(f.Comentario).trim()) errores.push("Escribe qué se coordinó.");
+  /* La misma regla que ya rige para el cliente: afirmar que alguien respondió
+     obliga a transcribir qué dijo. Si no hay nada que citar, no hubo respuesta. */
+  if (respondioBBVA(f.Respondio) && !String(f.Respuesta).trim())
+    errores.push("Escribe qué respondió el ejecutivo de BBVA. Si todavía no contesta, cambia el resultado a «Sin respuesta».");
+
+  const box = $("#errBox");
+  if (errores.length){
+    box.innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${
+      errores.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarBbva");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    const fila = {
+      customer_id: String(c.customer_id),
+      correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+      fecha_contacto: f.Fecha, hora_contacto: f.Hora || "00:00",
+      con: "BBVA",
+      tipo_contacto: f.Medio,
+      resultado: f.Respondio,
+      proposito: f.Proposito,
+      comentario_ejecutivo: String(f.Comentario).trim(),
+      comentario_cliente: String(f.Respuesta || "").trim() || null
+    };
+    const { error } = await sb.from("interacciones").insert(fila);
+    if (error) throw new Error(error.message);
+    await sincronizar();
+    S.formBbva = null;
+    toast("Coordinación con BBVA registrada");
+    go("cartera", c.customer_id);
+  } catch (e){
+    box.innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(e.message)}</div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = "Registrar coordinación"; }
+  }
+}
+
+/* -------------------------------------------------------------------------
+   Registro en lote
+
+   Lo normal es un solo correo al ejecutivo de BBVA con veinte customer_id
+   adjuntos, y una sola respuesta con los veinte datos. En la base tiene que
+   quedar una fila por comercio —la respuesta es sobre cada uno, no sobre el
+   correo—, pero pedirle al ejecutivo que teclee veinte veces lo mismo es la
+   forma más segura de que deje de registrar.
+
+   Entonces: el dato queda como debe, el trabajo se hace una vez.
+   ------------------------------------------------------------------------- */
+function abrirLoteBBVA(){
+  S.loteBbva = Object.assign(FB_VACIO(), { Proposito:"primer_contacto", sel:{}, q:"" });
+  S.tab = "form_bbva_lote";
+  window.scrollTo(0,0);
+  render();
+}
+
+function candidatosLote(){
+  const q = String((S.loteBbva || {}).q || "").trim().toLowerCase();
+  return cartera()
+    .filter(c => !esClienteNuevo(c))
+    .filter(c => esDeCampo() ? esMiCliente(c) : true)
+    .filter(c => !q ||
+      String(c.customer_id).toLowerCase().includes(q) ||
+      String(c.nombre_comercio || "").toLowerCase().includes(q) ||
+      String(c.distrito || "").toLowerCase().includes(q))
+    .sort((a,b) => String(a.nombre_comercio||"").localeCompare(String(b.nombre_comercio||"")));
+}
+
+function renderLoteBBVA(){
+  const f = S.loteBbva || (S.loteBbva = Object.assign(FB_VACIO(), { Proposito:"primer_contacto", sel:{}, q:"" }));
+  const lista = candidatosLote();
+  const n = Object.values(f.sel).filter(Boolean).length;
+
+  $("#view").innerHTML = `
+  <button class="back" data-go="cartera">‹ Volver a la cartera</button>
+
+  <div class="page-head"><div>
+    <h2>Coordinación con BBVA para varios comercios</h2>
+    <div class="sub">Un correo con varios Customer ID se escribe una vez y queda registrado en cada ficha</div>
+  </div></div>
+
+  <div id="errBox"></div>
+
+  <div class="card"><div class="note" style="margin:0">
+    En la base va a quedar <b>una coordinación por comercio</b>, no una sola compartida:
+    la respuesta del banco es sobre cada Customer ID. Acá solo se escribe una vez.
+  </div></div>
+
+  <div class="card">
+    <h3>Cuándo, por dónde y para qué</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label>
+        <input type="date" data-l="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+      <div class="field"><label>Hora</label>
+        <input type="time" data-l="Hora" value="${esc(f.Hora)}"></div>
+    </div>
+    <div class="opts" style="margin-top:11px">
+      ${MEDIOS_BBVA.map(m => `
+        <div class="opt ${f.Medio===m.id?"on":""}" data-lmedio="${m.id}">
+          <span class="rd"></span><span><b>${m.label}</b><span>${m.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    <div class="opts" style="margin-top:11px">
+      ${PROPOSITOS_BBVA.map(p => `
+        <div class="opt ${f.Proposito===p.id?"on":""}" data-lprop="${p.id}">
+          <span class="rd"></span><span><b>${p.label}</b><span>${p.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>¿Respondió el ejecutivo de BBVA? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Se aplica a todos los comercios marcados. Si respondió por unos y por otros no,
+      regístralos en dos tandas.
+    </div>
+    <div class="opts">
+      ${RESULTADOS_BBVA.map(r => `
+        <div class="opt ${f.Respondio===r.id?"on":""}" data-lresp="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Qué se coordinó <span class="req">*</span></h3>
+    <div class="field">
+      <textarea data-l="Comentario" rows="3"
+        placeholder="Qué se le pidió al ejecutivo de BBVA">${esc(f.Comentario)}</textarea>
+    </div>
+    ${respondioBBVA(f.Respondio) ? `<div class="field">
+      <label>Qué respondió <span class="req">*</span></label>
+      <textarea data-l="Respuesta" rows="3">${esc(f.Respuesta)}</textarea>
+    </div>` : ""}
+  </div>
+
+  <div class="card">
+    <div class="ctrl-h">
+      <h3>Comercios · ${n} marcado${n===1?"":"s"}</h3>
+      <button class="btn ghost sm" id="loteTodos">${
+        n === lista.length && lista.length ? "Desmarcar todos" : `Marcar los ${lista.length}`}</button>
+    </div>
+    <div class="search" style="margin-bottom:10px"><span class="mag">⌕</span>
+      <input type="search" id="loteQ" placeholder="Buscar por Customer ID, nombre o distrito…" value="${esc(f.q)}"></div>
+    <div class="lote-lista">
+      ${lista.length ? lista.map(c => `
+        <label class="lote-item ${f.sel[c.customer_id] ? "on" : ""}">
+          <input type="checkbox" data-lsel="${esc(c.customer_id)}" ${f.sel[c.customer_id] ? "checked" : ""}>
+          <span>
+            <b>${esc(titulo(nombreCliente(c)))}</b>
+            <span>${esc(c.customer_id)}${c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
+              bbvaDe(c.customer_id).respondio ? " · BBVA ya respondió" : ""}</span>
+          </span>
+        </label>`).join("")
+      : `<div class="vacio">No hay comercios que coincidan.</div>`}
+    </div>
+  </div>
+
+  <div class="sticky-actions">
+    <button class="btn ghost" data-go="cartera">Cancelar</button>
+    <button class="btn" id="guardarLote">Registrar en ${n} comercio${n===1?"":"s"}</button>
+  </div>`;
+
+  bindLoteBBVA();
+}
+
+function bindLoteBBVA(){
+  const f = S.loteBbva;
+  document.querySelectorAll("[data-l]").forEach(el => { el.oninput = () => { f[el.dataset.l] = el.value; }; });
+  const pick = (attr, campo, repinta) => document.querySelectorAll(`[data-${attr}]`).forEach(el => {
+    el.onclick = () => {
+      f[campo] = el.dataset[attr];
+      if (repinta) renderLoteBBVA();
+      else document.querySelectorAll(`[data-${attr}]`).forEach(x =>
+        x.classList.toggle("on", x.dataset[attr] === f[campo]));
+    };
+  });
+  pick("lmedio", "Medio",     true);
+  pick("lprop",  "Proposito", false);
+  pick("lresp",  "Respondio", true);
+
+  document.querySelectorAll("[data-lsel]").forEach(el => {
+    el.onchange = () => {
+      f.sel[el.dataset.lsel] = el.checked;
+      renderLoteBBVA();
+    };
+  });
+  const q = $("#loteQ");
+  if (q) q.oninput = () => { f.q = q.value; const p = q.selectionStart; renderLoteBBVA();
+    const n2 = $("#loteQ"); if (n2){ n2.focus(); n2.setSelectionRange(p, p); } };
+
+  const todos = $("#loteTodos");
+  if (todos) todos.onclick = () => {
+    const lista = candidatosLote();
+    const marcar = !(Object.values(f.sel).filter(Boolean).length === lista.length && lista.length);
+    f.sel = {};
+    if (marcar) lista.forEach(c => { f.sel[c.customer_id] = true; });
+    renderLoteBBVA();
+  };
+  const g = $("#guardarLote");
+  if (g) g.onclick = guardarLoteBBVA;
+}
+
+async function guardarLoteBBVA(){
+  const f = S.loteBbva;
+  const ids = Object.keys(f.sel).filter(k => f.sel[k]);
+  const errores = [];
+  if (!ids.length) errores.push("Marca al menos un comercio.");
+  if (!f.Fecha) errores.push("Indica la fecha.");
+  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura.");
+  if (!f.Medio) errores.push("Indica por dónde se coordinó.");
+  if (!f.Proposito) errores.push("Indica para qué fue el contacto.");
+  if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
+  if (!String(f.Comentario).trim()) errores.push("Escribe qué se coordinó.");
+  if (respondioBBVA(f.Respondio) && !String(f.Respuesta).trim())
+    errores.push("Escribe qué respondió el ejecutivo de BBVA.");
+
+  const box = $("#errBox");
+  if (errores.length){
+    box.innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${
+      errores.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const btn = $("#guardarLote");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    const filas = ids.map(cid => ({
+      customer_id: String(cid),
+      correo_stratis: S.user.correo, ejecutivo: S.user.nombre,
+      fecha_contacto: f.Fecha, hora_contacto: f.Hora || "00:00",
+      con: "BBVA",
+      tipo_contacto: f.Medio,
+      resultado: f.Respondio,
+      proposito: f.Proposito,
+      comentario_ejecutivo: String(f.Comentario).trim(),
+      comentario_cliente: String(f.Respuesta || "").trim() || null
+    }));
+    const { error } = await sb.from("interacciones").insert(filas);
+    if (error) throw new Error(error.message);
+    await sincronizar();
+    S.loteBbva = null;
+    toast(`Coordinación registrada en ${filas.length} comercio${filas.length===1?"":"s"}`);
+    go("cartera");
+  } catch (e){
+    box.innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(e.message)}</div>`;
+    box.scrollIntoView({ behavior:"smooth", block:"center" });
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = `Registrar en ${ids.length} comercio${ids.length===1?"":"s"}`; }
+  }
+}
+
+/* =========================================================================
+   Formulario: registro de cada contacto o intento de comunicación
+   ========================================================================= */
+function nuevoForm(){
+  return {
+    /* En sábado, domingo o feriado arranca vacía a propósito: ver
+       `fechaInicialContacto` en el core. */
+    Fecha_Contacto: fechaInicialContacto(), Hora_Contacto: horaISO(),
+    Tipo_Contacto: "", Resultado: "efectivo",
+    Ubicacion: "", Ubicacion_Verificada: false, Calificacion: "",
+    Comentario_Ejecutivo: "", Comentario_Cliente: "", Espera: "", Copia_BBVA: false, Motivo: "",
+    Cierre: null            // resultado_gestion del comercio, se define acá mismo
+  };
+}
+
+/* ---- Corregir el medio y el resultado ----------------------------------
+   Un dedazo al elegir «llamada» en vez de WhatsApp se arregla acá mismo, sin
+   borrar el registro.
+
+   Dos días trabajados para corregir lo propio.
+
+   Registrar no tiene plazo —una gestión de hace un mes se puede cargar hoy, y
+   así debe ser: lo que se mide es la puntualidad, no se prohíbe el registro—.
+   Corregir sí: pasados dos días trabajados desde que se registró, la gestión
+   queda como está y cualquier arreglo lo hace supervisión.
+
+   Van en días trabajados por la misma razón que la puntualidad: si se registró
+   un viernes, el plazo llega hasta el martes. Un plazo que corre el domingo
+   castiga por descansar. */
+const DIAS_CORRECCION = 2;
+
+/* El Analista y el Manager corrigen cualquier gestión, sin plazo: son los que
+   responden por el dato frente al banco y no deberían depender de nadie para
+   arreglar un dedazo. Las coordenadas siguen fuera del alcance de todos. */
+/* Supervisión con permiso de escritura: el Analista y el Manager.
+   BBVA queda fuera aunque tampoco sea de campo — es el único rol que mira sin
+   tocar, y este es el punto por el que se colaba a todos los formularios. */
+const mandoTotal = () => !!(S.user && S.user.rol !== "Ejecutivo" && !esBBVA());
+
+/* La ubicación no se reescribe nunca. Lo único que se puede hacer con una
+   equivocada es anularla, y solo mientras la ventana de corrección esté
+   abierta —salvo supervisión, que no tiene ventana—. */
+/* Durante la ventana, el ejecutivo puede escribir la ubicación de sus propias
+   gestiones. Fuera de ella, nadie: vuelve a ser solo lectura. */
+function puedeCorregirUbicacion(f){
+  if (!f || !S.editId || !edicionLibre()) return false;
+  return mandoTotal() || !f.Correo_Stratis || f.Correo_Stratis === S.user.correo;
+}
+
+async function guardarUbicacion(id){
+  const txt = ($("#ubiTxt") && $("#ubiTxt").value || "").trim();
+  const msg = $("#ubiMsg");
+  if (!txt){ if (msg) msg.innerHTML = `<div class="err">Escribe las coordenadas o toca «Usar donde estoy ahora».</div>`; return; }
+  const { error } = await sb.rpc("fijar_ubicacion", { p_id: id, p_ubicacion: txt, p_motivo: null });
+  if (error){ if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  await refrescar();
+  S.form = Object.assign({}, DB.buscar(id));
+  render();
+  toast("Ubicación corregida");
+}
+
+function ubicacionDeAqui(){
+  const msg = $("#ubiMsg");
+  if (!navigator.geolocation){ if (msg) msg.innerHTML = `<div class="err">Este equipo no entrega ubicación.</div>`; return; }
+  if (msg) msg.innerHTML = `<div class="note">Buscando tu ubicación…</div>`;
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const v = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`;
+      if ($("#ubiTxt")) $("#ubiTxt").value = v;
+      S.form._ubiNueva = v;
+      if (msg) msg.innerHTML = `<div class="note">Tomada de donde estás <b>ahora</b>. Si la visita fue en otro sitio, esta no es la del local.</div>`;
+    },
+    err => { if (msg) msg.innerHTML = `<div class="err">No se pudo obtener la ubicación: ${esc(err.message)}</div>`; },
+    { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
+}
+
+function puedeAnularUbicacion(f){
+  if (!f || !S.editId) return false;
+  if (!f.Ubicacion && f.Ubicacion_Verificada !== true) return false;
+  if (mandoTotal()) return true;
+  return edicionLibre() && (!f.Correo_Stratis || f.Correo_Stratis === S.user.correo);
+}
+
+async function anularUbicacion(id){
+  const r = DB.buscar(id); if (!r) return;
+  const ok = await new Promise(res => {
+    modal(`
+      <h3>Anular la ubicación</h3>
+      <p style="margin-top:0">La gestión del <b>${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}</b> quedará
+      marcada como <b>sin ubicación verificada</b>. No se le pone otra ubicación: se borra la que tenía.</p>
+      <div class="note">Queda en la bitácora con tu nombre. Si la visita sí ocurrió, lo correcto es
+      eliminar el registro y volver a crearlo desde el local.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn danger" id="anOk" style="flex:1">Sí, anularla</button>
+        <button class="btn ghost" id="anNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#anOk").onclick = () => { cerrarModal(); res(true); };
+    $("#anNo").onclick = () => { cerrarModal(); res(false); };
+  });
+  if (!ok) return;
+  const { error } = await sb.rpc("anular_ubicacion", { p_id: id, p_motivo: null });
+  if (error) return toast("No se pudo anular: " + error.message);
+  await refrescar();
+  S.form = Object.assign({}, DB.buscar(id));
+  render();
+  toast("Ubicación anulada");
+}
+
+/* Quién puede corregir una gestión, y hasta cuándo. Tres reglas, en este
+   orden:
+
+   1 · Periodo sellado → nadie reescribe nada, salvo supervisión. Sobre esos
+       números ya se pagó.
+   2 · Supervisión (Analista y Manager) → cualquier gestión, de cualquier
+       fecha, sin plazo. El cambio queda en la bitácora a su nombre y la
+       gestión NO cambia de dueño.
+   3 · Ejecutivo → solo lo suyo, y dentro de dos días trabajados desde que lo
+       registró. Después se le pide a supervisión.
+
+   Lo que NO cambia con ninguna de las tres: la ubicación no se reescribe nunca
+   —solo se anula—, y una gestión no puede volverse presencial después del
+   hecho. Esas dos son las que sostienen la visita ante BBVA. */
+function corregible(f){
+  if (!f || !S.user) return false;
+  if (periodoSellado(periodoDe(f.Fecha_Contacto))) return mandoTotal();
+  /* Supervisión corrige cualquier gestión, de cualquier fecha: es quien
+     responde por el dato ante el banco. Queda en la bitácora con su nombre, y
+     la gestión NO cambia de dueño —sigue siendo del ejecutivo que la hizo—. */
+  if (mandoTotal()) return true;
+  if (f.Correo_Stratis && f.Correo_Stratis !== S.user.correo) return false;
+  return habilesDesde(f.Creado_En) <= DIAS_CORRECCION;
+}
+
+/* Cuántos días trabajados le quedan al ejecutivo sobre una gestión suya. */
+const habilesRestantes = f => Math.max(0, DIAS_CORRECCION - habilesDesde(f && f.Creado_En));
+
+/* Eliminar corre con el mismo plazo que corregir, y no por simetría estética:
+   si borrar no tuviera plazo, el plazo de edición no existiría —bastaría con
+   borrar la gestión vencida y volver a crearla con otra fecha—. Eliminar es
+   además la única salida para una ubicación equivocada, porque las coordenadas
+   no se reescriben; por eso la puerta es la misma y se cierra el mismo día. */
+function borrable(f){
+  return !!f && puedeEditar(f) && corregible(f);
+}
+
+function diasDesdeRegistro(f){
+  const c = String(f.Creado_En || "").slice(0,10);
+  if (!c) return 0;                       // sin dato, no se castiga al ejecutivo
+  const d = (new Date(hoyISO()) - new Date(c)) / 86400000;
+  return d > 0 ? Math.round(d) : 0;
+}
+
+function plazoCorreccion(f){
+  const c = String(f.Creado_En || "").slice(0,10);
+  if (!c) return "";
+  const n = diasDesdeRegistro(f);
+  const per = periodoDe(f.Fecha_Contacto);
+  if (periodoSellado(per))
+    return `El periodo ${nombrePeriodo(per)} está sellado: esta gestión ya no se corrige${
+      S.user && S.user.rol !== "Ejecutivo" ? ", salvo desde supervisión" : ""}.`;
+  if (mandoTotal())
+    return `Se registró el ${fmtFecha(c)}; como supervisión no tienes plazo. El cambio queda en la bitácora a tu nombre y la gestión sigue siendo de ${f.Ejecutivo || "quien la registró"}.`;
+  const quedan = habilesRestantes(f);
+  if (!quedan)
+    return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : ""}. Pasaron los ${DIAS_CORRECCION} días trabajados de plazo: para cambiarla ahora, pídeselo a tu supervisor.`;
+  return `Se registró el ${fmtFecha(c)}${n ? " (" + textoDias(n) + " atrás)" : " (hoy)"}. Te ${
+    quedan === 1 ? "queda 1 día trabajado" : "quedan " + quedan + " días trabajados"} para corregirla.`;
+}
+
+/* Avisos que dependen de lo que acaba de elegir, sin bloquear todavía */
+/* Una gestión presencial se sostiene en la ubicación capturada en el momento.
+   Como la ubicación no se puede tocar —ni ahora ni nunca—, convertir una
+   llamada en una visita después del hecho sería fabricar una visita sin
+   respaldo. El ejecutivo no puede hacerlo; el supervisor, que audita, sí. */
+function volverPresencialProhibido(f){
+  if (!S.user || S.user.rol !== "Ejecutivo") return false;
+  if (edicionLibre()) return false;      // hoy sí puede, pero sin ganar un GPS
+  if (!RULES.requiereUbicacion(f.Tipo_Contacto)) return false;
+  return f.Ubicacion_Verificada !== true;
+}
+
+function avisoCorreccion(f){
+  const avisos = [];
+  if (edicionLibre() && S.user && S.user.rol === "Ejecutivo"
+      && RULES.requiereUbicacion(f.Tipo_Contacto) && f.Ubicacion_Verificada !== true
+      && !String(f.Ubicacion || "").trim())
+    avisos.push(`Al pasarla a ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}, la gestión queda marcada como <b>sin ubicación verificada</b>: no se le puede poner un GPS que nunca tuvo. Si de verdad hiciste la visita, elimina el registro y créalo de nuevo desde el local.`);
+  if (volverPresencialProhibido(f))
+    avisos.push(`No puedes convertir esta gestión en ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}: una gestión presencial se respalda con la ubicación capturada en el momento, y la ubicación no se modifica nunca. Si de verdad fue presencial, elimina el registro y créalo de nuevo desde el local.`);
+  if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
+    avisos.push(`Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe abajo qué respondió: sin eso no se puede guardar.`);
+  if (!avisos.length) return "";
+  return `<div class="note crit" style="margin-top:11px">${avisos.join("<div style=\"height:6px\"></div>")}</div>`;
+}
+
+/* El pop de confirmación: se ve exactamente qué va a cambiar antes de tocar
+   nada, porque el medio y el resultado mueven la tasa de respuesta. */
+function confirmarCorreccion(cambios){
+  return new Promise(resolve => {
+    modal(`
+      <h3>Confirmar la corrección</h3>
+      <p style="margin-top:0">Vas a cambiar lo siguiente en esta gestión:</p>
+      <div class="corr-lista">
+        ${cambios.map(c => `<div class="corr-fila">
+          <span class="corr-campo">${esc(c.campo)}</span>
+          <span class="corr-antes">${esc(c.antes)}</span>
+          <span class="corr-flecha">→</span>
+          <span class="corr-despues">${esc(c.despues)}</span>
+        </div>`).join("")}
+      </div>
+      <div class="note" style="margin-top:12px">Queda registrado en la bitácora de cambios con tu nombre,
+      y los intentos y la tasa de respuesta se recalculan.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="corrOk" style="flex:1">Sí, corregir</button>
+        <button class="btn ghost" id="corrNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#corrOk").onclick = () => { cerrarModal(); resolve(true); };
+    $("#corrNo").onclick = () => { cerrarModal(); resolve(false); };
+  });
+}
+
+/* ---- Qué sigue con este comercio ---------------------------------------
+   Si la gestión no cierra el comercio, hay que decir qué sigue y para cuándo.
+   Es lo que convierte la lista de gestiones en un pipeline: sin esto, un
+   comercio trabajado a medias desaparece hasta que alguien se acuerda.
+   El catálogo de acciones lo mantiene el Analista desde Ajustes. */
+const requiereSeguimiento = f =>
+  !S.editId && !(f.Cierre && f.Cierre !== "PENDIENTE");
+
+function pintarSeguimiento(){
+  const f = S.form, box = $("#boxSeguimiento");
+  if (!box) return;
+  if (!requiereSeguimiento(f)){ box.innerHTML = ""; f.Accion = ""; return; }
+  const activas = accionesActivas();
+  if (!activas.length){ box.innerHTML = ""; return; }
+  if (!f.Fecha_Accion) f.Fecha_Accion = hoyISO();
+
+  if (!f.Hora_Accion) f.Hora_Accion = "10:00";
+
+  /* Una visita o una reunión son una CITA: van al calendario y necesitan hora.
+     Lo demás —llamar, mandar el tarifario, esperar respuesta— es una próxima
+     acción suelta, que no ocupa una franja de nadie. La distinción no es
+     burocrática: sin hora no se puede responder «¿está libre el jueves a las
+     tres?», que es justo para lo que se pidió el calendario. */
+  const esVisita = f.Accion === "VISITAR";
+  if (esVisita){
+    if (!f.Modalidad) f.Modalidad = "PRESENCIAL";
+    if (!f.Duracion)  f.Duracion = duracionDe(f.Modalidad);
+  } else {
+    /* La limpieza vive acá y no solo en el clic: si la acción cambia por
+       cualquier otro camino, no queda una hora colgada de algo que no ocupa
+       ninguna franja. Un estado que depende de por dónde se llegó es un
+       estado que algún día va a estar mal. */
+    f.Modalidad = ""; f.Duracion = null;
+  }
+
+  box.innerHTML = `
+  <div class="card">
+    <h3>¿Qué sigue con este comercio? <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Esta gestión no cierra el comercio, así que queda algo por hacer. Si es una <b>visita o una
+      reunión</b>, va al calendario con su hora y se puede ver quién está ocupado. Al registrar la
+      visita se da por concretada sola.
+    </div>
+    <div class="opts">
+      ${activas.map(a => `
+        <div class="opt ${f.Accion === a.codigo ? "on" : ""}" data-acc="${esc(a.codigo)}">
+          <span class="rd"></span><span><b>${esc(a.nombre)}</b>${a.descripcion ? `<span>${esc(a.descripcion)}</span>` : ""}</span>
+        </div>`).join("")}
+    </div>
+
+    ${esVisita ? `
+    <div class="field" style="margin-top:13px">
+      <label>¿Cómo va a ser? <span class="req">*</span></label>
+      <div class="seg" role="group" aria-label="Modalidad">
+        ${MODALIDADES.map(m => `<button type="button" class="${f.Modalidad === m.id ? "on" : ""}"
+          data-modal="${m.id}">${m.ic} ${esc(m.label)}</button>`).join("")}
+      </div>
+    </div>` : ""}
+
+    <div class="row2" style="margin-top:11px">
+      <div class="field">
+        <label>${esVisita ? "Día de la cita" : "¿Para cuándo?"} <span class="req">*</span></label>
+        <input type="date" data-f="Fecha_Accion" value="${esc(f.Fecha_Accion)}" min="${hoyISO()}">
+      </div>
+      ${esVisita ? `
+      <div class="field">
+        <label>Hora <span class="req">*</span></label>
+        <input type="time" data-f="Hora_Accion" value="${esc(f.Hora_Accion)}" step="900">
+      </div>` : ""}
+    </div>
+
+    ${esVisita ? `
+    <div class="field campo-corto">
+      <label>Cuánto dura <span class="hint">— para saber quién está ocupado en esa franja</span></label>
+      <select data-f="Duracion">
+        ${[30,45,60,90,120].map(n => `<option value="${n}"${
+          Number(f.Duracion) === n ? " selected" : ""}>${n} minutos</option>`).join("")}
+      </select>
+    </div>
+    ${avisoChoque(f)}` : ""}
+
+    <div class="field" style="margin-bottom:0">
+      <label>Detalle <span class="hint">— qué pidió exactamente</span></label>
+      <input type="text" data-f="Comentario_Accion" value="${esc(f.Comentario_Accion || "")}"
+             placeholder="Ej.: llevarle el tarifario de POS y hablar con el dueño, no con la cajera">
+    </div>
+  </div>`;
+
+  box.querySelectorAll("[data-acc]").forEach(el => el.onclick = () => {
+    f.Accion = el.dataset.acc;
+    /* Al salir de «volver a visitar» la cita deja de serlo: no queda una hora
+       colgada de una acción que no ocupa franja. */
+    if (f.Accion !== "VISITAR"){ f.Modalidad = ""; f.Duracion = null; }
+    pintarSeguimiento();
+  });
+  box.querySelectorAll("[data-modal]").forEach(el => el.onclick = () => {
+    f.Modalidad = el.dataset.modal;
+    f.Duracion = duracionDe(f.Modalidad);
+    pintarSeguimiento();
+  });
+  box.querySelectorAll("[data-f]").forEach(el => {
+    el.oninput = el.onchange = () => {
+      f[el.dataset.f] = el.value;
+      /* La hora y el día cambian el aviso de choque: se vuelve a pintar para
+         que el ejecutivo lo vea mientras elige, no después de guardar. */
+      if (["Fecha_Accion","Hora_Accion","Duracion"].includes(el.dataset.f) && esVisita) pintarSeguimiento();
+    };
+  });
+}
+
+/* Dos citas que se pisan no se prohíben —a veces el cliente solo puede a esa
+   hora y algo hay que mover— pero no se dejan pasar en silencio. */
+function avisoChoque(f){
+  if (!f.Fecha_Accion || !f.Hora_Accion || !S.user) return "";
+  const desde = minutosDe(f.Hora_Accion);
+  if (desde === null) return "";
+  const hasta = desde + (Number(f.Duracion) || 60);
+  const choques = ocupacionDe(correoObservado() || S.user.correo, f.Fecha_Accion)
+    .filter(s => chocaCon(s, desde, hasta));
+  if (!choques.length) return "";
+  return `<div class="note crit" style="margin-top:9px">
+    <b>Ya tienes algo a esa hora.</b> ${choques.map(s => {
+      const c = byId[String(s.customer_id)];
+      return `${esc(rangoCita(s))} · ${esc(titulo(c ? nombreCliente(c) : s.customer_id))}`;
+    }).join(" · ")}. Puedes guardarla igual, pero una de las dos se va a caer.</div>`;
+}
+
+function renderFormulario(){
+  const c = byId[S.cid];
+  if (!c) return go("cartera");
+  /* La supervisión también puede registrar. Antes solo corregía lo ya escrito,
+     y eso dejaba un hueco: un comercio sin ninguna gestión no se podía tocar
+     desde oficina, ni para dejar constancia de una llamada al titular. La
+     gestión queda a su nombre, no al del ejecutivo. */
+  if (!S.form) S.form = S.editId ? Object.assign({}, DB.buscar(S.editId)) : nuevoForm();
+  const f = S.form;
+
+  $("#view").innerHTML = `
+  <button class="back" data-back>‹ ${esc(titulo(nombreCliente(c)))}</button>
+  <div class="card">
+    <h3 style="margin-bottom:4px">${S.editId ? "Editar" : "Registrar"} contacto / intento</h3>
+    <div style="font-size:13px;color:var(--muted)">${esc(titulo(nombreCliente(c)))} · ID ${esc(c.customer_id)} · ${esc(titulo(c.distrito))}</div>
+    ${S.editId ? `<div class="pie">La <b>ubicación capturada no se puede modificar</b>: queda como constancia del lugar donde se hizo el registro.</div>` : ""}
+  </div>
+
+  ${S.editId ? "" : `
+  <div class="card">
+    <h3>Fecha y hora del contacto</h3>
+    <div class="row2">
+      <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${topeFechaContacto()}"></div>
+      <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
+    </div>
+    ${!f.Fecha_Contacto ? `
+    <div class="note crit" style="margin-top:8px">
+      <b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}, así que la fecha no viene puesta.</b>
+      Escribe el día en que de verdad ocurrió el contacto — como máximo el
+      <b>${esc(fmtFecha(topeFechaContacto()))}</b>, que fue el último día trabajado.
+      Puedes registrar hoy sin problema; lo que no va es fechar la gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.
+    </div>` : fechaSobreElTope(f.Fecha_Contacto) ? `
+    <div class="note crit" style="margin-top:8px">
+      ${diaNoTrabajado(hoyISO())
+        ? `<b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))} y no se puede fechar una gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.</b>
+           El último día trabajado fue el <b>${esc(fmtFecha(topeFechaContacto()))}</b>: esa es la fecha
+           más reciente que se puede poner. Registrar hoy está bien; lo que se pide es la fecha real del contacto.`
+        : `<b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
+           Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.`}
+    </div>` : diaNoTrabajado(f.Fecha_Contacto) ? `
+    <div class="note warn" style="margin-top:8px">
+      <b>Ese día fue ${esc(nombreDiaNoTrabajado(f.Fecha_Contacto))}.</b> Se puede registrar —hay comercios que
+      abren— y al guardar te lo voy a preguntar una vez. Si en realidad el contacto fue otro día,
+      cámbialo ahora.
+    </div>` : diasDeAtraso(f.Fecha_Contacto) > 2 ? `
+    <div class="note" style="margin-top:8px">
+      Estás registrando una gestión de hace ${esc(textoDias(diasDeAtraso(f.Fecha_Contacto)))}. Se puede,
+      pero mientras más cerca del día en que ocurrió, más confiable el seguimiento.
+    </div>` : ""}
+    <div class="pie">Se registra a nombre de <b>${esc(S.user.nombreCompleto || S.user.nombre)}</b> · ${esc(S.user.correo)}</div>
+  </div>`}
+
+  ${S.editId ? (corregible(f) ? `
+  <div class="card">
+    <h3>Lo que quedó registrado</h3>
+    <div class="note" style="margin-bottom:11px">
+      ${mandoTotal()
+        ? "Puedes corregir <b>la fecha, la hora, el medio y el resultado</b>. La ubicación capturada no se toca: es la constancia de dónde estuvo el ejecutivo."
+        : "Puedes corregir <b>el medio y el resultado</b> si te equivocaste al elegirlos. " + esc(plazoCorreccion(f)) +
+          " La fecha, la hora y la ubicación no cambian: son la constancia de lo que pasó."}
+    </div>
+    ${mandoTotal() ? `
+    <div class="row2">
+      <div class="field"><label>Fecha</label>
+        <input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${topeFechaContacto()}"></div>
+      <div class="field" style="margin-bottom:0"><label>Hora</label>
+        <input type="time" data-f="Hora_Contacto" value="${esc(String(f.Hora_Contacto||"").slice(0,5))}"></div>
+    </div>
+    ${fechaSobreElTope(f.Fecha_Contacto) ? `<div class="note crit" style="margin-top:8px">
+      ${diaNoTrabajado(hoyISO())
+        ? `Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}: la fecha más reciente que se puede poner es el ${esc(fmtFecha(topeFechaContacto()))}.`
+        : `Esa fecha todavía no llega. Hoy es ${esc(fmtFecha(hoyISO()))}.`}</div>` : ""}`
+    : `<div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>`}
+
+    <h3 style="margin-top:15px">¿Cómo se contactó al cliente?</h3>
+    <div class="opts">
+      ${TIPOS_CONTACTO.map(t => `
+        <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-tipo="${t.id}">
+          <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+        </div>`).join("")}
+    </div>
+
+    <h3 style="margin-top:15px">¿Cuál fue el resultado?</h3>
+    <div class="opts">
+      ${RESULTADOS.map(x => `
+        <div class="opt ${f.Resultado === x.id ? "on" : ""}" data-res="${x.id}">
+          <span class="rd"></span><span><b>${x.label}</b><span>${x.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    ${avisoCorreccion(f)}
+    ${puedeCorregirUbicacion(f) ? `
+    <div class="note warn" style="margin-top:12px" id="cajaUbi">
+      <b>Ubicación del registro</b>
+      <div style="margin-top:4px">Actual: <span class="mono">${esc(f.Ubicacion || "sin ubicación")}</span>${
+        f.Ubicacion_Verificada === true ? ` · <span class="chip ok">capturada por GPS</span>` : ""}</div>
+      <div style="margin-top:9px">
+        <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:5px">Coordenadas correctas <span class="hint" style="font-weight:400">— latitud, longitud</span></label>
+        <input type="text" id="ubiTxt" class="mono" placeholder="-12.0464, -77.0428" value="${esc(f._ubiNueva || "")}">
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:9px">
+        <button class="btn ghost sm" id="ubiAqui">📍 Usar donde estoy ahora</button>
+        <button class="btn sm" id="ubiGuardar">Guardar la ubicación</button>
+        <button class="btn ghost sm" id="anularUbi" style="color:var(--crit-ink)">Anular</button>
+      </div>
+      <div id="ubiMsg" style="margin-top:8px"></div>
+      <div style="margin-top:9px;font-size:12px">
+        La corrección queda en la bitácora con tu nombre. El sello de <b>GPS verificado</b> solo lo da
+        la captura hecha en el local; escribirla acá ubica el comercio en el mapa.
+      </div>
+    </div>` : ""}
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+  ` : `
+  <div class="card">
+    <h3>Lo que quedó registrado <span style="text-transform:none;font-weight:500;color:var(--muted)">(no editable)</span></h3>
+    <div class="note crit" style="margin-bottom:11px">
+      El plazo para corregir el medio y el resultado <b>ya venció</b>: son ${DIAS_CORRECCION} días
+      trabajados desde que se registró. ${esc(plazoCorreccion(f))}
+      Si hay algo mal, pídeselo a tu supervisor: él sí puede corregirlo y queda en la bitácora.
+    </div>
+    <div class="kv"><dt>Fecha y hora</dt><dd>${fmtDT(f.Fecha_Contacto, f.Hora_Contacto)}</dd></div>
+    <div class="kv"><dt>Medio de contacto</dt><dd>${esc(nomTipo(f.Tipo_Contacto))}</dd></div>
+    <div class="kv"><dt>Resultado</dt><dd><span class="chip ${esEfectivo(f.Resultado)?"ok":"serious"}">${esc(nomResultado(f.Resultado))}</span></dd></div>
+    <div id="derivado" style="margin-top:11px"></div>
+  </div>
+  `) : `
+  <div class="card">
+    <h3>¿Cómo se contactó al cliente? <span class="req">*</span></h3>
+    <div class="opts">
+      ${TIPOS_CONTACTO.map(t => `
+        <div class="opt ${f.Tipo_Contacto === t.id ? "on" : ""}" data-tipo="${t.id}">
+          <span class="rd"></span><span><b>${t.label}</b><span>${t.desc}</span></span>
+        </div>`).join("")}
+    </div>
+    <div id="derivado" style="margin-top:11px"></div>
+    <div id="boxCopia"></div>
+  </div>
+
+  <div class="card">
+    <h3>¿Cuál fue el resultado? <span class="req">*</span></h3>
+    <div class="pie" style="margin:0 0 11px">Todo registro cuenta como intento de comunicación. Solo <b>“Habló con el contacto”</b> cuenta como contacto logrado y puede calificar como visita.</div>
+    <div class="opts">
+      ${RESULTADOS.map(r => `
+        <div class="opt ${f.Resultado === r.id ? "on" : ""}" data-res="${r.id}">
+          <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
+        </div>`).join("")}
+    </div>
+  </div>`}
+
+  <div id="boxGps"></div>
+
+
+
+  <!-- La foto de evidencia se retiró del flujo en agosto de 2026: se exigía en
+       cada gestión y no se revisaba ninguna. Lo que respalda un registro es el
+       GPS de la visita, lo que el cliente dijo y la fecha, que no puede ser
+       futura. Las fotos ya cargadas se siguen viendo en la ficha. -->
+
+  <div id="boxCierre"></div>
+
+  <div id="boxSeguimiento"></div>
+
+  <div class="card">
+    <h3>Comentarios</h3>
+    <div class="field"><label>Calificación del cliente</label>
+      <select data-f="Calificacion">
+        <option value="">Seleccionar…</option>
+        ${CALIFICACIONES.map(k => `<option value="${k.id}" ${f.Calificacion===k.id?"selected":""}>${k.label}</option>`).join("")}
+      </select>
+    </div>
+    <div class="field"><label>Comentario del ejecutivo <span class="req">*</span> <span class="hint">— cómo calificas al cliente</span></label>
+      <textarea data-f="Comentario_Ejecutivo" placeholder="Ej.: Cliente con buena disposición, opera con Izipay por tasa. Solicita revisión de comisión para mantener el POS BBVA.">${esc(f.Comentario_Ejecutivo)}</textarea></div>
+    <div id="boxVoz"></div>
+  </div>
+
+  <div id="errBox"></div>
+  <div class="sticky-actions">
+    <button class="btn" id="guardar">${S.editId ? "Guardar cambios" : "Registrar"}</button>
+    <button class="btn ghost" data-back>Cancelar</button>
+  </div>`;
+
+  bindForm(c);
+}
+
+function bindForm(c){
+  const f = S.form;
+  $("#view").querySelectorAll("[data-back]").forEach(b => b.onclick = () => {
+    S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id); render(); });
+  $("#view").querySelectorAll("[data-f]").forEach(el => {
+    el.oninput = el.onchange = () => { f[el.dataset.f] = el.value; };
+  });
+  $("#view").querySelectorAll("[data-tipo]").forEach(el => el.onclick = () => {
+    f.Tipo_Contacto = el.dataset.tipo;
+    $("#view").querySelectorAll("[data-tipo]").forEach(x => x.classList.toggle("on", x.dataset.tipo === f.Tipo_Contacto));
+    pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c); pintarSeguimiento();
+  });
+  $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
+    f.Resultado = el.dataset.res;
+    $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
+    pintarDerivado(); pintarVoz(); pintarCierre(c); pintarSeguimiento();
+  });
+  $("#guardar").onclick = () => guardar(c);
+  pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c); pintarSeguimiento();
+}
+
+/* -------------------------------------------------------------------------
+   Cerrar la gestión desde acá
+
+   El momento en que el ejecutivo habla con el titular es el momento en que
+   sabe si lo retuvo. Obligarlo a entrar después a "Editar comercio" era
+   pedirle que se acuerde: las carteras se quedaban en Pendiente y a BBVA le
+   llegaba Gestión = NO.
+
+   Se ofrece lo mismo que permite la base: retención solo para un comercio
+   activo, venta solo para uno que estaba dado de baja, y ninguna de las dos
+   sin haber logrado la comunicación.
+   ------------------------------------------------------------------------- */
+function pintarCierre(c){
+  const f = S.form, box = $("#boxCierre");
+  if (!box) return;
+  if (!c){ box.innerHTML = ""; return; }
+
+  const actual = c.resultado_gestion || "PENDIENTE";
+  if (f.Cierre === null || f.Cierre === undefined) f.Cierre = actual;
+
+  const logrado = esEfectivo(f.Resultado) ||
+    DB.delCliente(c.customer_id).some(r => esEfectivo(r.Resultado) && r._id !== S.editId);
+
+  const posibles = RESULTADOS_GESTION.filter(g => {
+    if (g.id === "PENDIENTE" || g.id === "PERDIDO") return true;
+    if (!logrado) return false;
+    /* Un RUC que trajo Stratis nunca se «retiene», y su venta no depende del
+       estado que traía en la base de BBVA porque nunca estuvo en ella. */
+    if (g.id === "RETENIDO") return !esClienteNuevo(c) && c.estado === "ACTIVO";
+    if (g.id === "VENTA")    return esClienteNuevo(c) || c.estado === "DE BAJA";
+    return true;
+  });
+  if (!posibles.some(g => g.id === f.Cierre)) f.Cierre = "PENDIENTE";
+
+  const cambia = f.Cierre !== actual;
+  box.innerHTML = `
+  <div class="card">
+    <h3>¿Con esto se cierra la gestión?</h3>
+    <div class="note" style="margin-bottom:11px">
+      Es lo que BBVA lee como <b>objetivo cumplido</b>. Márcalo ahora, mientras tienes fresco lo que
+      pasó: mientras siga pendiente, al banco le llega <b>Gestión = NO</b>.
+    </div>
+    <div class="opts">
+      ${posibles.map(g => `
+        <div class="opt ${f.Cierre === g.id ? "on" : ""}" data-cierre="${g.id}">
+          <span class="rd"></span><span><b>${g.id === "PENDIENTE" ? "Sigue abierta" : g.label}</b>
+          <span>${g.id === "PENDIENTE" ? "Todavía hay que seguir trabajándola" : esc(g.desc)}</span></span>
+        </div>`).join("")}
+    </div>
+    ${f.Cierre === "PERDIDO" ? `
+      <div class="field" style="margin:13px 0 0">
+        <label>¿Por qué no se retuvo? <span class="req">*</span>
+          <span class="hint">— es lo que le falta al reporte de BBVA para poder actuar</span></label>
+        <select data-f="Motivo">
+          <option value="">Seleccionar…</option>
+          ${MOTIVOS_NO_RETENCION.map(m => `<option value="${m.id}" ${f.Motivo === m.id ? "selected" : ""}>${esc(m.label)} — ${esc(m.desc)}</option>`).join("")}
+        </select>
+      </div>` : ""}
+    ${!logrado ? `<div class="note warn" style="margin-top:11px">
+      Con este resultado no se logró hablar con el titular, así que no se puede marcar como
+      retención ni como venta. Registra el intento y vuelve cuando consigas la conversación.</div>` : ""}
+    <div class="note ${cambia ? (gestionCumplida({resultado_gestion:f.Cierre}) ? "ok" : "") : ""}" style="margin-top:11px">
+      ${cambia
+        ? `Al guardar, el comercio pasa de <b>${esc((RESULTADOS_GESTION.find(g=>g.id===actual)||{}).label)}</b>
+           a <b>${esc((RESULTADOS_GESTION.find(g=>g.id===f.Cierre)||{}).label)}</b> ·
+           Para BBVA · Gestión = <b>${gestionCumplida({resultado_gestion:f.Cierre}) ? "SI" : "NO"}</b>`
+        : `El comercio queda como está: <b>${esc((RESULTADOS_GESTION.find(g=>g.id===actual)||{}).label)}</b> ·
+           Para BBVA · Gestión = <b>${gestionCumplida(c) ? "SI" : "NO"}</b>`}
+    </div>
+  </div>`;
+  box.querySelectorAll("[data-cierre]").forEach(el => el.onclick = () => {
+    f.Cierre = el.dataset.cierre;
+    if (f.Cierre !== "PERDIDO") f.Motivo = "";
+    pintarCierre(c);
+  });
+  const selMotivo = box.querySelector('[data-f="Motivo"]');
+  if (selMotivo) selMotivo.onchange = e => { f.Motivo = e.target.value; };
+}
+
+function pintarDerivado(){
+  const f = S.form, box = $("#derivado");
+  if (!box) return;
+  if (!f.Tipo_Contacto){ box.innerHTML = `<div class="pie" style="margin-top:0">Elige el medio para saber si esta gestión cuenta como visita.</div>`; return; }
+  /* Se le pasa el registro entero para que la visita presencial sin respaldo
+     se vea como lo que va a quedar: un intento. Antes el recuadro decía
+     «Cumple_Visita = SI» y la base guardaba otra cosa. */
+  const cumple = RULES.cumpleVisita(f.Tipo_Contacto, f.Resultado, f);
+  const efectivo = esEfectivo(f.Resultado);
+  box.innerHTML = `
+    <div class="note ${cumple === "SI" ? "ok" : "warn"}">
+      <b>Cumple_Visita = ${cumple}.</b>
+      ${cumple === "SI"
+        ? `El contacto es ${RULES.visitaPresencial(f.Tipo_Contacto)==="SI" ? "presencial" : "virtual"} y se logró la comunicación, por lo que califica como visita válida.`
+        : !efectivo
+          ? `El registro queda como <b>intento</b>: no se logró la comunicación, así que no califica como visita cumplida.`
+          : `Este medio no califica como visita presencial ni virtual. La interacción igual cuenta como intento y queda en el histórico.`}
+      <div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap">
+        <span class="chip ${RULES.visitaPresencial(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_Presencial: ${RULES.visitaPresencial(f.Tipo_Contacto)}</span>
+        <span class="chip ${RULES.visitaVirtual(f.Tipo_Contacto)==="SI"?"ok":"no"}">Visita_virtual: ${RULES.visitaVirtual(f.Tipo_Contacto)}</span>
+        <span class="chip ${efectivo?"ok":"serious"}">${efectivo ? "El cliente respondió" : "Sin respuesta"}</span>
+        <span class="chip ${cumple==="SI"?"ok":"no"}">Cumple_Visita: ${cumple}</span>
+      </div>
+      ${(RULES.visitaPresencial(f.Tipo_Contacto)==="SI" && efectivo && cumple !== "SI") ? `
+        <div style="margin-top:9px;padding-top:9px;border-top:1px solid var(--line)">
+          <b>Falta el respaldo de la ubicación.</b> Sin coordenada verificada —o una exención de
+          supervisión con su motivo— esta gestión se guarda como <b>intento</b>, no como visita.
+          La visita cumplida es lo que se le evidencia al banco, y una sin respaldo no se puede
+          defender. Toca «Usar donde estoy ahora» más abajo, estando en el local.</div>` : ""}
+    </div>`;
+}
+
+/* ---- El correo del destrabe ---------------------------------------------
+   La secuencia de la campaña es: se le piden los datos del comercio a BBVA y,
+   si el banco no contesta, se le escribe igual al cliente copiando al
+   ejecutivo del banco. Ese segundo correo es el que destraba el caso, y hasta
+   hoy no dejaba ninguna huella: entraba como un correo más, idéntico al
+   primero. Con 178 comercios esperando al banco, no había forma de contestar
+   en reunión si el caso estaba trabado del lado de BBVA o del nuestro.
+
+   Se pregunta solo en el correo porque copiar a alguien solo existe ahí, y es
+   una casilla y no un medio aparte porque el correo LLEGA AL CLIENTE: como
+   medio del banco habría dejado de contar como contacto con el comercio. */
+function pintarCopia(){
+  const f = S.form, box = $("#boxCopia");
+  if (!box) return;
+  if (f.Tipo_Contacto !== "correo"){ box.innerHTML = ""; f.Copia_BBVA = false; return; }
+  box.innerHTML = `
+    <label class="cbx" style="margin-top:11px">
+      <input type="checkbox" data-fb="Copia_BBVA" ${f.Copia_BBVA ? "checked" : ""}>
+      <span><b>Copié al ejecutivo de BBVA en este correo</b>
+      <span class="hint">Márcalo si escribiste al cliente poniendo en copia al ejecutivo del banco.
+      Es lo que deja constancia de que el caso ya no está esperando a BBVA.</span></span>
+    </label>`;
+  const el = box.querySelector('[data-fb]');
+  if (el) el.onchange = () => { f.Copia_BBVA = el.checked; };
+}
+
+/* ---- Qué dijo el cliente, o en qué quedó --------------------------------
+   Una sola caja que cambia de pregunta según el resultado, y no dos cajas
+   siempre visibles. El motivo está en la base: 174 gestiones guardaban «A la
+   espera de respuesta» en el campo del comentario del cliente, y el CRM lo
+   mostraba como «Lo que dijo el cliente» en gestiones donde el cliente no
+   había dicho nada. La migración 63 movió esos textos a «En qué quedó»; esto
+   es lo que evita que vuelvan a entrar mal.
+
+   Si el cliente respondió, se pide su voz. Si no respondió, nadie habló:
+   preguntar por su comentario es invitar a inventarlo. */
+function pintarVoz(){
+  const f = S.form, box = $("#boxVoz");
+  if (!box) return;
+  const hablo = esEfectivo(f.Resultado);
+  /* Las dos cajas no pueden llenarse a la vez. Si el ejecutivo escribe la
+     respuesta del cliente y después corrige el resultado a «no respondió»,
+     ese texto ya no describe nada: se limpia acá y no llega a la base. Es
+     exactamente lo que produjo las 174 gestiones que hubo que mover. */
+  if (hablo) f.Espera = ""; else f.Comentario_Cliente = "";
+  box.innerHTML = hablo ? `
+    <div class="field" style="margin-bottom:0">
+      <label>Comentario del cliente ${pruebaDeRespuesta(f) ? '<span class="req">*</span>' : ''}
+        <span class="hint">— ${pruebaDeRespuesta(f) ? "qué respondió, en sus palabras" : "el sentir del cliente, en sus palabras"}</span></label>
+      <textarea data-fv="Comentario_Cliente" placeholder="Ej.: “El POS funciona bien pero la comisión es más alta que la competencia; si me igualan me quedo.”">${esc(f.Comentario_Cliente)}</textarea>
+      ${(pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim()) ? `<div class="note crit" style="margin-top:8px">
+        Marcaste que el cliente respondió por ${esc(nomTipo(f.Tipo_Contacto).toLowerCase())}. Escribe qué respondió:
+        es lo que separa una conversación de un mensaje enviado. Si todavía no contesta, el resultado
+        es <b>No respondió</b>.</div>` : ""}
+    </div>` : `
+    <div class="field" style="margin-bottom:0">
+      <label>¿En qué quedó? <span class="hint">— qué sigue, no lo que dijo el cliente</span></label>
+      <textarea data-fv="Espera" placeholder="Ej.: Quedó en revisarlo con el contador y responder el viernes. Si no contesta, se le escribe con copia al ejecutivo BBVA.">${esc(f.Espera)}</textarea>
+      <div class="pie" style="margin-top:7px">El cliente no respondió en esta gestión, así que acá no va su comentario.
+      Escribir “a la espera de respuesta” no agrega nada: eso ya lo dice el resultado. Puedes dejarlo vacío.</div>
+    </div>`;
+  const el = box.querySelector('[data-fv]');
+  if (el) el.oninput = () => { f[el.dataset.fv] = el.value; };
+}
+
+function pintarGps(){
+  const f = S.form, box = $("#boxGps");
+  if (!box) return;
+  /* Editando no se muestra: la ubicación quedó fijada al registrar y no se
+     puede volver a capturar. */
+  if (S.editId){ box.innerHTML = ""; return; }
+  if (!RULES.requiereUbicacion(f.Tipo_Contacto)){ box.innerHTML = ""; return; }
+
+  if (S.editId){
+    const ok = f.Ubicacion_Verificada === true;
+    box.innerHTML = `
+    <div class="card">
+      <h3>Ubicación capturada</h3>
+      <div class="note"><b>Este dato no se puede modificar.</b> La ubicación la tomó el GPS del equipo en el momento de la visita y sirve como constancia auditable; la base rechaza cualquier intento de cambiarla.</div>
+      ${ok ? `
+      <div class="kv" style="margin-top:9px"><dt>Coordenadas</dt><dd class="mono">${esc(f.Ubicacion) || "—"}</dd></div>
+      ${/^-?\d+\.\d+,\s*-?\d+\.\d+/.test(f.Ubicacion||"") ? `<div style="margin-top:9px">
+        <a class="btn ghost sm" target="_blank" rel="noopener"
+           href="https://www.google.com/maps?q=${encodeURIComponent(String(f.Ubicacion).split("(")[0].trim())}">Ver en el mapa</a></div>` : ""}`
+      : `<div class="note crit" style="margin-top:9px"><b>Sin ubicación verificada.</b> Este registro se guardó sin señal de GPS, así que no tiene respaldo del lugar. La marca es permanente.</div>`}
+    </div>`;
+    return;
+  }
+
+  const cap = f.Ubicacion_Verificada === true;
+  box.innerHTML = `
+  <div class="card">
+    <h3>Ubicación del registro <span class="req">*</span></h3>
+    <div class="note" style="margin-bottom:11px">
+      Obligatoria para contactos presenciales: deja constancia auditable de dónde se realizó la visita.
+      Las coordenadas <b>las toma el GPS del equipo</b> — no se escriben ni se pueden corregir, ni antes
+      ni después de guardar.
+    </div>
+    <button class="btn ${cap ? "ghost" : ""} block" id="gps">📍 ${cap ? "Volver a capturar" : "Capturar mi ubicación actual"}</button>
+    <div id="gpsVal" style="margin-top:11px">${cap ? tarjetaUbicacion(f.Ubicacion) : ""}</div>
+    <div id="gpsMsg"></div>
+    ${(!cap && !f._sinUbicacion) ? `
+      <button class="btn ghost sm block" id="gpsOmitirYa" style="margin-top:9px">
+        No puedo capturar la ubicación</button>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:6px;text-align:center">
+        Sin señal, sin permiso de GPS, o una visita anterior que estás registrando después.
+      </div>` : ""}
+    ${f._sinUbicacion ? notaSinUbicacion() : ""}
+  </div>`;
+
+  /* La salida tiene que estar visible desde el principio. Antes solo aparecía
+     después de que el GPS fallara, y si el navegador nunca respondía —permiso
+     descartado, equipo sin ubicación— el ejecutivo quedaba atrapado: el aviso
+     le pedía usar un botón que no estaba en pantalla. */
+  if ($("#gpsOmitirYa")) $("#gpsOmitirYa").onclick = () => {
+    f.Ubicacion = ""; f.Ubicacion_Verificada = false; f._sinUbicacion = true;
+    pintarGps();
+  };
+
+  $("#gps").onclick = () => {
+    const msg = $("#gpsMsg");
+    if (!navigator.geolocation){ return fallaGps("Este dispositivo no permite obtener la ubicación."); }
+    msg.innerHTML = `<div class="note" style="margin-top:9px">Obteniendo ubicación…</div>`;
+    // Algunos navegadores no llaman de vuelta si el usuario descarta el aviso
+    // de permiso: sin esto, el mensaje se queda girando para siempre.
+    let respondio = false;
+    setTimeout(() => { if (!respondio && $("#gpsMsg") && /Obteniendo/.test($("#gpsMsg").innerText))
+      fallaGps("El equipo no respondió. Puede que no se haya dado permiso de ubicación."); }, 14000);
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        respondio = true;
+        f.Ubicacion = `${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} (±${Math.round(p.coords.accuracy)} m)`;
+        f.Ubicacion_Verificada = true;
+        f._sinUbicacion = false;
+        pintarGps();
+        $("#gpsMsg").innerHTML = `<div class="note ok" style="margin-top:9px"><b>Ubicación capturada.</b> Precisión ±${Math.round(p.coords.accuracy)} m.</div>`;
+      },
+      e => { respondio = true; fallaGps(e.message); },
+      { enableHighAccuracy:true, timeout:12000, maximumAge:0 });
+  };
+
+  function fallaGps(motivo){
+    f.Ubicacion = ""; f.Ubicacion_Verificada = false;
+    $("#gpsVal").innerHTML = "";
+    $("#gpsMsg").innerHTML = `
+      <div class="note crit" style="margin-top:9px">
+        <b>No se pudo obtener la ubicación.</b> ${esc(motivo || "")}
+        <div style="margin-top:5px;font-size:12px">Revisa que el GPS del celular esté encendido y que el navegador
+        tenga permiso de ubicación. Vuelve a intentarlo desde el botón de arriba.</div>
+        <button class="btn ghost sm block" id="gpsOmitir" style="margin-top:9px">Registrar sin ubicación verificada</button>
+      </div>`;
+    $("#gpsOmitir").onclick = () => {
+      f._sinUbicacion = true;
+      pintarGps();
+    };
+  }
+}
+
+function tarjetaUbicacion(v){
+  const coord = String(v || "").split("(")[0].trim();
+  return `
+    <div class="note ok">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;opacity:.75">Coordenadas capturadas · no editables</div>
+      <div class="mono" style="font-size:15px;margin-top:3px">${esc(v)}</div>
+      ${coord ? `<a class="btn ghost sm" style="margin-top:8px" target="_blank" rel="noopener"
+         href="https://www.google.com/maps?q=${encodeURIComponent(coord)}">Ver en el mapa</a>` : ""}
+    </div>`;
+}
+
+function notaSinUbicacion(){
+  return `
+    <div class="note crit" style="margin-top:11px">
+      <b>Se guardará como “Sin ubicación verificada”.</b> El registro es válido y cuenta igual: la
+      gestión, la visita cumplida y el cierre no cambian. Lo único es que queda marcado en la ficha,
+      en el panel y en el Excel, para que se vea que esa vez no hubo respaldo de GPS.
+      <div style="margin-top:6px">Es lo correcto cuando no hay señal, cuando el equipo no da permiso
+      de ubicación, o cuando estás registrando una visita de días anteriores. Si recuperas señal antes
+      de guardar, vuelve a capturar.</div>
+    </div>`;
+}
+
+/* Los viáticos se retiraron de la campaña: ya no se capturan gastos ni
+   comprobantes en el formulario. Lo que se declaró antes sigue guardado y se
+   puede consultar en el Excel; simplemente no se pide nada nuevo. */
+
+/* «comprimir()» achicaba la foto de evidencia antes de subirla. Al retirar las
+   evidencias quedó sin un solo llamado, y el código que nadie llama es código
+   que nadie mantiene: se fue con ellas. */
+
+/* ---- Guardar ----------------------------------------------------------- */
+async function guardar(c){
+  const f = S.form, errores = [];
+  if (!f.Fecha_Contacto) errores.push("Indica la fecha del contacto.");
+  if (requiereSeguimiento(f) && accionesActivas().length){
+    if (!f.Accion) errores.push("Indica qué sigue con este comercio: sin próxima acción el caso se pierde de vista.");
+    if (!f.Fecha_Accion) errores.push("Ponle fecha a la próxima acción.");
+    else if (f.Fecha_Accion < hoyISO()) errores.push("La próxima acción no puede quedar en una fecha que ya pasó.");
+    /* Sin hora no hay cita: no ocupa franja, no se puede consultar
+       disponibilidad y no se puede contrastar contra lo que de verdad pasó. */
+    if (f.Accion === "VISITAR" && f.Modalidad && !f.Hora_Accion)
+      errores.push("Ponle hora a la visita. Sin hora no entra al calendario y nadie puede saber si estás ocupado.");
+  }
+  if (S.editId && volverPresencialProhibido(f))
+    errores.push(`No puedes cambiar el medio a ${nomTipo(f.Tipo_Contacto).toLowerCase()}: una gestión presencial necesita la ubicación capturada en el momento, y esa no se modifica. Elimina el registro y créalo de nuevo desde el local.`);
+  /* El `max` del selector no alcanza: la fecha se puede teclear a mano y en
+     móvil algunos navegadores lo ignoran. La regla se comprueba también al
+     guardar, que es donde de verdad importa. */
+  if (fechaSobreElTope(f.Fecha_Contacto))
+    errores.push(diaNoTrabajado(hoyISO())
+      ? `No se puede fechar una gestión el ${fmtFecha(f.Fecha_Contacto)}: hoy es ${nombreDiaNoTrabajado(hoyISO())} y el último día trabajado fue el ${fmtFecha(topeFechaContacto())}. Puedes registrar hoy, pero con la fecha real del contacto.`
+      : `No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
+  if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
+  if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
+  if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
+    errores.push("Captura la ubicación con el botón, o marca “No puedo capturar la ubicación” si el GPS no responde o estás registrando una visita anterior.");
+  if (!String(f.Comentario_Ejecutivo).trim()) errores.push("Escribe el comentario del ejecutivo.");
+  if (f.Cierre === "PERDIDO" && !f.Motivo)
+    errores.push("Indica por qué no se retuvo el comercio: sin ese dato el reporte dice que se perdió, pero no por qué.");
+  /* Enviar un correo o un WhatsApp no es que te hayan respondido. Si se marca
+     que el cliente respondió, tiene que haber algo que citar. */
+  if (pruebaDeRespuesta(f) && !String(f.Comentario_Cliente).trim())
+    errores.push(`Escribe qué respondió el cliente por ${nomTipo(f.Tipo_Contacto).toLowerCase()}. Si todavía no contesta, cambia el resultado a “No respondió”.`);
+  if (errores.length){
+    $("#errBox").innerHTML = `<div class="err"><b>Falta completar:</b><ul style="margin:6px 0 0;padding-left:18px">${errores.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  /* ---- La pregunta del día no trabajado ---------------------------------
+     Misma forma que la del titular y por la misma razón: se pregunta una vez,
+     no se bloquea, y quien registró decide. Un sábado puede ser una visita de
+     verdad —hay comercios que abren— o puede ser el formulario regalándole la
+     fecha de hoy, que es lo que pasó 58 veces. Preguntarlo cuesta un toque y
+     distingue las dos cosas. */
+  if (!S.editId && diaNoTrabajado(f.Fecha_Contacto)){
+    const dia = nombreDiaNoTrabajado(f.Fecha_Contacto);
+    const ok = await new Promise(res => {
+      modal(`
+        <h3>¿El contacto fue en ${esc(dia)}?</h3>
+        <p style="margin-top:0">Estás fechando esta gestión el
+        <b>${esc(fmtFecha(f.Fecha_Contacto))}</b>, que fue ${esc(dia)}.</p>
+        <div class="note">Si el comercio abrió y de verdad lo atendiste ese día, adelante: queda
+        registrado tal cual. Si estás poniendo al día trabajo de la semana, la fecha que va es la
+        del día en que ocurrió, no la de hoy.</div>
+        <div style="display:flex;gap:8px;margin-top:15px;flex-wrap:wrap">
+          <button class="btn" id="ndSi" style="flex:1 1 180px">Sí, fue ese ${esc(dia)}</button>
+          <button class="btn ghost" id="ndNo" style="flex:1 1 180px">Corregir la fecha</button>
+        </div>`);
+      $("#ndSi").onclick = () => { cerrarModal(); res(true); };
+      $("#ndNo").onclick = () => { cerrarModal(); res(false); };
+    });
+    if (!ok){
+      f.Fecha_Contacto = "";
+      render();
+      toast("Escribe el día en que ocurrió el contacto.");
+      return;
+    }
+  }
+
+  /* ---- La pregunta del titular -----------------------------------------
+     Se pregunta, no se bloquea, y la diferencia importa. En la base hay 20
+     gestiones marcadas «el cliente respondió» donde lo transcrito lo dijo el
+     encargado, el administrador o el cajero —«Encargado indica que volvamos a
+     comunicarnos»—, o es un aplazamiento y no una respuesta. Una dice
+     directamente «Comercio indica que no puede atendernos», que es un rechazo.
+
+     Para el primer caso ya existe «Titular ausente», que es un resultado
+     distinto y no cuenta como contacto logrado.
+
+     Ningún patrón de texto acierta siempre: hay comentarios legítimos que
+     nombran al encargado. Por eso el CRM pregunta y ofrece el arreglo en el
+     mismo sitio, y quien registró decide. Es la misma regla de «Perdido»: el
+     CRM no asume por nadie. */
+  if (respuestaDudosa(f)){
+    const eleccion = await new Promise(res => {
+      modal(`
+        <h3>¿Habló el titular?</h3>
+        <p style="margin-top:0">Marcaste <b>«El cliente respondió»</b>, y en el comentario aparece
+        alguien que suele no ser el titular —o un «vuelvan a llamar», que es un aplazamiento y no
+        una respuesta.</p>
+        <div class="cita" style="margin:12px 0">${esc(String(f.Comentario_Cliente || f.Comentario_Ejecutivo || "").slice(0,220))}</div>
+        <div class="note">Si atendió otra persona, el resultado es <b>«Titular ausente»</b>. Si de
+        verdad hablaste con el titular, guárdalo como está: nadie va a cambiarlo por ti.</div>
+        <div style="display:flex;gap:8px;margin-top:15px;flex-wrap:wrap">
+          <button class="btn" id="dudSi" style="flex:1 1 180px">Sí, hablé con el titular</button>
+          <button class="btn ghost" id="dudNo" style="flex:1 1 180px">Atendió otra persona</button>
+        </div>
+        <button class="btn ghost sm" id="dudCancel" style="width:100%;margin-top:8px">Volver a editarlo</button>`);
+      $("#dudSi").onclick     = () => { cerrarModal(); res("titular"); };
+      $("#dudNo").onclick     = () => { cerrarModal(); res("tercero"); };
+      $("#dudCancel").onclick = () => { cerrarModal(); res("volver"); };
+    });
+    if (eleccion === "volver") return;
+    if (eleccion === "tercero"){
+      /* No se guarda a sus espaldas: se le deja el formulario con el resultado
+         correcto puesto y decide él si lo manda. */
+      f.Resultado = "titular_ausente";
+      render();
+      toast("Cambiado a «Titular ausente». Revísalo y guarda.");
+      return;
+    }
+  }
+
+  const btn = $("#guardar");
+  btn.disabled = true; btn.textContent = "Guardando…";
+  try {
+    {
+      /* Editando, lo que cambia el medio, el resultado, la hora o la fecha va
+         por funciones aparte: la base congela esos campos en un UPDATE normal
+         y solo las deja pasar con la corrección autorizada, que además las
+         anota en la bitácora. El resto —comentarios y calificación— sí viaja
+         en el UPDATE de siempre. */
+      if (S.editId){
+        const o = DB.buscar(S.editId) || {};
+        const hhmm = v => String(v || "").slice(0,5);
+        const cambiaMedio = f.Tipo_Contacto !== o.Tipo_Contacto || f.Resultado !== o.Resultado;
+        const cambiaHora  = mandoTotal() && hhmm(f.Hora_Contacto) !== hhmm(o.Hora_Contacto);
+        const cambiaFecha = mandoTotal() && f.Fecha_Contacto !== o.Fecha_Contacto;
+
+        if (cambiaMedio || cambiaHora || cambiaFecha){
+          const cambios = [];
+          if (cambiaFecha) cambios.push({ campo:"Fecha", antes:fmtFecha(o.Fecha_Contacto), despues:fmtFecha(f.Fecha_Contacto) });
+          if (cambiaHora)  cambios.push({ campo:"Hora",  antes:hhmm(o.Hora_Contacto) || "—", despues:hhmm(f.Hora_Contacto) });
+          if (f.Tipo_Contacto !== o.Tipo_Contacto)
+            cambios.push({ campo:"Medio", antes:nomTipo(o.Tipo_Contacto), despues:nomTipo(f.Tipo_Contacto) });
+          if (f.Resultado !== o.Resultado)
+            cambios.push({ campo:"Resultado", antes:nomResultado(o.Resultado), despues:nomResultado(f.Resultado) });
+
+          if (!await confirmarCorreccion(cambios)){
+            btn.disabled = false; btn.textContent = S.editId ? "Guardar cambios" : "Registrar";
+            return;
+          }
+          if (cambiaFecha){
+            const { error: eF } = await sb.rpc("corregir_fecha_gestion", {
+              p_id: S.editId, p_fecha: f.Fecha_Contacto,
+              p_motivo: "Corrección desde el CRM" });
+            if (eF) throw new Error(eF.message);
+          }
+          if (cambiaMedio || cambiaHora){
+            const { error: eG } = await sb.rpc("corregir_gestion", {
+              p_id: S.editId, p_tipo: f.Tipo_Contacto, p_resultado: f.Resultado,
+              p_hora: cambiaHora ? hhmm(f.Hora_Contacto) + ":00" : null });
+            if (eG) throw new Error(eG.message);
+          }
+        }
+      }
+
+      const fila = aDB(f, c);
+      /* Igual que en el borrado: una edición que los permisos rechazan vuelve
+         sin error y sin filas. Se pide de vuelta lo escrito para poder
+         distinguir «se guardó» de «no se guardó y nadie avisó». */
+      const { data: escrito, error } = S.editId
+        ? await sb.from("interacciones").update(fila).eq("id", S.editId).select("id")
+        : await sb.from("interacciones").insert(fila).select("id");
+      if (error) throw new Error(error.message);
+      if (!(escrito || []).length)
+        throw new Error(S.editId
+          ? "La base no dejó guardar el cambio. Esta gestión es de otro ejecutivo y tu usuario no tiene permiso para corregirla."
+          : "La base no dejó registrar la gestión. Revisa que el comercio esté asignado a tu usuario.");
+
+      /* La próxima acción se guarda después de la gestión: la base cierra sola
+         la que estuviera abierta cuando entra una gestión nueva, así que esta
+         tiene que llegar al final para quedar como la vigente. */
+      if (requiereSeguimiento(f) && f.Accion){
+        /* La modalidad es lo que convierte una próxima acción en una cita del
+           calendario. Va con hora y duración; sin ellas la base la rechaza,
+           porque una cita sin hora no ocupa ninguna franja y no se le puede
+           preguntar nada. */
+        const cita = f.Accion === "VISITAR" && !!f.Modalidad;
+        const { error: eSeg } = await sb.from("seguimientos").insert(Object.assign({
+          customer_id: String(c.customer_id),
+          accion: f.Accion,
+          fecha_objetivo: f.Fecha_Accion,
+          comentario: String(f.Comentario_Accion || "").trim() || null,
+          correo_stratis: S.user.correo,
+          ejecutivo: S.user.nombre
+        }, cita ? {
+          modalidad: f.Modalidad,
+          hora_inicio: f.Hora_Accion,
+          duracion_min: Number(f.Duracion) || duracionDe(f.Modalidad)
+        } : {}));
+        if (eSeg) toast("La gestión se guardó, pero " + (cita ? "la cita" : "la próxima acción") + " no: " + eSeg.message);
+      }
+
+      // El cierre va después de la gestión, nunca antes: la base exige que ya
+      // exista el contacto logrado que lo respalda.
+      if (f.Cierre && f.Cierre !== (c.resultado_gestion || "PENDIENTE")){
+        const { error: eCierre } = await sb.from("clientes")
+          .update({ resultado_gestion: f.Cierre,
+                    motivo_no_retencion: f.Cierre === "PERDIDO" ? (f.Motivo || null) : null })
+          .eq("customer_id", String(c.customer_id));
+        if (eCierre) throw new Error("La gestión quedó registrada, pero el cierre no: " + eCierre.message);
+      }
+      await recargarCartera(); await refrescar(); await cargarAuditoria();
+    }
+  } catch (err) {
+    btn.disabled = false; btn.textContent = S.editId ? "Guardar cambios" : "Registrar";
+    $("#errBox").innerHTML = `<div class="err"><b>No se pudo guardar.</b><br>${esc(err.message)}</div>`;
+    $("#errBox").scrollIntoView({ behavior:"smooth", block:"center" });
+    return;
+  }
+
+  const cerro = f.Cierre && f.Cierre !== "PENDIENTE" && f.Cierre !== (c.resultado_gestion || "PENDIENTE");
+  toast(cerro
+    ? `Gestión cerrada como ${(RESULTADOS_GESTION.find(g=>g.id===f.Cierre)||{}).label}`
+    : (S.editId ? "Registro actualizado" : "Contacto registrado en el histórico"));
+  S.form = null; S.editId = null; S.tab = "cartera"; S.cid = String(c.customer_id);
+  window.scrollTo(0,0);
+  render();
+}
+
+function editarRegistro(id){
+  const r = DB.buscar(id);
+  if (!r) return;
+  if (!puedeEditar(r)) return toast("Solo puedes editar tus propios registros");
+  S.editId = id; S.cid = String(r.Customer_id); S.form = null;
+  S.tab = "form_visita";
+  window.scrollTo(0,0);
+  render();
+}
+
+function confirmarEliminar(id){
+  const r = DB.buscar(id);
+  if (!r) return;
+  if (!puedeEditar(r)) return toast("Solo puedes eliminar tus propios registros");
+  if (!borrable(r)) return toast(plazoCorreccion(r));
+  const c = byId[String(r.Customer_id)];
+  modal(`
+    <h3>Eliminar registro</h3>
+    <p>Se eliminará el contacto del <b>${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)}</b> con
+    <b>${esc(titulo(c ? nombreCliente(c) : ""))}</b>. El conteo de intentos y la tasa de respuesta se recalculan. Esta acción no se puede deshacer.</p>
+    <div style="display:flex;gap:9px">
+      <button class="btn danger" id="okDel" style="flex:1">Eliminar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Conservar</button>
+    </div>`);
+  $("#okDel").onclick = async () => {
+    const cid = r.Customer_id;
+    {
+      /* El `.select()` no es un adorno: sin él, un borrado que los permisos
+         rechazan vuelve SIN error y con cero filas, y esto anunciaba
+         «Registro eliminado» sobre una gestión que seguía ahí. Un permiso
+         que falla en silencio es peor que uno que falla: nadie lo reporta
+         porque la pantalla dice que funcionó. Ahora se cuenta lo borrado. */
+      const { data, error } = await sb.from("interacciones").delete().eq("id", id).select("id");
+      if (error){ cerrarModal(); return toast("No se pudo eliminar: " + error.message); }
+      if (!(data || []).length){
+        cerrarModal();
+        return toast("La base no dejó eliminar este registro. Es de otro ejecutivo y tu usuario no tiene permiso para borrarlo.");
+      }
+      await refrescar(); await cargarAuditoria();
+    }
+    cerrarModal(); toast("Registro eliminado"); render();
+  };
+}
+
+/* =========================================================================
+   Pantallas: Registros, Panel y Ajustes
+   ========================================================================= */
+
+/* ---------- Registros: historial con buscador y filtros ------------------ */
+/* =========================================================================
+   Bitácora de gestiones — el registro de lo que hizo el equipo
+
+   El Analista y el Manager ven todo; el ejecutivo, lo suyo. La diferencia con
+   la lista de antes no es que muestre más filas, es que ordena:
+
+     · un tablero de control por ejecutivo, para leer la actividad de un golpe
+     · las gestiones agrupadas por día, que es como se conversa en una reunión
+     · cada tarjeta con su respaldo: lo que dijo el cliente y el GPS
+
+   Todo se puede filtrar por período, ejecutivo, medio y resultado, y bajar a
+   Excel tal como se está viendo.
+   ========================================================================= */
+
+const PERIODOS_REG = [
+  ["todo", "Todo"],
+  ["7",    "Últimos 7 días"],
+  ["30",   "Últimos 30 días"],
+  ["mes",  "Este mes"]
+];
+
+/* Recorta por el período elegido. Se mide contra la fecha del contacto, no
+   contra cuándo se grabó: lo que importa es cuándo se trabajó el comercio. */
+function enPeriodo(r, periodo){
+  if (periodo === "todo") return true;
+  const f = String(r.Fecha_Contacto || "").slice(0,10);
+  if (!f) return false;
+  if (periodo === "mes") return f.slice(0,7) === mesHoy();
+  const dias = Number(periodo);
+  const corte = new Date(new Date(hoyISO()).getTime() - (dias - 1) * 86400000)
+                  .toISOString().slice(0,10);
+  return f >= corte;
+}
+
+/* Una fila por ejecutivo: lo que hay que mirar cuando los resultados no salen */
+/* ---- En qué está parada la cartera de cada ejecutivo ---------------------
+ *
+ * Antes esta tabla contaba actividad: gestiones, días con movimiento, por día.
+ * Decía cuánto se trabajó, que no es lo mismo que en qué punto está la cartera
+ * —y era esta segunda la pregunta que se hacía todos los días—. Trescientas
+ * cuarenta gestiones no dicen si quedan ochenta comercios sin contactar.
+ *
+ * Dos relojes conviven acá y hay que decirlo, no esconderlo:
+ *
+ *   · El estado del comercio —registrados, faltan, en negociación, esperando a
+ *     BBVA, por contactar, y los tres cierres— es DE HOY. No tiene periodo:
+ *     un comercio retenido en julio sigue retenido en agosto.
+ *   · Las visitas efectivas SÍ siguen el periodo elegido arriba, porque son
+ *     gestiones y el requisito del incentivo se mide por semana.
+ *
+ * Mezclar los dos sin avisar es exactamente cómo dos números correctos se leen
+ * como una contradicción. Por eso la nota al pie lo dice con todas las letras.
+ */
+function controlEquipo(regs){
+  const porCorreo = {};
+  regs.forEach(r => { (porCorreo[r.Correo_Stratis] = porCorreo[r.Correo_Stratis] || []).push(r); });
+
+  const p = periodoHoy();
+  const rBono = { periodo:p };
+
+  return USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false).map(u => {
+    const lista = porCorreo[u.correo] || [];
+    const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo);
+    const cartera = suyos.filter(c => !esClienteNuevo(c));
+    const enEstado = id => cartera.filter(c => estadoDerivado(c) === id).length;
+
+    const asignada = asignadaDe(u.correo, rBono);
+    const ultima = lista.length ? lista.map(r => String(r.Fecha_Contacto).slice(0,10)).sort().pop() : "";
+
+    return {
+      nombre: u.nombre, correo: u.correo,
+      asignada,
+      registrados: cartera.length,
+      /* Lo que BBVA asignó y todavía no tiene ficha en el CRM. Sin la cartera
+         cargada en Ajustes no hay resta posible, y se dice con un guion en vez
+         de con un cero, que se leería como «no falta nada». */
+      faltan: asignada ? Math.max(0, asignada - cartera.length) : null,
+      negociacion:  enEstado("EN_NEGOCIACION"),
+      esperaBbva:   enEstado("POR_VALIDAR"),
+      porContactar: enEstado("POR_CONTACTAR"),
+      /* Del periodo que se esté mirando arriba, no de toda la campaña. */
+      visitas: lista.filter(r => r.Cumple_Visita === "SI").length,
+      retenciones: suyos.filter(esRetencion).length,
+      ventas:      suyos.filter(esRecuperado).length,
+      sinLead:     suyos.filter(esVentaNueva).length,
+      gestiones: lista.length,
+      sinGps: lista.filter(sinUbicacion).length,
+      ultima,
+      silencio: ultima ? diasDeAtraso(ultima) : null
+    };
+  }).sort((a,b) => b.registrados - a.registrados);
+}
+
+const COLS_EQUIPO = [
+  { k:"registrados", th:"Registrados", fuerte:true,
+    ttl:"Comercios de cartera con ficha creada en el CRM, se hayan trabajado o no" },
+  { k:"faltan", th:"Faltan",
+    ttl:"Cartera que BBVA asignó y todavía no tiene ficha en el CRM" },
+  { k:"negociacion", th:"Negociación", est:"EN_NEGOCIACION",
+    ttl:"Ya se habló con el titular y el caso sigue abierto" },
+  { k:"esperaBbva", th:"Espera a BBVA", est:"POR_VALIDAR",
+    ttl:"El ejecutivo de BBVA todavía no entrega los datos del titular" },
+  { k:"porContactar", th:"Por contactar", est:"POR_CONTACTAR",
+    ttl:"Los datos ya llegaron y nadie ha llamado al comercio" },
+  { k:"visitas", th:"Visitas efectivas", periodo:true,
+    ttl:"Presenciales o virtuales en las que se logró hablar, dentro del periodo elegido arriba" },
+  { k:"retenciones", th:"Retenciones", cierre:"retenido",
+    ttl:"Ya operaban y se quedaron" },
+  { k:"ventas", th:"Ventas", cierre:"recuperado",
+    ttl:"Estaban de baja y volvieron a operar" },
+  { k:"sinLead", th:"Sin lead", cierre:"venta",
+    ttl:"RUC que Stratis captó y cerró; nunca estuvo en la cartera que entregó BBVA" }
+];
+
+function tablaControl(filas){
+  if (!filas.length) return "";
+  /* Basta con que a UNO le falte la cartera cargada para que su guion pida
+     explicación. Preguntar si alguien la tiene deja al que no la tiene con un
+     guion mudo en medio de una columna de números. */
+  const faltaMeta = filas.some(f => f.faltan === null);
+
+  const celda = (f, c) => {
+    const v = f[c.k];
+    if (v === null) return `<td class="num tenue">—</td>`;
+    if (!v) return `<td class="num">—</td>`;
+    /* Cada cifra abre su lista. Un número sin salida obliga a buscar a mano lo
+       que el CRM acaba de contar. */
+    const ir = c.est    ? `data-verest="${c.est}" data-verejec="${esc(f.nombre)}"`
+             : c.cierre ? `data-vercierre="${c.cierre}" data-verejec="${esc(f.nombre)}"`
+             : c.k === "registrados" ? `data-verlista="registrado" data-verejec="${esc(f.nombre)}" data-vercuantos="${v}"`
+             : "";
+    return `<td class="num ${c.fuerte ? "fuerte" : ""}">${
+      ir ? `<button class="cifra-link" ${ir}>${v}</button>` : v}</td>`;
+  };
+
+  return `
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>En qué está parada la cartera de cada ejecutivo</h3>
+      <span class="sub">Toca una fila para ver solo sus gestiones · toca una cifra para ver de qué comercios se trata</span>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblControl">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        ${COLS_EQUIPO.map(c => `<th title="${esc(c.ttl)}">${c.th}</th>`).join("")}
+        <th>Última gestión</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(f => {
+        const mudo = f.silencio === null || f.silencio > 6;
+        return `<tr data-fejec="${esc(f.nombre)}" class="${S.fEjecReg === f.nombre ? "on" : ""}${f.registrados ? "" : " vacia"}">
+          <td class="nom">${esc(f.nombre)}</td>
+          ${COLS_EQUIPO.map(c => celda(f, c)).join("")}
+          <td class="num ${mudo ? "alerta" : ""}">${
+            f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}`
+                     : "sin gestiones"}</td>
+        </tr>`;
+      }).join("")}
+      <tr class="total-eq">
+        <td class="nom">Equipo</td>
+        ${COLS_EQUIPO.map(c => {
+          const n = filas.reduce((a,f) => a + (f[c.k] || 0), 0);
+          /* Cero se escribe con guion, igual que en las filas de arriba: un
+             cero en una columna y un guion en la de abajo se leen como dos
+             cosas distintas cuando son la misma. */
+          return `<td class="num ${c.fuerte ? "fuerte" : ""}">${n || "—"}</td>`;
+        }).join("")}
+        <td></td>
+      </tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="ctrl-pie">
+      ${filas.filter(f => f.sinGps).map(f =>
+        `<span class="chip crit">${esc(f.nombre)}: ${f.sinGps} sin ubicación</span>`).join("")}
+    </div>
+    <p class="pie">Los estados del comercio —registrados, faltan, en negociación, espera a BBVA, por
+      contactar y los tres cierres— son <b>de hoy</b> y no cambian con el periodo de arriba: un
+      comercio retenido en julio sigue retenido. Las <b>visitas efectivas</b> sí siguen el periodo
+      elegido, porque son gestiones.${faltaMeta ?
+      " <b>Faltan</b> sale en guion cuando ese ejecutivo todavía no tiene su cartera asignada cargada en Ajustes: sin ese número no hay resta posible." : ""}</p>
+  </div>`;
+}
+
+/* Una tarjeta de gestión, con todo lo que sirve para respaldarla */
+function tarjetaGestion(r){
+  const c   = byId[String(r.Customer_id)];
+  const res = resultadoById(r.Resultado);
+  const hora = r.Hora_Contacto ? String(r.Hora_Contacto).slice(0,5) : "";
+  return `<div class="tl-item">
+    <div class="card ges" style="margin-bottom:0">
+      <div class="tl-h">
+        <div>
+          <div class="who" data-cid="${r.Customer_id}" style="cursor:pointer;color:var(--brand-2)">${esc(titulo(c?nombreCliente(c):"—"))}</div>
+          <div class="dt">${hora ? hora + " · " : ""}${esc(nomTipo(r.Tipo_Contacto))} · ${esc(r.Ejecutivo)}${c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</div>
+        </div>
+        <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res?res.label:r.Resultado)}</span>
+      </div>
+
+      <div class="ges-cuerpo">
+        <div class="ges-texto">
+          ${r.Comentario_Ejecutivo?`<div class="quote"><b>Ejecutivo</b>${esc(r.Comentario_Ejecutivo)}</div>`:""}
+          ${r.Comentario_Cliente?`<div class="quote cli"><b>Lo que dijo el cliente</b>${esc(r.Comentario_Cliente)}</div>`:""}
+          ${r.Espera?`<div class="quote"><b>En qué quedó</b>${esc(r.Espera)}</div>`:""}
+          <div class="ges-chips">
+            ${/* En qué terminó ese comercio: la gestión sola no lo dice, y era
+                 lo que impedía ver «de qué comercios estamos hablando». */
+              c && gestionCumplida(c) ? `<span class="chip ok">${esc(tipoCierre(c))}</span>`
+              : c && c.resultado_gestion === "PERDIDO" ? `<span class="chip crit">Perdido</span>` : ""}
+            ${r.Calificacion?`<span class="chip info">${esc(r.Calificacion)}</span>`:""}
+            ${r.Cumple_Visita === "SI"?`<span class="chip ok">Visita efectiva</span>`:""}
+            ${sinUbicacion(r)?`<span class="chip crit">Sin ubicación</span>`
+              : ubicacionExenta(r)?`<span class="chip no" title="${esc(r.Ubicacion_Exenta_Motivo||"")}">Ubicación no exigible</span>`
+              : (r.Ubicacion?`<span class="chip no">Ubicación registrada</span>`:"")}
+            ${/* La demora de registro es la evidencia de la puntualidad: se
+                 muestra solo a supervisión, igual que la columna del panel. */
+              mandoTotal() && demoraRegistro(r) > 2
+                ? `<span class="chip no">Registrada ${esc(textoDias(demoraRegistro(r)))} después</span>` : ""}
+          </div>
+        </div>
+      </div>
+
+      ${puedeEditar(r)?`<div class="ges-acc">
+        ${corregible(r) ? `<button class="btn ghost sm" data-edit="${r._id}">Editar</button>` : ""}
+        ${borrable(r)   ? `<button class="btn ghost sm" data-del="${r._id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
+        <button class="btn ghost sm" data-cid="${r.Customer_id}">Ver ficha</button></div>`:""}
+    </div></div>`;
+}
+
+function viewRegistros(){
+  const mando = !vistaDeCampo();
+  /* Con «ver como» puesto, «mis gestiones» son las del ejecutivo observado.
+     `correoObservado` devuelve el suyo cuando quien mira es ejecutivo, y el
+     elegido cuando supervisión pidió mirar como uno. */
+  const mio = correoObservado();
+  /* Las filas reconstruidas no entran al historial del ejecutivo. No son
+     gestiones suyas: las escribió una migración a partir del canal que él
+     declaró al dar de alta, y llevan un texto que él nunca tecleó. Verlas
+     mezcladas con su trabajo es leer palabras ajenas con su firma, y además
+     le infla el contador de su propia bitácora.
+
+     Supervisión sí las ve, marcadas: hacen falta para entender de dónde salió
+     el histórico y para no volver a contarlas por error. */
+  const todos = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === mio && !esReconstruida(r)))
+                  .filter(r => enPeriodo(r, S.fPeriodoReg))
+                  .sort((a,b) => ts(b) - ts(a));
+
+  const efect = todos.filter(r => esEfectivo(r.Resultado)).length;
+
+  let lista = todos;
+  const q = S.qReg.trim().toLowerCase();
+  if (q) lista = lista.filter(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return String(r.Customer_id).toLowerCase().includes(q)
+        || String(c.nombre_comercio||"").toLowerCase().includes(q)
+        || String(c.distrito||"").toLowerCase().includes(q)
+        || String(r.Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q)
+        || String(r.Espera||"").toLowerCase().includes(q);
+  });
+  if (S.fResultado === "efectivos")           lista = lista.filter(r => esEfectivo(r.Resultado));
+  else if (S.fResultado === "fallidos")       lista = lista.filter(r => !esEfectivo(r.Resultado));
+  else if (S.fResultado === "sin_ubicacion")  lista = lista.filter(sinUbicacion);
+  /* El Panel avisa cuántas se registraron tarde; sin este filtro el número
+     llevaba a la lista completa, que es lo mismo que no llevar a ninguna. */
+  else if (S.fResultado === "fuera_plazo")    lista = lista.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "con_el_alta")    lista = lista.filter(cargadaConLaFicha);
+  else if (S.fResultado === "respuesta_sin_voz") lista = lista.filter(respuestaSinVoz);
+  else if (S.fResultado === "respuesta_dudosa")  lista = lista.filter(respuestaDudosa);
+  else if (S.fResultado === "dia_no_trabajado")  lista = lista.filter(gestionEnDiaNoTrabajado);
+  else if (S.fResultado !== "todos")          lista = lista.filter(r => r.Resultado === S.fResultado);
+  if (S.fMedio !== "todos")   lista = lista.filter(r => r.Tipo_Contacto === S.fMedio);
+  if (S.fEjecReg !== "todos") lista = lista.filter(r => r.Ejecutivo === S.fEjecReg);
+
+  const medios  = TIPOS_CONTACTO.filter(t => todos.some(r => r.Tipo_Contacto === t.id));
+  const mostrar = lista.slice(0, S.limiteReg);
+  const dias    = new Set(todos.map(r => String(r.Fecha_Contacto).slice(0,10))).size;
+
+  const filtrando = q || S.fResultado !== "todos" || S.fMedio !== "todos" || S.fEjecReg !== "todos";
+  const opciones = (valor, todosTxt, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todosTxt}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
+  /* Las tarjetas se agrupan por día: así se lee como una jornada, no como
+     una lista infinita. */
+  let bloques = "", diaActual = "";
+  mostrar.forEach(r => {
+    const d = String(r.Fecha_Contacto).slice(0,10);
+    if (d !== diaActual){
+      if (diaActual) bloques += `</div>`;
+      const delDia = lista.filter(x => String(x.Fecha_Contacto).slice(0,10) === d);
+      const resp   = delDia.filter(x => esEfectivo(x.Resultado)).length;
+      bloques += `<div class="dia-h"><span class="dia-t">${esc(fechaLarga(d))}</span>
+        <span class="dia-n">${delDia.length} ${delDia.length===1?"gestión":"gestiones"}${resp?` · ${resp} con respuesta`:""}</span></div>
+        <div class="tl tl-lectura">`;
+      diaActual = d;
+    }
+    bloques += tarjetaGestion(r);
+  });
+  if (diaActual) bloques += `</div>`;
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>${mando ? "Gestiones del equipo" : "Mis gestiones"}</h2>
+      <div class="sub">Cada contacto y cada intento, con su respaldo, del más reciente al más antiguo</div>
+    </div>
+    ${/* Descargar es de supervisión. Un ejecutivo con la base de gestiones en
+         un Excel puede reenviarla, y lo que sale de este CRM son datos de la
+         cartera de un banco. Los archivos viven en Ajustes → Descargas, que ya
+         es solo de supervisión; este botón era la última puerta abierta. */
+      mando && lista.length ? `<button class="btn ghost sm" id="bajarReg">Descargar lo que estoy viendo</button>` : ""}
+  </div>
+
+  <div class="seg seg-periodo" role="group" aria-label="Período">
+    ${PERIODOS_REG.map(([k,l]) => `<button class="${S.fPeriodoReg===k?"on":""}" data-fper="${k}">${l}</button>`).join("")}
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Gestiones</div><div class="val">${todos.length}</div><div class="sub">intentos de comunicación</div></div>
+    <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${efect}</div><div class="sub">gestiones · ${todos.length?Math.round(efect/todos.length*100):0}% de los intentos obtuvo respuesta</div></div>
+    <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div><div class="sub">${dias?`${(todos.length/dias).toFixed(1)} gestiones por día`:"sin movimiento"}</div></div>
+    <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">presenciales sin ninguna coordenada</div></div>
+  </div>
+
+  ${mando ? tablaControl(controlEquipo(todos)) : ""}
+
+  <div class="filtros">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="qReg" placeholder="Buscar por comercio, Customer ID, distrito o comentario…" value="${esc(S.qReg)}"></div>
+
+    <div class="seg" role="group" aria-label="Resultado">
+      ${[["todos","Todos"],["efectivos","El cliente respondió"],["fallidos","Sin respuesta"]]
+        .map(([k,l]) => `<button class="${S.fResultado===k?"on":""}" data-fr="${k}">${l}</button>`).join("")}
+      ${todos.some(sinUbicacion)
+        ? `<button class="${S.fResultado==="sin_ubicacion"?"on":""}" data-fr="sin_ubicacion">Sin ubicación</button>` : ""}
+      ${todos.some(r => demoraHabil(r) > 1)
+        ? `<button class="${S.fResultado==="fuera_plazo"?"on":""}" data-fr="fuera_plazo" title="Registradas más de un día trabajado después de la fecha de la gestión">Fuera de plazo</button>
+           ${mando ? `<button class="${S.fResultado==="con_el_alta"?"on":""}" data-fr="con_el_alta" title="El comercio entró al CRM después de trabajarse: se registraron junto con su ficha. Explica la demora, no la descuenta">Cargadas con el alta</button>` : ""}` : ""}
+      ${todos.some(respuestaSinVoz)
+        ? `<button class="${S.fResultado==="respuesta_sin_voz"?"on":""}" data-fr="respuesta_sin_voz" title="Se marcó que el cliente respondió y no quedó ninguna palabra suya">Respuesta sin transcribir</button>` : ""}
+      ${todos.some(respuestaDudosa)
+        ? `<button class="${S.fResultado==="respuesta_dudosa"?"on":""}" data-fr="respuesta_dudosa" title="El comentario sugiere que habló otra persona, o que quedó en volver a llamar">Respuesta por revisar</button>` : ""}
+      ${todos.some(gestionEnDiaNoTrabajado)
+        ? `<button class="${S.fResultado==="dia_no_trabajado"?"on":""}" data-fr="dia_no_trabajado" title="Fechadas en sábado, domingo o feriado">Día no trabajado</button>` : ""}
+    </div>
+
+    <div class="sel-row">
+      <label class="fsel"><span>Resultado</span>
+        <select data-fr-sel>${opciones(RESULTADOS.some(x=>x.id===S.fResultado)?S.fResultado:"todos", "Cualquier resultado",
+          RESULTADOS.filter(x => todos.some(r => r.Resultado === x.id)).map(x => [x.id, `${x.label} · ${todos.filter(r => r.Resultado === x.id).length}`]))}</select></label>
+      <label class="fsel"><span>Medio</span>
+        <select data-fm-sel>${opciones(S.fMedio, "Todos los medios", medios.map(t => [t.id, `${t.label} · ${todos.filter(r => r.Tipo_Contacto === t.id).length}`]))}</select></label>
+      ${mando ? `<label class="fsel"><span>Ejecutivo</span>
+        <select data-fe-sel>${opciones(S.fEjecReg, `Todo el equipo · ${todos.length}`,
+          USUARIOS.filter(u=>u.rol==="Ejecutivo")
+            .map(u => [u.nombre, `${u.nombre} · ${todos.filter(r => r.Ejecutivo === u.nombre).length}`]))}</select></label>` : ""}
+    </div>
+
+    ${filtrando ? `<div class="filtros-pie">
+      <span>${lista.length} de ${todos.length} gestiones</span>
+      <button class="btn ghost sm" id="limpiarReg">Quitar filtros</button>
+    </div>` : ""}
+  </div>
+
+  ${mostrar.length ? bloques
+    : todos.length
+      ? `<div class="empty"><div class="big">⌕</div>No hay gestiones con estos filtros.</div>`
+      : `<div class="empty"><div class="big">≡</div>${
+          S.fPeriodoReg === "todo"
+            ? (mando ? "Todavía no hay gestiones registradas." : "Todavía no has registrado contactos.")
+            : "No hay gestiones en este período."}<br><br>
+         <button class="btn" data-go="cartera">Ir a la cartera</button></div>`}
+  ${lista.length > mostrar.length ? `<button class="btn ghost block" id="masReg">Ver ${Math.min(40, lista.length-mostrar.length)} más de ${lista.length-mostrar.length}</button>` : ""}
+
+  <div class="card" style="margin-top:14px">
+    <div class="pie" style="margin:0"><b>Editar no suma un intento.</b> El contador solo sube cuando se registra
+    un contacto nuevo desde la ficha del comercio.</div>
+  </div>`;
+}
+
+/* Lo que está en pantalla, a Excel: la misma selección, sin volver a filtrar */
+function gestionesFiltradas(){
+  const mando = !vistaDeCampo();
+  let l = (mando ? DB.todos() : DB.todos().filter(r => r.Correo_Stratis === correoObservado()))
+            .filter(r => enPeriodo(r, S.fPeriodoReg))
+            .sort((a,b) => ts(b) - ts(a));
+  const q = S.qReg.trim().toLowerCase();
+  if (q) l = l.filter(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return String(r.Customer_id).toLowerCase().includes(q)
+        || String(c.nombre_comercio||"").toLowerCase().includes(q)
+        || String(c.distrito||"").toLowerCase().includes(q)
+        || String(r.Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Ejecutivo||"").toLowerCase().includes(q)
+        || String(r.Comentario_Cliente||"").toLowerCase().includes(q)
+        || String(r.Espera||"").toLowerCase().includes(q);
+  });
+  if (S.fResultado === "efectivos")           l = l.filter(r => esEfectivo(r.Resultado));
+  else if (S.fResultado === "fallidos")       l = l.filter(r => !esEfectivo(r.Resultado));
+  else if (S.fResultado === "sin_ubicacion")  l = l.filter(sinUbicacion);
+  else if (S.fResultado === "fuera_plazo")    l = l.filter(r => demoraHabil(r) > 1);
+  else if (S.fResultado === "con_el_alta")    l = l.filter(cargadaConLaFicha);
+  else if (S.fResultado === "respuesta_sin_voz") l = l.filter(respuestaSinVoz);
+  else if (S.fResultado === "respuesta_dudosa")  l = l.filter(respuestaDudosa);
+  else if (S.fResultado === "dia_no_trabajado")  l = l.filter(gestionEnDiaNoTrabajado);
+  else if (S.fResultado !== "todos")          l = l.filter(r => r.Resultado === S.fResultado);
+  if (S.fMedio !== "todos")   l = l.filter(r => r.Tipo_Contacto === S.fMedio);
+  if (S.fEjecReg !== "todos") l = l.filter(r => r.Ejecutivo === S.fEjecReg);
+  return l;
+}
+
+
+
+/* =========================================================================
+   Panel — cuatro bloques y un solo reloj
+
+   El desorden anterior no era estético. La misma palabra significaba cosas
+   distintas a diez centímetros de distancia: «Objetivo cumplido» salía con 1
+   y con 4, «Con respuesta» eran comercios acá y gestiones allá, y cada
+   tarjeta medía con un calendario propio. Nadie estaba mal calculado; nadie
+   decía contra qué medía.
+
+   Acá hay una regla y se cumple sin excepción: cada métrica dice su unidad
+   —comercios o gestiones— y todo el bloque 2 en adelante se mide con el
+   periodo que se elige arriba. El bloque 1 no: el proyecto es uno solo.
+   ========================================================================= */
+
+/* La cartera que mira el Panel no depende de los filtros de la pantalla de
+   Cartera. Antes sí, y bastaba con haber tocado «ver cuáles» para que el
+   Panel entero se quedara filtrado por un ejecutivo sin avisarlo. */
+/* Con «ver como» puesto, el universo del Panel es el del ejecutivo elegido:
+   es lo que hace que supervisión vea exactamente sus números y no los del
+   equipo recortados. */
+const correoObservado = () => {
+  if (!S.user) return "";
+  if (S.user.rol === "Ejecutivo") return S.user.correo;
+  const q = ejecObservado();
+  return q ? q.correo : "";
+};
+
+const universoPanel = () => {
+  if (!S.user) return [];
+  const c = correoObservado();
+  return c ? CLIENTES.filter(x => x.asignado_correo === c) : CLIENTES;
+};
+
+const ejecutivosPanel = () => {
+  const c = correoObservado();
+  return c ? USUARIOS.filter(u => u.correo === c)
+           : USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+};
+
+/* ---- El selector, uno para toda la pantalla ----------------------------- */
+/* `conTitulo` en falso lo deja como lo que es: un control. El tablero de
+   supervisión ya trae su propia cabecera con el periodo escrito, y dos títulos
+   seguidos diciendo casi lo mismo hacen dudar de cuál manda. */
+function selectorPanel(r, conTitulo){
+  const opciones = r.id === "proyecto" ? []
+    : r.id === "mes" ? mesesProyecto().map(m => [m, nombreMes(m)])
+    : periodosProyecto().slice().reverse().map(p => [p, `${nombrePeriodo(p)} · ${textoPeriodo(p)}`]);
+
+  return `
+  ${conTitulo === false ? "" : `
+  <div class="page-head">
+    <div>
+      <h2>Panel de la campaña</h2>
+      <div class="sub">Cartera asignada, alcance y actividad — todo medido contra el mismo periodo</div>
+    </div>
+  </div>`}
+
+  <div class="pnl-per">
+    <div class="seg" role="group" aria-label="Periodo">
+      ${VENTANAS_PANEL.map(v => `<button class="${(S.vPanel||"bono")===v.id?"on":""}" data-vpanel="${v.id}">${v.label}</button>`).join("")}
+    </div>
+    ${opciones.length > 1 ? `<label class="fsel"><span>${r.id === "mes" ? "Mes" : "Periodo"}</span>
+      <select id="pPanel">${opciones.map(([v,l]) =>
+        `<option value="${esc(v)}"${v === r.periodo ? " selected" : ""}>${esc(l)}</option>`).join("")}
+      </select></label>` : ""}
+    <div class="pnl-per-txt">Del <b>${esc(r.detalle)}</b>${
+      r.id === "bono" ? (esBBVA() ? " · el periodo corta el 18" : " · el mes del bono corta el 18") : ""}</div>
+  </div>`;
+}
+
+/* ---- 1 · El proyecto ----------------------------------------------------
+   Siempre el proyecto entero, sin importar el selector: la cartera asignada
+   no se reparte por mes y el avance se mide contra los cinco meses. */
+function bloqueProyecto(){
+  const base   = universoPanel();
+  const quien  = ejecutivosPanel();
+  const rTodo  = { id:"proyecto", ini:PROYECTO.inicio, fin:PROYECTO.fin, periodo:"" };
+  const asignada = quien.reduce((n,u) => n + asignadaDe(u.correo, rTodo), 0);
+
+  const deCartera = base.filter(c => !esClienteNuevo(c));
+  const nuevos    = base.filter(esClienteNuevo);
+  const cumplidos = deCartera.filter(c => esRetencion(c) || esRecuperado(c)).length;
+  const ventas    = nuevos.filter(c => c.resultado_gestion === "VENTA").length;
+  const trabajados = deCartera.filter(c =>
+    (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0).length;
+
+  const av = avanceProyecto();
+  const pct  = asignada ? cumplidos / asignada * 100 : 0;
+  const pctT = asignada ? trabajados / asignada * 100 : 0;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">1</span>
+    <div><b>El proyecto</b><span>Del ${fmtFecha(PROYECTO.inicio)} al ${fmtFecha(PROYECTO.fin)} — no cambia con el periodo de arriba</span></div>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Cartera asignada</div><div class="val">${asignada || "—"}</div>
+      <div class="sub">${asignada ? "comercios que entregó BBVA" : "todavía no se cargó en Ajustes"}</div></div>
+    <div class="stat"><div class="lbl">Registrados en el CRM</div><div class="val">${deCartera.length}</div>
+      <div class="sub">comercios de cartera${nuevos.length ? ` · ${nuevos.length} venta${nuevos.length===1?"":"s"} nueva${nuevos.length===1?"":"s"} aparte` : ""}</div></div>
+    <button class="stat stat-link" data-vercierre="cumplido_cartera">
+      <div class="lbl">Objetivo cumplido</div><div class="val">${cumplidos}</div>
+      <div class="sub">comercios${asignada ? ` · ${pct.toFixed(1)}% de los ${asignada} asignados` : ""} — <b>ver cuáles</b></div></button>
+    <button class="stat stat-link" data-vercierre="venta">
+      <div class="lbl">Ventas nuevas</div><div class="val">${ventas}</div>
+      <div class="sub">RUC que trajo Stratis · no salen de la cartera — <b>ver cuáles</b></div></button>
+    <div class="stat"><div class="lbl">Avance del proyecto</div><div class="val">${Math.round(av.pct)}%</div>
+      <div class="sub">día ${av.corrido} de ${av.total} · ${av.restante ? `quedan ${textoDias(av.restante)}` : "cerrado"}</div></div>
+  </div>
+
+  ${asignada ? `<div class="card">
+    <div class="g-barra">
+      <span style="width:${Math.min(100, pct).toFixed(1)}%;background:var(--good)"></span>
+      <span style="width:${Math.min(100 - Math.min(100,pct), Math.max(0, pctT - pct)).toFixed(1)}%;background:var(--warn)"></span>
+    </div>
+    <div class="g-leyenda">
+      <button class="g-ley-x" data-vercierre="cumplido_cartera"><i style="background:var(--good)"></i>Objetivo cumplido · <b>${cumplidos}</b></button>
+      <span><i style="background:var(--warn)"></i>Trabajados sin cerrar · <b>${Math.max(0, trabajados - cumplidos)}</b></span>
+      <span><i style="background:var(--grid)"></i>Sin tocar · <b>${Math.max(0, asignada - trabajados)}</b></span>
+    </div>
+    <details class="explica"><summary>Por qué la barra suma ${asignada} y el CRM tiene ${deCartera.length}</summary>
+      <div class="cuerpo">
+        <p>La barra se mide sobre la <b>cartera asignada</b>: los ${asignada} comercios que BBVA
+        entregó. Lo registrado en el CRM son ${deCartera.length}, porque un comercio entra recién
+        cuando alguien lo trabaja. La diferencia es el tramo gris: <b>sin tocar</b>.</p>
+        <p>Las <b>ventas nuevas</b> no entran en esta barra. Son RUC que Stratis trajo de cero y que
+        no salían de la cartera de nadie: sumarlas al porcentaje inflaría el alcance sobre un
+        denominador al que nunca pertenecieron. Cuentan —y pesan en el incentivo— en su propia cifra.</p>
+      </div>
+    </details>
+  </div>` : `<div class="card"><div class="note crit" style="margin:0">
+    Falta cargar la cartera asignada por ejecutivo en <b>Ajustes → Cartera asignada</b>.
+    Sin ese número el avance solo se puede medir sobre lo ya registrado, que siempre se ve
+    mejor de lo que es.</div></div>`}
+
+  ${cardReparto(base)}`;
+}
+
+/* En qué terminó cada comercio ya registrado. Es la otra mitad de la historia:
+   la barra de arriba mide contra los 841 asignados y siempre va a verse baja
+   al principio; esta mide contra lo que el equipo ya tocó, y dice si de lo
+   decidido se está ganando o perdiendo. */
+function cardReparto(base){
+  const total = base.length;
+  if (!total) return `<div class="card"><div class="vacio">Todavía no hay comercios registrados en la campaña.</div></div>`;
+
+  const n = t => base.filter(t).length;
+  const retenidos = n(esRetencion), recuperados = n(esRecuperado);
+  const ventas    = n(esVentaNueva);
+  const perdidos  = n(c => c.resultado_gestion === "PERDIDO");
+  const pendientes = n(c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE");
+  const cumplido  = retenidos + recuperados + ventas;
+  const decididos = cumplido + perdidos;
+
+  const reparto = [
+    { label:"Retenidos",     n:retenidos,   color:"var(--good)",    ver:"retenido" },
+    { label:"Recuperados",   n:recuperados, color:"var(--s2)",      ver:"recuperado" },
+    { label:"Ventas nuevas", n:ventas,      color:"var(--brand-2)", ver:"venta" },
+    { label:"Perdidos",      n:perdidos,    color:"var(--crit)",    ver:"perdido" },
+    { label:"Pendientes",    n:pendientes,  color:"var(--line)",    ver:"pendiente" }
+  ].filter(x => x.n > 0);
+
+  return `
+  <div class="card">
+    <h3>En qué terminó lo registrado · ${total} comercios en el CRM</h3>
+    <div class="stat-row" style="margin-bottom:13px">
+      <div class="stat"><div class="lbl">Efectividad de cierre</div>
+        <div class="val">${decididos ? Math.round(cumplido/decididos*100) + "%" : "—"}</div>
+        <div class="sub">${decididos ? `${cumplido} de ${decididos} comercios ya decididos` : "todavía no hay ningún comercio decidido"}</div></div>
+      <button class="stat stat-link" data-vercierre="pendiente"><div class="lbl">Todavía abiertos</div>
+        <div class="val">${pendientes}</div>
+        <div class="sub">${Math.round(pendientes/total*100)}% de lo registrado sigue en trabajo — <b>ver cuáles</b></div></button>
+    </div>
+    <div class="g-barra">
+      ${reparto.map(x => `<span style="width:${(x.n/total*100).toFixed(1)}%;background:${x.color}" title="${esc(x.label)}: ${x.n}"></span>`).join("")}
+    </div>
+    <div class="g-leyenda">
+      ${reparto.map(x => `<button class="g-ley-x" data-vercierre="${x.ver}" title="Ver los comercios">
+        <i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></button>`).join("")}
+    </div>
+    <details class="explica"><summary>Por qué van dos barras y no una</summary>
+      <div class="cuerpo">
+        <p>La de arriba mide contra la <b>cartera asignada</b>: es el número que le importa a BBVA y
+        al principio de campaña va a ser bajo, porque casi todo está sin tocar. Esta mide contra lo
+        que el equipo ya <b>registró</b>: dice cómo se está trabajando lo que sí se agarró.</p>
+        <p>La <b>efectividad de cierre</b> mira solo lo ya decidido. Un 100% con tres comercios
+        decididos de doscientos no es una buena campaña — por eso nunca va sola.</p>
+        <p>Nada de esto es la <b>tasa de respuesta</b>, que solo mide en cuántas gestiones el cliente
+        contestó. Que respondan no es que se queden: se puede tener 100% de respuesta y 0% de
+        retención.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* ---- 2 · La actividad del periodo --------------------------------------
+   Todo en gestiones. La confusión de fondo era contar unas veces comercios y
+   otras gestiones bajo el mismo rótulo. */
+function bloqueActividad(r, regs){
+  const gestiones  = regs.length;
+  const respuestas = regs.filter(x => esEfectivo(x.Resultado)).length;
+  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const tocados    = new Set(regs.map(x => String(x.Customer_id)));
+  const comercios  = tocados.size;
+  /* La tabla de abajo cuenta «Trabajados» solo sobre la cartera asignada,
+     porque ese es su denominador. Acá entran también las ventas nuevas, y la
+     diferencia entre los dos números se dice en vez de dejarla adivinar. */
+  const tocadosNuevos = [...tocados].filter(id => byId[id] && esClienteNuevo(byId[id])).length;
+  const dias       = new Set(regs.map(x => String(x.Fecha_Contacto).slice(0,10))).size;
+
+  const sem   = semanasRango(r);
+  const gente = ejecutivosPanel().length || 1;
+  const ritmo = sem ? efectivas / sem / gente : 0;
+  /* El ritmo se sigue mirando por semana porque es la unidad con la que uno
+     se organiza. Lo que cambió es contra qué se compara: desde el 19/08 el
+     requisito son 40 en el periodo, y la referencia semanal sale de dividir,
+     no de un número escrito a mano. */
+  const rvP   = reglaVisitas(paramsDe(r.periodo || periodoHoy()).requisitos,
+                             r.periodo || periodoHoy());
+  const pide  = rvP.porSemana || rvP.meta;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">2</span>
+    <div><b>La actividad</b><span>${esc(r.detalle)} — todo contado en gestiones</span></div>
+  </div>
+  <div class="stat-row">
+    ${/* Sin salto a Registros en la vista de campo: esa pestaña es de
+          supervisión desde el 27/08. La cifra se queda; el enlace no. */
+      vistaDeCampo()
+      ? `<div class="stat"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
+          <div class="sub">intentos de comunicación</div></div>
+         <div class="stat"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
+          <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo</div></div>`
+      : `<button class="stat stat-link" data-verges="todos"><div class="lbl">Gestiones</div><div class="val">${gestiones}</div>
+          <div class="sub">intentos de comunicación — <b>ver la lista</b></div></button>
+         <button class="stat stat-link" data-verges="efectivos"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
+          <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo — <b>ver cuáles</b></div></button>`}
+    <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${efectivas}</div>
+      <div class="sub">gestiones que cumplen visita</div></div>
+    <div class="stat"><div class="lbl">Comercios tocados</div><div class="val">${comercios}</div>
+      <div class="sub">comercios distintos con al menos una gestión${
+        tocadosNuevos ? ` · ${comercios - tocadosNuevos} de cartera + ${tocadosNuevos} venta${
+          tocadosNuevos===1?"":"s"} nueva${tocadosNuevos===1?"":"s"}` : ""}</div></div>
+    <div class="stat"><div class="lbl">Días con actividad</div><div class="val">${dias}</div>
+      <div class="sub">${dias ? `${(gestiones/dias).toFixed(1)} gestiones por día` : "sin movimiento"}</div></div>
+    <div class="stat ${sem && ritmo < pide ? "malo" : ""}"><div class="lbl">Ritmo semanal</div>
+      <div class="val">${sem ? ritmo.toFixed(1) : "—"}</div>
+      <div class="sub">visitas efectivas por semana y por ejecutivo · referencia ${pide}${
+        rvP.porPeriodo ? ` · el mínimo son ${rvP.pide} en el periodo` : ""}</div></div>
+  </div>
+  <details class="explica suelta"><summary>Por qué acá dice ${efectivas} gestiones y en la Cartera otro número</summary>
+      <div class="cuerpo">
+        <p>Este bloque cuenta <b>gestiones</b>: cada registro es uno, aunque sea el cuarto intento con
+        el mismo comercio. La Cartera cuenta <b>comercios</b>: uno que recibió tres visitas efectivas
+        sigue siendo un comercio. Los dos números son correctos y miden cosas distintas; por eso
+        cada uno dice su unidad.</p>
+        <p>El <b>ritmo semanal</b> es el requisito del incentivo: ${pide} visitas efectivas por semana
+        y por ejecutivo. Las semanas no se redondean y no se cuentan días que todavía no ocurren.</p>
+      </div>
+  </details>`;
+}
+
+/* ---- 3 · Una sola tabla por ejecutivo -----------------------------------
+   Antes eran tres tablas con tres ventanas: «Trabajados» y «Comercios» eran
+   lo mismo y nunca coincidían. */
+const COLS_PANEL = [
+  { k:"asignada",    th:"Asignados",        ttl:"Cartera que entregó BBVA", val:f => f.asignada || "—" },
+  /* Tres cuentas distintas de comercios, y hasta ahora se leían como una:
+     lo que BBVA asignó, lo que alguien cargó al CRM, y lo que de verdad
+     recibió una gestión. Entre la segunda y la tercera está el hueco que no
+     se veía en ninguna pantalla: fichas creadas y nunca trabajadas. */
+  { k:"registrados", th:"Registrados", lista:"registrado",
+    ttl:"Customer ID cargados en el CRM, se hayan trabajado o no. Cargar la ficha exige indicar cómo se coordinó con el ejecutivo de BBVA",
+    val:f => f.registrados || "—" },
+  { k:"trabajados",  th:"Gestionados", lista:"gestionado",
+    ttl:"Comercios con al menos un hecho con resultado en el periodo: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado. El intento sin respuesta se registra, pero no cuenta acá",
+    val:f => f.trabajados || "—" },
+  { k:"cargadosSinGestion", th:"Cargados sin gestión", extra:true,
+    ttl:"Registrados en el CRM que no tienen ni una gestión: ficha creada y nunca trabajada",
+    val:f => f.cargadosSinGestion || "—" },
+  { k:"sinTocar",    th:"Sin tocar",        extra:true, ttl:"Asignados que no recibieron ninguna gestión en el periodo",
+    val:f => f.asignada ? f.sinTocar : "—" },
+  { k:"gestiones",   th:"Gestiones",        extra:true, val:f => f.gestiones || "—" },
+  { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
+  { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
+    val:f => f.tasa === null ? "—" : Math.round(f.tasa) + "%" },
+  /* Estuvo oculta al ejecutivo hasta el 24/08, con el argumento de no
+     convertir una medición en una discusión diaria. Resultó al revés: uno de
+     los cuatro perdió la llave por un requisito que no podía ver. */
+  { k:"puntualidad", th:"Puntualidad",      extra:true,
+    ttl:"Gestiones registradas dentro del día trabajado siguiente al contacto",
+    val:f => f.puntualidad === null ? "—" : Math.round(f.puntualidad) + "%" },
+  { k:"retenidos",   th:"Retenidos",    cierre:"retenido" },
+  { k:"recuperados", th:"Recuperados",  cierre:"recuperado" },
+  { k:"ventasNuevas",th:"Ventas nuevas",cierre:"venta", ttl:"No suman al % de alcance: no salían de la cartera asignada" },
+  { k:"pct",         th:"% alcance",        ttl:"Retenidos y recuperados sobre la cartera asignada",
+    val:f => f.pct === null ? "—" : `<b>${(Math.round(f.pct*10)/10)}%</b>` },
+  { k:"ultima",      th:"Última gestión",   extra:true, txt:true,
+    val:f => f.ultima ? `${fmtFecha(f.ultima)}${f.silencio > 0 ? ` <span class="tenue">· hace ${textoDias(f.silencio)}</span>` : ""}` : "sin gestiones" }
+];
+
+/* ---- Dónde está parada la cartera, comercio por comercio ----------------
+   Hasta acá «Pendiente» tapaba dos cosas que no se parecen en nada: el
+   comercio que todavía espera que BBVA entregue los datos, y el que ya los
+   tiene y a nadie ha llamado. Son dos tareas distintas, de dos personas
+   distintas, en dos días distintos —y entre las dos es donde se está yendo el
+   volumen de la campaña—. Ahora cada una tiene su cifra y su lista.
+
+   Ninguno de estos números se teclea: salen de la línea de tiempo. */
+function cardPipeline(){
+  const base = cartera().filter(c => !esClienteNuevo(c));
+  const n = id => base.filter(c => estadoDerivado(c) === id).length;
+  const abiertos = ["POR_VALIDAR","POR_CONTACTAR","EN_NEGOCIACION"];
+  const total = base.length;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">◆</span>
+    <div><b>En qué punto está cada comercio</b>
+      <span>Calculado de lo registrado — nadie mueve estos estados a mano</span></div>
+  </div>
+  <div class="card">
+    <div class="stat-row" style="margin-bottom:0">
+      ${abiertos.map(id => { const e = estadoDerivadoById(id), v = n(id);
+        return `<button class="stat stat-link" data-verest="${id}">
+          <div class="lbl">${e.label}</div><div class="val">${v}</div>
+          <div class="sub">${e.hacer} · ${total ? Math.round(v/total*100) : 0}% de la cartera — <b>ver cuáles</b></div>
+        </button>`; }).join("")}
+    </div>
+    <details class="explica"><summary>Por qué estos estados no se marcan a mano</summary>
+      <div class="cuerpo">
+        <p>Nadie guarda «34 años» en una ficha: se guarda la fecha de nacimiento y la edad se
+        calcula, porque una edad guardada miente en el próximo cumpleaños y nadie se entera.</p>
+        <p>Con el estado del comercio pasaba lo mismo. Era un campo que alguien escribía y que se
+        quedaba escrito hasta que alguien más lo cambiara: un comercio que empezó a negociar el
+        martes seguía figurando como pendiente, y por eso <b>no aparecía en ninguna alarma</b> —justo
+        el caso que se enfría.</p>
+        <p><b>Por validar</b> es que el ejecutivo de BBVA todavía no entrega los datos. <b>Por
+        contactar</b> es que ya los entregó y nadie ha llamado. <b>En negociación</b> empieza cuando
+        se <i>habló</i> con el titular, no cuando se intentó: si empezara con el intento, el comercio
+        al que se llamó tres veces sin respuesta entraría al mismo balde que aquel donde se discute
+        una tasa.</p>
+        <p>Los cierres —retenido, recuperado, venta, perdido— siguen marcándose a mano, porque son
+        una decisión de una persona y no se deducen de nada.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bloqueEquipo(r){
+  const filas = ejecutivosPanel().map(u => filaEjecutivo(u, r));
+  const todo  = !!S.verTodo;
+  const cols  = COLS_PANEL.filter(c => (todo || !c.extra) && (!c.soloMando || mandoTotal()));
+  const nCols = COLS_PANEL.filter(c => !c.soloMando || mandoTotal()).length;
+  const suma  = k => filas.reduce((n,f) => n + (f[k] || 0), 0);
+
+  const celda = (f, c) => {
+    if (c.cierre) return f[c.k]
+      ? `<button class="cifra-link" data-vercierre="${c.cierre}" data-verejec="${esc(f.nombre)}" title="Ver los comercios">${f[c.k]}</button>`
+      : "—";
+    /* Registrados y Gestionados también abren su lista. Eran los dos números
+       más mirados de la tabla y los únicos sin salida. */
+    if (c.lista) return f[c.k]
+      ? `<button class="cifra-link" data-verlista="${c.lista}" data-verejec="${esc(f.nombre)}"
+                 data-vercuantos="${f[c.k]}" title="Ver los comercios">${f[c.k]}</button>`
+      : "—";
+    return c.val(f);
+  };
+
+  return `
+  ${flujoBbva() ? cardPipeline() : ""}
+  <div class="pnl-h"><span class="pnl-n">3</span>
+    <div><b>Cada ejecutivo</b><span>${esc(r.detalle)} — toca cualquier cifra subrayada para ver de qué comercios se trata</span></div>
+  </div>
+
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Alcance y actividad por ejecutivo</h3>
+      <button class="btn ghost sm" id="verTodoPanel">${todo ? "Ver lo esencial" : `Ver las ${nCols} columnas`}</button>
+    </div>
+    ${filas.length ? `<div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblEquipo">
+      <thead><tr><th>Ejecutivo</th>
+        ${cols.map(c => `<th${c.ttl ? ` title="${esc(c.ttl)}"` : ""}>${c.th}</th>`).join("")}
+      </tr></thead>
+      <tbody>
+        ${filas.map(f => `<tr>
+          <td class="nom">${esc(f.nombre)}</td>
+          ${cols.map(c => `<td class="${c.txt ? "" : "num"}">${celda(f, c)}</td>`).join("")}
+        </tr>`).join("")}
+      </tbody>
+      ${filas.length > 1 ? `<tfoot><tr>
+        <td class="nom">Equipo</td>
+        ${cols.map(c => {
+          if (c.k === "pct"){ const a = suma("asignada"), l = suma("logrado");
+            return `<td class="num"><b>${a ? (Math.round(l/a*1000)/10) + "%" : "—"}</b></td>`; }
+          if (c.k === "tasa"){ const g = suma("gestiones"), s = suma("respuestas");
+            return `<td class="num">${g ? Math.round(s/g*100) + "%" : "—"}</td>`; }
+          if (c.k === "puntualidad"){ const g = suma("gestiones"), s = suma("puntuales");
+            return `<td class="num">${g ? Math.round(s/g*100) + "%" : "—"}</td>`; }
+          if (c.k === "ultima") return `<td></td>`;
+          return `<td class="num">${suma(c.k) || "—"}</td>`;
+        }).join("")}
+      </tr></tfoot>` : ""}
+    </table>
+    </div>` : `<div class="vacio">Todavía no hay ejecutivos activos en la campaña.</div>`}
+    <details class="explica"><summary>Asignados, Registrados y Gestionados: en qué se diferencian</summary>
+      <div class="cuerpo">
+        <p>Los tres cuentan comercios y ninguno cuenta lo mismo.</p>
+        <p><b>Asignados</b> es la cartera que entregó BBVA. Es un número parado: no crece con el
+        trabajo del mes.</p>
+        <p><b>Registrados</b> son los que alguien ya cargó en el CRM, se hayan trabajado o no.
+        Cargar una ficha obliga a indicar <b>cómo se coordinó con el ejecutivo de BBVA</b> —correo,
+        llamada, WhatsApp, visita o chat—, que es lo que sostiene que el caso viene de una gestión
+        real y no de una lista suelta. Por eso un comercio registrado sí implica contacto con el
+        banco. La diferencia con <i>Asignados</i> es cartera que todavía no entró al CRM.</p>
+        <p><b>Gestionados</b> es otra cosa: son los comercios donde quedó al menos <b>un hecho con
+        resultado</b> en el rango. Cuenta cualquiera de estos cuatro: un correo enviado al banco o
+        al comercio, un contacto efectivo, una reunión o visita que se realizó, o un cierre
+        registrado —concretado o perdido—. Hasta el 27/08 acá contaba cualquier intento, y por eso
+        la cobertura daba casi 100% sin decir nada: la llamada que nadie contestó y el chat sin
+        respuesta se registran igual y siguen a la vista en la ficha, pero no mueven esta columna.
+        La diferencia con <i>Registrados</i> son fichas creadas y nunca trabajadas, más las que
+        solo tienen intentos sin respuesta.</p>
+        <p>Las dos cifras se pueden tocar: llevan a la Cartera con esos comercios en pantalla. La
+        Cartera no tiene rango de fechas —muestra el estado de hoy—, así que si el número no
+        coincide con el del Panel, el aviso lo dice.</p>
+      </div>
+    </details>
+    <details class="explica"><summary>Qué cuenta como retenido, qué como recuperado y qué como venta nueva</summary>
+      <div class="cuerpo">
+        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron. <b>Recuperados</b> estaban
+        dados de baja y volvieron. Los dos salían de la cartera asignada, así que los dos suman al
+        <b>% de alcance</b>.</p>
+        <p><b>Ventas nuevas</b> son RUC que trajo Stratis y que BBVA todavía no tenía. Es trabajo que
+        cuenta —y pesa en el incentivo— pero <b>no suma al % de alcance</b>, porque no salía de la
+        cartera de nadie.</p>
+        <p>Un cierre cuenta en el periodo en que se decidió, no en el que se registró la primera
+        gestión. La base sella esa fecha al cerrar.</p>
+      </div>
+    </details>
+  </div>
+
+  ${filas.some(f => f.gestiones) ? `<div class="card">
+    <h3>Tasa de respuesta por ejecutivo · % de gestiones que obtuvieron respuesta</h3>
+    ${filas.slice().sort((a,b) => (b.tasa||0) - (a.tasa||0)).map(f => `
+      <div class="bar-row">
+        <span class="nm">${esc(f.nombre)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${(f.tasa||0).toFixed(1)}%"></span></span>
+        <span class="bar-val">${f.tasa === null ? "—" : Math.round(f.tasa) + "%"}</span>
+      </div>
+      <div class="bar-sub">${f.gestiones} gestiones · ${f.respuestas} con respuesta · ${f.efectivas} visitas efectivas</div>
+    `).join("")}
+  </div>` : ""}`;
+}
+
+/* ---- 4 · La llave del bono ----------------------------------------------
+   Los tres mínimos de gestión que habilitan el cálculo del incentivo. No
+   suman un sol al monto: abren o cierran la puerta. Vivían solo en Incentivos
+   y por eso nadie los miraba hasta el cierre del periodo, cuando ya no hay
+   nada que corregir.
+
+   El cálculo no se repite acá: se llama al mismo de Incentivos. Dos fórmulas
+   para el mismo bono es la forma más segura de que un día no coincidan. */
+function bloqueLlave(r){
+  /* La llave solo tiene sentido en la ventana del bono. Si el Panel está
+     mirando un mes o el proyecto entero, se muestra el periodo que corre y se
+     dice cuál es, en vez de mezclar relojes en silencio. */
+  const p = r.id === "bono" ? r.periodo : periodoHoy();
+  const propio = r.id === "bono";
+  const ejec = ejecutivosPanel();
+  if (!ejec.length) return "";
+
+  const res = ejec.map(u => ({ nombre:u.nombre, x: incentivoDe(u.correo, p) }));
+  const abiertos = res.filter(z => z.x.llave.estado === "activo").length;
+  const conBono  = res.filter(z => z.x.pago > 0).length;
+  const faltaFact = ejec.filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  const chip = (ok, txt) => `<span class="chip ${ok ? "ok" : "crit"}">${ok ? "✓" : "✕"} ${esc(txt)}</span>`;
+  const B    = paramsDe(p);
+  const req  = B.requisitos;
+  const sello = selloDe(p);
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">4</span>
+    <div><b>La llave del bono</b><span>Periodo ${esc(nombrePeriodo(p))} · ${esc(textoPeriodo(p))}${
+      sello ? " — periodo sellado el " + fmtFecha(String(sello.cerrado_en).slice(0,10)) + ": estos números ya no se recalculan" : ""}${
+      propio ? "" : " — la llave siempre se mide en la ventana del bono, no en el periodo elegido arriba"}</span></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat ${abiertos === ejec.length ? "" : "malo"}"><div class="lbl">Con la llave abierta</div>
+      <div class="val">${abiertos}</div>
+      <div class="sub">de ${ejec.length} cumplen los 3 requisitos de gestión</div></div>
+    <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
+      <div class="sub">llegan al ${B.piso}% de cumplimiento</div></div>
+    <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
+      <div class="sub">${faltaFact ? "sin el monto del periodo cargado: el cumplimiento no sirve para liquidar"
+        : "todos los montos del periodo están cargados"}</div></div>
+  </div>
+
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Requisitos de gestión por ejecutivo</h3>
+      <button class="btn ghost sm" data-go="bono">Ver el detalle en Incentivos</button>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblLlave">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Comercios asignados con al menos una gestión en el periodo">Cobertura · mín ${req.cobertura_pct}%</th>
+        <th title="Presenciales o virtuales en las que se logró hablar. Desde el periodo 2 el mínimo se mide en el periodo completo; antes se escalaba por semanas">Visitas efectivas · mín ${esc(reglaVisitas(req, p).corto)}</th>
+        <th title="Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan">Puntualidad · mín ${req.puntualidad_pct}%</th>
+        <th>Llave</th><th>Cumplimiento</th><th>Incentivo</th>
+      </tr></thead>
+      <tbody>
+      ${res.map(({nombre, x}) => {
+        const ll = x.llave;
+        return `<tr>
+          <td class="nom">${esc(nombre)}</td>
+          <td class="num">${chip(ll.cobertura.ok, pct1(ll.cobertura.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.cobertura.detalle)}</div></td>
+          <td class="num">${chip(ll.visitas.ok, porSemana1(ll.visitas.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.visitas.detalle)}</div></td>
+          <td class="num">${chip(ll.puntualidad.ok, pct1(ll.puntualidad.valor))}
+            <div class="tenue" style="font-size:11.5px">${esc(ll.puntualidad.detalle)}</div></td>
+          <td class="num"><span class="chip ${ll.estado === "activo" ? "ok" : ll.estado === "base" ? "warn" : "crit"}">${
+            esc(TEXTO_LLAVE[ll.estado])}</span>
+            <div class="tenue" style="font-size:11.5px">${ll.cumplidos} de 3</div></td>
+          <td class="num"><b>${pct1(x.cumpl.total)}</b>
+            <div class="tenue" style="font-size:11.5px">${x.cumpl.completo ? esc(nombreTramo(x.cumpl.total))
+              : `sobre el ${x.cumpl.pesoMedido}% del peso`}</div></td>
+          <td class="num"><b>${pct1(x.pago)}</b>
+            <div class="tenue" style="font-size:11.5px">${x.nota ? esc(x.nota) : "del sueldo base"}</div></td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    </div>
+    <details class="explica"><summary>Por qué la llave no suma al monto</summary>
+      <div class="cuerpo">
+        <p>Los tres requisitos <b>habilitan el cálculo</b>, no aportan nada al monto. Con los tres
+        cumplidos se calcula normal; con uno incumplido queda solo el bono base del
+        ${B.base_incumple_uno}%; con dos o más no corresponde incentivo, por bueno que sea el
+        cumplimiento.</p>
+        <p>Por eso están acá y no solo en Incentivos: son lo único de todo el modelo que se puede
+        corregir <b>mientras el periodo sigue abierto</b>. Un registro tardío ya no se arregla el 19.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* ---- 5 · Lo que hay que corregir ----------------------------------------
+   Lo accionable, junto y con su enlace. Estaba repartido entre cuatro
+   pantallas y por eso nadie lo miraba. */
+function bloqueCorregir(r, regs){
+  const base = universoPanel();
+  const mando = !vistaDeCampo();
+
+  const sinUbi   = regs.filter(sinUbicacion);
+  const tarde    = regs.filter(x => demoraHabil(x) > 1);
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
+
+  const abiertas = SEGUIMIENTOS.filter(x => !x.cerrado_en
+    && (mando ? true : x.correo_stratis === S.user.correo));
+  const vencidas = abiertas.filter(x => estadoAccion(x) === "vencida");
+  const conAccion = new Set(abiertas.map(x => String(x.customer_id)));
+  const huerfanos = base.filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0
+    && !conAccion.has(String(c.customer_id)));
+
+  const puntos = [
+    { n:sinUbi.length,   t:"Gestiones sin ubicación", d:"presenciales sin coordenada y sin exención",
+      ir:`data-verges="sin_ubicacion"`, grave:true },
+    /* También para el ejecutivo desde el 24/08: es lo único de la llave que
+       puede corregir mientras el periodo sigue abierto. */
+    { n:tarde.length, t:"Gestiones fuera de plazo",
+      d:"registradas más de un día trabajado después del contacto",
+      ir:`data-verges="fuera_plazo"` },
+    { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
+      ir:`data-vercartera="sin_bbva"` },
+    { n:vencidas.length, t:"Acciones vencidas", d:"pasó la fecha comprometida y nadie retomó",
+      ir:`data-go="agenda"`, grave:true },
+    { n:huerfanos.length,t:"Comercios sin próxima acción", d:"trabajados, abiertos y sin nada agendado",
+      ir:`data-go="agenda"` },
+    /* Las tres que salieron de leer la base comercio por comercio. No corrigen
+       nada solas: llevan a la lista para que la mire quien la registró. */
+    { n:regs.filter(respuestaSinVoz).length, t:"Respuestas sin transcribir",
+      d:"se marcó que el cliente respondió y no quedó ninguna palabra suya",
+      ir:`data-verges="respuesta_sin_voz"`, grave:true },
+    { n:regs.filter(respuestaDudosa).length, t:"Respuestas por revisar",
+      d:"el comentario suena a que habló otra persona, o a que quedó en volver a llamar",
+      ir:`data-verges="respuesta_dudosa"` },
+    /* `base` ya viene acotado a la cartera del ejecutivo cuando mira un
+       ejecutivo: no hay que volver a filtrar acá. */
+    { n:base.filter(carteraSinSalir).length,
+      t:"Cartera sin una sola salida", d:"pedirle los datos al banco no es haber contactado al comercio",
+      ir:`data-vercartera="sin_salir"` },
+    { n:base.filter(bajaSinCierre).length, t:"De baja y sin cierre",
+      d:"el banco los dio de baja y nadie marcó qué pasó",
+      ir:`data-vercartera="baja_sin_cierre"` }
+  ].filter(x => x.n > 0);
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">${mando ? 5 : 4}</span>
+    <div><b>Lo que hay que corregir</b><span>${puntos.length ? "Cada uno lleva a su lista" : "Nada pendiente de corregir"}</span></div>
+  </div>
+  <div class="card">
+    ${puntos.length ? `<div class="pnl-fix">
+      ${puntos.map(p => `<button class="pnl-fix-x ${p.grave ? "grave" : ""}" ${p.ir}>
+        <span class="n">${p.n}</span>
+        <span class="t">${p.t}</span>
+        <span class="d">${p.d}</span>
+      </button>`).join("")}
+    </div>` : `<div class="vacio">No hay gestiones sin ubicación${mando ? ", ni registros fuera de plazo" : ""}, ni
+      acciones vencidas${sinCanal.length ? "" : ", ni comercios sin canal BBVA"}. Todo al día.</div>`}
+  </div>`;
+}
+
+/* ---- El detalle, para cuando el número de arriba no alcanza -------------- */
+function bloqueDetalle(r, regs){
+  const base = universoPanel();
+  const deCarteraBBVA = base.filter(c => !esClienteNuevo(c));
+  /* Este gráfico cuenta el SELLO DEL ALTA, no coordinaciones. Son cosas
+     distintas y hasta el 23/08/2026 se leían igual: 645 comercios tienen sello
+     y ninguna coordinación registrada con el banco. La etiqueta del CORREO
+     además afirmaba un destinatario que nadie confirmó —«correo» servía para
+     pedirle los datos al banco y para escribirle al cliente con copia—, así
+     que acá se parte en confirmados y sin confirmar. */
+  const canalBBVA = CONTACTO_BBVA.flatMap(x => {
+    const filas = deCarteraBBVA.filter(c => c.contacto_bbva === x.id);
+    if (x.id !== "CORREO") return [{ label:x.label, n:filas.length }];
+    const conf = filas.filter(c => !!c.canal_confirmado_en).length;
+    return [{ label:"Correo a BBVA · confirmado", n:conf },
+            { label:"Correo · sin confirmar a quién", n:filas.length - conf }];
+  });
+  const conCoordReal = deCarteraBBVA.filter(c => bbvaDe(c.customer_id).n > 0).length;
+  const sinCanalBBVA = deCarteraBBVA.filter(c => !c.contacto_bbva).length;
+  const conCanalBBVA = deCarteraBBVA.length - sinCanalBBVA;
+  const maxCanal = Math.max(1, ...canalBBVA.map(x => x.n));
+
+  const porResultado = RESULTADOS.map(x => ({ label:x.label, ok:x.ok,
+    n: regs.filter(y => y.Resultado === x.id).length })).filter(x => x.n > 0);
+  const maxRes = Math.max(1, ...porResultado.map(x => x.n));
+
+  const tipos = TIPOS_CONTACTO.map(t => ({ label:t.label, n: regs.filter(y => y.Tipo_Contacto === t.id).length }))
+    .filter(x => x.n > 0).sort((a,b) => b.n - a.n);
+  const maxTipo = Math.max(1, ...tipos.map(t => t.n));
+
+  const presenciales = regs.filter(x => RULES.requiereUbicacion(x.Tipo_Contacto));
+  const sinUbi = presenciales.filter(sinUbicacionVerificada);
+  const pctUbi = presenciales.length
+    ? Math.round((presenciales.length - sinUbi.length) / presenciales.length * 100) : 100;
+  const sinUbiEjec = [...new Set(sinUbi.map(x => x.Ejecutivo))]
+    .map(n => ({ nombre:n, n: sinUbi.filter(x => x.Ejecutivo === n).length })).sort((a,b) => b.n - a.n);
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">·</span>
+    <div><b>El detalle</b><span>Cómo se está trabajando, ${esc(r.detalle)}</span></div>
+  </div>
+  <div class="grid2">
+   <div>
+    <div class="card">
+      <h3>Resultado de las gestiones</h3>
+      ${porResultado.length ? porResultado.map(x => `
+        <div class="bar-row">
+          <span class="nm">${esc(x.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxRes*100).toFixed(1)}%;background:${x.ok?"var(--good)":"var(--serious)"}"></span></span>
+          <span class="bar-val">${x.n}</span>
+        </div>`).join("") : `<div class="vacio">No hay gestiones en este periodo.</div>`}
+      <div class="pie">Cada registro es una gestión, aunque sea el cuarto intento con el mismo
+        comercio. Solo <b>“Habló con el contacto”</b> cuenta como respuesta.</div>
+    </div>
+
+    <div class="card">
+      <h3>Medio de contacto utilizado</h3>
+      ${tipos.length ? tipos.map(t => `
+        <div class="bar-row">
+          <span class="nm">${esc(t.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(t.n/maxTipo*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${t.n}</span>
+        </div>`).join("") : `<div class="vacio">No hay gestiones en este periodo.</div>`}
+    </div>
+   </div>
+
+   <div>
+    <div class="card">
+      <h3>Contacto con el ejecutivo de BBVA · por dónde llega la cartera</h3>
+      ${conCanalBBVA ? `
+        ${canalBBVA.map(x => `
+        <div class="bar-row">
+          <span class="nm">${esc(x.label)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${(x.n/maxCanal*100).toFixed(1)}%"></span></span>
+          <span class="bar-val">${x.n}</span>
+        </div>`).join("")}
+        <div class="pie">${conCanalBBVA} de ${deCarteraBBVA.length} comercios de cartera tienen declarado
+          el canal.${sinCanalBBVA ? ` Los <b>${sinCanalBBVA}</b> restantes se registraron antes de que el
+          dato fuera obligatorio; se completan al editar el comercio.` : " Están todos."}
+          <b>Todo lo de este bloque pasa entre Stratis y el banco</b>, no con el cliente.</div>
+        <div class="note warn" style="margin-top:10px"><b>Esto es lo que se declaró al dar de alta,
+          no coordinaciones.</b> Con una coordinación registrada de verdad hay
+          <b>${conCoordReal}</b> de ${deCarteraBBVA.length}. El sello dice por dónde se pensaba
+          llegar; la coordinación es lo que alguien hizo y anotó.</div>`
+      : `<div class="vacio">Todavía ningún comercio tiene declarado el canal.</div>`}
+    </div>
+
+    <div class="card">
+      <h3>Respaldo de ubicación · visitas presenciales</h3>
+      ${presenciales.length ? `
+        <div class="bar-row">
+          <span class="nm">Con GPS verificado</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${pctUbi}%;background:var(--good)"></span></span>
+          <span class="bar-val">${presenciales.length - sinUbi.length}</span>
+        </div>
+        ${sinUbi.length ? `<div class="bar-row">
+          <span class="nm">Sin verificar</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${100-pctUbi}%;background:var(--crit)"></span></span>
+          <span class="bar-val">${sinUbi.length}</span>
+        </div>
+        <div class="bar-sub">${sinUbiEjec.map(e => `${esc(e.nombre)} (${e.n})`).join(" · ")}</div>
+        <div class="pie">Las coordenadas siempre las toma el GPS del equipo: nadie las escribe ni las
+        corrige. Un registro sin verificar significa que en ese momento no hubo señal o permiso de
+        ubicación.</div>`
+        : `<div class="pie">Todas las visitas presenciales tienen coordenadas tomadas por GPS.</div>`}`
+      : `<div class="vacio">No hay visitas presenciales en este periodo.</div>`}
+    </div>
+   </div>
+  </div>`;
+}
+
+/* ---- Tu registro al día -------------------------------------------------
+
+   La puntualidad del registro estuvo oculta al ejecutivo hasta el 24/08. La
+   razón escrita era buena —«que el número esté a la vista todos los días
+   convierte una medición en una discusión diaria»— y resultó ser exactamente
+   al revés: uno de los cuatro cerró el primer periodo en 73,8% y perdió la
+   llave por un requisito que no podía ver. Nadie corrige lo que no mira.
+
+   Así que acá está, con las tres cosas que lo hacen accionable y no solo
+   informativo:
+
+     · el porcentaje contra su mínimo, que es el veredicto;
+     · CUÁNTAS gestiones a tiempo le faltan, porque «te faltan 11» se puede
+       hacer hoy y «te falta 6,2 puntos» no;
+     · qué vence HOY. El plazo es un día trabajado: lo que se hizo el día
+       trabajado anterior deja de estar a tiempo cuando termine este. Esa es
+       la única frase de toda la pantalla que puede evitar el incumplimiento
+       en vez de contarlo.
+
+   No se muestra a supervisión: ellos tienen la tabla completa en el bloque de
+   la llave y en Incentivos. */
+/* ---- Tu periodo en números ----------------------------------------------
+   El bloque que pidió José el 27/08 y que el panel no tenía: las ocho cifras
+   con las que un ejecutivo decide qué hacer AHORA, en una sola fila y con las
+   dos que llevan a una lista puestas como botones.
+
+   La que manda es la alerta de lo que falta por gestionar. Un ejecutivo que
+   mira su panel y ve «cobertura 58%» no sabe a quién llamar; el que ve «te
+   faltan 47» y puede tocarlos sí. Y como el bono se traba justamente ahí, la
+   alerta es también el camino más corto para destrabarlo.
+
+   Todo se cuenta con la regla de gestión del 27/08 —correo al banco o al
+   comercio, contacto efectivo, reunión realizada o cierre—, la misma con la
+   que se arma el embudo del reporte. Que el ejecutivo y el comité cuenten
+   distinto es exactamente lo que este proyecto lleva una semana corrigiendo. */
+function bloqueMiPeriodo(r){
+  if (!vistaDeCampo()) return "";
+  const mios = universoPanel();
+  if (!mios.length) return "";
+
+  const cartera = mios.filter(c => !esClienteNuevo(c));
+  const nuevos  = mios.filter(c => esClienteNuevo(c));
+
+  /* Un comercio está gestionado con el mismo criterio de siempre: lo dice su
+     resumen, que ya lo calcula una vez por ficha. */
+  const gestionado = c => !!(c._base || RULES.recomputarBase(c.customer_id) || c._base || {})._gestionado;
+  const conGestion = cartera.filter(gestionado).length;
+  const faltan     = cartera.length - conGestion;
+  /* De los que faltan, cuántos ni siquiera tienen un intento. Es la diferencia
+     entre «no lo he tocado» y «lo toqué y no contestó», que se atienden
+     distinto: al primero se le escribe, al segundo se insiste. */
+  const sinTocar = cartera.filter(c => !gestionado(c)
+    && !DB.historiaDe(c.customer_id).some(x => !esReconstruida(x))).length;
+
+  /* Las gestiones VÁLIDAS: filas que califican, no intentos. Del periodo y del
+     último día trabajado, que es el que vence hoy. */
+  const validas = fs => fs.filter(esGestionValida).length;
+  const mias = DB.crudo.filter(x => x.Correo_Stratis === (correoObservado() || ""));
+  const delPeriodo = mias.filter(x => enRango(x.Fecha_Contacto, r));
+  const ayer  = diaTrabajadoAnterior(hoyISO());
+  const deAyer = ayer ? mias.filter(x => String(x.Fecha_Contacto).slice(0,10) === ayer) : [];
+
+  const visitas = delPeriodo.filter(x => x.Cumple_Visita === "SI").length;
+  const ventas  = nuevos.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
+  const negociando  = cartera.filter(c => estadoDerivado(c) === "EN_NEGOCIACION").length;
+  const porContactar= cartera.filter(c => estadoDerivado(c) === "POR_CONTACTAR").length;
+  const cobertura = cartera.length ? Math.round(conGestion / cartera.length * 100) : 0;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">1</span>
+    <div><b>Tu periodo en números</b><span>${esc(r.detalle)}</span></div>
+  </div>
+
+  ${faltan ? `<button class="alerta-gest" data-verfaltan="1">
+    <div class="ag-n">${faltan}</div>
+    <div class="ag-t"><b>comercios te faltan por gestionar</b>
+      <span>Cuenta la <b>última</b> gestión de cada uno: vale si le mandaste un correo
+      —al banco o al comercio—, si el cliente te respondió, si hiciste la reunión o si
+      cerraste el caso. Si lo último que quedó fue un intento sin respuesta, el comercio
+      vuelve a esta lista.${
+        sinTocar ? ` ${sinTocar} de ellos no tienen todavía ningún intento.` : ""}</span></div>
+    <div class="ag-ir">Ver cuáles →</div>
+  </button>` : `<div class="note ok" style="margin:0 0 12px">
+    <b>No te falta ninguno.</b> Los ${cartera.length} comercios de tu cartera tienen gestión.</div>`}
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Customer ID</div><div class="val">${cartera.length}</div>
+      <div class="sub">comercios de la cartera de BBVA a tu nombre</div></div>
+    <div class="stat"><div class="lbl">RUC</div><div class="val">${nuevos.length}</div>
+      <div class="sub">${nuevos.length === 1 ? "lead de venta nueva" : "leads de venta nueva"} que trajiste</div></div>
+    <div class="stat"><div class="lbl">Gestiones válidas del periodo</div>
+      <div class="val">${validas(delPeriodo)}</div>
+      <div class="sub">de ${delPeriodo.length} registradas · el resto son intentos sin resultado</div></div>
+    <div class="stat ${ayer && !validas(deAyer) ? "malo" : ""}">
+      <div class="lbl">Válidas de ${ayer ? esc(fmtFecha(ayer)) : "ayer"}</div>
+      <div class="val">${validas(deAyer)}</div>
+      <div class="sub">${ayer ? "el último día trabajado — su plazo vence hoy" : "sin día anterior"}</div></div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${visitas}</div>
+      <div class="sub">gestiones que cumplen visita en el periodo</div></div>
+    <div class="stat"><div class="lbl">Ventas cerradas</div><div class="val">${ventas}</div>
+      <div class="sub">afiliaciones nuevas cerradas en el periodo</div></div>
+    <button class="stat stat-link" data-verest="POR_CONTACTAR"><div class="lbl">Por contactar</div>
+      <div class="val">${porContactar}</div>
+      <div class="sub">BBVA respondió y falta hablar con el titular — <b>ver cuáles</b></div></button>
+    <button class="stat stat-link" data-verest="EN_NEGOCIACION"><div class="lbl">En negociación</div>
+      <div class="val">${negociando}</div>
+      <div class="sub">hablaste con el titular y el caso sigue abierto — <b>ver cuáles</b></div></button>
+  </div>
+
+  <div class="cob-linea">
+    <div class="cob-t">Cobertura de tu cartera <b>${cobertura}%</b>
+      <span>${conGestion} de ${cartera.length} con gestión</span></div>
+    <div class="pista"><i style="width:${cobertura}%"></i></div>
+  </div>`;
+}
+
+function bloqueMiRegistro(){
+  if (!vistaDeCampo()) return "";
+  const correo = correoObservado() || (S.user && S.user.correo);
+  if (!correo) return "";
+  const p  = periodoHoy();
+  const ll = llaveDe(correo, p);
+  const q  = ll.puntualidad;
+  if (!ll.gestiones) return "";
+
+  const hoy = hoyISO();
+  const ayer = diaTrabajadoAnterior(hoy);
+  /* Lo que se registró hoy, mirando el sello del servidor y no la fecha que se
+     tecleó: la pregunta es cuánto entró al CRM hoy. */
+  const hoyN = DB.crudo.filter(r => r.Correo_Stratis === correo
+    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)).length;
+  /* Y de eso, cuánto era trabajo de días anteriores: es el hábito que hay que
+     ver, no el total. */
+  const arrastre = DB.crudo.filter(r => r.Correo_Stratis === correo
+    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)
+    && String(r.Fecha_Contacto || "").slice(0,10) < hoy).length;
+
+  const ok = q.ok && !q.porExcepcion;
+  const margen = q.puntuales - Math.ceil(ll.gestiones * q.meta / 100);
+  const fuera = ll.gestiones - q.puntuales;
+
+  return `
+  <div class="card">
+    <div class="ctrl-h">
+      <h3>Tu registro al día</h3>
+      <span class="chip ${ok ? "ok" : "crit"}">${pct1(q.valor)} · mínimo ${q.meta}%</span>
+    </div>
+    <div class="stat-row" style="margin-bottom:0">
+      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">Puntualidad del periodo</div>
+        <div class="val">${pct1(q.valor)}</div>
+        <div class="sub">${q.puntuales} de ${ll.gestiones} registradas dentro del plazo</div></div>
+      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">${ok ? "Margen" : "Te faltan"}</div>
+        <div class="val">${ok ? margen : q.faltan}</div>
+        <div class="sub">${ok
+          ? `gestiones a tiempo de margen antes de bajar del ${q.meta}%`
+          : `gestiones a tiempo más para llegar al ${q.meta}%`}</div></div>
+      <div class="stat"><div class="lbl">Registradas hoy</div><div class="val">${hoyN}</div>
+        <div class="sub">${arrastre
+          ? `${arrastre} ${arrastre === 1 ? "era" : "eran"} de días anteriores`
+          : "todas del día de hoy"}</div></div>
+    </div>
+
+    ${ayer ? `<div class="note ${fuera ? "warn" : ""}" style="margin-top:12px">
+      <b>Lo que hiciste el ${esc(fmtFecha(ayer))} vence hoy.</b>
+      El plazo es un día trabajado: si lo registras mañana, esas gestiones cuentan fuera de plazo
+      y ya no se pueden recuperar.
+    </div>` : ""}
+
+    ${fuera && !vistaDeCampo() ? `<div style="margin-top:11px">
+      <button class="btn ghost sm" data-verges="fuera_plazo">Ver las ${fuera} fuera de plazo</button>
+    </div>` : ""}
+
+    <details class="explica" style="margin-top:11px"><summary>Cómo se cuenta el plazo</summary>
+      <div class="cuerpo">
+        <p>Se cuentan los <b>días trabajados</b> entre la fecha que pones como fecha de la gestión y
+        el momento en que el CRM recibe el formulario. Sábados, domingos y feriados no cuentan.
+        Registrar el mismo día o el día trabajado siguiente está dentro del plazo.</p>
+        <p>Crear la ficha del comercio también es trabajo tuyo, así que cargarla tarde no corre el
+        plazo: si atendiste un comercio el lunes y recién lo das de alta el viernes, esa gestión
+        entra fuera de plazo aunque la registres el mismo minuto del alta.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function viewPanel(){
+  /* Supervisión tiene su propio tablero: mismas cuentas, otro orden de lectura.
+     El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
+     se le cambia la herramienta de trabajo en medio de una campaña sin que sea
+     su turno—. */
+  if (!vistaDeCampo()) return viewTablero();
+  const r = rangoPanel();
+  universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
+
+  const visibles = new Set(universoPanel().map(c => String(c.customer_id)));
+  const regs = DB.todos().filter(x => visibles.has(String(x.Customer_id)) && enRango(x.Fecha_Contacto, r));
+
+  return `
+  ${bannerComoEjec()}
+  ${selectorPanel(r)}
+  ${bloqueMiPeriodo(r)}
+  ${bloqueMiRegistro()}
+  ${bloqueProyecto()}
+  ${bloqueActividad(r, regs)}
+  ${bloqueEquipo(r)}
+  ${/* El seguimiento del incentivo lo miran el Analista y el Manager; al
+       ejecutivo no se le ofrece la pestaña y tampoco se le filtra por acá. */
+    (!vistaDeCampo() && !esBBVA()) ? bloqueLlave(r) : ""}
+  ${bloqueCorregir(r, regs)}
+  ${bloqueDetalle(r, regs)}
+  ${(!vistaDeCampo() && !esBBVA())
+    ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
+        <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
+    : ""}`;
+}
+
+/* =========================================================================
+   El tablero de supervisión
+   =========================================================================
+
+   Una pantalla que se mira, no que se lee de arriba abajo. Eso cambia el orden
+   de las cosas: primero las cuatro cifras contra las que se juzga el periodo,
+   después el detalle por persona y el ritmo, y en la columna de la derecha lo
+   único accionable —lo que está trabado y a un clic de su lista—.
+
+   Todo lo que sale acá ya se calculaba antes; no hay una sola cuenta nueva.
+   Lo que cambió es qué se pone delante y qué se guarda un nivel más abajo.
+
+   El ejecutivo NO ve esta pantalla: sigue con su Panel de siempre. Cuando le
+   toque su turno tendrá el suyo, con sus propios números y sin los del resto.
+   ========================================================================= */
+
+/* ---- Las cuatro cifras de cabecera ---------------------------------------
+   Cada una trae su mínimo, porque un porcentaje sin su umbral no dice si está
+   bien o mal: 93,7% suena a mucho hasta que se sabe que el mínimo es 95%. */
+function cifrasTablero(r, regs){
+  const p    = r.periodo || periodoHoy();
+  const req  = paramsDe(p).requisitos;
+  const ejec = ejecutivosPanel();
+  const filas = ejec.map(u => filaEjecutivo(u, r));
+
+  const asignada   = filas.reduce((n,f) => n + (f.asignada || 0), 0);
+  const gestionados= filas.reduce((n,f) => n + (f.trabajados || 0), 0);
+  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const puntuales  = regs.filter(aTiempo).length;
+
+  const base = universoPanel();
+  const cumplidos = base.filter(c => !esClienteNuevo(c)
+    && (esRetencion(c) || esRecuperado(c)) && enRango(c.cerrado_en, r)).length;
+  const ventas = base.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
+
+  /* Las visitas que pide el tramo mirado, por persona y prorrateadas: solo se
+     exige por los días que ya pasaron. Exigir por días que todavía no
+     ocurrieron es inventar un incumplimiento. Desde el 19/08 el mínimo es del
+     periodo —40 efectivas— y antes era semanal; `pideVisitasRango` sabe cuál
+     rige en cada periodo. */
+  const sem = semanasRango(r);
+  const rv  = reglaVisitas(req, p);
+  /* Se le pasan los correos y no solo cuántos son: desde el 22/08/2026 cada
+     ejecutivo lleva su propio calendario y el que trabajó un sábado tiene un
+     día más corrido. Ver `diasExtraTrabajados` en el core. */
+  const pideVisitas = pideVisitasRango(req, r, ejec.length || 1, ejec.map(u => u.correo));
+
+  return {
+    filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, rv, pideVisitas,
+    cobertura:   asignada ? gestionados / asignada * 100 : null,
+    calidad:     regs.length ? puntuales / regs.length * 100 : null,
+    gestiones:   regs.length
+  };
+}
+
+/* Una barra de 5 px que dice de un vistazo si el número llegó o no. El color
+   no va solo: al lado siempre está la cifra y su mínimo escrito. */
+const medidor = (pct, tono) =>
+  `<div class="medidor ${tono || ""}"><i style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%"></i></div>`;
+
+const tonoContra = (valor, minimo) =>
+  valor === null ? "" : (valor >= minimo ? "" : (valor >= minimo * 0.8 ? "ojo" : "alerta"));
+
+function kpisTablero(x, r){
+  const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const cobOk = x.cobertura !== null && x.cobertura >= x.req.cobertura_pct;
+  const calOk = x.calidad   !== null && x.calidad   >= x.req.puntualidad_pct;
+
+  return `
+  <div class="kpis">
+    <button class="kpi kpi-link" data-verlista="gestionado" data-vercuantos="${x.gestionados}">
+      <div class="lbl">Cobertura del periodo</div>
+      ${/* Sin cartera asignada no hay porcentaje que dar, y poner «—%» al lado de
+           una barra vacía se lee como cero. Se muestra lo que sí se sabe —los
+           comercios gestionados— y se dice qué falta para poder medirlo. */
+        x.asignada
+          ? `<div class="val num">${pct1(x.cobertura)}<span class="pc">%</span></div>
+             <div class="sub">${x.gestionados} de ${x.asignada} gestionados · mínimo ${x.req.cobertura_pct}%</div>
+             ${medidor(x.cobertura, cobOk ? "" : tonoContra(x.cobertura, x.req.cobertura_pct))}`
+          : `<div class="val num">${x.gestionados}</div>
+             <div class="sub">comercios gestionados${esBBVA() ? "" : " · falta cargar la cartera asignada en Ajustes"}</div>
+             ${medidor(0, "ojo")}`}
+    </button>
+
+    <div class="kpi">
+      <div class="lbl">Visitas efectivas</div>
+      <div class="val num">${x.efectivas}</div>
+      <div class="sub">${x.pideVisitas
+        ? `de ${x.pideVisitas} que pide el tramo · ${esc(x.rv.corto)} y ejecutivo`
+        : `se piden ${esc(x.rv.corto)} y ejecutivo`}</div>
+      ${medidor(x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0,
+                x.pideVisitas && x.efectivas >= x.pideVisitas ? "" : "alerta")}
+    </div>
+
+    <button class="kpi kpi-link" data-vercierre="cumplido_cartera">
+      <div class="lbl">Objetivo cumplido</div>
+      <div class="val num">${x.cumplidos}</div>
+      <div class="sub">${x.cumplidos === 1 ? "comercio retenido o recuperado" : "comercios retenidos o recuperados"}${
+        x.ventas ? ` · ${x.ventas} venta${x.ventas === 1 ? "" : "s"} nueva${x.ventas === 1 ? "" : "s"}` : ""}</div>
+      ${medidor(x.asignada ? x.cumplidos / x.asignada * 100 : 0, "ojo")}
+    </button>
+
+    <div class="kpi">
+      <div class="lbl">Calidad del registro</div>
+      <div class="val num">${pct1(x.calidad)}<span class="pc">%</span></div>
+      <div class="sub">${x.gestiones
+        ? `${calOk ? `<span class="chip ok">llega al mínimo de ${x.req.puntualidad_pct}%</span>`
+                   : `<span class="chip warn">bajo el mínimo de ${x.req.puntualidad_pct}%</span>`}`
+        : "sin gestiones en el periodo"}</div>
+      ${medidor(x.calidad, calOk ? "" : "ojo")}
+    </div>
+  </div>`;
+}
+
+/* ---- Avance por ejecutivo ------------------------------------------------
+   La misma tabla de siempre, con dos cambios: la cobertura se lee como barra
+   —comparar cuatro porcentajes en texto obliga a hacer la resta a mano— y las
+   columnas de detalle siguen a un clic, sin ocupar la primera lectura. */
+function tablaTablero(x){
+  const b = (pct) => `<div class="barra-fila">
+    <div class="pista"><i style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%"></i></div>
+    <span class="cifra num">${pct === null ? "—" : Math.round(pct) + "%"}</span></div>`;
+
+  const suma = k => x.filas.reduce((n,f) => n + (f[k] || 0), 0);
+  const equipo = {
+    asignada: x.asignada, registrados: suma("registrados"), trabajados: suma("trabajados"),
+    efectivas: suma("efectivas"), logrado: suma("logrado"),
+    cobertura: x.cobertura
+  };
+
+  const fila = (f, esEquipo) => `<tr${esEquipo ? ' class="total"' : ""}>
+    <td>${esc(f.nombre || "Equipo")}</td>
+    <td>${f.asignada || "—"}</td>
+    <td>${f.registrados
+      ? `<button class="cifra-link" data-verlista="registrado" ${esEquipo ? "" : `data-verejec="${esc(f.nombre)}"`}
+                 data-vercuantos="${f.registrados}">${f.registrados}</button>` : "—"}</td>
+    <td>${f.trabajados
+      ? `<button class="cifra-link" data-verlista="gestionado" ${esEquipo ? "" : `data-verejec="${esc(f.nombre)}"`}
+                 data-vercuantos="${f.trabajados}">${f.trabajados}</button>` : "—"}</td>
+    <td>${f.efectivas || "—"}</td>
+    <td>${f.logrado || "—"}</td>
+    <td>${b(esEquipo ? f.cobertura : (f.asignada ? f.trabajados / f.asignada * 100 : null))}</td>
+  </tr>`;
+
+  return `
+  <div class="panel">
+    <h3>Avance por ejecutivo <span>cobertura = gestionados sobre su cartera asignada</span></h3>
+    <div class="tabla-cont">
+      <table class="tbl-tab">
+        <thead><tr>
+          <th>Ejecutivo</th><th>Asignados</th><th>Registrados</th><th>Gestionados</th>
+          <th>Visitas</th><th>Cumplido</th><th>Cobertura</th>
+        </tr></thead>
+        <tbody>
+          ${x.filas.map(f => fila(f, false)).join("")}
+          ${fila(equipo, true)}
+        </tbody>
+      </table>
+    </div>
+    <p class="nota"><b>Asignados</b> los pone BBVA. <b>Registrados</b> son las fichas cargadas en el
+      CRM, se hayan trabajado o no. <b>Gestionados</b> son los que tienen al menos un hecho
+      con resultado en el periodo: un correo al banco o al comercio, un contacto efectivo,
+      una reunión o visita realizada, o un cierre registrado. El intento sin respuesta se
+      registra igual, pero no cuenta acá. Los números subrayados abren su lista.</p>
+  </div>`;
+}
+
+/* ---- Gestiones por día ---------------------------------------------------
+   La cifra del periodo dice dónde se está; esta línea dice si se está yendo
+   hacia allá. Sin ella un 9,5% de cobertura se lee igual el día que sube que
+   el día que se detiene. */
+function lineaDiaria(r, regs){
+  const dias = [];
+  const fin  = r.fin > hoyISO() ? hoyISO() : r.fin;
+  if (r.ini && fin >= r.ini){
+    for (let d = new Date(r.ini + "T12:00:00Z"); ; ){
+      const iso = d.toISOString().slice(0,10);
+      dias.push(iso);
+      if (iso >= fin || dias.length > 400) break;
+      d = new Date(d.getTime() + 86400000);
+    }
+  }
+  if (dias.length < 2) return `
+    <div class="panel"><h3>Gestiones por día</h3>
+      <div class="vacio">Todavía no hay días suficientes en este periodo para dibujar una línea.</div>
+    </div>`;
+
+  /* Con periodos largos la línea se vuelve ilegible y las etiquetas se pisan.
+     Se muestran los últimos 21 días: es el tramo sobre el que se puede actuar. */
+  const VENTANA = 21;
+  const vistos  = dias.slice(-VENTANA);
+  const cuenta  = iso => regs.filter(x => String(x.Fecha_Contacto).slice(0,10) === iso).length;
+  const vals    = vistos.map(cuenta);
+
+  /* El ritmo necesario: lo que falta de cobertura repartido entre los días
+     trabajados que quedan. Es la pregunta que sigue a «vamos en 9,5%». */
+  const fer   = feriadosDe(r.periodo || periodoHoy());
+  const quedan = dias.filter(iso => iso > fin && esDiaTrabajado(iso, fer)).length
+    + (r.fin > fin ? diasHabilesHasta(fin, r.fin, fer) : 0);
+
+  const asignada = ejecutivosPanel().reduce((n,u) => n + asignadaDe(u.correo, r), 0);
+  const hechos   = new Set(regs.map(x => String(x.Customer_id))).size;
+  /* Sin cartera asignada no hay meta contra la que calcular un ritmo. Dibujar
+     la línea igual la pondría en cero, y una meta en cero se lee como
+     «cumplido», que es lo contrario de lo que pasa. */
+  const ritmo    = (asignada && quedan > 0) ? Math.ceil(Math.max(0, asignada - hechos) / quedan) : null;
+
+  /* Más aire arriba (T) que antes: cada punto lleva su cifra encima y sin ese
+     margen la del día más alto se salía del marco. */
+  const W = 620, H = 156, L = 34, R = 611, T = 24, B = 118;
+  const tope = Math.max(10, Math.ceil(Math.max(...vals, ritmo || 0) / 10) * 10);
+  const px = i => vistos.length === 1 ? (L + R) / 2 : L + 28 + (R - L - 28) * i / (vistos.length - 1);
+  const py = v => B - (B - T) * (v / tope);
+
+  const pts   = vals.map((v,i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`);
+  const linea = "M" + pts.join(" L");
+  const area  = `${linea} L${px(vals.length-1).toFixed(1)},${B} L${px(0).toFixed(1)},${B} Z`;
+  const yMeta = ritmo !== null && ritmo <= tope ? py(ritmo) : null;
+
+  /* Con muchos días no cabe una etiqueta por punto: se rotulan como mucho seis,
+     repartidas. Una etiqueta ilegible es peor que ninguna. */
+  const paso = Math.max(1, Math.ceil(vistos.length / 6));
+  const dia  = iso => { const [,m,d] = iso.split("-"); return `${d}/${m}`; };
+  const prom = vals.length ? (vals.reduce((a,b) => a + b, 0) / vals.length) : 0;
+
+  return `
+  <div class="panel">
+    <h3>Gestiones por día <span>${dia(vistos[0])} al ${dia(vistos[vistos.length-1])}</span></h3>
+    <div class="grafico">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gestiones registradas por día: ${
+        vistos.map((iso,i) => `${dia(iso)} ${vals[i]}`).join(", ")}.${
+        ritmo !== null ? ` El ritmo necesario es de ${ritmo} comercios por día trabajado.` : ""}">
+        ${[0, 0.5, 1].map(f => {
+          const y = (B - (B - T) * f).toFixed(1);
+          return `<line class="rejilla" x1="${L}" y1="${y}" x2="${R + 1}" y2="${y}"/>
+                  <text class="eje" x="${L - 6}" y="${(+y + 3).toFixed(1)}" text-anchor="end">${Math.round(tope * f)}</text>`;
+        }).join("")}
+        <path class="area" d="${area}"/>
+        <path class="serie" d="${linea}"/>
+        ${yMeta !== null ? `<line class="meta" x1="${L}" y1="${yMeta.toFixed(1)}" x2="${R + 1}" y2="${yMeta.toFixed(1)}"/>
+          <text class="meta-txt" x="${R + 1}" y="${(yMeta - 6).toFixed(1)}" text-anchor="end">ritmo necesario · ${ritmo} al día</text>` : ""}
+        ${vals.map((v,i) => `<circle class="punto" cx="${px(i).toFixed(1)}" cy="${py(v).toFixed(1)}" r="4"/>`).join("")}
+        ${/* La cifra de cada día, encima de su punto. Leer una línea sin números
+             obliga a estimar contra la rejilla, y estimar contra una rejilla de
+             tres marcas no da un número: da una impresión.
+
+             El `paint-order:stroke` del CSS dibuja un borde del color del papel
+             por detrás del texto, así la cifra se lee aunque caiga sobre la
+             línea o sobre el relleno del área. */
+          vals.map((v,i) => {
+            const y = py(v);
+            /* Si el punto está muy arriba, la cifra va debajo para no salirse. */
+            const arriba = y - T > 13;
+            return `<text class="cifra-punto" x="${px(i).toFixed(1)}" y="${
+              (arriba ? y - 8 : y + 14).toFixed(1)}" text-anchor="middle">${v}</text>`;
+          }).join("")}
+        ${vistos.map((iso,i) => (i % paso === 0 || i === vistos.length - 1)
+          ? `<text class="eje" x="${px(i).toFixed(1)}" y="144" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
+      </svg>
+    </div>
+    <p class="nota">${hechos} comercios distintos tocados en el periodo${
+      asignada ? ` de ${asignada} asignados` : ""}. ${
+      ritmo !== null
+        ? `Quedan ${quedan} día${quedan === 1 ? "" : "s"} trabajado${quedan === 1 ? "" : "s"}: el ritmo necesario es ${ritmo} al día y el promedio de estos ${vistos.length} es ${prom.toFixed(0)}.`
+        : !asignada
+          ? `El ritmo necesario no se puede calcular sin la cartera asignada.${esBBVA() ? "" : " Se carga en <b>Ajustes</b>."}`
+          : "El periodo ya cerró: la línea es el registro de lo que pasó."}</p>
+  </div>`;
+}
+
+/* Días trabajados entre dos fechas, sin contar la primera. Se usa para saber
+   cuánto queda del periodo; `demoraHabil` hace la misma cuenta hacia atrás. */
+function diasHabilesHasta(desde, hasta, fer){
+  let n = 0;
+  if (!desde || !hasta || hasta <= desde) return 0;
+  for (let d = new Date(desde + "T12:00:00Z"); ; ){
+    d = new Date(d.getTime() + 86400000);
+    const iso = d.toISOString().slice(0,10);
+    if (esDiaTrabajado(iso, fer)) n++;
+    if (iso >= hasta || n > 400) break;
+  }
+  return n;
+}
+
+/* ---- Requiere una decisión ----------------------------------------------
+   Antes se llamaba «Lo que hay que corregir» y vivía al fondo de la pantalla,
+   que es donde se van a morir las listas de pendientes. Acá va a la derecha,
+   a la altura de los ojos, y cada punto lleva a su lista. */
+function decisionesTablero(r, regs){
+  const base = universoPanel();
+  const sinUbi   = regs.filter(sinUbicacion);
+  const tarde    = regs.filter(x => demoraHabil(x) > 1);
+  /* La otra demora, la que la puntualidad dejó de castigar el 24/08: gestiones
+     que se cargaron junto con el alta del comercio. No son un registro tardío
+     —no había dónde escribir— pero sí dicen que el comercio entró al CRM
+     después de trabajarse, y eso conviene verlo. Va en gris: es para mirar,
+     no para corregir. */
+  const conElAlta = regs.filter(x => typeof cargadaConLaFicha === "function"
+                                  && cargadaConLaFicha(x));
+  /* Sin los cerrados: a un comercio que ya vendió, se retuvo o se perdió
+     no se le pide completar el canal. El dato ya no cambia nada, y la
+     lista se vuelve una tarea que nunca baja a cero. */
+  const sinCanal = base.filter(c =>
+    !esClienteNuevo(c) && !c.contacto_bbva && !casoCerrado(c));
+  const ambiguos = base.filter(c => typeof correoAmbiguo === "function" && correoAmbiguo(c));
+  const sinComentario = base.filter(c => {
+    const rs = DB.delCliente(c.customer_id);
+    return rs.length > 0 && !rs.some(x => String(x.Comentario_Cliente || "").trim()
+                                       || String(x.Espera || "").trim()
+                                       || String(x.Comentario_Ejecutivo || "").trim());
+  });
+
+  /* Las citas del calendario, no las acciones sueltas. Quedaron setecientas y
+     pico abiertas de la mecánica anterior: contarlas acá sería reportar todos
+     los días el incumplimiento de un mecanismo que ya no existe. */
+  const citasAbiertasT = citasTodas().filter(x => !x.cerrado_en);
+  const vencidas = citasAbiertasT.filter(x => estadoCita(x) === "vencida");
+  const conCita = new Set(citasAbiertasT.map(x => String(x.customer_id)));
+  /* El hueco de la campaña: el banco confirmó o el cliente respondió, y no hay
+     ninguna visita puesta en el calendario. */
+  const habilitadosSinCita = base.filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && habilitadoEn(c.customer_id)
+    && !conCita.has(String(c.customer_id)));
+
+  /* Un ejecutivo con gestiones y sin una sola visita en el periodo no es un
+     número más de la tabla: es una conversación que hay que tener hoy. */
+  const sinVisitas = ejecutivosPanel().map(u => filaEjecutivo(u, r))
+    .filter(f => f.gestiones > 0 && f.efectivas === 0);
+
+  const puntos = [
+    { n:ambiguos.length, t:"Correos sin aclarar", d:"No se sabe si fueron al banco o al cliente",
+      ir:`data-vercartera="correo_ambiguo"`, tono:"crit" },
+    ...sinVisitas.map(f => ({ n:0, t:`${f.nombre.split(" ")[0]} sin una sola visita`,
+      d:`${f.trabajados} gestionados, 0 visitas en el periodo`,
+      ir:`data-verges="todos" data-verejec="${esc(f.nombre)}"`, tono:"crit", siempre:true })),
+    { n:sinUbi.length, t:"Gestiones sin ubicación", d:"Presenciales sin coordenada y sin exención",
+      ir:`data-verges="sin_ubicacion"`, tono:"crit" },
+    { n:vencidas.length, t:"Citas no concretadas", d:"Pasó el día pactado y no hay visita registrada",
+      ir:`data-go="agenda"`, tono:"crit" },
+    { n:tarde.length, t:"Gestiones fuera de plazo",
+      d:"Más de un día trabajado después, con la ficha ya cargada",
+      ir:`data-verges="fuera_plazo"`, tono:"warn" },
+    { n:conElAlta.length, t:"Gestiones cargadas con el alta",
+      d:"El comercio entró al CRM después de trabajarse: el registro no llegó tarde, la ficha sí",
+      ir:`data-verges="con_el_alta"`, tono:"warn" },
+    { n:sinComentario.length, t:"Comercios sin comentario", d:"Ninguna gestión dejó nota del cliente",
+      ir:`data-vercartera="sin_comentario"`, tono:"warn" },
+    { n:sinCanal.length, t:"Fichas sin coordinar con BBVA", d:"El caso no puede avanzar sin el dato",
+      ir:`data-vercartera="sin_bbva"`, tono:"warn" },
+    { n:habilitadosSinCita.length, t:"Habilitados sin visita",
+      d:"BBVA confirmó o el cliente respondió, y no hay cita puesta",
+      ir:`data-go="agenda"`, tono:"crit" },
+    /* Las cuatro que salieron de leer la base comercio por comercio el
+       23/08/2026. Ninguna corrige nada: llevan a la lista para que la mire
+       quien la registró, igual que «Perdido» solo lo marca el ejecutivo. */
+    { n:regs.filter(respuestaSinVoz).length, t:"Respuestas sin transcribir",
+      d:"Se marcó que el cliente respondió y no quedó ninguna palabra suya",
+      ir:`data-verges="respuesta_sin_voz"`, tono:"crit" },
+    { n:regs.filter(respuestaDudosa).length, t:"Respuestas por revisar",
+      d:"El comentario suena a que habló otra persona, o a que quedó en volver a llamar",
+      ir:`data-verges="respuesta_dudosa"`, tono:"warn" },
+    { n:base.filter(carteraSinSalir).length, t:"Cartera sin una sola salida",
+      d:"Pedirle los datos al banco no es haber contactado al comercio",
+      ir:`data-vercartera="sin_salir"`, tono:"crit" },
+    { n:base.filter(bajaSinCierre).length, t:"De baja y sin cierre",
+      d:"El banco los dio de baja y nadie marcó qué pasó",
+      ir:`data-vercartera="baja_sin_cierre"`, tono:"warn" },
+    { n:regs.filter(gestionEnDiaNoTrabajado).length, t:"Gestiones en día no trabajado",
+      d:"Sábado, domingo o feriado: suman a la meta sobre días que no cuentan en el denominador",
+      ir:`data-verges="dia_no_trabajado"`, tono:"warn" }
+  ].filter(x => x.siempre || x.n > 0);
+
+  return `
+  <div class="panel">
+    <h3>Requiere una decisión <span>${puntos.length || "nada"} ${puntos.length === 1 ? "punto" : "puntos"}</span></h3>
+    ${puntos.length ? `<div class="aten">
+      ${puntos.map(x => `<button class="aten-x" ${x.ir}>
+        <span class="pip ${x.tono}"></span>
+        <span class="txt"><b>${esc(x.t)}</b><span>${esc(x.d)}</span></span>
+        <span class="n num">${x.n}</span>
+      </button>`).join("")}
+    </div>` : `<div class="vacio">No hay nada trabado: sin correos por aclarar, sin acciones vencidas
+      y sin gestiones sin ubicación.</div>`}
+  </div>`;
+}
+
+/* ---- Los tres mínimos ---------------------------------------------------
+   Es la llave del bono, resumida a lo que se mira todos los días. El detalle
+   por persona sigue en Incentivos; acá va el estado del equipo. */
+function minimosTablero(x){
+  const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const barra = (etiqueta, valor, meta, texto) => `
+    <div class="min-x">
+      <div class="min-h"><span>${etiqueta}</span>
+        <b class="num">${texto}<span class="de"> / ${meta}</span></b></div>
+      ${medidor(valor, "")}
+    </div>`;
+
+  const cobPct = x.cobertura === null ? 0 : x.cobertura / x.req.cobertura_pct * 100;
+  const calPct = x.calidad   === null ? 0 : x.calidad   / x.req.puntualidad_pct * 100;
+  const visPct = x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0;
+
+  return `
+  <div class="panel">
+    <h3>Los tres mínimos</h3>
+    <p class="nota" style="margin-bottom:12px">Cumplir los tres abre la llave del bono base.
+      Acá va el equipo completo; el detalle por persona está en <b>Incentivos</b>.</p>
+    <div class="minimos">
+      ${barra("Cobertura", cobPct, x.req.cobertura_pct + "%", pct1(x.cobertura) + "%")}
+      ${barra("Calidad del registro", calPct, x.req.puntualidad_pct + "%", pct1(x.calidad) + "%")}
+      ${barra("Visitas efectivas", visPct, x.pideVisitas || "—", String(x.efectivas))}
+    </div>
+  </div>`;
+}
+
+/* ---- La pantalla completa ----------------------------------------------- */
+function viewTablero(){
+  const r = rangoPanel();
+  universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
+
+  const visibles = new Set(universoPanel().map(c => String(c.customer_id)));
+  const regs = DB.todos().filter(x => visibles.has(String(x.Customer_id)) && enRango(x.Fecha_Contacto, r));
+  const x = cifrasTablero(r, regs);
+  const av = avanceProyecto();
+
+  return `
+  <div class="tab-cab">
+    <div>
+      <h2>Tablero de la campaña</h2>
+      <div class="tab-periodo">${esc(r.label ? r.label[0].toUpperCase() + r.label.slice(1) : "Periodo")} ·
+        ${esc(r.detalle)} · día ${av.corrido} de ${av.total} del proyecto</div>
+    </div>
+    ${selectorComoEjec()}
+  </div>
+
+  ${selectorPanel(r, false)}
+  ${kpisTablero(x, r)}
+
+  <div class="cols-tab">
+    <div>
+      ${tablaTablero(x)}
+      ${lineaDiaria(r, regs)}
+      ${flujoBbva() ? cardPipeline() : ""}
+    </div>
+    <div>
+      ${decisionesTablero(r, regs)}
+      ${esBBVA() ? "" : minimosTablero(x)}
+    </div>
+  </div>
+
+  <details class="tab-mas">
+    <summary>El proyecto completo, el reparto de la cartera y el detalle del periodo</summary>
+    <div class="tab-mas-cuerpo">
+      ${bloqueProyecto()}
+      ${bloqueActividad(r, regs)}
+      ${bloqueEquipo(r)}
+      ${esBBVA() ? "" : bloqueLlave(r)}
+      ${bloqueDetalle(r, regs)}
+    </div>
+  </details>
+
+  ${esBBVA() ? "" : `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
+    <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`}`;
+}
+
+/* =========================================================================
+   Actividad del equipo — la pantalla que faltaba
+   =========================================================================
+
+   El 26/08 Aníbal dijo que llevaba el día poniéndose al día con los correos y
+   que no se reflejaba. Averiguar qué había hecho tomó una hora de consultas a
+   mano contra cuatro tablas, y la respuesta no estaba en ninguna pantalla del
+   CRM: sus cinco confirmaciones de canal no son gestiones y no aparecían en
+   «Registros»; sus citas estaban en el Calendario; sus borrados en la bitácora
+   de Ajustes; y la fecha con la que registró cada cosa no se veía en ningún
+   lado junto a la hora en que la registró de verdad.
+
+   Cada pieza estaba, repartida en cuatro sitios y ordenada por el criterio de
+   cada sitio. Ninguno respondía la pregunta que se hace un supervisor: «¿qué
+   pasó hoy, quién lo hizo y cuándo?».
+
+   Esta vista pone todo en una sola línea de tiempo ordenada por CUÁNDO PASÓ DE
+   VERDAD —la hora del sistema, no la fecha que alguien tecleó— y pone las dos
+   fechas una al lado de la otra. Un correo registrado hoy con fecha del 5 de
+   agosto se ve en la misma fila: 21 días de desfase, en naranja.
+
+   Es de solo lectura a propósito. Al tocar una fila se abre la ficha del
+   comercio, que es donde la edición ya existe, con sus reglas y su bitácora, y
+   donde le corresponde corregir al ejecutivo dueño del registro. Una pantalla
+   de supervisión que además escribe sobre el trabajo de otros es una pantalla
+   que puede romper un dato sin que nadie se entere.
+
+   No la ve ningún ejecutivo.
+   ========================================================================= */
+
+/* ---- Un solo reloj, el de Lima ------------------------------------------
+   Los sellos de tiempo llegan en UTC y las fechas que teclea la gente son del
+   calendario de Lima, que va cinco horas atrás. Cortar un UTC con `slice(0,10)`
+   —que es lo obvio y lo que hacía la primera versión— manda al día siguiente
+   TODO lo que se registró después de las 19:00: la gestión de las 20:00 del
+   miércoles aparecía el jueves, con la hora «20:00» al lado, y encima con un
+   día de desfase inventado.
+
+   Es el mismo error de siempre en este proyecto: dos relojes y una sola
+   etiqueta. Acá se resuelve pasando cada sello por el reloj de Lima antes de
+   preguntarle en qué día cae. */
+const diaLima = t => {
+  const d = new Date(new Date(t).toLocaleString("en-US", { timeZone: TZ }));
+  return isNaN(d) ? "" : `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+};
+const horaLima = t => {
+  const d = new Date(new Date(t).toLocaleString("en-US", { timeZone: TZ }));
+  return isNaN(d) ? "" : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/* Cuántos días hay entre la fecha con la que se registró algo y el día en que
+   de verdad se grabó. Positivo = la fecha escrita quedó ATRÁS de la real.
+   Las dos se miden en el calendario de Lima o la cuenta no significa nada. */
+function desfaseDias(fechaRegistrada, cuandoSeGrabo){
+  const f = String(fechaRegistrada || "").slice(0,10);
+  const c = diaLima(cuandoSeGrabo);
+  if (!f || !c) return null;
+  return Math.round((new Date(c) - new Date(f)) / 86400000);
+}
+
+/* ---- Qué significa el desfase, que NO es lo mismo en cada evento ---------
+   Una gestión describe algo que YA pasó: su fecha debería ser la del día en
+   que se grabó, y cualquier distancia es una señal. Una cita describe algo que
+   VA a pasar: agendarla para dentro de dos días es exactamente su propósito, y
+   marcarlo en rojo sería llamar error a lo correcto — la primera versión de
+   esta pantalla lo hacía, y pintaba de alarma la visita del viernes.
+
+   Para una cita lo anormal es lo contrario: quedar puesta para una fecha que
+   ya pasó el día en que se creó.
+
+   Devuelve el texto que va bajo la fecha y su tono, o null si no hay nada que
+   decir. */
+function marcaDesfase(tipo, d){
+  if (d === null || d === undefined) return null;
+  const dias = n => Math.abs(n) + (Math.abs(n) === 1 ? " día" : " días");
+  if (tipo === "cita"){
+    if (d > 0)  return { texto:"agendada " + dias(d) + " hacia atrás", tono:"atras" };
+    if (d === 0) return { texto:"para el mismo día", tono:"neutro" };
+    return { texto:"en " + dias(d), tono:"neutro" };
+  }
+  if (d === 0) return null;                       // registrada el día que pasó
+  if (d > 0)  return { texto:dias(d) + " antes", tono:"atras" };
+  /* Fecha futura sobre un hecho que ya ocurrió: es lo más raro de los dos. */
+  return { texto:dias(d) + " en el futuro", tono:"futuro" };
+}
+/* Solo cuenta como «fecha corrida» lo que de verdad lo es. Con el criterio
+   anterior, una semana de citas bien agendadas inflaba la cifra de alarma. */
+const desfaseRaro = e => { const m = marcaDesfase(e.tipo, e.desfase);
+  return !!m && m.tono !== "neutro"; };
+
+/* Los tipos de evento, con su color y su etiqueta. El orden importa: es el que
+   usa el filtro, y va de lo más frecuente a lo más raro. */
+const ACT_TIPOS = [
+  { id:"gestion",  label:"Gestiones",            color:"s1"      },
+  { id:"ficha",    label:"Fichas creadas",       color:"s3"      },
+  { id:"canal",    label:"Canal BBVA confirmado",color:"brand-2" },
+  { id:"cita",     label:"Citas y tareas",       color:"s2"      },
+  { id:"cierre",   label:"Citas cerradas",       color:"s4"      },
+  { id:"edicion",  label:"Ediciones",            color:"muted"   },
+  { id:"borrado",  label:"Borrados",             color:"crit"    }
+];
+const actTipo = id => ACT_TIPOS.find(t => t.id === id) || { label:id, color:"muted" };
+
+/* ---- El flujo de eventos -------------------------------------------------
+   Se arma con lo que ya está en memoria: no hay una consulta nueva ni una
+   tabla nueva. Eso importa por dos razones: la vista se actualiza sola con la
+   misma sincronización que el resto del CRM —websocket más reloj de 45 s—, y
+   no agrega ni una fila que mantener. */
+function actividadEventos(){
+  const ev = [];
+  const cuando = x => { const t = new Date(x).getTime(); return isNaN(t) ? 0 : t; };
+  /* Quién lo hizo. No todo lo que queda registrado lo hace una persona del
+     equipo: las correcciones supervisadas y las ediciones del relato del
+     reporte entran sin correo de nadie, y aparecían como «—», que en una
+     columna llamada «Quién» se lee como un dato que falta. Se nombran. */
+  const esSistema = correo => !correo || correo === "correccion-supervisada";
+  const nombreDe = correo => {
+    if (!correo) return "Sistema";
+    if (correo === "correccion-supervisada") return "Corrección supervisada";
+    const u = USUARIOS.find(x => x.correo === correo);
+    return u ? u.nombre : correo;
+  };
+
+  /* 1 · Las gestiones. Las tres clases: al comercio, al banco y las que
+     fabricó la migración. Las fabricadas se muestran marcadas en vez de
+     esconderse: son parte de lo que hay en la ficha y explican por qué un
+     comercio con «una gestión» puede estar en cero. */
+  DB.crudo.forEach(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const alBanco = esAlBanco(r);
+    ev.push({
+      ts: cuando(r.Creado_En), tipo:"gestion",
+      correo: r.Correo_Stratis, quien: r.Ejecutivo || nombreDe(r.Correo_Stratis),
+      cid: String(r.Customer_id), comercio: c.nombre_comercio || "",
+      titulo: (r.Inferida ? "Fila del alta · " : "") +
+        (alBanco ? "Coordinación con BBVA" : "Gestión al comercio"),
+      detalle: [actMedio(r.Tipo_Contacto), actResultado(r.Resultado),
+                r.Cumple_Visita === "SI" ? "visita cumplida" : ""]
+                .filter(Boolean).join(" · "),
+      nota: (r.Comentario_Ejecutivo || r.Comentario_Cliente || r.Espera || "").trim(),
+      fechaReg: String(r.Fecha_Contacto || "").slice(0,10),
+      horaReg: r.Hora_Contacto || "",
+      desfase: desfaseDias(r.Fecha_Contacto, r.Creado_En),
+      inferida: !!r.Inferida,
+      /* Las dos preguntas del resumen, resueltas acá para que el gráfico no
+         tenga que volver a mirar la fila cruda: ¿cuenta como gestión? ¿se
+         registró dentro de plazo? */
+      valida: esGestionValida(r),
+      aTiempo: aTiempo(r)
+    });
+  });
+
+  /* 2 · Las fichas creadas y 3 · el canal confirmado. Los dos salen de
+     `clientes`, y el canal tiene su propia marca de tiempo desde la migración
+     que la agregó: no hay que deducirla de la última modificación. */
+  CLIENTES.forEach(c => {
+    ev.push({
+      ts: cuando(c.creado_en), tipo:"ficha",
+      correo: c.asignado_correo, quien: c.asignado || nombreDe(c.asignado_correo),
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      titulo: esClienteNuevo(c) ? "Ficha creada · venta nueva" : "Ficha creada",
+      detalle: [c.distrito, rubroLabel(c), c.contacto_bbva ? "alta por " + nomMedioBBVA2(c.contacto_bbva) : ""]
+        .filter(Boolean).join(" · "),
+      nota:"", fechaReg:"", desfase:null
+    });
+    if (c.canal_confirmado_por) ev.push({
+      ts: cuando(c.canal_confirmado_en), tipo:"canal",
+      correo: c.canal_confirmado_por, quien: nombreDe(c.canal_confirmado_por),
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      titulo:"Canal BBVA confirmado",
+      detalle:"Confirmó que el alta se coordinó por " + (nomMedioBBVA2(c.contacto_bbva) || "ese medio"),
+      /* La advertencia que le habría ahorrado el día a Aníbal. */
+      /* `every` sobre un arreglo vacío devuelve true, así que se cuenta lo
+         real en vez de preguntar por lo fabricado: un comercio sin ninguna
+         fila también tiene que salir avisado. */
+      aviso: DB.historiaDe(c.customer_id).filter(r => !esReconstruida(r)).length === 0
+        ? "Confirmar no crea una gestión: este comercio sigue en cero" : "",
+      nota:"", fechaReg:"", desfase:null
+    });
+  });
+
+  /* 4 · La agenda: citas con día y hora, y tareas sin hora —llamar, esperar—.
+     Se distinguen porque una cita se puede cumplir y una tarea se vence. */
+  SEGUIMIENTOS.forEach(s => {
+    const c = byId[String(s.customer_id)] || {};
+    const esVisita = !!s.modalidad;
+    ev.push({
+      ts: cuando(s.creado_en), tipo:"cita",
+      correo: s.correo_stratis, quien: s.ejecutivo || nombreDe(s.correo_stratis),
+      cid: String(s.customer_id), comercio: c.nombre_comercio || "",
+      titulo: esVisita ? "Visita agendada" : "Tarea de seguimiento",
+      detalle: (esVisita ? cortoModalidad(s.modalidad) + " · " : (s.accion ? s.accion + " · " : "")) +
+        "para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) +
+        (s.hora_inicio ? " a las " + horaCorta(s.hora_inicio) : ""),
+      nota: (s.comentario || "").trim(),
+      fechaReg: String(s.fecha_objetivo || "").slice(0,10),
+      /* Para una cita el desfase se lee al revés: agendar para ATRÁS es el
+         error. Se guarda con el mismo signo que las gestiones y el rótulo lo
+         explica. */
+      desfase: desfaseDias(s.fecha_objetivo, s.creado_en)
+    });
+    if (s.cerrado_en) ev.push({
+      ts: cuando(s.cerrado_en), tipo:"cierre",
+      correo: s.cerrado_por || s.correo_stratis, quien: nombreDe(s.cerrado_por || s.correo_stratis),
+      cid: String(s.customer_id), comercio: c.nombre_comercio || "",
+      titulo: "Cita cerrada · " + (s.cerrado_motivo || "sin motivo"),
+      detalle: "Estaba puesta para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) +
+        (s.hora_inicio ? " a las " + horaCorta(s.hora_inicio) : ""),
+      /* El defecto que atrapó a Aníbal: una gestión de hoy cerrando como
+         cumplida una cita que todavía no llegaba. */
+      aviso: (s.cerrado_motivo === "CUMPLIDA" &&
+              String(s.fecha_objetivo).slice(0,10) > String(s.cerrado_en).slice(0,10))
+        ? "Se dio por cumplida antes de su fecha" : "",
+      nota:"", fechaReg:"", desfase:null
+    });
+  });
+
+  /* 5 · Lo que la bitácora sí registra: ediciones y borrados. Las altas no
+     pasan por ahí, y por eso se leyeron arriba de cada tabla. */
+  (AUDITORIA || []).forEach(a => {
+    const esBorrado = a.accion === "eliminar";
+    const d = (a.detalle && (a.detalle._borrado || a.detalle)) || {};
+    ev.push({
+      ts: cuando(a.creado_en), tipo: esBorrado ? "borrado" : "edicion",
+      correo: a.correo, quien: a.ejecutivo || nombreDe(a.correo),
+      cid: String(a.customer_id || ""), comercio: a.comercio || "",
+      titulo: (esBorrado ? "Borró " : "Editó ") +
+        (a.tabla === "interacciones" ? "una gestión"
+         : a.tabla === "clientes" ? "una ficha" : a.tabla),
+      detalle: [d.medio ? actMedio(d.medio) : "",
+                d.fecha ? "fechada " + d.fecha : "",
+                d.nombre || "", d.llave || ""].filter(Boolean).join(" · "),
+      nota: (d.comentario || d._motivo || "").trim(),
+      fechaReg:"", desfase:null
+    });
+  });
+
+  return ev.filter(x => x.ts > 0)
+    .map(x => Object.assign(x, { sistema: esSistema(x.correo) }))
+    .sort((a, b) => b.ts - a.ts);
+}
+
+/* Los nombres largos de medio y resultado. Hay dos catálogos —el del comercio
+   y el del banco— y esta pantalla mezcla las dos clases de gestión en una sola
+   lista, así que pregunta a los dos antes de rendirse y mostrar el código
+   crudo. Sin esto, media tabla decía «bbva_correo». */
+const actMedio = id => (tipoById(id) || {}).label || nomMedioBBVA(id) || String(id || "");
+const actResultado = id => (resultadoById(id) || {}).label || nomResultadoBBVA(id) || String(id || "");
+/* El medio declarado en el alta viene en mayúsculas en la ficha. */
+const nomMedioBBVA2 = id => nomMedioBBVA(String(id || "").toLowerCase()) || String(id || "").toLowerCase();
+
+
+/* ---- El resumen comparativo por ejecutivo -------------------------------
+   Lo que piden José y Gabriel: de un vistazo, cuánto trabajó cada uno, cuánto
+   de eso CUENTA, y si lo registró dentro de plazo.
+
+   Son dos preguntas distintas y por eso son dos gráficos, no uno con dos
+   escalas —un eje doble es la forma más rápida de que dos medidas se lean como
+   una—. Las dos son parte-todo sobre el mismo total, así que van en barra
+   apilada horizontal: la barra entera es lo que registró, y el tramo oscuro es
+   la parte que cuenta.
+
+   Sobre el color: el par obvio para «a tiempo / fuera de plazo» era verde y
+   naranja, y no se puede usar. Medidos con el validador, para un ojo protán
+   esos dos quedan a ΔE 5,9 —por debajo del piso— y son prácticamente el mismo
+   color. Es una distinción que decide el bono de alguien: no puede depender de
+   ver bien el rojo y el verde. Se usa azul contra naranja, que pasa con ΔE
+   25,2, y además cada tramo lleva su cifra escrita, así que el color nunca es
+   la única señal.
+
+   El azul claro de «intentos sin resultado» no llega a 3:1 contra el fondo. La
+   regla dice que eso obliga a etiqueta visible o vista de tabla; acá hay las
+   dos. Y no es casual que lo que NO cuenta sea lo más tenue.
+
+   Debajo va la tabla con las cifras exactas, que no es un adorno: es la vista
+   que funciona con lector de pantalla, la que se copia a un correo y la que
+   resuelve cualquier duda sobre lo que dice una barra. */
+function repResumenEjecutivos(todos){
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  if (!ejec.length) return "";
+
+  /* Solo las GESTIONES entran al resumen: una ficha creada o una cita agendada
+     son trabajo, pero no son interacciones y mezclarlas haría que el
+     denominador dejara de significar algo. */
+  const ges = todos.filter(e => e.tipo === "gestion" && !e.inferida);
+  if (!ges.length) return "";
+
+  const filas = ejec.map(u => {
+    const suyas = ges.filter(e => e.correo === u.correo);
+    const validas = suyas.filter(e => e.valida).length;
+    const aTpo = suyas.filter(e => e.aTiempo).length;
+    return { nombre:u.nombre, correo:u.correo,
+      total:suyas.length, validas, intentos:suyas.length - validas,
+      aTiempo:aTpo, tarde:suyas.length - aTpo,
+      comercios:new Set(suyas.map(e => e.cid)).size };
+  /* Ordenadas por lo que cuenta, de mayor a menor: comparar magnitudes es
+     mucho más fácil cuando vienen ordenadas, y lo que se compara acá es
+     cuánto trabajo con resultado puso cada uno. */
+  }).filter(f => f.total).sort((a, b) => b.validas - a.validas);
+  if (!filas.length) return "";
+
+  const T = filas.reduce((a, f) => ({
+    total:a.total + f.total, validas:a.validas + f.validas,
+    aTiempo:a.aTiempo + f.aTiempo, tarde:a.tarde + f.tarde
+  }), { total:0, validas:0, aTiempo:0, tarde:0 });
+  const tope = Math.max(...filas.map(f => f.total), 1);
+  const pc = (n, d) => d ? Math.round(n / d * 100) : 0;
+
+  /* Una barra apilada. El ancho de la barra entera es el total de esa persona
+     contra el mayor del equipo, así que las barras se comparan entre sí y no
+     cada una consigo misma. */
+  const barra = (f, buena, mala, claseMala) => {
+    const w = f.total / tope * 100;
+    const p = f.total ? buena / f.total * 100 : 0;
+    return `<div class="rz-b" style="width:${w.toFixed(1)}%">
+      <i class="rz-ok" style="width:${p.toFixed(1)}%"></i>
+      <i class="rz-no ${claseMala}" style="width:${(100 - p).toFixed(1)}%"></i>
+    </div>`;
+  };
+
+  const grafico = (titulo, sub, buenaK, malaK, etiqueta, claseMala) => `
+    <div class="rz-g">
+      <div class="rz-t"><b>${titulo}</b><span>${sub}</span></div>
+      ${filas.map(f => `<div class="rz-fila">
+        <div class="rz-n">${esc(f.nombre)}</div>
+        <div class="rz-pista">${barra(f, f[buenaK], f[malaK], claseMala)}</div>
+        <div class="rz-v"><b>${f[buenaK]}</b><span>de ${f.total}</span>
+          <em>${pc(f[buenaK], f.total)}%</em></div>
+      </div>`).join("")}
+      <div class="rz-ley">
+        <span><i class="rz-ok"></i>${esc(etiqueta[0])}</span>
+        <span><i class="rz-no ${claseMala}"></i>${esc(etiqueta[1])}</span>
+      </div>
+    </div>`;
+
+  return `
+  <div class="rz">
+    <div class="rz-cab">
+      <h3>Gestión del equipo en el periodo</h3>
+      <div class="rz-kpi">
+        <div><b>${T.validas}</b><span>gestiones válidas</span></div>
+        <div><b>${T.total}</b><span>interacciones registradas</span></div>
+        <div><b>${pc(T.validas, T.total)}%</b><span>de lo registrado cuenta</span></div>
+        <div class="${pc(T.aTiempo, T.total) < 95 ? "mal" : ""}">
+          <b>${pc(T.aTiempo, T.total)}%</b><span>registrado dentro de plazo</span></div>
+      </div>
+    </div>
+
+    <div class="rz-gs">
+      ${grafico("Cuánto de lo registrado cuenta",
+                "una gestión cuenta si dejó un correo, una respuesta, una reunión o un cierre",
+                "validas", "intentos",
+                ["Gestiones válidas", "Intentos sin resultado"], "azulclaro")}
+      ${grafico("Cuánto se registró a tiempo",
+                "el plazo es el mismo día o el día trabajado siguiente",
+                "aTiempo", "tarde",
+                ["Dentro de plazo", "Fuera de plazo"], "naranja")}
+    </div>
+
+    <div class="tabla-cont">
+      <table class="tbl-rz">
+        <caption>Las mismas cifras, exactas</caption>
+        <thead><tr><th>Ejecutivo</th><th>Interacciones</th><th>Válidas</th><th>% válidas</th>
+          <th>A tiempo</th><th>Fuera de plazo</th><th>% a tiempo</th><th>Comercios</th></tr></thead>
+        <tbody>
+          ${filas.map(f => `<tr>
+            <td>${esc(f.nombre)}</td>
+            <td class="n">${f.total}</td><td class="n">${f.validas}</td>
+            <td class="n">${pc(f.validas, f.total)}%</td>
+            <td class="n">${f.aTiempo}</td>
+            <td class="n ${f.tarde ? "mal" : ""}">${f.tarde}</td>
+            <td class="n ${pc(f.aTiempo, f.total) < 95 ? "mal" : ""}">${pc(f.aTiempo, f.total)}%</td>
+            <td class="n">${f.comercios}</td></tr>`).join("")}
+          <tr class="total"><td>Equipo</td>
+            <td class="n">${T.total}</td><td class="n">${T.validas}</td>
+            <td class="n">${pc(T.validas, T.total)}%</td>
+            <td class="n">${T.aTiempo}</td><td class="n">${T.tarde}</td>
+            <td class="n">${pc(T.aTiempo, T.total)}%</td>
+            <td class="n">${new Set(ges.map(e => e.cid)).size}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* ---- La pantalla --------------------------------------------------------- */
+function viewActividad(){
+  /* La puerta está en `go()`, que es por donde entra la navegación. Esta es la
+     segunda cerradura, y existe porque `go()` solo protege el camino normal:
+     cualquier código que ponga `S.tab` a mano —una prueba, un enlace nuevo, un
+     estado restaurado— pintaría la pantalla entera sin pasar por ahí. En una
+     vista que muestra el trabajo nominal del equipo, una sola cerradura es
+     pocas. */
+  if (!puedeVerTab("actividad") || vistaDeCampo())
+    return `<div class="vacio">Esta pantalla es de supervisión.</div>`;
+
+  const hoy = hoyISO();
+  const menos = n => new Date(new Date(hoy).getTime() - n * 86400000).toISOString().slice(0,10);
+  const RANGOS = [["hoy","Hoy",0], ["ayer","Ayer y hoy",1], ["7","7 días",6], ["30","30 días",29]];
+  const rango = RANGOS.find(r => r[0] === S.fActRango) || RANGOS[0];
+  const desde = menos(rango[2]);
+
+  const todos = actividadEventos().filter(e => diaLima(e.ts) >= desde);
+
+  let lista = todos;
+  if (S.fActEjec !== "todos") lista = lista.filter(e => e.correo === S.fActEjec);
+  if (S.fActTipo !== "todos") lista = lista.filter(e => e.tipo === S.fActTipo);
+  if (S.fActDesfase) lista = lista.filter(desfaseRaro);
+  const q = (S.qAct || "").trim().toLowerCase();
+  if (q) lista = lista.filter(e =>
+    (e.comercio + " " + e.cid + " " + e.quien + " " + e.titulo + " " + e.detalle + " " + e.nota)
+      .toLowerCase().includes(q));
+
+  /* Las tres cifras de cabecera se cuentan sobre el rango completo, no sobre
+     lo filtrado: son el contexto contra el que se lee el filtro. */
+  /* «Personas» cuenta gente del equipo, no cadenas distintas en una columna.
+     Con el criterio anterior salían seis donde había cuatro: sumaba las
+     ediciones del relato —que entran sin correo— y la corrección supervisada,
+     que no es nadie. Lo del sistema se declara aparte. */
+  const personas = new Set(todos.filter(e => !e.sistema).map(e => e.correo)).size;
+  const delSistema = todos.filter(e => e.sistema).length;
+  const corridas = todos.filter(desfaseRaro).length;
+
+  /* `activo !== false` no es un detalle: sin él, una cuenta desactivada sigue
+     ofreciéndose en el selector con cero eventos al lado, y el supervisor la
+     elige pensando que es alguien que no trabajó. El resumen ya la filtraba;
+     el selector no, y los dos tienen que decir lo mismo. */
+  const ejecutivos = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    .map(u => [u.correo, `${u.nombre} · ${todos.filter(e => e.correo === u.correo).length}`]);
+  const opciones = (valor, todosTxt, items) =>
+    `<option value="todos"${valor==="todos"?" selected":""}>${todosTxt}</option>` +
+    items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+
+  const mostrar = lista.slice(0, S.limiteAct || 120);
+
+  /* Se agrupa por día real. Un supervisor lee «qué pasó el miércoles», no
+     «las últimas cien filas». */
+  let filas = "", diaActual = "";
+  mostrar.forEach(e => {
+    const iso = diaLima(e.ts);
+    if (iso !== diaActual){
+      diaActual = iso;
+      const n = lista.filter(x => diaLima(x.ts) === iso).length;
+      filas += `<tr class="act-dia"><td colspan="5">
+        <b>${esc(fechaLarga(iso))}</b><span>${n} ${n === 1 ? "evento" : "eventos"}</span></td></tr>`;
+    }
+    const t = actTipo(e.tipo);
+    /* La hora también en Lima: si el supervisor abre el CRM desde otro huso, la
+       columna tiene que seguir diciendo la hora a la que trabajó el equipo. */
+    const hora = horaLima(e.ts);
+
+    /* La columna que motivó la pantalla: con qué fecha se registró, y a qué
+       distancia de cuándo se registró de verdad. */
+    let fecha = `<span class="act-vacio">—</span>`;
+    if (e.fechaReg){
+      const m = marcaDesfase(e.tipo, e.desfase);
+      fecha = `<b>${esc(fmtFecha(e.fechaReg))}</b>${e.horaReg ? " " + esc(e.horaReg) : ""}` +
+        (m ? `<span class="act-desf ${m.tono}">${esc(m.texto)}</span>` : "");
+    }
+
+    filas += `<tr class="act-f" data-actcid="${esc(e.cid)}" tabindex="0">
+      <td class="act-h">${hora}</td>
+      <td class="act-q">${esc(e.quien)}</td>
+      <td class="act-t"><i class="act-p" style="background:var(--${t.color})"></i>
+        <b>${esc(e.titulo)}</b>
+        ${e.detalle ? `<span class="act-d">${esc(e.detalle)}</span>` : ""}
+        ${e.aviso ? `<span class="act-av">${esc(e.aviso)}</span>` : ""}
+        ${e.nota ? `<span class="act-n">${esc(e.nota.slice(0,140))}</span>` : ""}</td>
+      <td class="act-c">${e.comercio ? esc(e.comercio) : `<span class="act-vacio">—</span>`}
+        ${e.cid ? `<span class="act-id">${esc(e.cid)}</span>` : ""}</td>
+      <td class="act-fe">${fecha}</td>
+    </tr>`;
+  });
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>Actividad del equipo</h2>
+      <div class="sub">Todo lo que se registró en el CRM, ordenado por cuándo pasó de verdad.
+        La última columna dice con qué fecha se registró cada cosa.</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Eventos</div><div class="val">${todos.length}</div>
+      <div class="sub">${esc(rango[1].toLowerCase())}</div></div>
+    <div class="stat"><div class="lbl">Personas</div><div class="val">${personas}</div>
+      <div class="sub">del equipo registraron algo${
+        delSistema ? ` · ${delSistema} ${delSistema === 1 ? "movimiento" : "movimientos"} del sistema` : ""}</div></div>
+    <div class="stat ${corridas ? "malo" : ""}"><div class="lbl">Con la fecha corrida</div>
+      <div class="val">${corridas}</div>
+      <div class="sub">gestiones fechadas en otro día, o citas puestas hacia atrás</div></div>
+  </div>
+
+  <div class="filtros">
+    <div class="seg">${RANGOS.map(([v,l]) =>
+      `<button data-f="actrango" data-v="${v}" class="${S.fActRango===v?"on":""}">${l}</button>`).join("")}
+    </div>
+    <div class="sel-row">
+      <label class="fsel"><span>Ejecutivo</span>
+        <select id="ejecAct">${opciones(S.fActEjec, `Todo el equipo · ${todos.length}`, ejecutivos)}</select></label>
+      <label class="fsel"><span>Tipo</span>
+        <select id="tipoAct">${opciones(S.fActTipo, "Todo lo que pasó",
+          ACT_TIPOS.filter(t => todos.some(e => e.tipo === t.id))
+                   .map(t => [t.id, `${t.label} · ${todos.filter(e => e.tipo === t.id).length}`]))}</select></label>
+      <label class="fchk"><input type="checkbox" id="desfAct"${S.fActDesfase?" checked":""}>
+        <span>Solo con la fecha corrida</span></label>
+    </div>
+    <input class="busca" id="qAct" placeholder="Buscar por comercio, Customer ID, persona o comentario…"
+           value="${esc(S.qAct || "")}">
+  </div>
+
+  ${repResumenEjecutivos(todos)}
+
+  ${lista.length ? `
+  <div class="tabla-cont">
+    <table class="tbl-act">
+      <thead><tr>
+        <th>Hora real</th><th>Quién</th><th>Qué hizo</th><th>Comercio</th>
+        <th title="La fecha con la que quedó registrado, y a qué distancia de la hora real">Fecha registrada</th>
+      </tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+  </div>
+  ${lista.length > mostrar.length
+    ? `<div class="mas-row"><button class="btn ghost" id="masAct">Ver ${
+        Math.min(120, lista.length - mostrar.length)} más · quedan ${lista.length - mostrar.length}</button></div>`
+    : ""}`
+  : `<div class="vacio">No hay actividad registrada con estos filtros.</div>`}
+
+  <p class="nota"><b>Hora real</b> es cuándo se grabó en el CRM; <b>fecha registrada</b> es la que
+  escribió la persona. Cuando no coinciden, el trabajo aparece en otro día del que se hizo — por eso
+  se marca. Al tocar una fila se abre la ficha del comercio, que es donde se corrige: la corrección
+  la hace quien registró, con su nombre en la bitácora.</p>`;
+}
+
+/* =========================================================================
+   Exportación a Excel — estructura v3 (cartera en campo, sin datos sensibles)
+   ========================================================================= */
+/* Las once columnas que resumen la coordinación con el banco. Se declaran una
+   sola vez porque viven en dos archivos —la Base interna y el detalle del
+   archivo de análisis— y dos listas iguales mantenidas a mano es la forma más
+   segura de que un día dejen de serlo. */
+const COLS_BBVA_RESUMEN = [
+  "Punto_del_Caso","Coordinaciones_BBVA",
+  "BBVA_1er_Contacto","BBVA_1er_Medio","BBVA_2do_Contacto","BBVA_2do_Medio",
+  "BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Contactos_En_Negociacion","BBVA_Ultimo_Contacto",
+  "BBVA_Falta_Correo_De_Respaldo"];
+
+const COLS_BASE = ["customer_id","Origen","RUC","Razon_Social","Nombre_Comercio","Rubro","Distrito","Direccion","Estado_Cliente",
+  "Estado_Gestion","Contacto_BBVA","Ejecutivo_Stratis","Correo_Stratis","Fecha_Alta",
+  "Estado_Gestion_Tipo","Fecha_Cierre","Motivo_No_Retencion",
+  /* Antes acá iban «Intentos» y «Contactado (Si/No)». Las dos se retiraron en
+     agosto de 2026 y no por espacio: ninguna contestaba lo que se pregunta en
+     la reunión. «Contactado = Si» valía igual para un comercio que recibió un
+     correo sin respuesta que para uno en negociación, y el conteo de gestiones
+     subía lo mismo mandando ocho correos al vacío que consiguiendo una
+     reunión. En su lugar van la etapa —en qué punto del recorrido está— y la
+     efectividad —de cada diez toques, cuántos contestó—. Los intentos y las
+     respuestas siguen enteros en la hoja de gestiones, una fila por gestión. */
+  "Etapa","Efectividad_del_Contacto","Respuestas_del_Cliente","Visitas_Validas",
+  "Visita_Presencial","Visita_Virtual","Cumple_Visita","Fecha_Visita_Actualizada",
+  "Ultimo_Contacto","Comentario_Ejecutivo","Comentario_Cliente","Observacion",
+  /* El escalón que faltaba. Estas ocho columnas son lo que hoy se seguía a
+     mano en una hoja aparte: para cuántos comercios respondió el banco, en
+     cuántos intentos, y en qué punto quedó parado cada caso. Ninguna se
+     teclea — todas salen de la línea de tiempo del comercio. */
+  ...COLS_BBVA_RESUMEN];
+
+const COLS_VISITAS = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis","Customer_id",
+  "Nombre_Comercio","Rubro","Distrito","Tipo_Contacto","Resultado","El_Cliente_Respondio",
+  "Visita_Presencial","Visita_virtual","Cumple_Visita","Fecha_Visita_Actualizada","Ubicacion",
+  "Ubicacion_Verificada","Calificacion","Comentario_Ejecutivo","Comentario_Cliente",
+  /* Dos columnas que hasta agosto de 2026 no existían y estaban aplastadas
+     dentro de «Comentario_Cliente». «En_Que_Quedo» es el ejecutivo diciendo
+     qué falta; «Comentario_Cliente» es el titular hablando. Confundirlas hacía
+     que 174 gestiones donde nadie contestó apareciesen con una frase atribuida
+     al comercio. «Con_Copia_A_BBVA» marca el correo del destrabe. */
+  "En_Que_Quedo","Con_Copia_A_BBVA",
+  /* Cuándo se grabó, que no es cuándo se gestionó. Sin esta columna la
+     puntualidad no se puede recalcular fuera del CRM, y es justo el número
+     que se discute en la reunión de cierre. */
+  "Fecha_Registro","Dias_Trabajados_De_Demora","Registrada_A_Tiempo","ID_Registro"];
+
+/* SI / NO solo aplica a los medios que exigen ubicación; el resto queda vacío. */
+const marcaUbicacion = r => {
+  const e = estadoUbicacion(r);
+  if (e === "gps")       return "SI";
+  if (e === "declarada") return "Escrita a mano — sin respaldo de GPS";
+  if (e === "exenta")    return "No aplica — exenta por supervisión";
+  if (e === "falta")     return "NO — sin ubicación";
+  return "";
+};
+
+const nomTipo = id => (tipoById(id) || {}).label || id || "";
+const nomResultado = id => (resultadoById(id) || {}).label || id || "";
+
+function filasBase(){
+  return cartera().map(c => {
+    const b = RULES.recomputarBase(c.customer_id);
+    /* El mismo par de nombres que usa Tipo_Registro en la hoja del banco: dos
+       poblaciones, dos objetivos, un solo vocabulario en todo el archivo. */
+    return [c.customer_id, tipoRegistro(c),
+      c.ruc || "", c.razon_social || "", c.nombre_comercio || "", rubroLabel(c), c.distrito || "", c.direccion || "",
+      c.estado || "", (RESULTADOS_GESTION.find(x=>x.id===(c.resultado_gestion||'PENDIENTE'))||{}).label || '',
+      /* El sello del alta, con su nivel de certeza. «CORREO» servía para las dos
+         cosas opuestas —pedirle los datos al banco o escribirle al cliente con
+         copia—, así que mientras nadie lo confirme la celda lo dice en vez de
+         elegir una. Son 473 fichas: escribir «Correo a BBVA» en todas ellas es
+         mandar a la reunión una afirmación que la base no sostiene. */
+      esClienteNuevo(c) ? "No aplica"
+        : !c.contacto_bbva ? "Sin indicar"
+        : (c.contacto_bbva === "CORREO" && !c.canal_confirmado_en)
+            ? "Correo — sin confirmar a quién"
+            : nomContactoBBVA(c.contacto_bbva),
+      c.asignado, c.asignado_correo,
+      String(c.creado_en || "").slice(0,10),
+      tipoCierre(c),
+      c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "",
+      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : ""]
+      .concat([nomEtapa(etapaDe(c)),
+        efectividadDe(c) === null ? "Sin gestiones" : efectividadDe(c) + "%",
+        b._efectivos,
+        DB.delCliente(c.customer_id).filter(r => r.Cumple_Visita === "SI").length,
+        b.Visita_Presencial, b.Visita_Virtual, b.Cumple_Visita, b.Fecha_Visita_Actualizada || "",
+        b._ultimo ? b._ultimo.Fecha_Contacto : "",
+        /* Misma regla que en la hoja que va al banco: ninguna de las dos
+           celdas llega vacía, y la marca deja ver cuál la escribió alguien. */
+        b.Comentario_Ejecutivo || (MARCA_DEDUCIDO + relatoCaso(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado)))),
+        comentarioParaBanco(c, DB.delCliente(c.customer_id), DB.delCliente(c.customer_id).filter(r => esEfectivo(r.Resultado))),
+        c.observacion || ""])
+      .concat(COLS_BBVA_RESUMEN.map(k => coordBBVA(c)[k]));
+  });
+}
+
+/* Lo que el CRM deduce de la coordinación con el banco. Se escribe siempre,
+   haya o no llegado el corte: el Excel es el que se manda a la reunión, y una
+   columna que aparece y desaparece según la hora es peor que una vacía. */
+/* ---- Lo que el CRM deduce de la coordinación con el banco ---------------
+   Una sola función para las dos hojas que lo necesitan —la Base del archivo
+   interno y el detalle del archivo de análisis—, y devuelve un objeto con
+   nombres en vez de una lista posicional: así el orden de las columnas se
+   decide en un solo sitio y estas no se pueden correr. */
+/* Acá había un atajo que partía la hoja en dos: si el comercio era un lead de
+   venta, se devolvía un bloque fijo —«Venta» como punto del caso, cero
+   coordinaciones, «No aplica» en la respuesta del banco— con la idea de que
+   una venta nueva no pasa por BBVA.
+
+   Es falso, y los números lo dicen: de los 56 leads de venta, 35 tienen
+   coordinación con el banco registrada —proporcionalmente MÁS que la cartera—
+   y el banco respondió en 8. Un RUC que no está en la cartera hay que darlo de
+   alta con el banco antes de venderlo.
+
+   Lo que el atajo rompía era justo lo que se quiere mirar: los 56 salían todos
+   como «Venta» en la dinámica aunque solo 8 hubieran cerrado, así que el
+   recorrido de ese tipo de lead no se podía ver. Retirado el 23/08/2026: un
+   solo camino, y las columnas del banco se calculan igual para los dos. */
+function coordBBVA(c){
+  const k = bbvaDe(c.customer_id);
+  const e = estadoDerivadoById(estadoDerivado(c)) || {};
+  const m = r => r ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : "";
+  const f = r => r ? String(r.Fecha_Contacto || "").slice(0,10) : "";
+  /* Cuánto tardó el banco en contestar: el número que dice si el atasco está
+     de nuestro lado o del suyo. */
+  const demora = (k.respondio && k.primero && k.fechaRespuesta)
+    ? Math.round((new Date(String(k.fechaRespuesta).slice(0,10))
+                - new Date(String(k.primero.Fecha_Contacto).slice(0,10))) / 86400000)
+    : "";
+  /* El ida y vuelta con el banco DURANTE la negociación —una tasa, un POS
+     adicional, un cambio de equipo—. No pasa en todos los casos, y por eso se
+     cuenta acá en vez de abrirle un bloque de columnas que quedaría vacío en
+     la mayoría de las filas. */
+  const enNegociacion = k.contactos.filter(r => r.Proposito === "negociacion").length;
+  return {
+    Punto_del_Caso: e.label || "",
+    Coordinaciones_BBVA: k.n,
+    BBVA_1er_Contacto: f(k.primero), BBVA_1er_Medio: m(k.primero),
+    BBVA_2do_Contacto: f(k.segundo), BBVA_2do_Medio: m(k.segundo),
+    /* Tres respuestas, no dos. «NO» a secas metía en la misma bolsa dos cosas
+       que no se parecen: el comercio al que se le pidieron los datos y el
+       banco no contestó, y el comercio al que nadie le pidió nada. El primero
+       está trabado del lado de BBVA; el segundo, del nuestro. Con dos valores
+       la dinámica no podía separarlos y el cuello de botella se leía más
+       grande de lo que es. */
+    BBVA_Respondio: k.respondio ? "SI" : (k.n > 0 ? "NO" : "Sin pedir"),
+    BBVA_Fecha_Respuesta: k.fechaRespuesta ? String(k.fechaRespuesta).slice(0,10) : "",
+    BBVA_Intentos_Hasta_Respuesta: k.respondio ? k.intentosHasta : "",
+    BBVA_Dias_Hasta_Respuesta: demora,
+    BBVA_Contactos_En_Negociacion: enNegociacion,
+    BBVA_Ultimo_Contacto: f(k.ultima),
+    BBVA_Falta_Correo_De_Respaldo: k.faltaRespaldo ? "SI" : "NO"
+  };
+}
+
+/* ---- La coordinación con BBVA, una fila por contacto --------------------
+   La hoja «Base» trae el resumen por comercio —1er contacto, 2do, si
+   respondió—, que sirve para mirar, no para dinamizar. Una tabla dinámica
+   necesita el hecho suelto: cada contacto con su fecha, su medio, su motivo y
+   su resultado, en su propia fila.
+
+   Con esto se puede preguntar cosas que hasta ahora no tenían dónde: cuántos
+   contactos hicieron falta por comercio, qué medio obtiene más respuesta,
+   cuánto demora el banco en contestar, cuántos chats quedaron sin su correo
+   de respaldo.
+
+   Va SOLO en el archivo interno. La coordinación con el banco es cómo trabaja
+   Stratis por dentro —incluido cuántas veces tuvimos que insistirle a su
+   ejecutivo—, y eso no es parte de lo que se le entrega a BBVA. */
+const COLS_COORD = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis",
+  "Customer_id","Nombre_Comercio","Distrito","Ejecutivo_Asignado",
+  "Medio","Proposito","Respondio_BBVA","Numero_de_Contacto",
+  "Dias_Desde_El_Primer_Contacto","Que_Se_Coordino","Que_Respondio_BBVA",
+  "Fecha_Registro","Dias_Trabajados_De_Demora","Registrada_A_Tiempo",
+  "Origen_Del_Dato","Punto_del_Caso","ID_Registro"];
+
+function filasCoordinaciones(){
+  /* Se agrupa por comercio para poder numerar los contactos y medir cuántos
+     días pasaron desde el primero: eso no se puede saber mirando una fila
+     sola, y es justo lo que se quiere dinamizar. */
+  const porComercio = {};
+  DB.bbva().forEach(r => {
+    const k = String(r.Customer_id);
+    (porComercio[k] = porComercio[k] || []).push(r);
+  });
+  Object.values(porComercio).forEach(l => l.sort((a,b) => ts(a) - ts(b)));
+
+  const dias = (a, b) => {
+    const x = String(a || "").slice(0,10), y = String(b || "").slice(0,10);
+    if (!x || !y) return "";
+    return Math.round((new Date(y) - new Date(x)) / 86400000);
+  };
+
+  return DB.bbva().sort((a,b) => ts(a) - ts(b)).map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const lista = porComercio[String(r.Customer_id)] || [];
+    const i = lista.indexOf(r);
+    const e = estadoDerivadoById(estadoDerivado(c)) || {};
+    return [
+      r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis,
+      r.Customer_id, c.nombre_comercio || "", c.distrito || "", c.asignado || "",
+      nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto,
+      nomProposito(r.Proposito) || "",
+      respondioBBVA(r.Resultado) ? "SI" : "NO",
+      i + 1,
+      i === 0 ? 0 : dias(lista[0].Fecha_Contacto, r.Fecha_Contacto),
+      r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
+      String(r.Creado_En || "").slice(0,10), demoraHabil(r), aTiempo(r) ? "SI" : "NO",
+      r.Inferida ? "Deducido del histórico" : "Registrado por el ejecutivo",
+      e.label || "",
+      r._id
+    ];
+  });
+}
+
+function filasVisitas(){
+  return DB.todos().sort((a,b) => ts(a) - ts(b)).map(r => [
+    r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Correo_Stratis, r.Customer_id,
+    r.Nombre_Comercio, r.Rubro, r.Distrito, nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
+    esEfectivo(r.Resultado) ? "SI" : "NO",
+    r.Visita_Presencial, r.Visita_virtual, r.Cumple_Visita, r.Fecha_Visita_Actualizada || "",
+    r.Ubicacion, marcaUbicacion(r), r.Calificacion,
+    r.Comentario_Ejecutivo, r.Comentario_Cliente,
+    r.Espera || "", traeDatosDelCliente(r) ? "SI" : "NO",
+    String(r.Creado_En || "").slice(0,10), demoraHabil(r), aTiempo(r) ? "SI" : "NO", r._id]);
+}
+
+/* Lo que se está viendo en «Gestiones del equipo», tal cual, a Excel. Sirve
+   para llevar el detalle a una reunión sin bajar el archivo completo. */
+/* La descarga se ofrece solo a supervisión, y se comprueba también acá: la
+   pantalla puede equivocarse, pero esta función es el único camino al archivo
+   y desde acá no sale nada para un ejecutivo. */
+function descargarGestiones(){
+  if (vistaDeCampo()) return toast("Las descargas son de supervisión. Pídeselas a tu supervisor.");
+  const regs = typeof gestionesFiltradas === "function" ? gestionesFiltradas() : DB.todos();
+  if (!regs.length) return toast("No hay gestiones que descargar con estos filtros");
+  /* La puntualidad viaja con el detalle desde el 24/08/2026. Antes esta hoja
+     traía «Registrada_El» y nada más, así que para saber si una gestión entró
+     dentro del plazo había que restar días a mano descontando sábados,
+     domingos y feriados. Ahora van las tres columnas que producen el
+     requisito: cuándo empieza a correr el plazo —el alta de la ficha, si el
+     comercio entró al CRM después de la gestión—, cuántos días trabajados
+     pasaron, y si quedó a tiempo. */
+  const cols = ["Fecha","Hora","Ejecutivo","Customer_id","Nombre_Comercio","Distrito",
+                "Medio","Resultado","El_Cliente_Respondio","Cumple_Visita",
+                "Ubicacion_Verificada","Calificacion",
+                "Alta_De_La_Ficha","Registrada_El","Dias_Trabajados","A_Tiempo",
+                "Comentario_Ejecutivo","Lo_Que_Dijo_El_Cliente","ID_Registro"];
+  const filas = regs.map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    return [
+      r.Fecha_Contacto, r.Hora_Contacto, r.Ejecutivo, r.Customer_id,
+      titulo(c.nombre_comercio || r.Nombre_Comercio || ""), titulo(c.distrito || r.Distrito || ""),
+      nomTipo(r.Tipo_Contacto), nomResultado(r.Resultado),
+      esEfectivo(r.Resultado) ? "SI" : "NO",
+      r.Cumple_Visita === "SI" ? "SI" : "NO",
+      marcaUbicacion(r),
+      r.Calificacion || "",
+      String(c.creado_en || "").slice(0,10),
+      String(r.Creado_En || "").slice(0,10),
+      demoraHabil(r),
+      aTiempo(r) ? "Sí" : "No",
+      r.Comentario_Ejecutivo || "", r.Comentario_Cliente || "",
+      r._id
+    ];
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hoja(cols, filas), "Gestiones");
+  XLSX.writeFile(wb, `Gestiones_${hoyISO().replace(/-/g,"")}.xlsx`);
+  toast(`${filas.length} gestiones descargadas`);
+}
+
+/* =========================================================================
+   Toda la gestión de un ejecutivo, con lo que decide cada requisito al lado
+
+   El caso que lo pidió: Vanessa aparecía cumpliendo en los registros del CRM y
+   no en la puntualidad, y la pantalla decía «2 de 3» sin decir CUÁLES de sus
+   gestiones se cayeron ni por qué. Discutir eso en una reunión de liquidación
+   con una cifra y ningún renglón no se puede.
+
+   Lo que baja es el detalle fila por fila, con las tres columnas que producen
+   los tres números de la llave —a tiempo, cuenta para cobertura, visita
+   efectiva— y una hoja de resumen que los suma. Si la suma de una columna no
+   da el número de la pantalla, hay un error y se ve sin buscarlo.
+
+   Tres decisiones de forma que no son cosméticas:
+
+     · Van las gestiones de LOS DOS LADOS —al comercio y al ejecutivo de BBVA—
+       porque el bono cuenta las dos, y una descarga que trajera solo el lado
+       del cliente diría que faltan gestiones que sí existen.
+     · NO van las filas que escribió la migración. No las trabajó nadie, no
+       cuentan para el bono, y verlas acá invitaría a discutir sobre trabajo
+       que no ocurrió.
+     · El plazo de puntualidad arranca en el más tardío entre la fecha de la
+       gestión y el alta de la ficha, y las dos fechas van en columnas
+       separadas. Es lo que permite ver de un vistazo que un «fuera de plazo»
+       era en realidad una ficha creada después.
+   ========================================================================= */
+function descargarGestionesDe(correo, p){
+  if (vistaDeCampo()) return toast("Las descargas son de supervisión. Pídeselas a tu supervisor.");
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return toast("No encuentro a ese ejecutivo");
+  const periodo = p || periodoActivo();
+  const ll = llaveDe(correo, periodo);
+
+  /* El mismo conjunto que cuenta el bono: los dos lados, sin las filas
+     reconstruidas. Se pide por la misma función, no por una copia. */
+  const gest = gestionesDe(correo, periodo)
+    .slice().sort((a,b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto))
+                        || String(a.Hora_Contacto || "").localeCompare(String(b.Hora_Contacto || "")));
+  if (!gest.length) return toast(`${u.nombre} no tiene gestiones registradas en ${nombreMes(periodo)}`);
+
+  /* «Cuenta para cobertura» se marca en la PRIMERA gestión de cada comercio
+     cubierto: es lo que hace que cinco gestiones sobre la misma bodega sean un
+     comercio y no cinco, y deja la columna sumable. */
+  const cubiertos = ll.cobertura.idsCubiertos || new Set();
+  const yaMarcado = new Set();
+
+  const cols = ["Fecha de gestión","Hora","Dirigida a","Alta de la ficha","Fecha de registro",
+                "Días trabajados","A tiempo","Customer ID","Comercio","Distrito",
+                "Medio","Resultado","¿Respondió?","Visita efectiva","Cuenta para cobertura",
+                "Ubicación","Comentario del ejecutivo","Lo que respondió","ID del registro"];
+
+  const filas = gest.map(r => {
+    const c = byId[String(r.Customer_id)] || {};
+    const alBanco = esAlBanco(r);
+    const cid = String(r.Customer_id);
+    let cobertura = "";
+    if (cubiertos.has(cid) && !yaMarcado.has(cid)){ cobertura = "Sí"; yaMarcado.add(cid); }
+    return [
+      String(r.Fecha_Contacto || "").slice(0,10),
+      r.Hora_Contacto || "",
+      alBanco ? "Ejecutivo de BBVA" : "Comercio",
+      String((c.creado_en || "")).slice(0,10),
+      String(r.Creado_En || "").slice(0,10),
+      demoraHabil(r),
+      aTiempo(r) ? "Sí" : "No",
+      cid,
+      titulo(c.nombre_comercio || r.Nombre_Comercio || ""),
+      titulo(c.distrito || r.Distrito || ""),
+      alBanco ? (nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto) : nomTipo(r.Tipo_Contacto),
+      alBanco ? (nomResultadoBBVA(r.Resultado) || r.Resultado) : nomResultado(r.Resultado),
+      alBanco ? (respondioBBVA(r.Resultado) ? "SI" : "NO") : (esEfectivo(r.Resultado) ? "SI" : "NO"),
+      (!alBanco && r.Cumple_Visita === "SI") ? "SI" : "NO",
+      cobertura,
+      marcaUbicacion(r),
+      r.Comentario_Ejecutivo || "",
+      r.Comentario_Cliente || "",
+      r._id
+    ];
+  });
+
+  const co = ll.cobertura, vi = ll.visitas, pu = ll.puntualidad;
+  const si = ok => ok ? "CUMPLE" : "NO CUMPLE";
+  const resumen = [
+    ["Ejecutivo", u.nombre],
+    ["Correo", correo],
+    ["Periodo", nombreMes(periodo)],
+    ["Descargado el", fmtFecha(hoyISO())],
+    [],
+    ["Requisito", "Va en", "Mínimo", "Estado", "Cómo se lee en el detalle"],
+    ["Cobertura de cartera", `${co.cubiertos} de ${co.denom}`, co.meta + "%", si(co.ok),
+     'Suma de «Cuenta para cobertura» = ' + co.cubiertos],
+    ["Visitas efectivas", vi.efectivas, vi.pide, si(vi.ok),
+     'Suma de «Visita efectiva» = SI'],
+    ["Puntualidad del registro", `${gest.filter(aTiempo).length} de ${gest.length}`, pu.meta + "%", si(pu.ok),
+     'Suma de «A tiempo» = Sí'],
+    [],
+    ["Gestiones del periodo", gest.length, "", "",
+     "Registradas por él, al comercio y al ejecutivo de BBVA"],
+    ["Al comercio", gest.filter(esAlCliente).length],
+    ["Al ejecutivo de BBVA", gest.filter(esAlBanco).length],
+    ["Fuera de plazo", gest.filter(r => !aTiempo(r)).length, "", "",
+     "Registradas más de un día trabajado después de la gestión"],
+    /* El dato que explicaba el caso de Vanessa: registros que parecían tardíos
+       y en realidad se hicieron el mismo día en que la ficha entró al CRM. */
+    ["De ellas, cargadas junto con la ficha", gest.filter(cargadaConLaFicha).length, "", "",
+     "El comercio entró al CRM después de trabajarse. Explica la demora; no la descuenta, porque el alta la crea el propio ejecutivo"],
+    ["Llave de acceso", `${ll.cumplidos} de 3 requisitos`],
+    [],
+    ["No entran acá las filas que escribió la migración al reconstruir el histórico: no las trabajó nadie y no cuentan para el bono."]
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), "Resumen");
+  XLSX.utils.book_append_sheet(wb, hoja(cols, filas), "Gestiones");
+  const slug = String(u.nombre).normalize("NFD").replace(/[̀-ͯ]/g, "")
+                 .replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  XLSX.writeFile(wb, `Gestiones_${slug}_${periodo.replace("-","")}.xlsx`);
+  toast(`${filas.length} gestiones de ${u.nombre} descargadas`);
+}
+
+const hoja = (cols, filas) => {
+  const ws = XLSX.utils.aoa_to_sheet([cols].concat(filas));
+  ws["!cols"] = cols.map(c => ({ wch: Math.min(32, Math.max(11, String(c).length + 3)) }));
+  ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:filas.length, c:cols.length-1} }) };
+  ws["!freeze"] = { xSplit:0, ySplit:1 };
+  return ws;
+};
+
+/* Hojas exclusivas del Analista y del Manager -------------------------- */
+function hojaAvance(){
+  const p = periodoActivo();
+  const cols = ["Ejecutivo","Cartera asignada","% Alcance del mes","Retenidos del mes","Recuperados del mes",
+                "Comercios registrados","Comercios trabajados","Comercios sin intentar","Intentos",
+                "Presenciales","Reuniones virtuales","Llamadas","WhatsApp","Correos","Suma por medio","Cuadra",
+                "Gestiones con respuesta","Sin respuesta","% Tasa de respuesta","Intentos por comercio","Visitas efectivas",
+                "Retenidos","Ventas","Perdidos","Pendientes","Objetivo cumplido","% Avance","% Efectividad de cierre",
+                "Sin ubicación","Con ubicación escrita a mano"];
+  const filas = USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
+    const cs = CLIENTES.filter(c => c.asignado_correo === u.correo);
+    cs.forEach(c => RULES.recomputarBase(c.customer_id));
+    const rs = DB.todos().filter(r => r.Correo_Stratis === u.correo);
+    const ef = rs.filter(r => esEfectivo(r.Resultado)).length;
+    const n = id => cs.filter(c => (c.resultado_gestion || "PENDIENTE") === id).length;
+    const ret = n("RETENIDO"), ven = n("VENTA"), per = n("PERDIDO"), pen = n("PENDIENTE");
+    const cumplido = ret + ven, decididos = cumplido + per;
+    const nPres = rs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length;
+    const nVirt = rs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length;
+    const nLlam = rs.filter(r => r.Tipo_Contacto === "llamada").length;
+    const nWsp  = rs.filter(r => r.Tipo_Contacto === "whatsapp").length;
+    const nCorr = rs.filter(r => r.Tipo_Contacto === "correo").length;
+    const suma  = nPres + nVirt + nLlam + nWsp + nCorr;
+    const trabajados = new Set(rs.map(r => String(r.Customer_id))).size;
+    const al = alcanceDe(u.correo, p);
+    return [u.nombre, al.asignada || "", al.asignada ? Math.round(al.pct*10000)/10000 : "",
+      al.retenidos, al.recuperados,
+      cs.length, trabajados, cs.length - trabajados, rs.length,
+      nPres, nVirt, nLlam, nWsp, nCorr, suma, suma === rs.length ? "SI" : "REVISAR",
+      ef, rs.length - ef,
+      rs.length ? Math.round(ef/rs.length*10000)/10000 : 0,
+      cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
+      rs.filter(r => r.Cumple_Visita === "SI").length,
+      ret, ven, per, pen, cumplido,
+      cs.length ? Math.round(cumplido/cs.length*10000)/10000 : 0,
+      decididos ? Math.round(cumplido/decididos*10000)/10000 : "",
+      rs.filter(sinUbicacion).length,
+      rs.filter(ubicacionDeclarada).length];
+  });
+  const ws = hoja(cols, filas);
+  columnaFormula(ws, cols, filas, "% Alcance del mes",
+    (L, f) => `IFERROR((${L("Retenidos del mes")}${f}+${L("Recuperados del mes")}${f})/${L("Cartera asignada")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Tasa de respuesta",
+    (L, f) => `IFERROR(${L("Gestiones con respuesta")}${f}/${L("Intentos")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Avance",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/${L("Comercios registrados")}${f},0)`);
+  columnaFormula(ws, cols, filas, "% Efectividad de cierre",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/(${L("Objetivo cumplido")}${f}+${L("Perdidos")}${f}),0)`);
+  columnaFormula(ws, cols, filas, "Intentos por comercio",
+    (L, f) => `IFERROR(${L("Intentos")}${f}/${L("Comercios registrados")}${f},0)`);
+  columnaFormula(ws, cols, filas, "Suma por medio",
+    (L, f) => `${L("Presenciales")}${f}+${L("Reuniones virtuales")}${f}+${L("Llamadas")}${f}+${L("WhatsApp")}${f}+${L("Correos")}${f}`);
+  columnaFormula(ws, cols, filas, "Sin respuesta",
+    (L, f) => `${L("Intentos")}${f}-${L("Gestiones con respuesta")}${f}`);
+  columnaFormula(ws, cols, filas, "Comercios sin intentar",
+    (L, f) => `${L("Comercios registrados")}${f}-${L("Comercios trabajados")}${f}`);
+  formatoPorcentaje(ws, cols, filas, ["% Alcance del mes","% Tasa de respuesta","% Avance","% Efectividad de cierre"]);
+  return ws;
+}
+
+/* El histórico completo: una fila por ejecutivo y mes, con lo asignado y lo
+   logrado. Es la hoja de la que sale cualquier evolutivo. */
+function hojaMetas(){
+  const cols = ["Mes","Ejecutivo","Cartera asignada","Comercios trabajados en el mes",
+                "Retenidos","Recuperados","Objetivo cumplido","% Alcance","Perdidos",
+                "Cargada por","Actualizada"];
+  const filas = [];
+  mesesConMeta().slice().reverse().forEach(m => {
+    USUARIOS.filter(u => u.rol === "Ejecutivo").forEach(u => {
+      const a = alcanceDe(u.correo, m);
+      const reg = METAS.find(x => x.correo === u.correo && x.periodo === m);
+      if (!a.asignada && !a.logrado && !a.trabajados) return;
+      filas.push([nombreMes(m), u.nombre, a.asignada || "", a.trabajados,
+        a.retenidos, a.recuperados, a.logrado,
+        a.asignada ? Math.round(a.pct*10000)/10000 : "", a.perdidos,
+        reg ? reg.porQuien : "", reg ? String(reg.cuando).slice(0,10) : ""]);
+    });
+  });
+  const ws = hoja(cols, filas);
+  columnaFormula(ws, cols, filas, "Objetivo cumplido",
+    (L, f) => `${L("Retenidos")}${f}+${L("Recuperados")}${f}`);
+  columnaFormula(ws, cols, filas, "% Alcance",
+    (L, f) => `IFERROR(${L("Objetivo cumplido")}${f}/${L("Cartera asignada")}${f},0)`);
+  formatoPorcentaje(ws, cols, filas, ["% Alcance"]);
+  return ws;
+}
+
+
+function hojaEfectividad(){
+  const regs = DB.todos();
+  const filas = RESULTADOS.map(x => {
+    const n = regs.filter(r => r.Resultado === x.id).length;
+    return [x.label, x.ok ? "El cliente respondió" : "Intento sin respuesta", n,
+      regs.length ? Math.round(n/regs.length*100) + "%" : "—"];
+  });
+  filas.push([]);
+  filas.push(["TOTAL DE INTENTOS", "", regs.length, "100%"]);
+  filas.push(["CON RESPUESTA DEL CLIENTE", "", regs.filter(r => esEfectivo(r.Resultado)).length,
+    regs.length ? Math.round(regs.filter(r => esEfectivo(r.Resultado)).length/regs.length*100) + "%" : "—"]);
+  return hoja(["Resultado","Clasificación","Registros","% del total"], filas);
+}
+
+function hojaRubros(){
+  const filas = RUBROS.map(r => {
+    const cs = cartera().filter(c => c.rubro === r.codigo);
+    if (!cs.length) return null;
+    cs.forEach(c => RULES.recomputarBase(c.customer_id));
+    const ct = cs.filter(c => c._base._efectivos > 0).length;
+    return [r.nombre, cs.length, ct, Math.round(ct/cs.length*100) + "%",
+      cs.reduce((a,c) => a + c._base._intentos, 0),
+      cs.filter(c => c.estado === "DE BAJA").length];
+  }).filter(Boolean).sort((a,b) => b[1] - a[1]);
+  return hoja(["Rubro","Comercios","Con respuesta","% Con respuesta","Intentos","Dados de baja"], filas);
+}
+
+const CAMPO_ES = { comentario_ejecutivo:"Comentario del ejecutivo", comentario_cliente:"Comentario del cliente",
+  calificacion:"Calificación", nombre_comercio:"Nombre del comercio",
+  rubro:"Rubro", rubro_otro:"Rubro (otro)", distrito:"Distrito", direccion:"Dirección",
+  estado:"Estado del cliente", resultado_gestion:"Resultado de la gestión",
+  observacion:"Observación", ruc:"RUC", razon_social:"Razón social",
+  customer_id:"Customer ID", fecha_contacto:"Fecha de la gestión",
+  origen_lead:"Origen del lead" };
+const nomCampo = k => CAMPO_ES[k] || k;
+const valTexto = v => v === null || v === undefined || v === "" ? "(vacío)" : String(v);
+
+function resumenAuditoria(a){
+  const d = a.detalle || {};
+  if (a.accion === "eliminar"){
+    const b = d._borrado;
+    if (!b) return a.tabla === "clientes" ? "Eliminó el comercio completo" : "Eliminó una gestión";
+    /* Se arma con las partes que existan: un registro viejo puede no tener
+       todas, y no queremos líneas con paréntesis vacíos ni puntos sueltos. */
+    const partes = xs => xs.filter(x => x !== null && x !== undefined && String(x).trim() !== "").join(" · ");
+    if (a.tabla === "clientes"){
+      const g = Number(b.gestiones) || 0;
+      return partes([
+        "Eliminó el comercio" + (b.llave ? ` (${b.llave})` : ""),
+        b.cierre ? ((RESULTADOS_GESTION.find(x=>x.id===b.cierre)||{}).label || b.cierre) : "",
+        b.distrito ? titulo(b.distrito) : "",
+        `se llevó ${g} ${g === 1 ? "gestión" : "gestiones"}`
+      ]);
+    }
+    return partes([
+      "Eliminó la gestión" + (b.fecha ? ` del ${b.fecha}${b.hora ? " " + b.hora : ""}` : ""),
+      b.medio ? nomTipo(b.medio) : "",
+      b.resultado ? nomResultado(b.resultado) : "",
+      b.cumple === "SI" ? "cumplía visita" : "",
+      /* Gestiones borradas antes de que se retiraran los viáticos */
+      Number(b.gasto) > 0 ? soles(b.gasto) + " en viáticos" : ""
+    ]);
+  }
+  /* Las claves con guion bajo son contexto, no campos editados: no se listan
+     como "antes → después" sino que se cuentan aparte. */
+  const cambios = Object.keys(d).filter(k => k[0] !== "_")
+    .map(k => `${nomCampo(k)}: ${valTexto(d[k].antes)} → ${valTexto(d[k].despues)}`);
+  const n = Number(d._arrastro);
+  if (n > 0) cambios.push(`se movieron ${n} ${n === 1 ? "gestión" : "gestiones"} con él`);
+  if (d._nota) cambios.push(String(d._nota));
+  return cambios.join(" · ");
+}
+
+/* Quién hizo el cambio, que no es lo mismo que de quién es la gestión.
+   La bitácora guarda las dos cosas: `correo` es el de quien tocó el botón y
+   `ejecutivo` es el dueño del registro. Se leían como una sola, y por eso una
+   corrección hecha desde supervisión aparecía firmada por el ejecutivo al que
+   se le corrigió. En una bitácora eso no es un detalle de redacción: es
+   atribuirle a alguien un cambio que no hizo. */
+const autorCambio = a => nombrePorCorreo(a && a.correo) || (a && a.ejecutivo) || "—";
+const duenoDistinto = a => {
+  const d = String((a && a.ejecutivo) || "").trim();
+  return d && d !== autorCambio(a) ? d : "";
+};
+
+function hojaBitacora(){
+  const filas = AUDITORIA.map(a => [
+    String(a.creado_en||"").slice(0,10), String(a.creado_en||"").slice(11,16),
+    autorCambio(a), a.correo || "",
+    a.tabla === "clientes" ? "Comercio" : "Registro de contacto",
+    a.accion === "editar" ? "Editó" : "Eliminó",
+    a.ejecutivo || "",
+    a.comercio || "", a.customer_id || "", resumenAuditoria(a)]);
+  return hoja(["Fecha","Hora","Quién hizo el cambio","Correo","Qué","Acción","Gestión de","Comercio","customer_id","Detalle del cambio"], filas);
+}
+
+function hojaUsuarios(){
+  return hoja(["Ejecutivo","Nombre completo","Correo Stratis","Rol","Activo","Comercios","Registros"],
+    USUARIOS.map(u => [u.nombre, u.nombreCompleto || u.nombre, u.correo, u.rol, u.activo === false ? "NO" : "SI",
+      CLIENTES.filter(c => c.asignado_correo === u.correo).length,
+      DB.todos().filter(r => r.Correo_Stratis === u.correo).length]));
+}
+
+/* =========================================================================
+   Resumen para BBVA — una fila por comercio, en el formato exacto del banco.
+   Los nombres, el orden y la cantidad de columnas son los de su archivo, para
+   que el bloque se pegue tal cual sin reordenar nada.
+   ========================================================================= */
+/* Las columnas que se entregan al banco. Es la propuesta que reemplaza a las
+   12 originales: salen Visita_Presencial y Visita_Virtual —eran SI/NO derivados
+   de datos que ya estaban en el archivo— entra el motivo de la no retención, y
+   "Fecha de llamada o visita" pasa a llamarse por lo que es. */
+const COLS_ENTREGA = ["customer_id","Gestión","Comentario de Cliente","Visitas","Llamadas",
+  "Fecha_Ultima_Gestion","Fecha_Ultima_Respuesta","Direccion_Actual","Contactado (Si/No)",
+  "Cumple_Visita","Fecha_Visita","Intentos_Totales","Tipo_Cierre","Estado_Comercio",
+  "Fecha_Cierre","Motivo_No_Retencion","Ejecutivo_Asignado"];
+
+/* El resto de la gestión, completo. No se entrega al banco: es lo que sostiene
+   el análisis y las tablas dinámicas del lado de Stratis. Van en la misma hoja
+   para que el pegado sea uno solo. */
+/* ---- El detalle, en el orden en que ocurren las cosas -------------------
+   Antes las columnas estaban agrupadas por parecido —todos los conteos
+   juntos, todos los medios juntos— y para leer un comercio había que saltar
+   de un lado a otro de la hoja. Ahora se leen de izquierda a derecha como se
+   lee el caso: quién es el comercio, qué pasó con el banco, qué pasó con el
+   cliente, en qué quedó.
+
+   Ojo con lo que NO se movió: las 17 primeras columnas son el pegado a la
+   plataforma del banco y su orden es el que el banco espera. Reordenarlas
+   rompería el pegado de todo el mundo. Esto empieza en la 18.
+
+   El paso de negociación no tiene bloque propio a propósito: no todos los
+   casos negocian, y los que lo hacen pueden volver al banco por una tasa o un
+   POS. Por eso ese ida y vuelta se cuenta en «BBVA_Contactos_En_Negociacion»,
+   dentro del bloque del banco, y no en una sección que quedaría vacía en la
+   mayoría de las filas. */
+const COLS_DETALLE = [
+  /* --- De qué base sale esta fila --------------------------------------
+     La primera columna del bloque de Stratis, y la que separa las tres
+     poblaciones que conviven en la hoja. Se deduce, no se teclea: un
+     identificador de 11 dígitos es un RUC y por lo tanto una venta que trae
+     Stratis; que esté cerrada o todavía en trabajo lo dice su cierre. Nadie
+     puede marcarla mal, y no se puede desincronizar del resultado. */
+  "Tipo_Registro","Origen_Marcado",
+
+  /* --- Quién es el comercio y en qué punto está ------------------------- */
+  "Nombre_Comercio","Rubro","Distrito","Fecha_Alta","Punto_del_Caso",
+
+  /* --- Paso 1 · La coordinación con el ejecutivo de BBVA ---------------- */
+  "Contacto_BBVA","Coordinaciones_BBVA",
+  "BBVA_1er_Contacto","BBVA_1er_Medio","BBVA_2do_Contacto","BBVA_2do_Medio",
+  "BBVA_Respondio","BBVA_Fecha_Respuesta",
+  "BBVA_Intentos_Hasta_Respuesta","BBVA_Dias_Hasta_Respuesta",
+  "BBVA_Contactos_En_Negociacion","BBVA_Ultimo_Contacto",
+  "BBVA_Falta_Correo_De_Respaldo",
+
+  /* --- Paso 2 · El contacto con el cliente ------------------------------ */
+  "Estado_Contacto","Respuestas_del_Cliente","Sin_Respuesta","Tasa_Respuesta",
+  "Reuniones_Virtuales","WhatsApp","Correos","Suma_por_Medio","Cuadra",
+  "Visitas_Validas","Visita_Presencial","Visita_Virtual",
+  "Medio_con_Respuesta","Medio_Cumple_Visita","Ultimo_Resultado",
+
+  /* --- Paso 3 · En qué quedó ------------------------------------------- */
+  "Resultado_Gestion","Calificacion","Comentario_Ejecutivo",
+
+  /* --- Paso 4 · La última gestión, para poder contarla desde la hoja ----
+     Las tres últimas columnas de la hoja, y van al final a propósito: se
+     pueden agregar sin correr nada de lo que ya está pegado.
+
+     Existen porque sin ellas la hoja no puede aplicar la regla. «Comercio
+     gestionado» es «su ÚLTIMA gestión califica», y eso no se deduce desde
+     Sheets: un comercio tiene muchas filas y ninguna columna decía cuál
+     manda. Las fórmulas terminaban contando «alguna» gestión, que es otra
+     pregunta y da otro número — de ahí las contradicciones entre la base que
+     se le entrega al banco y lo que muestra el CRM.
+
+     `Cuenta_Como_Gestion` es el veredicto del CRM, para contar con un
+     COUNTIF y sin reimplementar nada. Las otras dos están para poder afinar
+     a mano —«si la última fue solo chat, no la cuentes»— sin perder el
+     veredicto de referencia. */
+  "Ultima_Gestion","Ultima_Gestion_Fecha","Ultima_Gestion_Medio","Cuenta_Como_Gestion",
+
+  /* --- Y lo que hay que revisar de esta fila ---------------------------- */
+  "Alertas"];
+
+const COLS_BASE_BBVA = COLS_ENTREGA.concat(COLS_DETALLE);
+
+const ES_PRESENCIAL = id => id === "visita_presencial" || id === "reunion_presencial";
+const ES_VIRTUAL    = id => id === "reunion_virtual"   || id === "videollamada";
+
+/* Contactado (Si/No) es la columna del banco y solo tiene dos valores, así que
+   mete en la misma bolsa dos cosas distintas: el comercio que se intentó y no
+   respondió, y el que nadie tocó todavía. Uno mide resistencia del cliente; el
+   otro mide trabajo pendiente del ejecutivo. Esta columna los separa. */
+const estadoContacto = (intentos, respuestas) =>
+  respuestas > 0 ? "Respondió"
+  : intentos > 0 ? "Intentado sin respuesta"
+  : "Sin intentar";
+
+/* Los tres grupos que conviven en la Base, en una sola columna.
+
+   Antes vivían en dos hojas y cruzarlos pedía copiar y pegar a mano. Ahora es
+   una hoja y un filtro.
+
+   Los nombres dicen a qué se juega en cada caso, y no de dónde salió la ficha.
+   «Cartera BBVA» y «Lead» se leían como cosas de distinta naturaleza cuando en
+   realidad las dos son leads: lo que cambia es el objetivo. Y una venta cerrada
+   se separa de las dos porque el comercio nunca estuvo en la cartera del banco,
+   que es justo lo que hay que poder ver sin cruzar columnas.
+
+     · Lead de retención   comercio que BBVA ya tiene; se trabaja para que se quede
+     · Lead de venta       RUC que trae Stratis; el banco todavía no lo tiene afiliado
+
+   Dos valores, y los decide el identificador: 8 dígitos es un Customer ID de
+   BBVA, 11 es un RUC. Nada más entra en la cuenta.
+
+   Hasta el 23/08/2026 había un tercero —«Venta fuera de cartera»— y el defecto
+   no era el nombre: era que se calculaba con el CIERRE. Un lead de venta
+   dejaba de ser lead de venta en el momento en que se vendía, así que la misma
+   ficha cambiaba de tipo al avanzar, y volvía a cambiar hacia atrás si alguien
+   corregía ese cierre.
+
+   Lo que eso rompía es justo lo que la columna existe para hacer. Filtrar
+   «Lead de venta» devolvía solo los abiertos —48 de 56—, porque los 8 que
+   habían cerrado ya estaban en otra categoría: el embudo de ese tipo de lead
+   se quedaba sin cierres y no se podía ver su recorrido completo ni su
+   conversión. Con dos valores, el filtro devuelve los 56 de punta a punta.
+
+   Los que cerraron sin haber estado nunca en la cartera del banco se siguen
+   viendo, y con las dos columnas que ya están:
+       Tipo_Registro = Lead de venta  +  Estado_Gestion_Tipo = Venta nueva */
+function tipoRegistro(c){
+  return esClienteNuevo(c) ? "Lead de venta" : "Lead de retención";
+}
+
+/* Lo que el ejecutivo eligió al dar de alta el comercio, tal cual quedó
+   guardado. Va al lado de Tipo_Registro y no en su lugar, porque son dos
+   hechos distintos: uno es lo que el registro ES —lo dice el identificador,
+   y de ahí no se discute— y el otro es lo que alguien DIJO que era.
+
+   Cuando no coinciden, hay un comercio mal clasificado: un RUC dado de alta
+   por el camino de la cartera viajaba dentro del archivo del banco como si
+   estuviera afiliado. Esa diferencia sale además en Alertas, para que se pueda
+   filtrar sin cruzar dos columnas a mano.
+
+   De aquí en adelante el formulario deduce el origen del propio número y las
+   dos columnas van a coincidir siempre; esta queda para poder leer lo que se
+   registró antes. */
+const origenMarcado = c =>
+  c && c.tipo_registro === "NUEVO" ? "Cliente nuevo" : "Cartera de BBVA";
+/* Y en una columna aparte, sin ambigüedad, si el comercio estuvo alguna vez en
+   la base que entregó el banco. Es la pregunta que se hace primero al armar
+   cualquier dinámica. */
+/* Acá vivían dos columnas que se retiraron el 23/08/2026: `En_Cartera_BBVA`,
+   que repetía Tipo_Registro con otras palabras, y `Venta_Fuera_De_Lead`, que
+   intentaba resolver dentro del CRM algo que el CRM no puede saber.
+
+   Determinar si una venta salió de un lead encargado o la trajo el equipo por
+   su cuenta se resuelve comparando el RUC contra la base del banco, y esa
+   comparación se hace donde está la base: en el archivo de BBVA, al pegar esta
+   hoja. Traerla acá obligaba a mantener una lista pegada a mano dentro de un
+   libro que se regenera cada vez, para contestar una pregunta que del otro
+   lado se contesta con un BUSCARV.
+
+   Lo que queda es lo único que el CRM sí sabe de primera mano: qué se
+   registró —Tipo_Registro—, qué se hizo —la línea de tiempo— y en qué quedó
+   —Tipo_Cierre—. Dos tipos de lead, un solo recorrido. */
+
+/* ¿Lo que se marcó contradice al identificador? */
+const origenNoCuadra = c =>
+  !!c && esRucValido(c.customer_id) && c.tipo_registro !== "NUEVO";
+
+/* `soloEntrega` es el pegado a la plataforma del banco, y ahí van únicamente
+   los comercios que BBVA ya tiene: un RUC no le pega a nada en su base. El
+   detalle completo, en cambio, las lleva a todas — para eso está la columna
+   Tipo_Registro. */
+function filasBBVA(soloEntrega){
+  const cs = soloEntrega ? cartera().filter(c => !esClienteNuevo(c)) : cartera();
+  return cs.map(c => filaComercio(c, soloEntrega));
+}
+
+/* ---- La celda de comentario nunca llega vacía --------------------------
+
+   BBVA pide que cada comercio traiga un comentario. Hasta hoy, si nadie
+   escribió nada en ninguna gestión, la celda salía en blanco y el banco leía
+   una fila muda: no sabía si el caso está trabado, si el cliente no contesta
+   o si simplemente nadie anotó.
+
+   Lo que NO se hace: escribir este texto en la base. El comentario del
+   ejecutivo es su palabra —lo que él vio y decidió contar— y un texto que el
+   CRM guarde en ese campo queda indistinguible del suyo. Al mes siguiente
+   nadie podría decir cuál frase escribió una persona y cuál compuso el
+   sistema, y esa es justo la diferencia que sostiene el informe.
+
+   Lo que sí se hace: componerlo AL EXPORTAR, con hechos que ya están en la
+   línea de tiempo —cuántos intentos, por qué medio, si el cliente contestó,
+   si el ejecutivo del banco contestó— y decir en la propia celda que se
+   dedujo. El banco recibe una explicación; nadie recibe una frase inventada
+   con firma ajena.
+
+   Si mañana el ejecutivo escribe su comentario, el suyo manda y esto
+   desaparece solo: no hay nada que limpiar. */
+const MARCA_DEDUCIDO = "Sin comentario del ejecutivo · ";
+
+/* Lo que va en la columna que lee el banco, por orden de quién lo dijo.
+ *
+ * La primera versión de esto saltaba de «no hay comentario del cliente» a la
+ * frase deducida, y tapaba con texto de máquina 467 comercios donde el
+ * ejecutivo SÍ había escrito algo —«Aviso de visita y solicitud de reunión»—
+ * solo porque lo había escrito en la otra columna. Casi todos eran de Juan y
+ * de Vanessa, que anotan lo que hicieron ellos y dejan vacío lo que dijo el
+ * cliente, que es razonable cuando el cliente no dijo nada.
+ *
+ * El orden es por autoría, de la más cercana al hecho a la más lejana:
+ *   1. lo que dijo el cliente;
+ *   2. si no, lo que escribió el ejecutivo —rotulado, porque en esa columna
+ *      sin rótulo se leería como palabra del cliente—;
+ *   3. si no hay ninguno, lo que el CRM deduce, marcado como deducido.
+ *
+ * Una frase escrita por una persona siempre vale más que una compuesta por
+ * el sistema, aunque esté en la casilla de al lado. */
+function comentarioParaBanco(c, regs, efectivos){
+  const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+  const delCliente = ultimo("Comentario_Cliente");
+  if (delCliente) return delCliente;
+  const delEjecutivo = ultimo("Comentario_Ejecutivo");
+  if (delEjecutivo) return "Del ejecutivo: " + delEjecutivo;
+  return MARCA_DEDUCIDO + relatoCliente(c, regs, efectivos);
+}
+
+/* Lo que le pasó al comercio con el CLIENTE, en una frase. */
+function relatoCliente(c, regs, efectivos){
+  if (!regs.length) return "Todavía no se registra ningún contacto con el comercio.";
+  const ult = regs[0];                       // regs viene del más reciente al más antiguo
+  const cuando = fmtFecha(ult.Fecha_Contacto);
+  const medio = nomTipo(ult.Tipo_Contacto).toLowerCase();
+  const n = regs.length;
+  const veces = n === 1 ? "1 intento" : `${n} intentos`;
+
+  if (!efectivos.length)
+    return `El cliente no responde: ${veces}, el último por ${medio} el ${cuando}.`;
+
+  const resp = efectivos[0];
+  return `El cliente respondió el ${fmtFecha(resp.Fecha_Contacto)} por `
+       + `${nomTipo(resp.Tipo_Contacto).toLowerCase()} (${veces} en total).`;
+}
+
+/* El estado del caso completo: el cliente, el banco y en qué quedó. */
+function relatoCaso(c, regs, efectivos){
+  const partes = [];
+  const cierre = c.resultado_gestion || "PENDIENTE";
+  const fechaCierre = c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "";
+
+  if (cierre === "VENTA")
+    partes.push(`Venta cerrada${fechaCierre ? " el " + fechaCierre : ""} tras ${regs.length} contacto${regs.length===1?"":"s"}.`);
+  else if (cierre === "RETENIDO")
+    partes.push(`Comercio retenido${fechaCierre ? " el " + fechaCierre : ""} tras ${regs.length} contacto${regs.length===1?"":"s"}.`);
+  else if (cierre === "PERDIDO")
+    partes.push(`No se retuvo${c.motivo_no_retencion ? ": " + nomMotivo(c.motivo_no_retencion).toLowerCase() : ""}. ${relatoCliente(c, regs, efectivos)}`);
+  else
+    partes.push(relatoCliente(c, regs, efectivos));
+
+  /* La otra mitad de la historia: muchas veces el caso no avanza porque el
+     ejecutivo del banco no ha contestado, y sin esto el informe lo lee como
+     si el atasco fuera de Stratis. */
+  const k = bbvaDe(c.customer_id);
+  if (k.n && !k.respondio){
+    const ultima = k.ultima ? fmtFecha(k.ultima.Fecha_Contacto) : "";
+    /* «coordinaciones», sin tilde: el plural la pierde. */
+    partes.push(`El ejecutivo de BBVA no ha respondido: ${k.n === 1 ? "1 coordinación" : k.n + " coordinaciones"}`
+              + `${ultima ? ", la última el " + ultima : ""}.`);
+  }
+  if (!k.n && !regs.length)
+    return "Sin gestiones ni coordinación con el banco registradas.";
+
+  return partes.join(" ");
+}
+
+/* La fila de un comercio, sea de la cartera de BBVA o un RUC que trajo Stratis.
+
+   Antes había dos armadores distintos: este y uno propio para los clientes
+   nuevos, con trece columnas de su invención. La consecuencia era que las dos
+   hojas no se podían cruzar —ni una dinámica ni un apilado— porque no
+   compartían ni un nombre de columna. Ahora el ciclo es el mismo, así que la
+   fila también: cambia la llave, no el esquema. */
+function filaComercio(c, soloEntrega){
+    const esNuevo = esClienteNuevo(c);   // por tipo_registro o por llevar un RUC de llave
+    const regs = DB.delCliente(c.customer_id);              // del más reciente al más antiguo
+    const efectivos = regs.filter(r => esEfectivo(r.Resultado));
+    const cumplidas = regs.filter(r => r.Cumple_Visita === "SI");
+    // El comentario más reciente que exista, aunque venga de una gestión anterior
+    const ultimo = campo => (regs.find(r => String(r[campo] || "").trim()) || {})[campo] || "";
+    const nPresencial = regs.filter(r => ES_PRESENCIAL(r.Tipo_Contacto)).length;
+    const nLlamada    = regs.filter(r => r.Tipo_Contacto === "llamada").length;
+    const nVirtual    = regs.filter(r => ES_VIRTUAL(r.Tipo_Contacto)).length;
+    const nWhatsapp   = regs.filter(r => r.Tipo_Contacto === "whatsapp").length;
+    const nCorreo     = regs.filter(r => r.Tipo_Contacto === "correo").length;
+    const suma = nPresencial + nLlamada + nVirtual + nWhatsapp + nCorreo;
+    const g = RESULTADOS_GESTION.find(x => x.id === (c.resultado_gestion || "PENDIENTE"));
+
+    /* Lo que se entrega al banco */
+    const entrega = [
+      /* La llave: el Customer ID de BBVA, o el RUC cuando el comercio todavía
+         no está afiliado y por eso no tiene uno. */
+      esNuevo ? rucDe(c) : c.customer_id,
+      gestionCumplida(c) ? "SI" : "NO",                     // ¿se cumplió el objetivo?
+      /* La columna que lee BBVA: lo dicho por el cliente, si no lo escrito
+         por el ejecutivo, si no lo deducido. Nunca vacía, nunca sin autor. */
+      comentarioParaBanco(c, regs, efectivos),
+      nPresencial,
+      nLlamada,
+      regs[0] ? fmtFecha(regs[0].Fecha_Contacto) : "",
+      efectivos.length ? fmtFecha(efectivos[0].Fecha_Contacto) : "",
+      c.direccion || "",
+      efectivos.length ? "SI" : "NO",
+      cumplidas.length ? "SI" : "NO",
+      cumplidas.length ? fmtFecha(cumplidas[0].Fecha_Contacto) : "",
+      regs.length,                                          // Intentos_Totales
+      tipoCierre(c),
+      c.estado || "",
+      c.cerrado_en ? fmtFecha(String(c.cerrado_en).slice(0,10)) : "Sin cerrar",
+      c.resultado_gestion === "PERDIDO" ? (nomMotivo(c.motivo_no_retencion) || "Sin indicar") : "",
+      c.asignado || ""
+    ];
+    if (soloEntrega) return entrega;
+
+    /* El resto de la gestión, para el análisis de Stratis.
+
+       Se arma por NOMBRE y no por posición. Antes era una lista de valores
+       que tenía que coincidir, uno a uno y en el mismo orden, con la lista de
+       encabezados: bastaba mover una columna para que toda la hoja quedara
+       corrida y con los datos en la columna equivocada —sin que nada fallara,
+       que es lo peor—. Ahora el orden lo manda COLS_DETALLE y los valores se
+       buscan por su nombre. Reordenar es mover una línea. */
+    const det = {
+      Tipo_Registro:   tipoRegistro(c),
+      Origen_Marcado:  origenMarcado(c),
+      Nombre_Comercio: titulo(c.nombre_comercio || ""),
+      Rubro:           rubroLabel(c),
+      Distrito:        titulo(c.distrito || ""),
+      Fecha_Alta:      String(c.creado_en || "").slice(0,10),
+      Contacto_BBVA:   esNuevo ? "" : (nomContactoBBVA(c.contacto_bbva) || "Sin indicar"),
+
+      Estado_Contacto:      estadoContacto(regs.length, efectivos.length),
+      Respuestas_del_Cliente: efectivos.length,
+      Sin_Respuesta:        regs.length - efectivos.length,
+      Tasa_Respuesta:       regs.length ? Math.round(efectivos.length / regs.length * 10000) / 10000 : "",
+      Reuniones_Virtuales:  nVirtual,
+      WhatsApp:             nWhatsapp,
+      Correos:              nCorreo,
+      Suma_por_Medio:       suma,
+      Cuadra:               suma === regs.length ? "SI" : "REVISAR",
+      Visitas_Validas:      cumplidas.length,
+      Visita_Presencial:    nPresencial > 0 ? "SI" : "NO",
+      Visita_Virtual:       nVirtual    > 0 ? "SI" : "NO",
+      Medio_con_Respuesta:  efectivos.length ? nomTipo(efectivos[0].Tipo_Contacto) : "Sin respuesta",
+      Medio_Cumple_Visita:  cumplidas.length ? nomTipo(cumplidas[0].Tipo_Contacto) : "Sin visita válida",
+      Ultimo_Resultado:     regs[0] ? nomResultado(regs[0].Resultado) : "Sin gestiones",
+
+      Resultado_Gestion:    g ? g.label : "",
+      Calificacion:         ultimo("Calificacion") || "Sin calificar",
+      /* Misma regla del lado de Stratis: la celda no queda muda, pero se ve
+         a simple vista cuál frase escribió una persona y cuál dedujo el CRM
+         —filtrando por «Sin comentario del ejecutivo» sale quién no anota—. */
+      Comentario_Ejecutivo: ultimo("Comentario_Ejecutivo") || (MARCA_DEDUCIDO + relatoCaso(c, regs, efectivos)),
+      Alertas:              alertasDe(c, regs, efectivos, suma)
+    };
+    /* La última gestión sale de la MISMA función que usa el CRM en pantalla y
+       en el embudo del deck. No se recalcula acá: si se recalculara, esta hoja
+       sería un cuarto lugar donde la palabra «gestión» puede significar otra
+       cosa, que es exactamente el problema que estas columnas vienen a cerrar.
+       El medio va con su nombre en español, el mismo que el resto de la hoja. */
+    const ug = ultimaGestionDe(c, DB.historiaDe(c.customer_id));
+    det.Ultima_Gestion        = ug.categoria;
+    det.Ultima_Gestion_Fecha  = ug.dia;
+    det.Ultima_Gestion_Medio  = ug.medio ? nomTipo(ug.medio) : "";
+    det.Cuenta_Como_Gestion   = ug.cuenta;
+    Object.assign(det, coordBBVA(c));
+    return entrega.concat(COLS_DETALLE.map(k => det[k] === undefined ? "" : det[k]));
+}
+
+/* Lo que hay que revisar en esta fila, en una sola celda. Filtrando esta columna
+   se ve de un vistazo qué le falta a la base, sin tener que cruzar nada a mano.
+   Vacía quiere decir que la fila está completa. */
+function alertasDe(c, regs, efectivos, suma){
+  const a = [];
+  const hoy = hoyISO();
+  if (regs.some(r => r.Fecha_Contacto > hoy))            a.push("Fecha futura");
+  if (c.cerrado_en && String(c.cerrado_en).slice(0,10) > hoy) a.push("Cierre con fecha futura");
+  if (c.resultado_gestion === "PERDIDO" && !c.motivo_no_retencion) a.push("Perdido sin motivo");
+  if (!regs.length)                                      a.push("Sin gestiones");
+  if (suma !== regs.length)                              a.push("Los medios no cuadran");
+  if (efectivos.length && !regs.some(r => String(r.Calificacion || "").trim())) a.push("Respondió sin calificar");
+  if (/^\d+$/.test(String(c.nombre_comercio || "").trim())) a.push("El nombre parece un RUC");
+  if (!esClienteNuevo(c) && !c.contacto_bbva) a.push("Sin indicar el contacto con BBVA");
+  if (origenNoCuadra(c)) a.push("Se marcó como cartera pero el identificador es un RUC");
+  return a.join(" · ");
+}
+
+/* La hoja de clientes nuevos usa EL MISMO esquema que la de la cartera, con
+   una sola diferencia: la primera columna es el RUC y no el Customer ID,
+   porque un comercio que todavía no está afiliado no tiene uno.
+
+   Mismo orden, mismos nombres, misma cantidad. Una dinámica armada sobre una
+   hoja funciona sobre la otra, y las dos se pueden apilar renombrando ese
+   único encabezado. La razón social viaja en «Nombre_Comercio», que es donde
+   el alta la guarda. */
+/* La hoja de ventas nuevas se retiró: sus filas viven en la Base, marcadas en
+   Tipo_Registro. Una sola hoja, una sola dinámica, y ningún comercio que se
+   quede fuera por estar en la pestaña equivocada. Lo que sigue existiendo es
+   el CSV filtrado, para quien solo quiera ese subconjunto. */
+const COLS_NUEVOS = COLS_BASE_BBVA;
+function filasNuevos(){
+  return cartera().filter(esClienteNuevo).map(c => filaComercio(c, false));
+}
+
+/* Convierte una columna en fórmula viva. Un porcentaje escrito como número se
+   queda congelado: si mañana se filtra, se reordena o se pega en otra hoja,
+   sigue diciendo lo mismo aunque sus dos factores hayan cambiado. Como fórmula,
+   se recalcula solo y además se ve de dónde sale. */
+function columnaFormula(ws, cols, filas, nombre, arma, tipo){
+  const i = cols.indexOf(nombre);
+  if (i < 0) return;
+  const L = n => XLSX.utils.encode_col(cols.indexOf(n));
+  filas.forEach((_, f) => {
+    const ref = XLSX.utils.encode_col(i) + (f + 2);
+    const celda = ws[ref];
+    if (!celda) return;
+    const fx = arma(L, f + 2);
+    /* El tipo importa: una fórmula que devuelve texto marcada como número
+       abre el archivo con la celda en blanco hasta que Excel recalcula, y en
+       una columna de «Sí / No» eso se lee como un dato que falta. */
+    if (fx) { celda.f = fx; celda.t = tipo === "s" ? "s" : "n"; }
+  });
+}
+
+/* Aplica formato de porcentaje a las columnas que lo son, buscándolas por
+   nombre. Antes iban por letra fija y bastaba agregar una columna al medio
+   para que el formato terminara en la de al lado. */
+function formatoPorcentaje(ws, cols, filas, nombres){
+  nombres.forEach(n => {
+    const i = cols.indexOf(n);
+    if (i < 0) return;
+    const letra = XLSX.utils.encode_col(i);
+    filas.forEach((_, f) => {
+      const celda = ws[letra + (f + 2)];
+      if (celda && typeof celda.v === "number") celda.z = "0.0%";
+    });
+  });
+}
+
+function hojaBBVA(){
+  const cols  = COLS_BASE_BBVA;
+  const filas = filasBBVA(false);
+  const ws = hoja(cols, filas);
+  ws["!cols"] = cols.map(c => ({ wch: /Comentario/.test(c) ? 46 : Math.min(30, Math.max(11, c.length + 3)) }));
+  /* Las doce del banco quedan fijas al desplazarse: el bloque de Stratis es
+     largo y sin esto uno se pierde de qué comercio está mirando. */
+  ws["!freeze"] = { xSplit: 1, ySplit: 1 };
+  columnaFormula(ws, cols, filas, "Tasa_Respuesta",
+    (L, f) => `IFERROR(${L("Respuestas_del_Cliente")}${f}/${L("Intentos_Totales")}${f},0)`);
+  columnaFormula(ws, cols, filas, "Suma_por_Medio",
+    (L, f) => `${L("Visitas")}${f}+${L("Llamadas")}${f}+${L("Reuniones_Virtuales")}${f}+${L("WhatsApp")}${f}+${L("Correos")}${f}`);
+  columnaFormula(ws, cols, filas, "Sin_Respuesta",
+    (L, f) => `${L("Intentos_Totales")}${f}-${L("Respuestas_del_Cliente")}${f}`);
+
+  formatoPorcentaje(ws, cols, filas, ["Tasa_Respuesta"]);
+  return ws;
+}
+
+async function exportarBBVA(btn){
+  if (!window.XLSX) return toast("La librería de Excel aún no cargó, intenta de nuevo");
+  if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
+  try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
+  const wb = XLSX.utils.book_new();
+  /* Una sola hoja. La Base trae primero lo que se entrega al banco y a
+     continuación el resto de la gestión, para que sea un solo pegado: es en el
+     archivo de BBVA donde se cruza contra su base y se arman las dinámicas. */
+  XLSX.utils.book_append_sheet(wb, hojaBBVA(), "Base");
+  XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
+  if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
+  const nRet   = cartera().filter(c => !esClienteNuevo(c)).length;
+  const nVenta = cartera().filter(esClienteNuevo).length;
+  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta`);
+}
+
+function hojaReporte(admin){
+  const base = cartera();
+  base.forEach(c => RULES.recomputarBase(c.customer_id));
+  /* Si un comercio quedara sin su base recalculada —un id repetido, una fila
+     a medio migrar— esto reventaba y se llevaba el archivo entero por delante.
+     Once hojas perdidas por una fila rara no es un intercambio razonable. */
+  const cont = base.filter(c => (c._base || {})._efectivos > 0).length;
+  const regs = DB.todos();
+  const ef = regs.filter(r => esEfectivo(r.Resultado)).length;
+  const filas = [["CRM Stratis — Campaña BBVA Adquirencia"], [],
+    ["Generado", fmtLima(new Date()) + " (hora de Lima)"],
+    ["Generado por", (S.user.nombreCompleto || S.user.nombre) + " (" + S.user.correo + ")"],
+    ["Perfil", S.user.rol],
+    ["Alcance del archivo", admin ? "Campaña completa — todos los ejecutivos" : "Cartera propia únicamente"], [],
+    ["Comercios registrados", base.length],
+    ["Comercios contactados", cont],
+    ["% de la cartera que respondió", base.length ? Math.round(cont/base.length*100) + "%" : "0%"],
+    ["Intentos de comunicación", regs.length],
+    ["Contactos efectivos", ef],
+    ["% Tasa de respuesta", regs.length ? Math.round(ef/regs.length*100) + "%" : "0%"], [],
+    ["CIERRE DE LA GESTIÓN"],
+    ["Retenidos", base.filter(c => c.resultado_gestion === "RETENIDO").length],
+    ["Ventas", base.filter(c => c.resultado_gestion === "VENTA").length],
+    ["Perdidos", base.filter(c => c.resultado_gestion === "PERDIDO").length],
+    ["Pendientes", base.filter(c => (c.resultado_gestion || "PENDIENTE") === "PENDIENTE").length],
+    ["Objetivo cumplido (Gestión = SI)", base.filter(gestionCumplida).length],
+    ["% Avance sobre la cartera", base.length ? Math.round(base.filter(gestionCumplida).length/base.length*100) + "%" : "0%"],
+    ["% Efectividad de cierre", (() => {
+      const cum = base.filter(gestionCumplida).length;
+      const dec = cum + base.filter(c => c.resultado_gestion === "PERDIDO").length;
+      return dec ? Math.round(cum/dec*100) + "%" : "—";
+    })()],
+    ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
+    ["Visitas efectivas", regs.filter(r => r.Cumple_Visita === "SI").length],
+    [],
+    ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
+    ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
+    ["", "La ubicación capturada no puede modificarse una vez guardada."]];
+  return XLSX.utils.aoa_to_sheet(filas);
+}
+
+/* ---- Exportación principal, según el rol ------------------------------- */
+async function exportarExcel(btn){
+  if (!window.XLSX) return toast("La librería de Excel aún no cargó, intenta de nuevo");
+  const admin = S.user.rol !== "Ejecutivo";
+  if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
+
+  if (admin && !S.demo){
+    try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
+  }
+
+  /* Todo lo que sigue va dentro de un try: si algo falla, el botón vuelve a su
+     estado y se dice qué pasó. Un «Generando…» eterno es peor que un error,
+     porque no se sabe si hay que esperar o si el archivo no va a llegar. */
+  try {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_BASE, filasBase()), "Base");
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_COORD, filasCoordinaciones()), "Coordinación BBVA");
+
+  if (admin){
+    XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
+    XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
+    XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
+    /* Ojo con el nombre: esta hoja y la primera se llamaban «Base» las dos, y
+       Excel no admite dos hojas con el mismo nombre. La librería lanzaba, la
+       excepción se escapaba sin que nadie la atrapara y el botón se quedaba
+       en «Generando…» para siempre. Doce hojas perdidas por una palabra. */
+    XLSX.utils.book_append_sheet(wb, hojaBBVA(),          "Base para BBVA");
+    XLSX.utils.book_append_sheet(wb, hojaRubros(),         "Rubros");
+    XLSX.utils.book_append_sheet(wb, hojaUsuarios(),       "Usuarios");
+    XLSX.utils.book_append_sheet(wb, hojaBitacora(),      "Bitácora");
+  }
+  XLSX.utils.book_append_sheet(wb, hojaReporte(admin), "Reporte");
+
+  const hoy = hoyISO().replace(/-/g,"");
+  const quien = admin ? "Completo" : S.user.nombre.replace(/\s+/g,"_");
+  XLSX.writeFile(wb, `CRM_BBVA_${quien}_${hoy}.xlsx`);
+  toast(admin ? `Excel completo generado · ${wb.SheetNames.length} hojas`
+              : "Excel de tu cartera generado · 3 hojas");
+  } catch (e){
+    toast("No se pudo generar el Excel: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt || "Descargar Excel completo"; }
+  }
+}
+
+function exportarCSV(que){
+  try {
+  const mapa = { base:[COLS_BASE, filasBase(), "Base"],
+                 visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
+                 coord:[COLS_COORD, filasCoordinaciones(), "Coordinacion_BBVA"],
+                 bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
+                 nuevos:[COLS_NUEVOS, filasNuevos(), "Ventas_nuevas"] };
+  const [cols, filas, nombre] = mapa[que];
+  const q = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  const csv = "\ufeff" + [cols.map(q).join(";")].concat(filas.map(f => f.map(q).join(";"))).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type:"text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `${nombre}_StratisCRM.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  toast(`${nombre} exportado`);
+  } catch (e){ toast("No se pudo generar el CSV: " + (e.message || e)); }
+}
+
+/* =========================================================================
+   Ajustes
+
+   La pantalla se organiza en secciones con un propósito cada una —tu cuenta,
+   descargas, equipo, bitácora, cómo funciona— en vez de una pila de tarjetas
+   del mismo peso. Lo accionable (los botones) queda arriba y a la vista; la
+   letra chica, que antes eran párrafos azules apilados, vive plegada.
+   ========================================================================= */
+
+function ajSeccion(titulo, bajada, cuerpo, clase){
+  return `<section class="aj-sec ${clase || ""}">
+    <div class="aj-h"><h2>${titulo}</h2>${bajada ? `<span>${bajada}</span>` : ""}</div>
+    ${cuerpo}
+  </section>`;
+}
+
+function ajFilaDescarga(titulo, desc, idBoton, textoBoton, csv){
+  return `<div class="aj-dl">
+    <div class="txt"><b>${titulo}</b><div>${desc}</div></div>
+    <button class="btn" id="${idBoton}">${textoBoton}</button>
+    ${csv ? `<div class="aj-csv">${csv.map(c =>
+        `<button class="btn ghost sm" data-exp="${c[0]}">${c[1]}</button>`).join("")}</div>` : ""}
+  </div>`;
+}
+
+function viewAyuda(){
+  const admin = S.user.rol !== "Ejecutivo";
+  const yo = S.user;
+
+  /* ---- Tu cuenta -------------------------------------------------------- */
+  const alcance = yo.rol === "Ejecutivo"
+    ? `Ves <b>${cartera().length}</b> comercios: los tuyos. La base rechaza cualquier consulta fuera de tu cartera.`
+    : `Ves la campaña completa: <b>${cartera().length}</b> comercios y <b>${DB.todos().length}</b> gestiones de todo el equipo.`;
+
+  const cuenta = `
+  <div class="aj-grid${S.demo ? " una" : ""}">
+    <div class="card">
+      <div class="aj-yo">
+        <span class="av" style="background:${userColor(yo.nombre)}">${iniciales(yo.nombre)}</span>
+        <div class="quien">
+          <b>${esc(yo.nombreCompleto || yo.nombre)}</b>
+          <div>${esc(yo.correo)}</div>
+        </div>
+        <span class="chip ${yo.rol === "Ejecutivo" ? "no" : "info"}">${esc(yo.rol)}</span>
+      </div>
+      <div class="note ok" style="margin:13px 0">${alcance}</div>
+      <div class="aj-acc">
+        <button class="btn ghost sm" id="recargar">Actualizar datos</button>
+        <button class="btn ghost sm" id="salir">Cerrar sesión</button>
+      </div>
+      ${S.demo ? `<div class="note warn" style="margin-top:11px"><b>Modo demostración.</b> Nada se guarda: al recargar la página se pierde todo.</div>` : ""}
+    </div>
+
+    ${S.demo ? "" : `<div class="card">
+      <h3>Tu contraseña</h3>
+      <div style="font-size:12.8px;color:var(--muted);margin:-3px 0 12px;line-height:1.5">
+        Cámbiala cuando quieras. Solo afecta a tu cuenta y no hace falta correo de confirmación.
+      </div>
+      <div class="field campo-corto">
+        <label for="nc1">Nueva contraseña <span class="hint">— mínimo 8 caracteres</span></label>
+        <input type="password" id="nc1" autocomplete="new-password">
+      </div>
+      <div class="field campo-corto">
+        <label for="nc2">Repítela</label>
+        <input type="password" id="nc2" autocomplete="new-password">
+      </div>
+      <button class="btn ghost limitado" id="guardarNuevaClave">Guardar contraseña</button>
+    </div>`}
+  </div>`;
+
+  /* ---- Descargas -------------------------------------------------------- */
+  const descargas = !admin ? "" : `
+  <div class="card">
+    ${ajFilaDescarga(
+      "Base para BBVA",
+      "Una sola hoja: la Base, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro.",
+      "expBBVA", "Descargar para BBVA",
+      [["bbva","Base para BBVA en CSV"],["nuevos","Ventas nuevas en CSV"]])}
+
+    ${ajFilaDescarga(
+      "La campaña completa",
+      "13 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
+      "expXlsx", "Descargar Excel completo",
+      [["base","Base en CSV"],["visitas","Visitas en CSV"],["coord","Coordinación BBVA en CSV"]])}
+
+    <details class="aj-mas">
+      <summary>Qué trae cada archivo y cómo se pega</summary>
+      <div class="cuerpo">
+        <p><b>Base para BBVA</b> trae dos hojas. La hoja <b>Base</b> tiene una fila por comercio
+        de la cartera: primero las <b>17 columnas que se entregan al banco</b>, y a continuación
+        el resto de la gestión completa, para el análisis de Stratis. Es un solo pegado.</p>
+        <p>Las 17 de entrega son: customer_id, Gestión, Comentario de Cliente, Visitas, Llamadas,
+        Fecha_Ultima_Gestion, Fecha_Ultima_Respuesta, Direccion_Actual, Contactado (Si/No),
+        Cumple_Visita, Fecha_Visita, Intentos_Totales, Tipo_Cierre, Estado_Comercio, Fecha_Cierre,
+        Motivo_No_Retencion y Ejecutivo_Asignado. <b>De la 18 en adelante es material interno</b> y
+        no se pega en el banco.</p>
+        <p>De la 18 en adelante las columnas siguen <b>el orden en que ocurren las cosas</b>, para
+        que la fila se lea de izquierda a derecha como se lee el caso:</p>
+        <p><b>1)</b> quién es el comercio y en qué punto está · <b>2)</b> la coordinación con el
+        ejecutivo de BBVA —cuántos contactos, el 1.º y el 2.º con su medio, si respondió, en qué
+        fecha, cuántos intentos y cuántos días tardó, y si quedó un chat sin su correo de respaldo—
+        · <b>3)</b> el contacto con el cliente · <b>4)</b> en qué quedó · y al final, las alertas
+        de la fila.</p>
+        <p>La negociación no tiene bloque propio a propósito: no todos los casos negocian, y los que
+        lo hacen pueden volver al banco por una tasa o un POS. Ese ida y vuelta se cuenta en
+        <b>BBVA_Contactos_En_Negociacion</b>, dentro del bloque del banco, en vez de abrir columnas
+        que quedarían vacías en la mayoría de las filas.</p>
+        <p>Todo eso es una fila por comercio. Si necesitas dinamizar <b>contacto por contacto</b>,
+        esa está en la hoja <b>Coordinación BBVA</b> del archivo completo.</p>
+        <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
+        pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
+        o virtual y además el cliente respondió. <b>Volumen_Comercio</b> no sale: esa columna la
+        maneja el banco y el pegado no la toca.</p>
+        <p><b>Intentos_Totales</b> incluye WhatsApp y correo, que son la mayor parte del esfuerzo
+        y antes no viajaban. Sirve además para leer bien el NO de Contactado: en cero es cobertura
+        pendiente, sobre cero es que el cliente no responde. <b>Tipo_Cierre</b> separa el comercio
+        activo que se quedó (Retenido) del que estaba de baja y volvió (Recuperado), que para el
+        banco no valen lo mismo.</p>
+        <p><b>Coordinación BBVA</b> es la hoja nueva, y va <b>solo en el archivo interno</b>: una
+        fila por cada contacto con el ejecutivo del banco, con su medio, su motivo, si respondió y
+        en qué número de contacto llegó la respuesta. Es la que se dinamiza para preguntar cuántos
+        intentos hicieron falta, qué medio obtiene más respuesta o cuántos chats quedaron sin su
+        correo de respaldo. No se pega en el banco: cuántas veces le insistimos a su ejecutivo es
+        cómo trabaja Stratis por dentro, no parte de lo que se entrega.</p>
+        <p><b>Las ventas nuevas</b> son los comercios que trae Stratis, identificados por RUC. Como el banco todavía no las
+        tiene afiliadas, van identificadas por RUC y razón social. Ahí Gestión sale siempre SI:
+        la derivación ya cuenta como venta, y siempre trae la gestión que la cerró, porque el
+        CRM no deja registrar una sin la otra.</p>
+        <p>El <b>Excel completo</b> trae Base, Visitas, Avance por ejecutivo, Cartera asignada,
+        Tasa de respuesta, Base para BBVA, Rubros, Usuarios, Bitácora
+        y Reporte. La hoja <b>Visitas</b> es la que trae una fila por gestión: es la fuente para
+        cualquier tabla dinámica por medio, por fecha o por resultado.</p>
+      </div>
+    </details>
+  </div>`;
+
+  /* ---- Bitácora --------------------------------------------------------- */
+  const bitacora = !admin ? "" : `
+  <div class="card">
+    ${AUDITORIA.length ? (() => {
+      const q = (S.qBit || "").trim().toLowerCase();
+      let lista = AUDITORIA;
+      if (S.fBitAccion !== "todos") lista = lista.filter(a => a.accion === S.fBitAccion);
+      if (S.fBitQuien !== "todos")  lista = lista.filter(a => autorCambio(a) === S.fBitQuien);
+      if (q) lista = lista.filter(a =>
+        String(a.comercio||"").toLowerCase().includes(q) ||
+        String(a.customer_id||"").toLowerCase().includes(q) ||
+        String(autorCambio(a)).toLowerCase().includes(q) ||
+        String(a.ejecutivo||"").toLowerCase().includes(q) ||
+        resumenAuditoria(a).toLowerCase().includes(q));
+      const quienes = [...new Set(AUDITORIA.map(autorCambio).filter(n => n && n !== "—"))].sort();
+      const mostrar = lista.slice(0, S.limiteBit);
+      const filtrando = q || S.fBitAccion !== "todos" || S.fBitQuien !== "todos";
+      const op = (valor, todos, items) =>
+        `<option value="todos"${valor==="todos"?" selected":""}>${todos}</option>` +
+        items.map(([v,l]) => `<option value="${esc(v)}"${valor===v?" selected":""}>${esc(l)}</option>`).join("");
+      return `
+      <div class="filtros" style="margin-bottom:12px">
+        <div class="search"><span class="mag">⌕</span>
+          <input type="search" id="qBit" placeholder="Buscar por comercio, persona o cambio…" value="${esc(S.qBit||"")}"></div>
+        <div class="sel-row">
+          <label class="fsel"><span>Acción</span>
+            <select data-fbit="accion">${op(S.fBitAccion, `Todo · ${AUDITORIA.length}`, [
+              ["editar", `Ediciones · ${AUDITORIA.filter(a=>a.accion==="editar").length}`],
+              ["eliminar", `Eliminaciones · ${AUDITORIA.filter(a=>a.accion==="eliminar").length}`]])}</select></label>
+          <label class="fsel"><span>Quién</span>
+            <select data-fbit="quien">${op(S.fBitQuien, "Todo el equipo",
+              quienes.map(n => [n, `${n} · ${AUDITORIA.filter(a=>autorCambio(a)===n).length}`]))}</select></label>
+        </div>
+      </div>
+      ${mostrar.length ? `<div class="caja-scroll" id="cajaBit"><table class="tbl" id="tblBitacora">
+        <thead><tr><th>Cuándo</th><th>Quién</th><th>Acción</th><th>Comercio</th><th>Cambio</th></tr></thead>
+        <tbody>${mostrar.map(a => `<tr>
+          <td style="white-space:nowrap">${fmtFecha(String(a.creado_en).slice(0,10))}<div style="font-size:11px;color:var(--muted)">${String(a.creado_en).slice(11,16)}</div></td>
+          <td>${esc(autorCambio(a))}${duenoDistinto(a)
+            ? `<div style="font-size:11px;color:var(--muted)">gestión de ${esc(duenoDistinto(a))}</div>` : ""}</td>
+          <td><span class="chip ${a.accion==="eliminar"?"crit":"warn"}">${a.accion==="eliminar"?"Eliminó":"Editó"}</span>
+              <div style="font-size:11px;color:var(--muted)">${a.tabla==="clientes"?"Comercio":"Registro"}</div></td>
+          <td>${esc(a.comercio||a.customer_id||"—")}</td>
+          <td style="font-size:12px">${esc(resumenAuditoria(a))}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="note">Ningún cambio coincide con lo que buscas.</div>`}
+      <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <span style="font-size:12.5px;color:var(--muted)">
+          ${mostrar.length} de ${lista.length}${filtrando ? ` (${AUDITORIA.length} en total)` : ""}</span>
+        ${lista.length > mostrar.length ? `<button class="btn ghost sm" id="masBit">Ver ${Math.min(25, lista.length - mostrar.length)} más</button>` : ""}
+        ${filtrando ? `<button class="btn ghost sm" id="limpiarBit">Quitar filtros</button>` : ""}
+        <span style="font-size:12px;color:var(--muted);margin-left:auto">La lista se desliza dentro del recuadro · el Excel trae la bitácora completa</span>
+      </div>
+      <details class="aj-mas">
+        <summary>Qué queda registrado</summary>
+        <div class="cuerpo"><p>Cada edición y cada eliminación, con quién la hizo, cuándo y qué
+        cambió. Los ejecutivos no la ven.</p>
+        <p><b>«Quién» es quien tocó el botón</b>, no de quién es la gestión. Cuando supervisión
+        corrige el registro de un ejecutivo, el cambio figura a nombre de supervisión y debajo dice
+        de quién sigue siendo la gestión —que no cambia de dueño por haber sido corregida—.</p>
+        <p>El ejecutivo puede corregir el medio y el resultado de lo suyo durante
+        ${DIAS_CORRECCION} días trabajados desde que lo registró; después, solo supervisión. La
+        <b>ubicación no se edita nunca</b>: la única salida es eliminar el registro y volver a
+        crearlo desde el local, y esa eliminación aparece acá con el detalle de lo que se borró.</p></div>
+      </details>`;
+    })()
+      : `<div class="note ok">Todavía no hay ediciones ni eliminaciones registradas. Cuando alguien
+         edite o elimine algo, aparecerá acá con el detalle de lo que cambió.</div>`}
+  </div>`;
+
+  /* ---- Cómo funciona ---------------------------------------------------- */
+  const reglas = [
+    ["Registrar", "Solo los ejecutivos dan de alta comercios y registran gestiones; el Analista y el Manager supervisan"],
+    ["Alta de comercios", "La hace el ejecutivo en campo; el customer_id es único en toda la campaña"],
+    ["Venta", "Se guarda junto con la gestión que la cerró, en una sola transacción. El medio debe ser presencial o virtual"],
+    ["Gestión = SI", "Solo con al menos un contacto logrado sobre ese comercio. Un comercio activo cierra como <b>retención</b>; uno dado de baja, como <b>venta</b> si se recuperó"],
+    ["Cumple_Visita", "SI solo si el contacto fue presencial o virtual <b>y</b> se logró hablar"],
+    ["Intentos", "Todo registro cuenta como intento, aunque sea el cuarto con el mismo comercio"],
+    ["Ubicación", "Obligatoria en contactos presenciales y <b>no modificable</b> una vez guardada"],
+    ["Respaldo de la gestión", "El GPS de la visita, lo que dijo el cliente y la fecha, que no puede ser futura. La foto de evidencia se retiró en agosto de 2026"],
+    ["Datos sensibles", "No se guardan teléfonos, correos ni personas de contacto. De la cartera de BBVA tampoco razón social ni RUC; de un cliente nuevo solo esos dos, para identificar la venta"],
+    ["Dominio permitido", "@" + CONFIG.dominio],
+    ["Zona horaria", "America/Lima — fechas, horas y plazos se calculan en hora de Lima"],
+    /* Se dice acá a propósito. Los viáticos se retiraron del CRM en agosto de
+       2026 y la pregunta «¿dónde cargo el taxi?» vuelve cada tanto; sin esta
+       línea alguien la busca en el sistema equivocado. */
+    ["Viáticos", "No se registran en el CRM. Van íntegramente en <b>Expensify</b>: el adelanto mensual, la cobertura adicional y el plan de telefonía"]
+  ];
+
+  const comoFunciona = `
+  <div class="card">
+    <!-- Con id propio: desde que los parámetros traen su propio resumen en
+         formato de reglas, «la primera .aj-reglas de la página» ya no es esta,
+         y buscarla así daba con la lista equivocada. -->
+    <div class="aj-reglas" id="reglasCRM">
+      ${reglas.map(([k,v]) => `<div class="kv"><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join("")}
+    </div>
+    <details class="aj-mas">
+      <summary>Por qué estas reglas no se pueden saltar</summary>
+      <div class="cuerpo">
+        <p>No viven en esta pantalla sino dentro de la base de datos, como restricciones y
+        disparadores de Postgres. Aunque alguien manipulara el navegador o llamara a la API por
+        fuera del CRM, la base las vuelve a aplicar al guardar y rechaza lo que no cumpla.</p>
+        ${admin ? `<p>Para cambiar cualquiera de ellas se edita la tabla <b>config</b> en Supabase.
+        No hay que tocar la aplicación.</p>` : ""}
+      </div>
+    </details>
+  </div>`;
+
+  /* ---- La página ---------------------------------------------------------
+
+     Dos columnas de verdad, no una grilla que va llenando casillas.
+
+     La diferencia importa y es la que hacía falta arreglar. Con una grilla de
+     dos columnas cada FILA mide lo que mide su elemento más alto: como
+     «Parámetros del incentivo» ocupa una pantalla entera, lo que le tocaba
+     debajo en la otra columna —las Descargas— empezaba recién donde terminaba
+     ese bloque, y había que bajar toda la pantalla para llegar a un botón que
+     se usa todos los días. El hueco no era un problema de orden sino de
+     alineación entre columnas.
+
+     Ahora cada columna es una pila independiente. Nada de una columna espera a
+     nada de la otra, así que un apartado largo ya no empuja al vecino.
+
+     El orden se decidió por frecuencia de uso, no por importancia:
+
+       Izquierda — lo de todos los días:
+         Descargas · Facturación del periodo · Próximas acciones
+       Derecha — lo que se mira o se ajusta de tanto en tanto:
+         Tu cuenta · Reporte de avance · Parámetros del incentivo
+       Cruzando las dos, abajo — todo lo que lleva tabla:
+         Cartera asignada · Equipo · Bitácora · Cómo funciona
+
+     Las Descargas arriba del todo, a la izquierda: es lo que más se abre y era
+     lo que estaba más abajo.
+
+     Lo que lleva tabla va a ancho completo y no dentro de una columna. En 648
+     px una tabla de seis columnas se corta y hay que arrastrarla de lado para
+     leer la última: la cartera asignada perdía el «% de alcance» y el equipo,
+     el botón de contraseña. Una tabla que no se puede leer entera no está
+     ordenada por estar arriba.
+
+     «Parámetros del incentivo» va último en su columna a propósito: es el
+     apartado más alto y el que menos se toca. Además ahora se despliega solo
+     cuando se va a editar —lo que rige se lee en cinco líneas sin abrir nada—,
+     con lo que pasó de 1806 px a 447.
+
+     El reparto entre las dos columnas está pesado: las dos pilas miden casi lo
+     mismo, así que ninguna deja un vacío largo al costado de la otra.
+
+     Abajo, cruzando las dos columnas, lo que lleva tabla ancha: la bitácora y
+     las reglas. */
+  const izq = [
+    admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : "",
+    admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : "",
+    admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""
+  ].filter(Boolean);
+
+  const der = [
+    ajSeccion("Tu cuenta", "Quién eres para el CRM y qué alcance tienes", cuenta),
+    admin ? ajSeccion("Reporte de avance", "El relato de la presentación — los hitos, las lecturas y las metas de los tres objetivos", cardReporte()) : "",
+    admin ? ajSeccion("Parámetros del incentivo", "Metas, pesos y tramos del modelo — se ajustan sin tocar el sistema", cardParametrosBono()) : ""
+  ].filter(Boolean);
+
+  /* El ejecutivo solo ve «Tu cuenta»: dos columnas con una vacía dejaría un
+     hueco raro al costado. Con una sola pila queda como corresponde. */
+  const dosColumnas = izq.length > 0 && der.length > 0;
+  const columnas = dosColumnas
+    ? `<div class="aj-col">${izq.join("")}</div><div class="aj-col">${der.join("")}</div>`
+    : `<div class="aj-col aj-ancho">${izq.concat(der).join("")}</div>`;
+
+  return `
+  ${columnas}
+  ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas(), "aj-ancho") : ""}
+  ${admin ? ajSeccion("Equipo", `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo(), "aj-ancho") : ""}
+  ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora, "aj-ancho") : ""}
+  ${ajSeccion("Cómo funciona", "Las reglas que el CRM aplica sin preguntar", comoFunciona, "aj-ancho")}
+  <div class="aj-pie aj-ancho"><b>Stratis CRM</b> · campaña BBVA Adquirencia<br>
+    Los datos viven en Supabase con las reglas de acceso por rol activas.</div>`;
+}
+
+/* =========================================================================
+   Gestión del equipo — solo Analista y Manager
+   Las altas y las contraseñas pasan por un servicio en Supabase que guarda
+   la llave de administración; el navegador nunca la ve.
+   ========================================================================= */
+const ROLES = ["Ejecutivo", "Analista", "Manager"];
+
+async function equipoAPI(cuerpo){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) throw new Error("Tu sesión venció. Vuelve a entrar.");
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/equipo`, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", apikey: SUPABASE_ANON_KEY,
+              Authorization: "Bearer " + session.access_token },
+    body: JSON.stringify(cuerpo)
+  });
+  let j = {};
+  try { j = await r.json(); } catch { throw new Error("El servidor no respondió correctamente."); }
+  if (!r.ok || j.error) throw new Error(j.error || ("Error " + r.status));
+  return j;
+}
+
+function cardEquipo(){
+  const activos = USUARIOS.filter(u => u.activo !== false).length;
+  const baja    = USUARIOS.length - activos;
+  return `
+  <div class="card">
+    <div class="eq-top">
+      <div class="eq-conteo">
+        <b>${activos}</b> con acceso${baja ? ` · <span style="color:var(--muted)">${baja} de baja</span>` : ""}
+      </div>
+      <button class="btn sm" id="eqNuevo">＋ Agregar persona</button>
+    </div>
+
+    <div class="tbl-wrap"><table class="tbl tbl-equipo">
+      <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Comercios</th>
+        <th style="text-align:right">Gestiones</th><th></th></tr></thead>
+      <tbody>${!USUARIOS.length ? `<tr><td colspan="5" style="padding:22px 10px;text-align:center;color:var(--muted)">
+        No se pudo leer la lista del equipo. Cierra sesión y vuelve a entrar.</td></tr>` : ""}
+      ${USUARIOS.map(u => {
+        const nCom = CLIENTES.filter(c=>c.asignado_correo===u.correo).length;
+        const nGes = DB.todos().filter(r=>r.Correo_Stratis===u.correo).length;
+        return `<tr${u.activo === false ? ' class="eq-baja"' : ""}>
+        <td><b>${esc(u.nombreCompleto || u.nombre)}</b>
+          ${u.activo === false ? ` <span class="chip crit" style="font-size:10px">De baja</span>` : ""}
+          <div style="font-size:11.5px;color:var(--muted)">${esc(u.correo)}</div>
+          <div class="eq-mini">
+            <span class="chip ${u.rol==="Ejecutivo"?"no":"info"}">${esc(u.rol)}</span>
+            ${nCom || "sin"} comercio${nCom===1?"":"s"} · ${nGes || "sin"} gesti${nGes===1?"ón":"ones"}</div></td>
+        <td><span class="chip ${u.rol==="Ejecutivo"?"no":"info"}">${esc(u.rol)}</span></td>
+        <td style="text-align:right" class="mono">${nCom || "—"}</td>
+        <td style="text-align:right" class="mono">${nGes || "—"}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn ghost sm" data-eqedit="${esc(u.correo)}">Editar</button>
+          <button class="btn ghost sm" data-eqclave="${esc(u.correo)}">Contraseña</button>
+        </td>
+      </tr>`; }).join("")}</tbody>
+    </table></div>
+
+    <details class="aj-mas">
+      <summary>Cómo funcionan las altas, las bajas y las contraseñas</summary>
+      <div class="cuerpo">
+        <p>Al crear una cuenta la contraseña se genera al momento y <b>se muestra una sola vez</b>:
+        cópiala y envíasela por mensaje directo, nunca en un grupo. En su primer ingreso el CRM le
+        pedirá cambiarla por una suya. Si se pierde, el botón <b>Contraseña</b> genera otra.</p>
+        <p>Dar de baja a alguien le cierra el acceso de inmediato, pero <b>no borra su historial</b>:
+        sus comercios y gestiones siguen contando en la campaña y en el Excel.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bindEquipo(){
+  if ($("#eqNuevo")) $("#eqNuevo").onclick = () => modalNuevoUsuario();
+  document.querySelectorAll("[data-eqedit]").forEach(b =>
+    b.onclick = () => modalEditarUsuario(b.dataset.eqedit));
+  document.querySelectorAll("[data-eqclave]").forEach(b =>
+    b.onclick = () => modalClaveUsuario(b.dataset.eqclave));
+}
+
+/* ---- Alta ---------------------------------------------------------------- */
+function modalNuevoUsuario(){
+  modal(`
+    <h3>Agregar persona al equipo</h3>
+    <div class="field"><label>Nombre completo <span class="req">*</span></label>
+      <input type="text" id="eqNom" placeholder="Ej.: Ana María Torres Díaz"></div>
+    <div class="field"><label>Nombre corto <span class="hint">— el que aparece en la app</span></label>
+      <input type="text" id="eqCorto" placeholder="Ej.: Ana Torres"></div>
+    <div class="field"><label>Correo corporativo <span class="req">*</span></label>
+      <input type="email" id="eqMail" inputmode="email" autocapitalize="off"
+             placeholder="nombre.apellido@${CONFIG.dominio}"></div>
+    <div class="field"><label>Rol <span class="req">*</span></label>
+      <select id="eqRol">
+        <option value="Ejecutivo">Ejecutivo — registra su propia cartera</option>
+        <option value="Analista">Analista — ve todo y descarga el Excel</option>
+        <option value="Manager">Manager — ve todo y descarga el Excel</option>
+      </select></div>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="eqOk" style="flex:1">Crear cuenta</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  $("#eqNom").oninput = () => {
+    const p = $("#eqNom").value.trim().split(/\s+/);
+    if (!$("#eqCorto").dataset.tocado && p.length >= 3)
+      $("#eqCorto").value = p[0] + " " + p[2];
+  };
+  $("#eqCorto").oninput = () => $("#eqCorto").dataset.tocado = "1";
+
+  $("#eqOk").onclick = async () => {
+    const nombre = $("#eqNom").value.trim();
+    const corto  = $("#eqCorto").value.trim() || nombre;
+    const correo = $("#eqMail").value.trim().toLowerCase();
+    const rol    = $("#eqRol").value;
+    const msg = $("#eqMsg");
+    if (nombre.length < 3) return msg.innerHTML = `<div class="err">Escribe el nombre completo.</div>`;
+    if (!correo.endsWith("@" + CONFIG.dominio))
+      return msg.innerHTML = `<div class="err">El correo debe ser @${CONFIG.dominio}.</div>`;
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Creando…";
+    try {
+      const r = await equipoAPI({ accion:"crear", correo, nombre, nombre_corto:corto, rol });
+      await recargarEquipo();
+      modalClaveLista(nombre, correo, r.clave, "Cuenta creada");
+    } catch (e) {
+      b.disabled = false; b.textContent = "Crear cuenta";
+      msg.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- Edición ------------------------------------------------------------- */
+function modalEditarUsuario(correo){
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return;
+  const yo = correo === S.user.correo;
+  modal(`
+    <h3>Editar a ${esc(u.nombre)}</h3>
+    <div class="note" style="margin-bottom:12px">${esc(correo)}${yo ? " — eres tú" : ""}</div>
+    <div class="field"><label>Nombre completo</label>
+      <input type="text" id="eqNom" value="${esc(u.nombreCompleto || u.nombre)}"></div>
+    <div class="field"><label>Nombre corto</label>
+      <input type="text" id="eqCorto" value="${esc(u.nombre)}"></div>
+    <div class="field"><label>Rol</label>
+      <select id="eqRol" ${yo ? "disabled" : ""}>
+        ${ROLES.map(r => `<option ${u.rol===r?"selected":""}>${r}</option>`).join("")}
+      </select>
+      ${yo ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">No puedes cambiar tu propio rol.</div>` : ""}
+    </div>
+    <div class="field"><label>Acceso</label>
+      <div class="opts">
+        <div class="opt ${u.activo !== false ? "on" : ""}" data-act="1"><span class="rd"></span>
+          <span><b>Activo</b><span>Puede entrar al CRM</span></span></div>
+        <div class="opt ${u.activo === false ? "on" : ""}" data-act="0"><span class="rd"></span>
+          <span><b>De baja</b><span>Pierde el acceso, su historial se conserva</span></span></div>
+      </div>
+    </div>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px;margin-top:4px">
+      <button class="btn" id="eqOk" style="flex:1">Guardar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+
+  let activo = u.activo !== false;
+  document.querySelectorAll("[data-act]").forEach(el => el.onclick = () => {
+    if (yo && el.dataset.act === "0") return;
+    activo = el.dataset.act === "1";
+    document.querySelectorAll("[data-act]").forEach(x =>
+      x.classList.toggle("on", (x.dataset.act === "1") === activo));
+  });
+
+  $("#eqOk").onclick = async () => {
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Guardando…";
+    try {
+      await equipoAPI({ accion:"guardar", correo,
+        nombre: $("#eqNom").value.trim(),
+        nombre_corto: $("#eqCorto").value.trim(),
+        rol: $("#eqRol").value, activo });
+      await recargarEquipo();
+      cerrarModal(); toast("Equipo actualizado"); render();
+    } catch (e) {
+      b.disabled = false; b.textContent = "Guardar";
+      $("#eqMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- Reasignar contraseña ------------------------------------------------ */
+function modalClaveUsuario(correo){
+  const u = USUARIOS.find(x => x.correo === correo);
+  if (!u) return;
+  modal(`
+    <h3>Nueva contraseña</h3>
+    <p>Se generará una contraseña nueva para <b>${esc(u.nombre)}</b> (${esc(correo)}).
+    La anterior deja de funcionar de inmediato y en su próximo ingreso el CRM le pedirá
+    cambiarla por una suya.</p>
+    <div id="eqMsg"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn" id="eqOk" style="flex:1">Generar</button>
+      <button class="btn ghost" onclick="cerrarModal()" style="flex:1">Cancelar</button>
+    </div>`);
+  $("#eqOk").onclick = async () => {
+    const b = $("#eqOk"); b.disabled = true; b.textContent = "Generando…";
+    try {
+      const r = await equipoAPI({ accion:"clave", correo });
+      modalClaveLista(u.nombre, correo, r.clave, "Contraseña reasignada");
+    } catch (e) {
+      b.disabled = false; b.textContent = "Generar";
+      $("#eqMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    }
+  };
+}
+
+/* ---- La contraseña se muestra una sola vez ------------------------------- */
+function modalClaveLista(nombre, correo, clave, titulo2){
+  modal(`
+    <h3>${esc(titulo2)}</h3>
+    <div class="note ok" style="margin-bottom:12px">
+      <b>${esc(nombre)}</b> ya puede entrar con <b>${esc(correo)}</b>.
+    </div>
+    <div class="field">
+      <label>Contraseña inicial <span class="hint">— se muestra solo esta vez</span></label>
+      <input type="text" id="eqClave" value="${esc(clave)}" readonly
+             style="font-family:ui-monospace,monospace;font-size:17px;text-align:center;letter-spacing:.5px">
+    </div>
+    <button class="btn ghost block" id="eqCopiar" style="margin-bottom:10px">Copiar contraseña</button>
+    <div class="note" style="margin-bottom:12px">
+      Envíasela por mensaje directo, nunca en un grupo. Si se pierde, generas otra desde
+      el botón <b>Contraseña</b> de la lista.
+    </div>
+    <button class="btn block" onclick="cerrarModal()">Listo</button>`);
+  $("#eqCopiar").onclick = async () => {
+    const i = $("#eqClave");
+    try { await navigator.clipboard.writeText(i.value); toast("Contraseña copiada"); }
+    catch { i.select(); document.execCommand("copy"); toast("Contraseña copiada"); }
+  };
+  const cerrar = $("#overlay").querySelector(".btn.block:last-of-type");
+  if (cerrar) cerrar.onclick = () => { cerrarModal(); render(); };
+}
+
+async function recargarEquipo(){
+  const { data, error } = await sb.from("usuarios").select("*").order("rol");
+  if (error) return;
+  USUARIOS = (data || []).map(u => ({ nombre: u.nombre_corto || u.nombre,
+    nombreCompleto: u.nombre, correo: u.correo, rol: u.rol, activo: u.activo }));
+  await cargarAuditoria();
+}
+
+/* =========================================================================
+   Metas: la cartera asignada por mes
+
+   Es el denominador de todo el alcance. Lo cargan el Analista y el Manager;
+   cada ejecutivo ve el suyo. Se guarda por mes, nunca se pisa: así queda el
+   histórico y se puede mirar la evolución.
+   ========================================================================= */
+function periodoActivo(){
+  return S.mesPanel || mesHoy();
+}
+
+/* Lo que un ejecutivo logró en un mes, medido contra lo que le asignaron. */
+function alcanceDe(correo, periodo){
+  const suyos    = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  /* Con la base congelada, si no se cargó la del mes se hereda la última: el
+     alcance no puede caer a cero solo porque nadie retipeó 841. */
+  const asignada = metaVigente(correo, periodo).n;
+  const retenidos   = suyos.filter(c => esRetencion(c)  && cerroEn(c, periodo)).length;
+  const recuperados = suyos.filter(c => esRecuperado(c) && cerroEn(c, periodo)).length;
+  const perdidos    = suyos.filter(c => c.resultado_gestion === "PERDIDO" && cerroEn(c, periodo)).length;
+  /* La venta nueva no sale de la cartera asignada, así que no suma al % de
+     alcance. Pero es trabajo hecho y hasta ahora no se veía en ningún lado:
+     un ejecutivo con dos ventas nuevas aparecía en cero. Va aparte. */
+  const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === correo && esVentaNueva(c)
+                                         && cerroEn(c, periodo)).length;
+  const logrado  = retenidos + recuperados;
+  /* Misma regla de gestión que el Tablero (27/08): la ÚLTIMA actividad del
+     comercio dentro del periodo tiene que calificar —y la unidad es el día, no
+     la fila—. Si acá contara otra cosa, la misma persona tendría dos cifras de
+     «trabajados» en dos pantallas del mismo CRM.
+
+     Decía `some()` hasta el 27/08 por la tarde, que es «¿alguna vez en el
+     periodo?». Se corrigió junto con la Cartera, a pedido de José, aunque esta
+     cifra alimenta el cálculo del bono. */
+  const trabajados = suyos.filter(c =>
+    ultimoDiaCalifica([...DB.delCliente(c.customer_id), ...DB.bbvaDe(c.customer_id)]
+      .filter(r => mesISO(r.Fecha_Contacto) === periodo))
+    || (tieneCierreRegistrado(c) && cerroEn(c, periodo))).length;
+  return { asignada, retenidos, recuperados, perdidos, logrado, trabajados, ventasNuevas,
+           pct: asignada ? logrado / asignada : 0,
+           pctTrabajo: asignada ? trabajados / asignada : 0 };
+}
+
+/* La cartera asignada vale para el rango que se esté mirando. Es un número
+   que está parado, no una suma: si se miran cinco meses no son cinco carteras,
+   es la misma cartera. Se toma la del periodo, y si ese mes no se cargó, la
+   última cargada. */
+function asignadaDe(correo, r){
+  if (r.periodo) return metaVigente(correo, r.periodo).n;
+  const suyas = METAS.filter(m => m.correo === correo && m.asignada > 0)
+                     .sort((a,b) => String(a.periodo).localeCompare(String(b.periodo)));
+  return suyas.length ? suyas[suyas.length - 1].asignada : 0;
+}
+
+/* Todo lo que el Panel muestra de un ejecutivo, medido contra un solo reloj.
+   Antes esto vivía repartido en tres tablas con tres ventanas distintas y por
+   eso «Trabajados» y «Comercios» nunca coincidían. */
+function filaEjecutivo(u, r){
+  const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo && !esClienteNuevo(c));
+  const gest  = DB.todos().filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r));
+
+  /* «Gestionado» dejó de ser «se registró algún intento» el 27/08. Cuenta el
+     comercio donde quedó un hecho CON RESULTADO: un correo al banco o al
+     comercio, un contacto efectivo, una reunión o visita realizada, o un
+     cierre registrado. La llamada que nadie contestó sigue registrada y sigue
+     siendo trabajo, pero no mueve esta columna — y por eso mismo la cobertura
+     que sale de acá dejó de ser un 99% que no decía nada.
+
+     Se pregunta a los dos montones: `DB.todos()` es el del comercio y
+     `DB.bbva()` el de la coordinación con el banco. El correo al ejecutivo de
+     BBVA es la mitad del trabajo y vive solo en el segundo.
+
+     Y lo que decide es la ÚLTIMA actividad dentro del rango, por DÍA: un
+     correo a las 15:03 y un WhatsApp sin respuesta a las 15:25 son el mismo
+     día de trabajo. Antes acá bastaba con que hubiera UNA fila válida en el
+     rango; eso contestaba «¿alguna vez?» donde la regla pregunta «¿en qué
+     quedó?», y era la misma brecha que tenía la Cartera. */
+  const porComercio = new Map();
+  [...DB.todos(), ...DB.bbva()]
+    .filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r))
+    .forEach(x => {
+      const cid = String(x.Customer_id);
+      if (!porComercio.has(cid)) porComercio.set(cid, []);
+      porComercio.get(cid).push(x);
+    });
+  const gestionados = new Set();
+  porComercio.forEach((filas, cid) => { if (ultimoDiaCalifica(filas)) gestionados.add(cid); });
+
+  const asignada    = asignadaDe(u.correo, r);
+  /* El cierre no es una interacción: vive en la ficha. Un comercio cerrado en
+     el periodo cuenta como gestionado aunque no haya quedado fila detrás. */
+  const trabajados  = suyos.filter(c => gestionados.has(String(c.customer_id))
+    || (tieneCierreRegistrado(c) && enRango(c.cerrado_en, r))).length;
+  const retenidos   = suyos.filter(c => esRetencion(c)  && enRango(c.cerrado_en, r)).length;
+  const recuperados = suyos.filter(c => esRecuperado(c) && enRango(c.cerrado_en, r)).length;
+  const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === u.correo && esVentaNueva(c)
+                          && enRango(c.cerrado_en || c.creado_en, r)).length;
+  const respuestas  = gest.filter(x => esEfectivo(x.Resultado)).length;
+  const efectivas   = gest.filter(x => x.Cumple_Visita === "SI").length;
+  const puntuales   = gest.filter(aTiempo).length;
+  const ultima      = gest.length
+    ? gest.map(x => String(x.Fecha_Contacto).slice(0,10)).sort().pop() : "";
+  const logrado = retenidos + recuperados;
+
+  /* Ficha creada y nunca trabajada. No es lo mismo que «sin tocar»: a estos
+     alguien ya les dedicó tiempo, tienen ejecutivo y están a una gestión de
+     contar. Se mide sobre todo el historial, no sobre el periodo: un comercio
+     cargado en julio y trabajado en julio no es un pendiente de agosto. */
+  const conAlgunaGestion = suyos.filter(c => DB.delCliente(c.customer_id).length > 0).length;
+
+  return { nombre:u.nombre, correo:u.correo,
+    asignada, registrados:suyos.length, trabajados,
+    cargadosSinGestion: suyos.length - conAlgunaGestion,
+    sinTocar: Math.max(0, asignada - trabajados),
+    gestiones: gest.length, respuestas, efectivas, puntuales,
+    tasa: gest.length ? respuestas / gest.length * 100 : null,
+    puntualidad: gest.length ? puntuales / gest.length * 100 : null,
+    retenidos, recuperados, ventasNuevas, logrado,
+    pct: asignada ? logrado / asignada * 100 : null,
+    ultima, silencio: ultima ? diasDeAtraso(ultima) : null };
+}
+
+function cardMetas(){
+  const p = periodoActivo();
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  const meses = mesesConMeta();
+  const total = ejec.reduce((n,u) => n + metaDe(u.correo, p), 0);
+
+  return `
+  <div class="card">
+    <div class="eq-top">
+      <div class="eq-conteo">
+        <b>${total}</b> casos asignados en ${esc(nombreMes(p))}
+      </div>
+      <label class="fsel" style="min-width:170px"><span>Mes</span>
+        <select id="mesMetas">${meses.map(m =>
+          `<option value="${m}"${m === p ? " selected" : ""}>${esc(nombreMes(m))}</option>`).join("")}
+        </select></label>
+    </div>
+
+    <div class="tbl-wrap"><table class="tbl tbl-metas">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Cartera asignada</th>
+        <th style="text-align:right">Trabajados</th><th style="text-align:right">Retenidos</th>
+        <th style="text-align:right">Recuperados</th><th style="text-align:right">% alcance</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const a = alcanceDe(u.correo, p);
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>
+            <div class="eq-mini">${a.asignada ? a.asignada + " asignados" : "sin meta cargada"}</div></td>
+          <td style="text-align:right">
+            <input type="number" class="meta-in" min="0" max="100000" step="1"
+                   data-meta="${esc(u.correo)}" value="${a.asignada || ""}" placeholder="0"></td>
+          <td style="text-align:right" class="mono">${a.trabajados || "—"}</td>
+          <td style="text-align:right" class="mono">${a.retenidos || "—"}</td>
+          <td style="text-align:right" class="mono">${a.recuperados || "—"}</td>
+          <td style="text-align:right" class="mono">${a.asignada ? Math.round(a.pct*1000)/10 + "%" : "—"}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+
+    <div id="msgMetas"></div>
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <button class="btn sm" id="guardarMetas">Guardar las metas de ${esc(nombreMes(p))}</button>
+      <span style="font-size:12px;color:var(--muted)">Cada mes se guarda por separado; el histórico no se pisa.</span>
+    </div>
+
+    <details class="aj-mas">
+      <summary>Qué cuenta para el % de alcance</summary>
+      <div class="cuerpo">
+        <p><b>Retenidos</b> son comercios que ya operaban y se quedaron con BBVA.
+        <b>Recuperados</b> estaban <b>de baja</b> y volvieron: cierran como Venta, no como
+        Retención, pero salían de la misma cartera asignada, así que suman igual. Van separados
+        a propósito para que se vea de dónde viene cada punto.</p>
+        <p>Las <b>ventas nuevas por RUC no entran</b>: nunca estuvieron en la cartera de nadie,
+        así que inflarían el alcance de un mes sin que hubiera nada asignado detrás.</p>
+        <p>Un cierre cuenta en el mes en que se decidió, no en el mes en que se registró la
+        primera gestión. Si un comercio se reabre, deja de contar hasta que se vuelva a cerrar.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bindMetas(){
+  const sel = $("#mesMetas");
+  if (sel) sel.onchange = e => { S.mesPanel = e.target.value; render(); };
+
+  const btn = $("#guardarMetas");
+  if (!btn) return;
+  btn.onclick = async () => {
+    const p = periodoActivo();
+    const filas = [...document.querySelectorAll("[data-meta]")].map(i => ({
+      correo: i.dataset.meta,
+      periodo: p + "-01",
+      cartera_asignada: Math.max(0, Math.round(Number(i.value) || 0))
+    }));
+    const msg = $("#msgMetas");
+    btn.disabled = true; btn.textContent = "Guardando…";
+    try {
+      const { error } = await sb.from("metas").upsert(filas, { onConflict: "correo,periodo" });
+      if (error) throw new Error(error.message);
+      await cargarMetas();
+      toast(`Metas de ${nombreMes(p)} guardadas`);
+      render();
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "Guardar las metas de " + nombreMes(p);
+      msg.innerHTML = `<div class="err">${esc(String(e.message))}</div>`;
+    }
+  };
+}
+
+/* =========================================================================
+   Calendario de visitas
+
+   Antes esto era una agenda de «próximas acciones»: una lista de pendientes
+   con fecha y sin hora. No se usaba, y por una razón que se ve al mirarla:
+   una lista de trescientos compromisos vencidos no es una herramienta, es un
+   reproche. Nadie abre eso por la mañana.
+
+   El calendario mide otra cosa. Una CITA es un compromiso con el cliente —día,
+   hora y modalidad— y lo que interesa de ella son tres preguntas:
+
+     · ¿Cuánto tardamos en agendarla desde que el caso quedó habilitado?
+     · ¿Cuántas hay comprometidas para esta semana?
+     · ¿Se concretaron?
+
+   Las acciones sueltas de la mecánica anterior siguen existiendo en la base,
+   pero no salen acá: son de otro modelo y aparecer juntas haría que ninguna de
+   las dos cuentas signifique nada.
+   ========================================================================= */
+const ORDEN_PLAZO = ["vencida", "hoy", "semana", "despues"];
+
+/* Las citas que le corresponden a quien está mirando. Con «ver como» puesto,
+   las del ejecutivo observado: es la mitad de la pregunta «¿por qué dice que
+   no tiene nada esta semana?». */
+function citasVisibles(){
+  const mio = correoObservado();
+  let l = citasTodas();
+  if (mio) l = l.filter(x => x.correo_stratis === mio);
+  else if (S.fEjecAgenda !== "todos") l = l.filter(x => x.ejecutivo === S.fEjecAgenda);
+  return l.sort((a,b) =>
+    String(a.fecha_objetivo).localeCompare(String(b.fecha_objetivo))
+    || String(a.hora_inicio || "").localeCompare(String(b.hora_inicio || "")));
+}
+const citasAbiertas = () => citasVisibles().filter(s => !s.cerrado_en);
+
+function tarjetaCita(s){
+  const c = byId[String(s.customer_id)];
+  const e = estadoCita(s);
+  const meta = ESTADO_CITA[e] || {};
+  const d = diasParaAccion(s);
+  /* El chip ya dice el estado; el complemento solo se añade cuando aporta algo
+     que el estado no dice. «Es hoy · es hoy» no informa, distrae. */
+  const cuando = e === "vencida" ? `venció hace ${textoDias(Math.abs(d))}`
+               : e === "programada" && d === 1 ? "mañana"
+               : e === "programada" && d > 1   ? `en ${textoDias(d)}`
+               : "";
+  const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
+
+  return `<div class="card ag-item ${e === "vencida" ? "vencida" : e === "hoy" ? "hoy" : ""}">
+    <div class="ag-h">
+      <div>
+        <div class="who" data-cid="${esc(s.customer_id)}" style="cursor:pointer;color:var(--brand-2)">${
+          esc(titulo(c ? nombreCliente(c) : s.customer_id))}</div>
+        <div class="dt"><b>${esc(rangoCita(s))}</b> · ${esc(cortoModalidad(s.modalidad))}${
+          c && c.distrito ? " · " + esc(titulo(c.distrito)) : ""}${
+          vistaDeCampo() ? "" : " · " + esc(s.ejecutivo)}</div>
+        <div class="dt tenue">${esc(c ? (esClienteNuevo(c) ? "RUC " + (c.ruc || llaveDesnudaCita(c)) : "Customer ID " + c.customer_id) : "")}</div>
+      </div>
+      <span class="chip ${meta.tono || "no"}">${esc(meta.label || "")}${cuando ? " · " + esc(cuando) : ""}</span>
+    </div>
+    ${s.comentario ? `<div class="quote" style="margin-top:7px">${esc(s.comentario)}</div>` : ""}
+    ${movida(s)}
+    ${g ? `<div class="pie" style="margin-top:6px">Se concretó el <b>${fmtFecha(String(g.Fecha_Contacto).slice(0,10))}</b>${
+      String(g.Fecha_Contacto).slice(0,10) !== String(s.fecha_objetivo).slice(0,10)
+        ? " · se pactó para el " + fmtFecha(String(s.fecha_objetivo).slice(0,10)) : ""}.</div>` : ""}
+    <div class="ag-acc">
+      ${esDeCampo() && c && !s.cerrado_en
+        ? `<button class="btn sm" data-go="form_visita|${esc(s.customer_id)}">Registrar la visita</button>` : ""}
+      <button class="btn ghost sm" data-cid="${esc(s.customer_id)}">Ver comercio</button>
+      ${!s.cerrado_en && (s.correo_stratis === S.user.correo || !vistaDeCampo())
+        ? `<button class="btn ghost sm" data-reag="${esc(s.id)}">Reagendar</button>
+           <button class="btn ghost sm" data-segdel="${esc(s.id)}" style="color:var(--crit-ink)"
+             title="Cierra la cita sin registrar una visita. Úsalo solo si dejó de tener sentido.">Se cayó</button>` : ""}
+    </div>
+  </div>`;
+}
+/* El identificador que se está tramitando, tal cual se pidió que figure en el
+   calendario: Customer ID para la cartera, RUC para una venta nueva. */
+const llaveDesnudaCita = c => String((c && c.customer_id) || "").replace(/^NUEVO-/, "");
+
+/* Si la cita se movió, se dice. Mover una fecha es legítimo; moverla cuatro
+   veces cuenta otra historia, y esa historia solo existe si se ve. */
+function movida(s){
+  const h = Array.isArray(s && s.historial) ? s.historial : [];
+  if (!h.length) return "";
+  const primera = h[0];
+  return `<div class="pie cal-movida" style="margin-top:6px">
+    <b>Reagendada ${h.length === 1 ? "una vez" : h.length + " veces"}.</b>
+    Originalmente para el ${esc(fmtFecha(String(primera.fecha).slice(0,10)))}${
+      primera.hora ? " a las " + esc(horaCorta(primera.hora)) : ""}.</div>`;
+}
+
+/* ---- Las cifras de arriba ------------------------------------------------
+   Proyección a la izquierda, cumplimiento a la derecha. Son dos preguntas
+   distintas —qué viene y qué pasó— y mezclarlas en una sola fila fue lo que
+   hizo que la agenda vieja no dijera nada. */
+function cifrasCalendario(){
+  const todas = citasVisibles();
+  const abiertas = todas.filter(s => !s.cerrado_en);
+  const est = s => estadoCita(s);
+
+  const hoy = abiertas.filter(s => est(s) === "hoy");
+  const semana = abiertas.filter(s => { const d = diasParaAccion(s); return d > 0 && d <= 7; });
+  const vencidas = abiertas.filter(s => est(s) === "vencida");
+
+  /* El cumplimiento solo se puede medir sobre citas cuya fecha ya pasó: contar
+     las futuras como incumplidas sería castigar por no haber viajado al
+     futuro. */
+  const juzgables = todas.filter(s => cuentaCumplimiento(est(s)));
+  const concretadas = juzgables.filter(s => seConcreto(est(s)));
+  const pct = juzgables.length ? Math.round(concretadas.length / juzgables.length * 100) : null;
+
+  return { todas, abiertas, hoy, semana, vencidas, juzgables, concretadas, pct };
+}
+
+/* ---- La proyección por ejecutivo ----------------------------------------
+   Lo que pediste poder evidenciar: cuántas visitas tiene comprometidas cada
+   uno esta semana, y cuántas de las que ya vencieron se concretaron. Sale
+   solo para supervisión. */
+function proyeccionEquipo(){
+  const req = paramsDe(periodoHoy()).requisitos;
+  /* La tabla mira «hoy» y «esta semana», así que el mínimo se muestra en
+     semanas aunque el requisito sea del periodo: la referencia semanal sale
+     de dividir las 40 entre las semanas del periodo, no de un número puesto
+     a mano. `reglaVisitas` guarda la de cada versión. */
+  const rvP = reglaVisitas(req, periodoHoy());
+  return USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false).map(u => {
+    const suyas = citasTodas().filter(s => s.correo_stratis === u.correo);
+    const abiertas = suyas.filter(s => !s.cerrado_en);
+    const d = s => diasParaAccion(s);
+    const juzgables = suyas.filter(s => cuentaCumplimiento(estadoCita(s)));
+    const concretadas = juzgables.filter(s => seConcreto(estadoCita(s)));
+    /* La demora en agendar, medida sobre los comercios de esa persona que ya
+       quedaron habilitados. La mediana, no el promedio. */
+    const demoras = CLIENTES.filter(c => c.asignado_correo === u.correo)
+      .map(c => demoraEnAgendar(c.customer_id)).filter(n => n !== null);
+    const habilitados = CLIENTES.filter(c => c.asignado_correo === u.correo && habilitadoEn(c.customer_id));
+    return {
+      nombre:u.nombre, correo:u.correo,
+      hoy: abiertas.filter(s => d(s) === 0).length,
+      semana: abiertas.filter(s => d(s) > 0 && d(s) <= 7).length,
+      vencidas: abiertas.filter(s => estadoCita(s) === "vencida").length,
+      juzgables: juzgables.length,
+      concretadas: concretadas.length,
+      pct: juzgables.length ? Math.round(concretadas.length / juzgables.length * 100) : null,
+      habilitados: habilitados.length,
+      conCita: demoras.length,
+      demora: mediana(demoras),
+      pide: rvP.porSemana || rvP.meta, regla: rvP
+    };
+  }).sort((a,b) => (b.semana + b.hoy) - (a.semana + a.hoy));
+}
+
+function bloqueProyeccion(){
+  const filas = proyeccionEquipo();
+  if (!filas.length) return "";
+  const pct = v => v === null ? "—" : v + "%";
+  const suma = k => filas.reduce((n,f) => n + (f[k] || 0), 0);
+  /* La mediana del equipo se calcula sobre TODAS las demoras, no promediando
+     las medianas de cada uno: la mediana de medianas no es la mediana. */
+  const medEquipo = mediana(CLIENTES.map(c => demoraEnAgendar(c.customer_id)).filter(n => n !== null));
+  return `
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Proyección de visitas por ejecutivo</h3>
+      <span class="sub">Lo comprometido hacia adelante, y qué pasó con lo que ya venció</span>
+    </div>
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblProyeccion">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Citas para hoy">Hoy</th>
+        <th title="Citas en los próximos 7 días">Esta semana</th>
+        <th title="Referencia semanal del mínimo de visitas efectivas que pide el incentivo">Pide/sem</th>
+        <th title="Citas cuya fecha ya pasó y no tienen visita registrada">No concretadas</th>
+        <th title="De las citas cuya fecha ya pasó, cuántas se concretaron">Cumplimiento</th>
+        <th title="Comercios de su cartera que ya quedaron habilitados: BBVA confirmó los datos o el cliente respondió">Habilitados</th>
+        <th title="De esos, cuántos ya tienen al menos una cita agendada">Con cita</th>
+        <th title="Mediana de días trabajados entre que el caso quedó habilitado y que se agendó la visita">Demora en agendar</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(f => `<tr>
+        <td class="nom">${esc(f.nombre)}</td>
+        <td class="num fuerte">${f.hoy || "—"}</td>
+        <td class="num fuerte">${f.semana || "—"}</td>
+        <td class="num tenue">${f.pide}</td>
+        <td class="num ${f.vencidas ? "alerta" : ""}">${f.vencidas || "—"}</td>
+        <td class="num">${f.juzgables ? `${pct(f.pct)} <span class="tenue">${f.concretadas} de ${f.juzgables}</span>` : "—"}</td>
+        <td class="num">${f.habilitados || "—"}</td>
+        <td class="num ${f.habilitados && f.conCita < f.habilitados ? "alerta" : ""}">${f.conCita || "—"}</td>
+        <td class="num">${f.demora === null ? "—" : `${f.demora} <span class="tenue">día${f.demora === 1 ? "" : "s"}</span>`}</td>
+      </tr>`).join("")}
+      ${/* La fila del equipo es SEGUIMIENTO, no requisito. La llave del bono es
+           individual: cada ejecutivo la abre o no con su propio mínimo, y nadie
+           pierde su bono porque el equipo no llegó. Poner el total sin decir
+           esto sería dejar que se lea como una cuarta condición. */""}
+      <tr class="total-eq">
+        <td class="nom">Equipo</td>
+        <td class="num fuerte">${suma("hoy") || "—"}</td>
+        <td class="num fuerte">${suma("semana") || "—"}</td>
+        <td class="num tenue">${filas.reduce((n,f) => n + f.pide, 0)}</td>
+        <td class="num ${suma("vencidas") ? "alerta" : ""}">${suma("vencidas") || "—"}</td>
+        <td class="num">${suma("juzgables")
+          ? `${Math.round(suma("concretadas") / suma("juzgables") * 100)}% <span class="tenue">${
+              suma("concretadas")} de ${suma("juzgables")}</span>` : "—"}</td>
+        <td class="num">${suma("habilitados") || "—"}</td>
+        <td class="num ${suma("conCita") < suma("habilitados") ? "alerta" : ""}">${suma("conCita") || "—"}</td>
+        <td class="num">${medEquipo === null ? "—" : `${medEquipo} <span class="tenue">día${medEquipo === 1 ? "" : "s"}</span>`}</td>
+      </tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="pie"><b>Habilitados</b> son los comercios en los que BBVA ya confirmó los datos o el
+      cliente ya respondió: desde ahí se puede agendar. <b>Con cita</b> dice en cuántos de esos ya
+      hay una visita puesta. La diferencia entre las dos columnas es el hueco de la campaña.
+      La <b>demora</b> va en mediana y no en promedio: un caso agendado cuarenta días tarde
+      arrastraría el promedio y escondería a los que se agendaron al día siguiente.</p>
+    <p class="pie"><b>La fila del equipo es seguimiento, no requisito.</b> La llave del bono se
+      mide persona por persona: cada ejecutivo la abre con su propio mínimo de
+      ${filas[0] ? esc(filas[0].regla.corto) : "40 en el periodo"} visitas efectivas, y nadie
+      pierde su bono porque el equipo no haya llegado. El total del equipo está acá para mirarlo con BBVA, no para
+      liquidar.</p>
+  </div>`;
+}
+
+/* ---- ¿Quién está libre? -------------------------------------------------
+   Para la reunión de equipo. Se elige día y franja, y el CRM dice quién tiene
+   algo encima. No propone horarios: dice lo que hay. */
+function bloqueDisponibilidad(){
+  const fecha = S.dispFecha || hoyISO();
+  const desde = S.dispDesde || "15:00";
+  const hasta = S.dispHasta || "16:00";
+  const dMin = minutosDe(desde), hMin = minutosDe(hasta);
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+
+  const estado = ejec.map(u => {
+    const choques = (dMin === null || hMin === null) ? []
+      : ocupacionDe(u.correo, fecha).filter(s => chocaCon(s, dMin, hMin));
+    return { u, choques };
+  });
+  const libres = estado.filter(x => !x.choques.length);
+
+  return `
+  <div class="card">
+    <h3>¿Quién está libre?</h3>
+    <p class="pie" style="margin:4px 0 12px">Para cuadrar una reunión de equipo sin preguntarle a
+      nadie. Solo mira las citas del calendario: una franja libre acá no significa que la persona
+      no esté en la calle.</p>
+    <div class="sel-row">
+      <label class="fsel"><span>Día</span>
+        <input type="date" id="dispFecha" value="${esc(fecha)}"></label>
+      <label class="fsel"><span>Desde</span>
+        <input type="time" id="dispDesde" value="${esc(desde)}" step="900"></label>
+      <label class="fsel"><span>Hasta</span>
+        <input type="time" id="dispHasta" value="${esc(hasta)}" step="900"></label>
+    </div>
+    <div class="disp">
+      ${estado.map(({u, choques}) => `
+        <div class="disp-x ${choques.length ? "ocupado" : "libre"}">
+          <span class="pip"></span>
+          <div>
+            <b>${esc(u.nombre)}</b>
+            <span>${choques.length
+              ? choques.map(s => {
+                  const c = byId[String(s.customer_id)];
+                  return `${esc(rangoCita(s))} · ${esc(titulo(c ? nombreCliente(c) : s.customer_id))}`;
+                }).join(" · ")
+              : "sin citas en esa franja"}</span>
+          </div>
+        </div>`).join("")}
+    </div>
+    <p class="pie">${libres.length} de ${ejec.length} sin nada agendado el
+      ${fmtFecha(fecha)} entre las ${esc(horaCorta(desde))} y las ${esc(horaCorta(hasta))}.</p>
+  </div>`;
+}
+
+
+/* =========================================================================
+   La rejilla del mes
+   =========================================================================
+   Un calendario de verdad, no una lista larga. La razón es concreta: una lista
+   responde «qué tengo pendiente», y un calendario responde «qué tengo el
+   jueves» —que es la pregunta que se hace al pactar una visita nueva y la que
+   se hace al cuadrar una reunión de equipo—.
+
+   Se empieza el lunes. La semana laboral peruana empieza el lunes y un
+   calendario que arranca el domingo obliga a contar dos veces.
+   ========================================================================= */
+const mesVisible = () => S.calMes || mesDe(hoyISO());
+
+/* Las citas de un día, ya filtradas por quién mira y por la búsqueda. */
+function citasDelDia(iso){
+  return citasFiltradas().filter(s => String(s.fecha_objetivo).slice(0,10) === iso);
+}
+
+/* La búsqueda: por Customer ID, RUC, razón social o nombre del comercio. Busca
+   sobre TODAS las citas, no solo las del mes a la vista: quien escribe un RUC
+   quiere encontrarlo, no que le digan que no está en agosto. */
+function citasFiltradas(){
+  const q = String(S.qCal || "").trim().toLowerCase();
+  let l = citasVisibles();
+  if (!q) return l;
+  return l.filter(s => {
+    const c = byId[String(s.customer_id)] || {};
+    return String(s.customer_id).toLowerCase().includes(q)
+      || String(c.ruc || "").toLowerCase().includes(q)
+      || String(c.razon_social || "").toLowerCase().includes(q)
+      || String(c.nombre_comercio || "").toLowerCase().includes(q)
+      || String(c.distrito || "").toLowerCase().includes(q);
+  });
+}
+
+/* El punto de color de cada cita en la rejilla. El color nunca va solo: al
+   lado están la hora y el nombre, y la tarjeta de abajo dice el estado con
+   todas las letras. */
+const TONO_PIP = { cumplida:"ok", cumplida_tarde:"warn", corrida:"warn",
+  vencida:"crit", hoy:"warn", programada:"info", reagendada:"no", descartada:"no" };
+
+function rejillaMes(){
+  const ym = mesVisible();
+  const hoy = hoyISO();
+  const total = diasDelMes(ym);
+  const [y, m] = ym.split("-").map(Number);
+  const offset = diaSemana(isoYMD(y, m, 1));       // cuántas casillas vacías al inicio
+  const celdas = [];
+  for (let i = 0; i < offset; i++) celdas.push(null);
+  for (let d = 1; d <= total; d++) celdas.push(isoYMD(y, m, d));
+  while (celdas.length % 7) celdas.push(null);
+
+  const porDia = {};
+  citasFiltradas().forEach(s => {
+    const k = String(s.fecha_objetivo).slice(0,10);
+    (porDia[k] = porDia[k] || []).push(s);
+  });
+
+  const TOPE = 3;   // cuántas caben en la casilla antes de resumir
+  const casilla = iso => {
+    if (!iso) return `<div class="cal-x vacia"></div>`;
+    const dia = Number(iso.slice(8,10));
+    const del = (porDia[iso] || []).sort((a,b) =>
+      String(a.hora_inicio||"").localeCompare(String(b.hora_inicio||"")));
+    const finde = diaSemana(iso) >= 5;
+    return `<button class="cal-x ${iso === hoy ? "hoy" : ""} ${iso === S.calDia ? "sel" : ""} ${
+      finde ? "finde" : ""} ${del.length ? "con" : ""}" data-caldia="${iso}"
+      aria-label="${dia} de ${esc(mesLargo(ym))}, ${del.length} ${del.length === 1 ? "cita" : "citas"}">
+      <span class="n">${dia}</span>
+      <span class="ev">
+        ${del.slice(0, TOPE).map(s => {
+          const c = byId[String(s.customer_id)];
+          return `<span class="cal-ev ${TONO_PIP[estadoCita(s)] || "no"}">
+            <i></i><b>${esc(horaCorta(s.hora_inicio))}</b><span class="cal-ev-n">${
+              esc(titulo(c ? nombreCliente(c) : s.customer_id))}</span></span>`;
+        }).join("")}
+        ${del.length > TOPE ? `<span class="cal-mas">+${del.length - TOPE} más</span>` : ""}
+      </span>
+    </button>`;
+  };
+
+  return `
+  <div class="cal">
+    <div class="cal-cab">
+      <div class="cal-nav">
+        <button class="btn ghost sm" data-calmes="${mesMas(ym,-1)}" aria-label="Mes anterior">‹</button>
+        <b class="cal-mes">${esc(titulo(mesLargo(ym)))}</b>
+        <button class="btn ghost sm" data-calmes="${mesMas(ym,1)}" aria-label="Mes siguiente">›</button>
+        <button class="btn ghost sm" data-calhoy="1">Hoy</button>
+      </div>
+      <div class="cal-leyenda">
+        <span><i class="pip info"></i>Programada</span>
+        <span><i class="pip warn"></i>Es hoy</span>
+        <span><i class="pip crit"></i>No concretada</span>
+        <span><i class="pip ok"></i>Concretada</span>
+      </div>
+    </div>
+    <div class="cal-dow">${DIAS_CORTOS.map(d => `<span>${d}</span>`).join("")}</div>
+    <div class="cal-rej">${celdas.map(casilla).join("")}</div>
+  </div>`;
+}
+
+/* El día elegido, con sus citas completas. Es la segunda mitad del calendario:
+   la rejilla dice cuántas, esto dice cuáles. */
+function panelDelDia(){
+  const iso = S.calDia || hoyISO();
+  const del = citasDelDia(iso).sort((a,b) =>
+    String(a.hora_inicio||"").localeCompare(String(b.hora_inicio||"")));
+  const hay = del.length;
+  return `
+  <div class="sec-title dia-cab">
+    <span>${esc(titulo(fechaLarga(iso)))} · ${hay} ${hay === 1 ? "cita" : "citas"}</span>
+    ${esDeCampo() && iso >= hoyISO()
+      ? `<button class="btn sm" data-agendar-dia="${esc(iso)}">📅 Agendar reunión</button>` : ""}
+  </div>
+  ${hay ? del.map(tarjetaCita).join("")
+        : `<div class="card"><div class="vacio">No hay visitas agendadas para este día.${
+            esDeCampo() && iso >= hoyISO()
+              ? " Ponle día y hora a una desde el botón de arriba."
+              : " Toca otro día en el calendario, o busca un comercio arriba."}</div></div>`}`;
+}
+
+/* Los resultados de la búsqueda, con su fecha delante: buscar un RUC y que la
+   respuesta sea «no está en este mes» no es una respuesta. */
+function resultadosBusqueda(){
+  const l = citasFiltradas().sort((a,b) =>
+    String(b.fecha_objetivo).localeCompare(String(a.fecha_objetivo)));
+  return `
+  <div class="sec-title">${l.length} ${l.length === 1 ? "cita encontrada" : "citas encontradas"}
+    para «${esc(S.qCal)}»</div>
+  ${l.length ? l.map(s => `
+    <div class="cal-res">
+      <div class="cal-res-f">
+        <b>${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))}</b>
+        <span>${esc(horaCorta(s.hora_inicio))}</span>
+      </div>
+      <div class="cal-res-c">${tarjetaCita(s)}</div>
+    </div>`).join("")
+   : `<div class="card"><div class="vacio">Ningún comercio con cita coincide con esa búsqueda.
+      Se busca por Customer ID, RUC, razón social, nombre del comercio o distrito.</div></div>`}`;
+}
+
+/* ---- Agendar una reunión, directo ---------------------------------------
+
+   El calendario ya sabía mostrar citas, moverlas y contrastarlas contra lo que
+   de verdad pasó. Lo único que no tenía era la puerta de entrada: una cita solo
+   podía nacer dentro del formulario de gestión, al final, eligiendo «volver a
+   visitar». Así que agendar exigía registrar antes un contacto que muchas veces
+   no había ocurrido, y el ejecutivo que cuadraba la reunión por WhatsApp
+   simplemente no la ponía. El hueco no se veía como un hueco: se veía como
+   ejecutivos que no agendan.
+
+   Esta es la misma fila de `seguimientos` que escribe el formulario —misma
+   acción, misma modalidad, misma duración—, así que el cumplimiento de citas,
+   la demora en agendar y la ocupación del día siguen midiendo exactamente lo
+   mismo. Lo único que cambia es desde dónde se puede crear. */
+
+/* La hora que se ofrece por defecto: el siguiente cuarto de hora, y nunca
+   antes de las 9 ni después de las 18. Un valor por defecto que hay que
+   corregir siempre es peor que ninguno. */
+function horaSugerida(fecha){
+  const ahora = new Date();
+  if (fecha && fecha !== hoyISO()) return "10:00";
+  let m = Math.ceil((ahora.getHours() * 60 + ahora.getMinutes() + 30) / 15) * 15;
+  if (m < 9 * 60) m = 9 * 60;
+  if (m > 18 * 60) m = 10 * 60;      // ya es tarde: se ofrece mañana temprano
+  return String(Math.floor(m / 60)).padStart(2,"0") + ":" + String(m % 60).padStart(2,"0");
+}
+
+async function agendarCita(cid, fechaSugerida){
+  const c = byId[String(cid)];
+  if (!c) return toast("No encuentro ese comercio");
+
+  /* Una cita abierta por comercio: la base lo garantiza con un índice único, y
+     si se intentara insertar la segunda el rechazo llegaría como un error de
+     base de datos. Se resuelve antes y donde se entiende: lo que se quiere
+     hacer es mover la que ya está. */
+  const abierta = citaDe(cid);
+  if (abierta){
+    toast("Este comercio ya tiene una reunión puesta: se mueve, no se duplica");
+    return reagendarCita(abierta.id);
+  }
+
+  const hoy = hoyISO();
+  const fIni = (fechaSugerida && fechaSugerida >= hoy) ? fechaSugerida : hoy;
+
+  const datos = await new Promise(res => {
+    modal(`<h3>Agendar reunión</h3>
+      <p style="margin-top:0"><b>${esc(titulo(nombreCliente(c)))}</b><br>
+      <span class="tenue">${esc(esClienteNuevo(c) ? "RUC " + (c.ruc || "") : "Customer ID " + c.customer_id)}${
+        c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</span></p>
+
+      <div class="field"><label>¿Cómo va a ser?</label>
+        <div class="opts" id="agMod">
+          ${MODALIDADES.map((m,i) => `
+            <div class="opt ${i === 0 ? "on" : ""}" data-agmod="${m.id}">
+              <span class="rd"></span><span><b>${m.ic} ${m.label}</b><span>${m.min} minutos por defecto</span></span>
+            </div>`).join("")}
+        </div></div>
+
+      <div class="row2">
+        <div class="field"><label>Día</label>
+          <input type="date" id="agFecha" value="${esc(fIni)}" min="${esc(hoy)}"></div>
+        <div class="field"><label>Hora</label>
+          <input type="time" id="agHora" value="${esc(horaSugerida(fIni))}" step="900"></div>
+      </div>
+      <div class="field campo-corto"><label>Cuánto dura</label>
+        <select id="agDur">${[30,45,60,90,120].map(n =>
+          `<option value="${n}"${n === MODALIDADES[0].min ? " selected" : ""}>${n} minutos</option>`).join("")}</select></div>
+      <div class="field"><label>Qué se acordó — opcional</label>
+        <input type="text" id="agCom" maxlength="180"
+               placeholder="Ej.: lo confirmó por WhatsApp, pide que vaya el dueño"></div>
+
+      <div id="agAviso"></div>
+      <div class="note">La reunión entra al calendario con día y hora, ocupa esa franja y se
+      contrasta después contra la visita registrada. Si no llega a ocurrir, se cierra como
+      no concretada: mover la fecha no la borra.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="agOk" style="flex:1">Agendar</button>
+        <button class="btn ghost" id="agNo" style="flex:1">Cancelar</button>
+      </div>`);
+
+    let modalidad = MODALIDADES[0].id;
+
+    /* El choque se avisa mientras se elige, no al guardar: descubrir que te
+       pisaste una visita después de darle a Agendar obliga a volver a empezar. */
+    const revisar = () => {
+      const f = $("#agFecha").value, h = $("#agHora").value, d = Number($("#agDur").value);
+      const av = $("#agAviso"); if (!av) return;
+      const desde = minutosDe(h);
+      if (!f || desde === null){ av.innerHTML = ""; return; }
+      const choques = ocupacionDe(S.user.correo, f).filter(o => chocaCon(o, desde, desde + d));
+      av.innerHTML = choques.length ? `<div class="note crit" style="margin-bottom:11px">
+        <b>Ya tienes algo a esa hora.</b> ${choques.map(o => {
+          const cc = byId[String(o.customer_id)];
+          return `${esc(rangoCita(o))} · ${esc(titulo(cc ? nombreCliente(cc) : o.customer_id))}`;
+        }).join(" · ")}<div style="margin-top:5px">Se puede agendar igual, pero va a quedar cruzado.</div></div>` : "";
+    };
+
+    document.querySelectorAll("[data-agmod]").forEach(el => el.onclick = () => {
+      modalidad = el.dataset.agmod;
+      document.querySelectorAll("[data-agmod]").forEach(x => x.classList.toggle("on", x === el));
+      /* Cambiar de modalidad reajusta la duración por defecto: una visita al
+         local y una videollamada no duran lo mismo. */
+      const sel = $("#agDur"); if (sel) sel.value = String(duracionDe(modalidad));
+      revisar();
+    });
+    ["agFecha","agHora","agDur"].forEach(k => { const el = $("#"+k); if (el) el.onchange = revisar; });
+    revisar();
+
+    $("#agOk").onclick = () => {
+      const f = $("#agFecha").value, h = $("#agHora").value, d = Number($("#agDur").value);
+      /* Todo se lee ANTES de cerrar el modal: cerrarlo destruye los nodos y
+         el comentario se perdería sin que nadie se entere. */
+      const com = String(($("#agCom") || {}).value || "").trim();
+      if (!f || !h) return toast("Falta el día o la hora");
+      if (f < hoyISO()) return toast("La reunión no puede quedar en una fecha que ya pasó");
+      cerrarModal();
+      res({ fecha:f, hora:h, dur:d, modalidad, comentario:com });
+    };
+    $("#agNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!datos) return;
+
+  /* El `.select()`, igual que en el resto del CRM: sin él un rechazo por
+     permisos vuelve sin error y sin filas, y la pantalla diría que se agendó
+     algo que no se agendó. */
+  const { data, error } = await sb.from("seguimientos").insert({
+    customer_id: String(c.customer_id),
+    accion: "VISITAR",
+    fecha_objetivo: datos.fecha,
+    hora_inicio: datos.hora,
+    duracion_min: datos.dur,
+    modalidad: datos.modalidad,
+    comentario: datos.comentario || null,
+    correo_stratis: S.user.correo,
+    ejecutivo: S.user.nombre
+  }).select("id");
+  if (error) return toast("No se pudo agendar: " + error.message);
+  if (!(data || []).length)
+    return toast("La base no dejó agendar esta reunión. El comercio no está asignado a tu usuario.");
+
+  await cargarSeguimientos();
+  S.calDia = datos.fecha; S.calMes = mesDe(datos.fecha);
+  render();
+  toast(`Reunión agendada para el ${fmtFecha(datos.fecha)} a las ${datos.hora}`);
+}
+
+/* Agendar desde el calendario, donde todavía no hay un comercio elegido.
+   Se ofrece primero la cola que el calendario ya calcula —habilitados sin
+   visita puesta—, que es de donde sale casi siempre la respuesta. */
+async function agendarDesdeCalendario(fecha){
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  /* Solo los propios: la fila la escribe el usuario que está mirando, así que
+     ofrecerle comercios de otro sería ofrecerle un rechazo de la base. */
+  const mios = cartera().filter(c => esMiCliente(c)
+    && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE" && !conCita.has(String(c.customer_id)));
+  if (!mios.length) return toast("No te queda ningún comercio abierto sin reunión puesta");
+
+  const habilitados = mios.filter(c => habilitadoEn(c.customer_id));
+  const resto = mios.filter(c => !habilitadoEn(c.customer_id));
+  const op = c => `<option value="${esc(c.customer_id)}">${esc(titulo(nombreCliente(c)))}${
+    c.distrito ? " · " + esc(titulo(c.distrito)) : ""}</option>`;
+
+  const cid = await new Promise(res => {
+    modal(`<h3>¿Con qué comercio?</h3>
+      <div class="field"><label>Comercio</label>
+        <select id="agCid">
+          ${habilitados.length ? `<optgroup label="Ya se pueden visitar · ${habilitados.length}">${
+            habilitados.map(op).join("")}</optgroup>` : ""}
+          ${resto.length ? `<optgroup label="Todavía esperan a BBVA o al cliente · ${resto.length}">${
+            resto.map(op).join("")}</optgroup>` : ""}
+        </select></div>
+      <div class="note">Los de arriba son los que el banco ya confirmó o que ya respondieron: ahí
+      es donde una reunión se puede pactar hoy mismo.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="agcOk" style="flex:1">Continuar</button>
+        <button class="btn ghost" id="agcNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#agcOk").onclick = () => { const v = $("#agCid").value; cerrarModal(); res(v); };
+    $("#agcNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!cid) return;
+  return agendarCita(cid, fecha);
+}
+
+/* ---- Reagendar ----------------------------------------------------------
+   Mover una cita tiene que poder hacerse: el cliente cancela, se cruza otra
+   visita, llueve. Lo que no puede pasar es que mover la fecha borre la
+   anterior — así el cumplimiento se llevaría al 100% empujando fechas.
+   La base guarda cada movimiento con quién lo hizo, y la tarjeta lo dice. */
+async function reagendarCita(id){
+  const s = SEGUIMIENTOS.find(x => String(x.id) === String(id));
+  if (!s) return;
+  const c = byId[String(s.customer_id)];
+  const dur = Number(s.duracion_min) || duracionDe(s.modalidad);
+
+  const datos = await new Promise(res => {
+    modal(`<h3>Reagendar la visita</h3>
+      <p style="margin-top:0"><b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b><br>
+      <span class="tenue">Ahora está para el ${esc(fmtFecha(String(s.fecha_objetivo).slice(0,10)))}
+      a las ${esc(horaCorta(s.hora_inicio))}</span></p>
+      <div class="row2">
+        <div class="field"><label>Nuevo día</label>
+          <input type="date" id="reFecha" value="${esc(String(s.fecha_objetivo).slice(0,10))}" min="${hoyISO()}"></div>
+        <div class="field"><label>Hora</label>
+          <input type="time" id="reHora" value="${esc(horaCorta(s.hora_inicio))}" step="900"></div>
+      </div>
+      <div class="field campo-corto"><label>Cuánto dura</label>
+        <select id="reDur">${[30,45,60,90,120].map(n =>
+          `<option value="${n}"${n === dur ? " selected" : ""}>${n} minutos</option>`).join("")}</select></div>
+      <div id="reAviso"></div>
+      <div class="note">El compromiso original no se borra: queda anotado quién lo movió y cuándo.
+      Una cita que se mueve tres veces se ve en la tabla del equipo.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn" id="reOk" style="flex:1">Reagendar</button>
+        <button class="btn ghost" id="reNo" style="flex:1">Cancelar</button>
+      </div>`);
+
+    /* El choque se avisa mientras se elige, igual que al agendar. */
+    const revisar = () => {
+      const f = $("#reFecha").value, h = $("#reHora").value, d = Number($("#reDur").value);
+      const av = $("#reAviso"); if (!av) return;
+      const desde = minutosDe(h);
+      if (!f || desde === null){ av.innerHTML = ""; return; }
+      const choques = ocupacionDe(s.correo_stratis, f)
+        .filter(o => String(o.id) !== String(s.id) && chocaCon(o, desde, desde + d));
+      av.innerHTML = choques.length ? `<div class="note crit" style="margin-bottom:11px">
+        <b>Ya hay algo a esa hora.</b> ${choques.map(o => {
+          const cc = byId[String(o.customer_id)];
+          return `${esc(rangoCita(o))} · ${esc(titulo(cc ? nombreCliente(cc) : o.customer_id))}`;
+        }).join(" · ")}</div>` : "";
+    };
+    ["reFecha","reHora","reDur"].forEach(k => { const el = $("#"+k); if (el) el.onchange = revisar; });
+    revisar();
+
+    $("#reOk").onclick = () => {
+      const f = $("#reFecha").value, h = $("#reHora").value, d = Number($("#reDur").value);
+      if (!f || !h) return toast("Falta el día o la hora");
+      cerrarModal(); res({ fecha:f, hora:h, dur:d });
+    };
+    $("#reNo").onclick = () => { cerrarModal(); res(null); };
+  });
+  if (!datos) return;
+
+  const igual = datos.fecha === String(s.fecha_objetivo).slice(0,10)
+    && datos.hora === horaCorta(s.hora_inicio) && datos.dur === dur;
+  if (igual) return toast("No cambió nada");
+
+  /* El `.select()` otra vez: sin él, un rechazo por permisos vuelve sin error
+     y sin filas, y la pantalla diría que se movió algo que no se movió. */
+  const { data, error } = await sb.from("seguimientos")
+    .update({ fecha_objetivo: datos.fecha, hora_inicio: datos.hora, duracion_min: datos.dur })
+    .eq("id", id).select("id");
+  if (error) return toast("No se pudo reagendar: " + error.message);
+  if (!(data || []).length)
+    return toast("La base no dejó mover esta cita. Es de otro ejecutivo y tu usuario no tiene permiso.");
+  await cargarSeguimientos();
+  S.calDia = datos.fecha; S.calMes = mesDe(datos.fecha);
+  render();
+  toast(`Reagendada para el ${fmtFecha(datos.fecha)} a las ${datos.hora}`);
+}
+
+function viewAgenda(){
+  const mando = !vistaDeCampo();
+  const buscando = !!String(S.qCal || "").trim();
+  /* El calendario arranca en el mes de hoy y con hoy seleccionado. Si se llega
+     desde otra pantalla con un día ya elegido, el mes lo sigue. */
+  if (!S.calDia) S.calDia = hoyISO();
+  if (!S.calMes) S.calMes = mesDe(S.calDia);
+  const x = cifrasCalendario();
+  const lista = citasAbiertas();
+  const porPlazo = {};
+  ORDEN_PLAZO.forEach(k => porPlazo[k] = []);
+  lista.forEach(s => {
+    const e = estadoCita(s);
+    const d = diasParaAccion(s);
+    porPlazo[e === "vencida" ? "vencida" : e === "hoy" ? "hoy" : d <= 7 ? "semana" : "despues"].push(s);
+  });
+
+  /* Comercios habilitados —el banco confirmó o el cliente respondió— y sin una
+     visita puesta. Es el hueco que el calendario existe para cerrar. */
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en).map(s => String(s.customer_id)));
+  const sinAgendar = cartera().filter(c =>
+    (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && habilitadoEn(c.customer_id)
+    && !conCita.has(String(c.customer_id)));
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>${mando ? "Calendario de visitas del equipo" : "Mi calendario de visitas"}</h2>
+      <div class="sub">Lo que está comprometido con cada comercio: día, hora y si es en el local o por videollamada</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="lbl">Hoy</div><div class="val">${x.hoy.length}</div>
+      <div class="sub">citas para ${fmtFecha(hoyISO())}</div></div>
+    <div class="stat"><div class="lbl">Esta semana</div><div class="val">${x.semana.length}</div>
+      <div class="sub">en los próximos 7 días</div></div>
+    <div class="stat ${x.vencidas.length ? "malo" : ""}"><div class="lbl">No concretadas</div>
+      <div class="val">${x.vencidas.length}</div>
+      <div class="sub">pasó la fecha y no hay visita registrada</div></div>
+    <div class="stat"><div class="lbl">Cumplimiento</div>
+      <div class="val">${x.pct === null ? "—" : x.pct + "%"}</div>
+      <div class="sub">${x.juzgables.length
+        ? `${x.concretadas.length} de ${x.juzgables.length} citas ya vencidas se concretaron`
+        : "todavía no vence ninguna cita"}</div></div>
+    <div class="stat ${sinAgendar.length ? "malo" : ""}"><div class="lbl">Habilitados sin cita</div>
+      <div class="val">${sinAgendar.length}</div>
+      <div class="sub">BBVA confirmó o el cliente respondió, y no hay visita puesta</div></div>
+  </div>
+
+  ${mando ? `<div class="filtros">
+    <div class="sel-row cal-filtro">
+      <label class="fsel"><span>Ejecutivo</span>
+        <select id="ejecAgenda">
+          <option value="todos"${S.fEjecAgenda==="todos"?" selected":""}>Todo el equipo · ${citasTodas().filter(s=>!s.cerrado_en).length}</option>
+          ${USUARIOS.filter(u => u.rol === "Ejecutivo").map(u => {
+            const n = citasTodas().filter(s => !s.cerrado_en && s.ejecutivo === u.nombre).length;
+            return `<option value="${esc(u.nombre)}"${S.fEjecAgenda===u.nombre?" selected":""}>${esc(u.nombre)} · ${n}</option>`;
+          }).join("")}
+        </select></label>
+    </div>
+  </div>` : ""}
+
+  <div class="filtros" style="margin-bottom:11px">
+    <div class="search"><span class="mag">⌕</span>
+      <input type="search" id="qCal" value="${esc(S.qCal || "")}"
+             placeholder="Buscar por Customer ID, RUC, razón social, comercio o distrito…"></div>
+  </div>
+
+  ${buscando ? resultadosBusqueda() : `
+  <!-- Tres columnas, y en este orden por una razón: el calendario dice CUÁNDO,
+       la columna del medio dice QUÉ hay ese día, y la de la derecha dice QUÉ
+       FALTA agendar. Se lee de izquierda a derecha como se trabaja: miro el
+       mes, abro el día, y lo que sobra a la derecha es la cola por atender. -->
+  <div class="cal3">
+    <div class="cal3-rej">${rejillaMes()}</div>
+    <div class="cal3-dia">${panelDelDia()}</div>
+    <div class="cal3-cola">${columnaSinAgendar(sinAgendar, mando)}</div>
+  </div>
+  `}
+
+  ${mando ? bloqueProyeccion() : ""}
+  ${mando ? bloqueDisponibilidad() : ""}
+
+  ${!buscando && !citasVisibles().length && !sinAgendar.length ? `<div class="empty"><div class="big">◷</div>
+      No hay visitas agendadas.<br><br>
+      <span style="font-size:13px;color:var(--muted)">Una cita se crea al registrar una gestión que
+      no cierra el comercio: se elige «volver a visitar», el día y la hora.</span></div>` : ""}`;
+}
+
+/* ---- La cola: habilitados sin visita agendada ---------------------------
+   El hueco que el calendario existe para cerrar, en su propia columna y a la
+   vista permanente. Antes vivía al fondo de la pantalla, que es donde se van a
+   morir las listas de pendientes. */
+function columnaSinAgendar(lista, mando){
+  return `
+  <div class="card cola-sin"${lista.length ? "" : ' data-vacia="1"'}>
+    <h3>Habilitados sin visita <span class="cola-n">${lista.length}</span></h3>
+    ${lista.length ? `
+    <p class="pie" style="margin:5px 0 10px">BBVA ya confirmó los datos o el cliente ya
+      respondió: se puede agendar hoy mismo. Cada día que pasan acá es una visita que no ocurrió.</p>
+    <div class="cola-lista">
+      ${lista.slice(0, 40).map(c => {
+        const dias = habilesDesde(habilitadoEn(c.customer_id));
+        /* La fila lleva a la ficha; el botón agenda sin salir de acá. Son dos
+           acciones distintas sobre la misma línea, así que son dos botones
+           hermanos y no uno dentro de otro —anidar botones no es HTML válido y
+           el de adentro deja de responder en la mitad de los navegadores. */
+        return `<div class="cola-f">
+          <button class="cola-x" data-cid="${esc(c.customer_id)}">
+            <b>${esc(titulo(nombreCliente(c)))}</b>
+            <span>${esc(titulo(c.distrito || ""))}${mando ? " · " + esc(c.asignado || "") : ""}</span>
+            <span class="cola-d ${dias > 5 ? "tarde" : ""}">${
+              dias ? "hace " + textoDias(dias) : "hoy"}</span>
+          </button>
+          ${esMiCliente(c) ? `<button class="cola-ag" data-agendar="${esc(c.customer_id)}"
+            title="Agendar la reunión con día y hora" aria-label="Agendar reunión con ${
+              esc(titulo(nombreCliente(c)))}">📅</button>` : ""}
+        </div>`;
+      }).join("")}
+    </div>
+    ${lista.length > 40 ? `<p class="pie" style="margin-top:9px">…y ${lista.length - 40} más.</p>` : ""}`
+    : `<div class="vacio">Ningún comercio habilitado se quedó sin visita agendada.</div>`}
+  </div>`;
+}
+
+async function descartarSeguimiento(id){
+  const s = SEGUIMIENTOS.find(x => String(x.id) === String(id));
+  if (!s) return;
+  const c = byId[String(s.customer_id)];
+  const cita = esCita(s);
+  const ok = await new Promise(res => {
+    modal(`<h3>${cita ? "La cita se cayó" : "Ya no aplica"}</h3>
+      <p style="margin-top:0">Se dará por cerrada ${cita
+        ? `la <b>${esc(cortoModalidad(s.modalidad).toLowerCase())}</b> del
+           <b>${fmtFecha(String(s.fecha_objetivo).slice(0,10))} a las ${esc(horaCorta(s.hora_inicio))}</b>`
+        : `la acción <b>${esc(nomAccion(s.accion))}</b>`} de
+      <b>${esc(titulo(c ? nombreCliente(c) : s.customer_id))}</b>, sin registrar una visita.</p>
+      <div class="note crit">Cerrarla acá cuenta como <b>no concretada</b>: eso es lo que pasó.
+      Si la visita sí ocurrió, regístrala como gestión y la cita se cierra sola como concretada.</div>
+      <div class="pie">No se borra nada: la cita queda con su fecha, tu nombre y el motivo.</div>
+      <div style="display:flex;gap:8px;margin-top:15px">
+        <button class="btn danger" id="sgOk" style="flex:1">Cerrarla</button>
+        <button class="btn ghost" id="sgNo" style="flex:1">Cancelar</button>
+      </div>`);
+    $("#sgOk").onclick = () => { cerrarModal(); res(true); };
+    $("#sgNo").onclick = () => { cerrarModal(); res(false); };
+  });
+  if (!ok) return;
+  const { error } = await sb.from("seguimientos")
+    .update({ cerrado_en: new Date().toISOString(), cerrado_por: S.user.correo,
+              cerrado_motivo: "DESCARTADA" })
+    .eq("id", id);
+  if (error) return toast("No se pudo cerrar: " + error.message);
+  await cargarSeguimientos(); render();
+  toast(cita ? "Cita cerrada como no concretada" : "Acción cerrada");
+}
+/* =========================================================================
+   El catálogo de acciones, editable desde Ajustes
+
+   La campaña va a cambiar y la lista de «qué sigue» con ella. En vez de
+   pedirla por chat cada vez, el Analista y el Manager la mantienen acá y los
+   ejecutivos la ven al instante. Las que dejan de usarse se desactivan, no se
+   borran: si se borraran, las acciones ya registradas con ese código se
+   quedarían sin nombre.
+   ========================================================================= */
+function cardAcciones(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const usos = cod => SEGUIMIENTOS.filter(x => x.accion === cod).length;
+  return `
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      Es la lista que ve el ejecutivo cuando una gestión no cierra el comercio. Lo que cambies acá
+      lo ven todos en cuanto se sincronicen. Una acción que ya no se usa se <b>desactiva</b>: así
+      desaparece del formulario pero las que ya se registraron con ella conservan su nombre.
+    </div>
+    <div class="acc-lista">
+      ${ACCIONES.slice().sort((a,b) => (a.orden||50) - (b.orden||50)).map(a => `
+        <div class="acc-fila ${a.activo === false ? "off" : ""}">
+          <input type="text" class="acc-nom" data-accnom="${esc(a.codigo)}" value="${esc(a.nombre)}"
+                 placeholder="Nombre de la acción">
+          <input type="text" class="acc-desc" data-accdesc="${esc(a.codigo)}" value="${esc(a.descripcion || "")}"
+                 placeholder="Cuándo se usa — opcional">
+          <span class="acc-uso">${usos(a.codigo)} en uso</span>
+          <button class="btn ghost sm" data-accsw="${esc(a.codigo)}">${a.activo === false ? "Activar" : "Desactivar"}</button>
+        </div>`).join("")}
+    </div>
+    <div class="acc-nueva">
+      <input type="text" id="accNueva" placeholder="Agregar una acción nueva — ej.: Coordinar con el contador">
+      <button class="btn sm" id="accAdd">Agregar</button>
+    </div>
+    <div id="accMsg" style="margin-top:9px"></div>
+    <button class="btn block" id="accGuardar" style="margin-top:11px">Guardar los cambios</button>
+  </div>`;
+}
+
+async function guardarAcciones(){
+  const msg = $("#accMsg");
+  const cambios = [];
+  document.querySelectorAll("[data-accnom]").forEach(el => {
+    const cod = el.dataset.accnom;
+    const a = ACCIONES.find(x => x.codigo === cod);
+    const nombre = el.value.trim();
+    const desc = (document.querySelector(`[data-accdesc="${CSS.escape(cod)}"]`) || {}).value;
+    if (!a || !nombre) return;
+    if (nombre !== a.nombre || (desc || "").trim() !== (a.descripcion || ""))
+      cambios.push({ codigo: cod, nombre, descripcion: (desc || "").trim() || null });
+  });
+  if (!cambios.length) return toast("No hay cambios que guardar");
+  const btn = $("#accGuardar"); btn.disabled = true; btn.textContent = "Guardando…";
+  for (const c of cambios){
+    const { error } = await sb.from("acciones_seguimiento")
+      .update({ nombre: c.nombre, descripcion: c.descripcion }).eq("codigo", c.codigo);
+    if (error){ btn.disabled = false; btn.textContent = "Guardar los cambios";
+      if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  }
+  await cargarSeguimientos(); render();
+  toast(`${cambios.length} acción${cambios.length===1?"":"es"} actualizada${cambios.length===1?"":"s"}`);
+}
+
+async function alternarAccion(cod){
+  const a = ACCIONES.find(x => x.codigo === cod); if (!a) return;
+  const { error } = await sb.from("acciones_seguimiento")
+    .update({ activo: a.activo === false }).eq("codigo", cod);
+  if (error) return toast("No se pudo cambiar: " + error.message);
+  await cargarSeguimientos(); render();
+}
+
+async function agregarAccion(){
+  const inp = $("#accNueva"), msg = $("#accMsg");
+  const nombre = (inp.value || "").trim();
+  if (!nombre) return toast("Escribe el nombre de la acción");
+  /* El código sale del nombre: en mayúsculas, sin tildes ni espacios. Es lo
+     que guardan las acciones ya registradas, así que tiene que ser estable. */
+  const codigo = nombre.normalize("NFD").replace(/[̀-ͯ]/g, "")
+                   .toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 24);
+  if (!codigo) return toast("Ese nombre no sirve como acción");
+  if (ACCIONES.some(a => a.codigo === codigo)) return toast("Ya existe una acción parecida");
+  const orden = Math.max(0, ...ACCIONES.map(a => a.orden || 50)) + 1;
+  const { error } = await sb.from("acciones_seguimiento")
+    .insert({ codigo, nombre, orden, activo: true });
+  if (error){ if (msg) msg.innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  inp.value = "";
+  await cargarSeguimientos(); render();
+  toast("Acción agregada");
+}
+
+function bindAcciones(){
+  if ($("#accGuardar")) $("#accGuardar").onclick = () => guardarAcciones();
+  if ($("#accAdd")) $("#accAdd").onclick = () => agregarAccion();
+  if ($("#accNueva")) $("#accNueva").onkeydown = e => { if (e.key === "Enter") agregarAccion(); };
+  document.querySelectorAll("[data-accsw]").forEach(b => b.onclick = () => alternarAccion(b.dataset.accsw));
+}
+
+
+/* =========================================================================
+   Incentivos: la llave de acceso y el cumplimiento
+
+   Dos capas que no se mezclan. La llave son tres mínimos de gestión —
+   cobertura, visitas efectivas y puntualidad del registro— que dependen
+   enteramente del ejecutivo. El cumplimiento son los tres objetivos del
+   proyecto, que dependen además del banco y del mercado.
+
+   La llave paga por sí sola: cumplirla ya vale el bono base, aunque los
+   objetivos no despeguen. Lo que los objetivos deciden es cuánto MÁS, desde
+   el bono base hasta el tope. Quien gestionó como se le pidió no termina en
+   cero por una meta de proyecto que no controla.
+
+   Todo se mide en la ventana del bono, del 19 al 18, no en el mes del
+   calendario. Y todo sale del CRM salvo la facturación, que vive en la
+   plataforma de BBVA y se carga a mano cada periodo.
+   ========================================================================= */
+const periodoBono = () => S.pBono || periodoHoy();
+
+const ejecutivosDelBono = () => USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+
+/* La cartera de la que responde un ejecutivo. Se prefiere lo que BBVA asignó
+   —vive en Metas— y si no está cargado se cuenta lo que tiene en el CRM. */
+function carteraDe(correo, p){
+  const m = metaVigente(correo, p);
+  if (m.n > 0) return { n: m.n, fuente: m.heredada ? "heredada" : "asignada", de: m.de };
+  const n = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c)).length;
+  return { n, fuente: "crm" };
+}
+
+/* ---- Qué cuenta como trabajo del periodo --------------------------------
+
+   El bono mide TRABAJO REGISTRADO, y eso incluye la coordinación con el banco.
+   Un correo al ejecutivo de BBVA por un comercio es trabajo sobre ese
+   comercio: es lo único que se podía hacer mientras el banco no soltaba los
+   datos, y es exactamente lo que la campaña pidió hacer el primer mes.
+
+   Por eso esto NO sale de `DB.todos()`, que es el montón del cliente. Esa
+   distinción es correcta para el embudo, la efectividad y la tasa de
+   respuesta —ahí mezclar los dos lados infla un lado y vacía el otro— pero
+   aplicada al bono deja fuera media campaña: a Anibal Reyes le quitaba 106 de
+   sus 159 gestiones del periodo y le hundía la cobertura de 64% a 22%.
+
+   Lo que sí queda fuera, y no se negocia, son las RECONSTRUIDAS: las 842 filas
+   que escribió una migración a partir del canal declarado en el alta. Nadie
+   las trabajó. Contarlas convertiría el trabajo de la migración en cobertura
+   regalada, que es lo primero que encontraría un reclamo bien puesto.
+
+   Hasta el 23/08/2026 esto salía bien por accidente: los 183 correos al
+   funcionario conservaban con='CLIENTE', así que entraban por la puerta del
+   cliente, mientras las 29 coordinaciones declaradas con el medio correcto
+   quedaban fuera. Dos registros del mismo trabajo contaban distinto según cómo
+   se hubiera tecleado. Eso es lo que se cierra acá. */
+/* Y desde el 24/08, la segunda condición: además de OCURRIR en la ventana, la
+   gestión tiene que haber quedado REGISTRADA antes del cierre. Ver
+   `gestionDelPeriodo` en el core: 52 gestiones del primer periodo entraron al
+   CRM el 19 y el 21 de agosto, con el periodo ya vencido, y estaban contando.
+   Todas fuera de plazo, claro: hundían la puntualidad de un cierre que ya
+   estaba firmado. */
+const gestionesDe = (correo, p) =>
+  DB.crudo.filter(r => !esReconstruida(r) && r.Correo_Stratis === correo
+                    && gestionDelPeriodo(r, p));
+
+/* ---- La llave ----------------------------------------------------------
+   Tres requisitos. Cumplir los tres habilita el cálculo; fallar uno deja
+   solo el bono base; fallar dos o más deja sin incentivo. */
+function llaveDe(correo, p){
+  const cart  = carteraDe(correo, p);
+  const gest  = gestionesDe(correo, p);
+  /* Los requisitos son los que regían en ese periodo, no los de hoy. */
+  const req   = paramsDe(p).requisitos;
+
+  /* ---- Qué cuenta como cartera cubierta ------------------------------
+     Tres reglas, y la que rige viaja con la versión de parámetros del periodo.
+     Cambiarla no reescribe los meses ya medidos: cada uno se sigue liquidando
+     con la que estaba puesta cuando se trabajó.
+
+       · «registro»  — cuenta la ficha cargada, se haya trabajado o no, sobre
+                       la cartera que asignó BBVA. Fue la regla del primer mes:
+                       el cuello estaba en la respuesta del banco, así que
+                       exigir gestión medía algo que no dependía del ejecutivo.
+
+       · «gestion»   — cuenta el comercio que recibió contacto o intento de
+                       contacto, sobre la cartera asignada.
+
+       · «contacto»  — la regla de régimen. Cuenta el comercio donde hubo un
+                       contacto LOGRADO, que es una de dos cosas: un correo al
+                       ejecutivo de BBVA —el medio que deja constancia
+                       consultable, y por eso es el único que cuenta de ese
+                       lado— o una gestión efectiva con el cliente, no un
+                       intento. Va sobre los Customer ID registrados, no sobre
+                       la cartera asignada, porque mide qué proporción de lo
+                       que el ejecutivo cargó llegó a tener contacto.
+
+     Y en las tres, un comercio cuenta UNA vez. Cinco gestiones sobre la misma
+     bodega son un comercio gestionado, no cinco.
+
+     El riesgo de medir sobre lo registrado es evidente: cargar menos fichas
+     sube el porcentaje. Por eso «contacto» trae además una segunda condición
+     —tener cargada toda la cartera asignada— y las dos tienen que cumplirse
+     para que el requisito quede verde. Subir la cobertura dejando comercios
+     sin cargar deja de ser posible. */
+  const base = req.cobertura_base || "gestion";
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const registrados = mios.length;
+
+  /* `idsCubiertos` es el mismo conjunto que produce el número, expuesto. No es
+     un extra: la descarga por ejecutivo tiene que marcar EXACTAMENTE los
+     comercios que el requisito contó, y calcularlo por su cuenta sería tener
+     dos veces la misma regla en dos sitios que se van a separar el día que
+     alguien cambie una de las dos. */
+  let cubiertos, idsCubiertos;
+  if (base === "registro"){
+    cubiertos = registrados;
+    idsCubiertos = new Set(mios.map(c => String(c.customer_id)));
+  } else if (base === "contacto"){
+    /* Los comercios con un contacto logrado dentro del periodo, de los dos
+       lados del flujo. Es un Set: el comercio entra una vez por más veces que
+       se le haya escrito. */
+    const logrados = new Set();
+    /* Del lado del cliente cuenta la gestión efectiva; del lado del banco,
+       solo el correo, y se agrega abajo. Un chat con el funcionario marcado
+       «efectivo» no es cobertura: por eso el filtro pide además que la gestión
+       haya ido al comercio. */
+    gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
+        .forEach(r => logrados.add(String(r.Customer_id)));
+    /* Solo las coordinaciones DECLARADAS. Las inferidas son las que el CRM
+       dedujo del histórico al migrar: sirven para leer el estado de un
+       comercio, pero no son constancia de que alguien escribió el correo, y
+       la cobertura de régimen se paga precisamente contra esa constancia.
+       Contarlas convertiría el trabajo de la migración en cobertura
+       regalada —hoy hay 800 inferidas contra 14 declaradas—, y eso es
+       exactamente lo que un reclamo bien puesto encontraría primero. */
+    DB.bbva()
+      .filter(r => r.Correo_Stratis === correo
+                && r.Tipo_Contacto === "bbva_correo"
+                && r.Inferida !== true
+                && gestionDelPeriodo(r, p))
+      .forEach(r => logrados.add(String(r.Customer_id)));
+    idsCubiertos = new Set(mios.filter(c => logrados.has(String(c.customer_id)))
+                               .map(c => String(c.customer_id)));
+    cubiertos = idsCubiertos.size;
+  } else {
+    const tocados = new Set(gest.map(r => String(r.Customer_id)));
+    idsCubiertos = new Set(mios.filter(c => tocados.has(String(c.customer_id)))
+                               .map(c => String(c.customer_id)));
+    cubiertos = idsCubiertos.size;
+  }
+
+  /* El denominador es parte de la regla, no un detalle aparte: «registro» y
+     «gestion» miden contra lo que BBVA asignó, «contacto» contra lo cargado. */
+  const sobreRegistrados = base === "contacto";
+  const denom = sobreRegistrados ? registrados : cart.n;
+  const cobertura = denom ? cubiertos / denom * 100 : 0;
+  const cargaCompleta = !sobreRegistrados || registrados >= cart.n;
+  const faltanPorCargar = Math.max(0, cart.n - registrados);
+
+  /* Una visita a la agencia del banco no es una visita al comercio. El
+     requisito mide terreno con el cliente, así que se pide las dos cosas. */
+  const efectivas = gest.filter(r => esAlCliente(r) && r.Cumple_Visita === "SI").length;
+  const semanas   = semanasPeriodo(p);
+  /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
+     de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
+  const rv        = reglaVisitas(req, p);
+  const pide      = rv.pide;
+  const porSemana = semanas ? efectivas / semanas : 0;
+
+  const puntuales = gest.filter(aTiempo).length;
+  const puntualidad = gest.length ? puntuales / gest.length * 100 : 0;
+
+  const r1 = { valor:cobertura, meta:req.cobertura_pct,
+               ok: cobertura >= req.cobertura_pct && cargaCompleta,
+               detalle: `${cubiertos} de ${denom} comercios${
+                 cargaCompleta ? "" : ` · faltan ${faltanPorCargar} por cargar`}`,
+               base, cubiertos, idsCubiertos, denom, registrados, cargaCompleta, faltanPorCargar,
+               /* Cuántos comercios más hacen falta para llegar al mínimo. Es el
+                  número que el ejecutivo necesita para reaccionar antes del 18,
+                  y no lo tenía en ninguna pantalla. */
+               faltan: Math.max(0, Math.ceil(denom * req.cobertura_pct / 100) - cubiertos) };
+  /* Cuando el mínimo es del periodo, lo que se muestra es el total efectivo
+     contra las 40; cuando es semanal, el ritmo por semana contra las 25. Se
+     compara siempre lo mismo con lo mismo. */
+  const r2 = { valor: rv.porPeriodo ? efectivas : porSemana,
+               meta:  rv.meta, unidad: rv.unidad, regla: rv,
+               ok: efectivas >= pide, efectivas, pide, porSemana,
+               detalle:`${efectivas} efectivas, se piden ${pide}` };
+  const r3 = { valor:puntualidad, meta:req.puntualidad_pct,  ok: gest.length > 0 && puntualidad >= req.puntualidad_pct,
+               puntuales,
+               /* Cuántas gestiones a tiempo más hacen falta para llegar al
+                  mínimo. Es el número que convierte un porcentaje en algo que
+                  se puede hacer hoy, y el que el ejecutivo no tenía. */
+               faltan: Math.max(0, Math.ceil(gest.length * req.puntualidad_pct / 100) - puntuales),
+               detalle: gest.length ? `${puntuales} de ${gest.length} a tiempo` : "sin gestiones en el periodo" };
+
+  /* ---- Excepciones autorizadas -----------------------------------------
+
+     Una excepción es una persona con nombre y apellido decidiendo dar por
+     cumplido un requisito que no se cumplió. Existe porque a veces es lo
+     correcto —el primer periodo de una campaña arranca torcido y castigarlo
+     entero no arregla nada— y es peligrosa por lo mismo: si el CRM la aplicara
+     en silencio, en tres meses nadie sabría que el 80% no se alcanzó.
+
+     Así que la excepción NO toca el número. `valor` sigue diciendo 73,8%,
+     `detalle` sigue diciendo 127 de 172, y lo único que cambia es `ok`, con la
+     autorización colgada al lado para que el acta, el libro y la pantalla
+     puedan decir las dos cosas a la vez.
+
+     Vive en la versión de parámetros del periodo, como el techo y las metas
+     previas: el periodo que no la traiga no la hereda, y un mes siguiente
+     calcula normal sin que nadie tenga que acordarse de retirarla. */
+  const exc = (paramsDe(p).excepciones || []).filter(e => e && e.correo === correo);
+  const conExcepcion = (r, clave) => {
+    const e = exc.find(x => x.requisito === clave);
+    /* Solo hacia arriba, y solo si de verdad no llegaba: una excepción sobre
+       un requisito ya cumplido no es una excepción, es ruido en el acta. */
+    if (!e || r.ok) return r;
+    return Object.assign(r, { ok:true, porExcepcion:e });
+  };
+  conExcepcion(r1, "cobertura");
+  conExcepcion(r2, "visitas");
+  conExcepcion(r3, "puntualidad");
+
+  const cumplidos = [r1,r2,r3].filter(x => x.ok).length;
+  return { cobertura:r1, visitas:r2, puntualidad:r3, cumplidos, gestiones:gest.length,
+           excepciones: [r1,r2,r3].filter(x => x.porExcepcion).map(x => x.porExcepcion),
+           cartera:cart, registrados, efectivas, semanas, pide,
+           estado: cumplidos === 3 ? "activo" : cumplidos === 2 ? "base" : "sin" };
+}
+
+const TEXTO_LLAVE = {
+  activo:"Habilitado",
+  base:"Solo bono base",
+  sin:"Sin incentivo"
+};
+
+/* ---- El cumplimiento ---------------------------------------------------
+   Reactivación y venta salen del CRM; la facturación se carga a mano. Si
+   falta la facturación no se inventa un cero: se dice que falta, porque un
+   cero hundiría el ponderado y haría ver mal a quien quizá va bien. */
+function cumplimientoDe(correo, p){
+  const B    = paramsDe(p);
+  const cart = carteraDe(correo, p);
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+
+  /* La meta de un periodo no es la del proyecto. El documento de incentivos
+     trae una ruta mensual —4, 8, 11, 15, 18 p.p. y 3, 6, 9, 12, 15%— y lo que
+     se compara contra ella es el avance ACUMULADO desde el arranque, no lo
+     que pasó dentro del mes. Medir un mes contra la meta de cinco daba
+     cumplimientos de 2% a todo el mundo y hacía el bono inalcanzable de
+     entrada, que es exactamente lo contrario de para lo que existe. */
+  const M = metaPeriodo(p, B);
+
+  const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && hastaPeriodo(c.cerrado_en, p)).length;
+  const enElMes  = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
+  const pp       = cart.n ? logrados / cart.n * 100 : 0;
+  const cReact   = M.reactivacion_pp ? pp / M.reactivacion_pp * 100 : 0;
+
+  /* La facturación ya venía acumulada: crece contra la base congelada del
+     proyecto, no contra el cierre del mes anterior. Lo que cambia es contra
+     qué meta se compara. */
+  const crec  = crecimientoFact(correo, p);
+  /* Una meta de facturación en cero no es una meta fácil: es un mes en el que
+     todavía no se mide. La ruta reajustada arranca la facturación en el mes 3
+     porque el dato del banco llega un periodo desfasado, y los meses 1 y 2
+     quedan en cero a propósito. Puntuar eso como 0% de cumplimiento sería
+     hundir el ponderado de todos con el peso más grande —50— por un dato que
+     nadie podía tener. Se trata como no medible, igual que si faltara el
+     monto: sale del promedio y se dice en pantalla. */
+  const cFact = crec === null || !M.facturacion_pct ? null
+              : crec / M.facturacion_pct * 100;
+
+  /* La venta sí es mensual, y así está en el documento: 7 por periodo. No se
+     acumula ni se prorratea. */
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
+                                   && enVentana(c.creado_en, p)).length;
+  const cVenta = M.ventas_mes ? ventas / M.ventas_mes * 100 : 0;
+
+  const mes = M.i >= 1 ? `mes ${M.i} de ${M.total}` : "fuera del proyecto";
+  const objetivos = [
+    { id:"react", nombre:"Reactivación del portafolio", peso:B.pesos.reactivacion,
+      meta:`+${M.reactivacion_pp} p.p.`, metaPie:`acumulado al ${mes}`,
+      logro:`${pp.toFixed(1)} p.p.`,
+      detalle:`${logrados} de ${cart.n} comercios acumulados${
+        enElMes !== logrados ? ` · ${enElMes} en este periodo` : ""}`, cumpl:cReact },
+    /* Los meses sin meta de facturación se nombran como lo que son. Decir
+       «falta cargar la facturación» en el mes 2 mandaría a buscar un dato que
+       el banco todavía no entregó. */
+    { id:"fact", nombre:"Facturación", peso:B.pesos.facturacion,
+      meta: M.facturacion_pct ? `+${M.facturacion_pct}%` : "no se mide todavía",
+      metaPie: M.facturacion_pct ? `acumulado al ${mes}`
+             : `el dato del banco llega un periodo desfasado · la medición arranca en el ${mesArranqueFact(B)}`,
+      logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
+      detalle: !M.facturacion_pct ? "sin meta este mes: no entra al promedio"
+             : crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
+      cumpl:cFact },
+    { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
+      meta:`${M.ventas_mes} ${M.ventas_mes === 1 ? "venta" : "ventas"}`, metaPie:"por periodo, no se acumula",
+      logro:`${ventas} ${ventas === 1 ? "venta" : "ventas"}`,
+      detalle: ventas === 1 ? "1 afiliación nueva" : `${ventas} afiliaciones nuevas`, cumpl:cVenta }
+  ];
+
+  /* El ponderado se reparte solo entre lo que sí se puede medir: si falta la
+     facturación, el 50% no se cuenta como cero, se saca del reparto y se
+     avisa que el número está incompleto. */
+  const medibles = objetivos.filter(o => o.cumpl !== null);
+  const peso = medibles.reduce((n,o) => n + o.peso, 0);
+  const total = peso ? medibles.reduce((n,o) => n + o.cumpl * o.peso, 0) / peso : 0;
+
+  return { objetivos, total, completo: medibles.length === objetivos.length,
+           pesoMedido:peso, ventas, logrados, enElMes, pp, meta:M };
+}
+
+function montoFact(correo, p){
+  const f = factDe(correo, p), ini = inicioFact(correo, p);
+  if (!f) return "";
+  return `${soles(ini.monto)} → ${soles(f.monto_final)}${
+    ini.fuente === "base" ? " · sobre la base del proyecto" : ""}`;
+}
+/* Decir qué falta exactamente: no es lo mismo que nadie fijó la base del
+   proyecto a que falta el monto de cierre de este periodo. */
+/* En qué mes del proyecto la facturación empieza a pedir algo. Sale de la
+   curva y no de un número escrito: si mañana el banco entrega el dato antes y
+   la ruta se corrige en Ajustes, esta frase se corrige sola. */
+function mesArranqueFact(params){
+  const c = ((params || BONO).curva || {}).facturacion_pct || [];
+  const i = c.findIndex(v => Number(v) > 0);
+  return i < 0 ? "mes que corresponda" : `mes ${i + 1}`;
+}
+
+function textoFaltaFact(correo, p){
+  const ini = inicioFact(correo, p), f = factDe(correo, p);
+  if (ini.monto === null) return "falta fijar la base de facturación del proyecto";
+  if (!f || f.monto_final === null || f.monto_final === undefined)
+    return "falta el monto de cierre del periodo";
+  return "falta cargar la facturación";
+}
+
+/* Lo que se cobraría, en porcentaje del sueldo. El CRM no guarda sueldos:
+   ese dato no tiene por qué vivir acá. */
+/* El cálculo vivo, con los datos de hoy y los parámetros de ese periodo. */
+/* ---- La matriz de escenarios, sola y sin datos alrededor -----------------
+
+   Vive aparte a propósito. Es la regla que decide cuánto cobra una persona, y
+   una regla así tiene que poder leerse de un vistazo y probarse caso por caso
+   sin montar una cartera de prueba.
+
+   El incentivo tiene dos niveles y son independientes. La llave son tres
+   mínimos de gestión —cobertura, visitas efectivas, puntualidad del registro—
+   que dependen enteramente del ejecutivo. Los objetivos son del proyecto y
+   dependen además del banco, del cliente y del mercado. Un ejecutivo que
+   gestionó como se le pidió no puede terminar en cero porque la reactivación
+   del portafolio no despegó: eso convierte el incentivo en una lotería y deja
+   de premiar lo único que sí controla.
+
+     · 0 o 1 requisito  → 0%. No hay llave, no hay nada.
+     · 2 de 3           → el bono base, fijo, sin mirar los objetivos.
+     · 3 de 3           → el bono base como PISO, y desde el primer punto de
+                          la escala, el gradual hasta el tope.
+
+   Antes los dos últimos casos devolvían 0% cuando el cumplimiento no llegaba
+   al piso, que es exactamente el escenario del primer mes de campo: cuatro
+   personas que gestionaron su cartera y a las que el sistema les decía cero. */
+/* ---- El techo del periodo de marcha blanca -------------------------------
+
+   `solo_llave` es un parámetro de versión, no una excepción escrita en el
+   código: el periodo que lo trae paga la llave y nada más, pase lo que pase
+   con los objetivos.
+
+   Existe por una razón concreta y de plata. El primer periodo se liquida sin
+   la facturación de agosto —el banco entrega el dato un mes después—, y el
+   acuerdo fue que ahí se paga la llave. Si el gradual quedara abierto, cargar
+   esa facturación en septiembre movería un monto ya conversado y firmado: o se
+   le queda debiendo a alguien, o se le pagó de menos. Con el techo puesto, el
+   número del acta no puede cambiar aunque después se cargue la facturación,
+   se corrija una gestión o alguien reabra el periodo.
+
+   Es a propósito que el tope se aplique DESPUÉS de la puerta del «sin»: quien
+   no llegó a dos requisitos sigue en cero. El techo limita hacia arriba, no
+   regala hacia abajo. */
+function pagoDelPeriodo(estado, total, B){
+  const esc   = escalaDe(B);
+  const piso  = esc[0][1];                     // lo que paga el primer punto
+  const bruto = tramoIncentivo(total, B);
+  if (estado === "sin")
+    return { bruto, pago:0, concepto:"ninguno",
+             nota:"No cumplió dos o más requisitos de gestión" };
+  if (B && B.solo_llave)
+    return { bruto, pago:B.base_incumple_uno, concepto:"llave_tope", topado:true,
+             nota:"Periodo de marcha blanca: se paga la llave y el gradual no se abre" };
+  if (estado === "base")
+    return { bruto, pago:B.base_incumple_uno, concepto:"base",
+             nota:"Incumplió un requisito: se paga solo el bono base" };
+  if (bruto > piso)
+    return { bruto, pago:bruto, concepto:"gradual", nota:"" };
+  return { bruto, pago:piso, concepto:"llave",
+           nota:`El cumplimiento no llega al ${esc[0][0]}%: se paga la llave` };
+}
+
+/* Cómo se llama lo que se está pagando. El acta dice «Incentivo del periodo:
+   15%» y quien la firma tiene derecho a saber si ese 15% es el bono base por
+   haber cumplido la gestión o el gradual por haber alcanzado los objetivos.
+   Son dos cosas distintas y se conversan distinto. */
+const CONCEPTO_PAGO = {
+  ninguno:    "Sin incentivo",
+  base:       "Bono base por la llave de gestión",
+  llave:      "Bono base por la llave de gestión",
+  llave_tope: "Bono base por la llave de gestión",
+  gradual:    "Incentivo gradual por cumplimiento"
+};
+
+function incentivoVivo(correo, p){
+  const B  = paramsDe(p);
+  const ll = llaveDe(correo, p);
+  const cu = cumplimientoDe(correo, p);
+  const d = pagoDelPeriodo(ll.estado, cu.total, B);
+  const { bruto, pago, nota, concepto } = d;
+  return { llave:ll, cumpl:cu, bruto, pago, nota, concepto, sellado:false,
+           mensual: pago * B.pago_mensual / 100,
+           retenido: pago * (100 - B.pago_mensual) / 100 };
+}
+
+/* Lo que vale. Si el periodo está sellado se devuelve la foto y no se vuelve a
+   calcular: eso es lo que hace que un periodo liquidado no cambie de número
+   porque alguien corrigió una gestión de hace tres semanas. */
+function incentivoDe(correo, p){
+  const s = selloDe(p);
+  const foto = s && s.foto && s.foto.ejecutivos && s.foto.ejecutivos[correo];
+  if (foto) return Object.assign({}, foto, { sellado:true, selladoEn:s.cerrado_en, selladoPor:s.cerrado_por });
+  return incentivoVivo(correo, p);
+}
+
+/* =========================================================================
+   La bolsa retenida
+
+   El 20% que no se paga cada mes no es un descuento: es lo que financia el
+   premio del cierre. Las cinco retenciones se acumulan en una sola bolsa y se
+   evalúan UNA VEZ, en diciembre, contra la condición del acuerdo. Liquidarla
+   mes a mes la convertiría en el descuento que justamente no se quiso.
+
+   Dos cosas que esta función se cuida de no confundir:
+
+     · Un periodo que todavía no terminó NO cuenta como periodo sin llave.
+       Contar el futuro como incumplido daría un veredicto falso en octubre.
+     · El veredicto es definitivo solo cuando ya no se puede recuperar. Si
+       quedan periodos por correr y los corridos van bien, se dice «en
+       carrera»; si un periodo corrido ya se perdió y la condición pide
+       todos, se dice que no alcanza, y se dice cuál fue.
+   ========================================================================= */
+/* ---- El cumplimiento del PROYECTO, no el promedio de los meses ------------
+
+   «Cumplimiento como un todo, sin importar el mes a mes», que fue la última
+   palabra de dirección el 23/08/2026. No es lo mismo que promediar los cinco
+   cumplimientos mensuales: se mide el logro ACUMULADO contra la meta FINAL del
+   proyecto —20 p.p. de reactivación, +15% de facturación, 7 ventas por periodo
+   por los periodos que van—, con los mismos pesos.
+
+   La diferencia importa y no es cosmética: un mes malo al principio, cuando el
+   banco todavía no soltaba los datos, hunde para siempre un promedio de meses
+   pero no impide llegar a la meta del proyecto. Que es exactamente lo que pasó
+   en el primer periodo y exactamente por qué se decidió medirlo así.
+
+   Lo que no se puede medir sale del reparto, igual que en el mes: mientras la
+   facturación no esté cargada no se puntúa con un cero. */
+function cumplimientoProyecto(correo){
+  const B    = paramsDe(periodoHoy());
+  const ps   = periodosProyecto();
+  const ult  = ps[ps.length - 1];
+  const cart = carteraDe(correo, ult);
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const hoy  = hoyISO();
+  const corridos = ps.filter(p => ventanaPeriodo(p).fin <= hoy);
+
+  const logrados = mios.filter(c => esRetencion(c) || esRecuperado(c)).length;
+  const pp     = cart.n ? logrados / cart.n * 100 : 0;
+  const cReact = B.metas.reactivacion_pp ? pp / B.metas.reactivacion_pp * 100 : null;
+
+  /* La facturación ya venía acumulada contra la base congelada, así que el
+     último dato cargado ES el avance del proyecto. */
+  let crec = null;
+  for (let i = corridos.length - 1; i >= 0 && crec === null; i--)
+    crec = crecimientoFact(correo, corridos[i]);
+  const cFact = crec === null || !B.metas.facturacion_pct
+              ? null : crec / B.metas.facturacion_pct * 100;
+
+  /* La venta se mide mensual, pero acá se mira el proyecto entero: las de
+     todos los periodos contra las que pide el proyecto entero.
+
+     Es a propósito que el denominador sean los CINCO periodos y no los que ya
+     corrieron. En el mes 2 esto va a leerse bajo para todos, y está bien: van
+     por el segundo de cinco. La alternativa —dividir por los periodos
+     corridos— convierte cada mes en un veredicto parcial, que es exactamente
+     lo que se decidió no hacer. El veredicto es uno solo y es en diciembre. */
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
+                                   && ps.some(p => enVentana(c.creado_en, p))).length;
+  const pideVentas = B.metas.ventas_mes * ps.length;
+  const cVenta = pideVentas ? ventas / pideVentas * 100 : null;
+
+  const partes = [
+    { id:"react", peso:B.pesos.reactivacion, cumpl:cReact, logro:pp, meta:B.metas.reactivacion_pp },
+    { id:"fact",  peso:B.pesos.facturacion,  cumpl:cFact,  logro:crec, meta:B.metas.facturacion_pct },
+    { id:"venta", peso:B.pesos.venta,        cumpl:cVenta, logro:ventas, meta:pideVentas }
+  ];
+  const medibles = partes.filter(o => o.cumpl !== null);
+  const peso  = medibles.reduce((n,o) => n + o.peso, 0);
+  const total = peso ? medibles.reduce((n,o) => n + o.cumpl * o.peso, 0) / peso : 0;
+  return { total, partes, completo: medibles.length === partes.length, pesoMedido:peso,
+           periodosCorridos: corridos.length, periodos: ps.length };
+}
+
+function bolsaRetenida(correo){
+  const B    = paramsDe(periodoHoy());
+  const cfg  = B.bolsa || BONO_DEF.bolsa;
+  const fac  = Number(cfg.factor) || 1;
+  const hoy  = hoyISO();
+  /* Dos criterios conviven. El viejo contaba periodos con la llave abierta; el
+     que rige desde el 23/08/2026 mira el cumplimiento del proyecto entero. Se
+     deja el viejo leíble para no reescribir lo que se conversó con la otra
+     regla puesta. */
+  const criterio = cfg.criterio || (cfg.periodos_con_llave ? "periodos_con_llave" : "cumplimiento");
+  const pide = Number(cfg.periodos_con_llave) || 0;
+  const pidePct = cfg.cumplimiento_pct === null || cfg.cumplimiento_pct === undefined
+                ? null : Number(cfg.cumplimiento_pct);
+
+  const detalle = periodosProyecto().map(p => {
+    const v = ventanaPeriodo(p);
+    const corrido = v.fin <= hoy;
+    if (!corrido) return { periodo:p, corrido:false, retenido:0, llave:null };
+    const x = incentivoDe(correo, p);
+    return { periodo:p, corrido:true, retenido:x.retenido || 0,
+             llave: x.llave.estado === "activo", sellado:!!x.sellado };
+  });
+
+  const corridos  = detalle.filter(d => d.corrido);
+  const conLlave  = corridos.filter(d => d.llave).length;
+  const perdidos  = corridos.filter(d => !d.llave).map(d => d.periodo);
+  const faltan    = detalle.length - corridos.length;
+  const acumulada = corridos.reduce((n,d) => n + d.retenido, 0);
+
+  let estado, proyecto = null;
+  if (criterio === "cumplimiento"){
+    proyecto = cumplimientoProyecto(correo);
+    /* Mientras el proyecto no termine nadie está fuera: por eso se mide el
+       acumulado y no los meses. Solo al cerrar hay veredicto, y si el umbral
+       todavía no está fijado se dice eso y no un número inventado. */
+    estado = faltan > 0 ? "en_carrera"
+           : pidePct === null ? "por_definir"
+           : proyecto.total >= pidePct ? "cumple" : "no_alcanza";
+  } else {
+    const techo = conLlave + faltan;
+    estado = conLlave >= pide ? "cumple" : techo < pide ? "perdida" : "en_carrera";
+  }
+
+  return { detalle, corridos:corridos.length, faltan, conLlave, perdidos, pide, pidePct,
+           criterio, proyecto, factor:fac,
+           acumulada, alCierre: estado === "cumple" ? acumulada * fac : acumulada, estado };
+}
+
+/* La foto que se sella: los números de cada ejecutivo y los parámetros con
+   los que se calcularon. Se guarda todo junto para que dentro de tres meses
+   se pueda releer sin depender de nada más. */
+function fotoPeriodo(p){
+  const ejecutivos = {};
+  ejecutivosDelBono().forEach(u => {
+    ejecutivos[u.correo] = Object.assign({ nombre:u.nombre }, incentivoVivo(u.correo, p));
+  });
+  const v = versionDe(p);
+  return { periodo:p, ventana:ventanaPeriodo(p), tomada_en:new Date().toISOString(),
+           parametros:paramsDe(p),
+           parametros_version: v ? v.vigente_desde : "documento",
+           ejecutivos };
+}
+
+/* =========================================================================
+   La pantalla
+   ========================================================================= */
+/* OJO: esta ya devuelve el signo. Escribir `${pct1(x)}%` da «73,7%%», que es
+   lo que se veía en el panel del ejecutivo hasta el 27/08. Hay otra `pct1`
+   local en el tablero que NO lo trae y sombrea a esta dentro de sus funciones:
+   dos funciones con el mismo nombre y distinto contrato es la trampa, y el
+   nombre se queda porque renombrarla toca demasiados sitios a la vez. */
+const pct1 = n => (Math.round(n * 10) / 10).toFixed(1).replace(/\.0$/, "") + "%";
+
+/* Una cifra por semana no es un porcentaje: cada requisito trae su forma de
+   leerse para que el chip no diga «12,4%» donde debería decir «12,4 por semana». */
+function filaRequisito(nombre, r, fmt, comoSeMide){
+  return `<div class="bn-req ${r.ok ? "ok" : "no"}">
+    <div class="bn-req-h">
+      <b>${esc(nombre)}</b>
+      <span class="chip ${r.ok ? "ok" : "crit"}">${r.ok ? "✓" : "✕"} ${esc(fmt(r.valor))}</span>
+    </div>
+    <div class="bn-req-d">${esc(r.detalle)} · mínimo ${esc(fmt(r.meta))}</div>
+    <div class="bn-req-n">${esc(comoSeMide)}</div>
+  </div>`;
+}
+const comoPct    = v => pct1(v);
+
+/* Cómo se está midiendo la cobertura, dicho donde se lee el número. Sin esta
+   línea el mismo «90%» significa tres cosas distintas según el periodo. */
+const TEXTO_COBERTURA = {
+  registro: "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar",
+  gestion:  "Comercios asignados con al menos una gestión o intento de gestión en el periodo",
+  contacto: "Comercios registrados con un contacto logrado en el periodo: correo al ejecutivo de BBVA o gestión efectiva con el cliente. Un comercio cuenta una vez, por muchas gestiones que tenga"
+};
+
+/* Lo que falta para llegar al mínimo, y cuántos días quedan.
+
+   La regla de cobertura cambió con el periodo empezado, y eso solo es legítimo
+   si quien tiene que cumplirla puede verla moverse y reaccionar. Un requisito
+   que se descubre el día 18 no es un requisito: es una sanción. */
+function avisoCobertura(ll, p){
+  const c = ll.cobertura;
+  if (c.ok) return "";
+  const v = ventanaPeriodo(p);
+  const dias = Math.max(0, Math.round((new Date(v.fin) - new Date(hoyISO())) / 86400000));
+  const partes = [];
+  if (!c.cargaCompleta)
+    partes.push(`faltan <b>${c.faltanPorCargar}</b> Customer ID por cargar`);
+  if (c.faltan > 0)
+    partes.push(`<b>${c.faltan}</b> ${c.faltan === 1 ? "comercio más" : "comercios más"} con contacto logrado`);
+  if (!partes.length) return "";
+  return `<div class="bn-req-aviso">Para llegar al mínimo: ${partes.join(" y ")}${
+    dias > 0 ? ` · quedan ${dias} ${dias === 1 ? "día" : "días"} de periodo` : " · el periodo ya cerró"}</div>`;
+}
+
+
+const porSemana1 = v => (Math.round(v * 10) / 10).toString().replace(".", ",") + " por semana";
+
+function tarjetaEjecutivo(u, p){
+  const B  = paramsDe(p);
+  const x  = incentivoDe(u.correo, p);
+  const ll = x.llave, cu = x.cumpl;
+  const clase = ll.estado === "activo" ? "ok" : ll.estado === "base" ? "medio" : "no";
+  const fuente = ll.cartera.fuente;
+
+  return `<div class="card bn-card ${clase}">
+    <div class="bn-top">
+      <div>
+        <h3 style="margin:0">${esc(u.nombre)}</h3>
+        <div class="bn-sub">${ll.gestiones} gestiones en el periodo · cartera de ${ll.cartera.n}${
+          fuente === "crm" ? " (contada en el CRM, sin meta cargada)"
+          : fuente === "heredada" ? ` (heredada de ${esc(nombreMes(ll.cartera.de))})` : ""}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="chip ${clase === "ok" ? "ok" : clase === "medio" ? "warn" : "crit"}">${TEXTO_LLAVE[ll.estado]}</span>
+        <button class="btn ghost sm" data-pdfejec="${esc(u.correo)}"
+          title="El acta de este periodo en PDF, para firmar en la reunión">Acta en PDF</button>
+        ${/* La pantalla dice «2 de 3»; esto dice cuáles filas lo produjeron.
+              Es la diferencia entre afirmar un incumplimiento y poder
+              sostenerlo delante de la persona a la que se le está descontando. */ ""}
+        ${vistaDeCampo() ? "" : `<button class="btn ghost sm" data-xlsejec="${esc(u.correo)}"
+          title="Todas sus gestiones del periodo, con las columnas que producen los tres requisitos">Sus gestiones</button>`}
+      </div>
+    </div>
+
+    <div class="bn-sec">Llave de acceso · ${ll.cumplidos} de 3 requisitos</div>
+    <div class="bn-reqs">
+      ${filaRequisito("Cobertura de cartera", ll.cobertura, comoPct, TEXTO_COBERTURA[ll.cobertura.base]
+        || TEXTO_COBERTURA.gestion)}
+      ${avisoCobertura(ll, p)}
+      ${filaRequisito("Visitas efectivas", ll.visitas, porSemana1,
+        `Presenciales o virtuales en las que se logró hablar. El periodo tiene ${
+          ll.semanas.toFixed(1).replace(".", ",")} semanas: se piden ${ll.pide}`)}
+      ${filaRequisito("Puntualidad del registro", ll.puntualidad, comoPct,
+        "Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan")}
+    </div>
+
+    <div class="bn-sec">Cumplimiento de objetivos</div>
+    <div class="tbl-wrap"><table class="tbl bn-obj">
+      <thead><tr><th>Objetivo</th><th style="text-align:right">Meta</th>
+        <th style="text-align:right">Va en</th><th style="text-align:right">Peso</th>
+        <th style="text-align:right">Cumplimiento</th></tr></thead>
+      <tbody>${cu.objetivos.map(o => `<tr${o.cumpl === null ? ' class="falta"' : ""}>
+        <td><b>${esc(o.nombre)}</b><div class="bn-det">${esc(o.detalle)}</div></td>
+        <td style="text-align:right">${esc(o.meta)}${
+          o.metaPie ? `<div class="bn-det">${esc(o.metaPie)}</div>` : ""}</td>
+        <td style="text-align:right"><b>${esc(o.logro)}</b></td>
+        <td style="text-align:right">${o.peso}%</td>
+        <td style="text-align:right">${o.cumpl === null ? "—" : pct1(o.cumpl)}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+
+    <div class="bn-cierre">
+      <div class="bn-num">
+        <span class="k">Cumplimiento ponderado</span>
+        <b>${pct1(cu.total)}</b>
+        <span class="s">${cu.completo ? nombreTramo(cu.total, B)
+          : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
+      </div>
+      <div class="bn-num">
+        <span class="k">${esc(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo")}</span>
+        <b class="${x.pago > 0 ? "si" : "cero"}">${pct1(x.pago)}</b>
+        <span class="s">del sueldo base${x.nota ? " · " + esc(x.nota) : ""}</span>
+      </div>
+      <div class="bn-num">
+        <span class="k">Se paga ahora / se retiene</span>
+        <b>${pct1(x.mensual)} <span class="sep">/</span> ${pct1(x.retenido)}</b>
+        <span class="s">${B.pago_mensual}% de ${pct1(x.pago)} con la remuneración, ${
+          100 - B.pago_mensual}% retenido hasta el cierre del proyecto</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   El sello del periodo
+
+   Mientras el periodo está abierto los números se mueven, y está bien. Lo que
+   no puede pasar es que se muevan después de liquidar: alguien corrige una
+   gestión del 5 de agosto en septiembre y el bono ya pagado cambia de monto.
+
+   Sellar guarda la foto —los números de cada ejecutivo y los parámetros con
+   los que se calcularon— y a partir de ahí la pantalla muestra la foto, no el
+   cálculo. Si hay que corregir, se anula el sello y se vuelve a sellar: las
+   dos cosas quedan en la bitácora.
+   ========================================================================= */
+function cardSello(p, sello, ver, abierto){
+  const puede = S.user.rol !== "Ejecutivo";
+  const faltan = ejecutivosDelBono().filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  if (sello) return `
+    <div class="card" style="margin-top:12px;border-left:3px solid var(--good)">
+      <div class="eq-top">
+        <div>
+          <h3 style="margin:0">Periodo cerrado</h3>
+          <div class="bn-sub">Sellado el ${fmtFecha(String(sello.cerrado_en).slice(0,10))}${
+            sello.cerrado_por ? " por " + esc(sello.cerrado_por) : ""} · lo que ves es la foto de
+            ese momento, no un cálculo de hoy${
+            sello.foto && sello.foto.parametros_version
+              ? ` · parámetros vigentes desde ${esc(nombreMes(sello.foto.parametros_version))}` : ""}</div>
+        </div>
+        ${puede ? `<button class="btn ghost sm" id="anularCierre" style="color:var(--crit-ink)">Anular el cierre</button>` : ""}
+      </div>
+    </div>`;
+
+  if (!puede) return "";
+  return `
+    <div class="card" style="margin-top:12px">
+      <div class="eq-top">
+        <div>
+          <h3 style="margin:0">Periodo abierto</h3>
+          <div class="bn-sub">${abierto
+            ? `Cierra el ${fmtFecha(ventanaPeriodo(p).fin)}. Hasta entonces los números se mueven con cada gestión que se registre.`
+            : `La ventana ya terminó. Sellarlo deja los números firmes: después se puede corregir una gestión, pero lo liquidado no cambia.`}
+            ${ver ? `Se está calculando con los parámetros vigentes desde <b>${esc(nombreMes(ver.vigente_desde))}</b>.` : ""}</div>
+        </div>
+        <button class="btn sm" id="cerrarPeriodo">Cerrar y sellar el periodo</button>
+      </div>
+      ${paramsConfirmados(p) ? "" : `<div class="note crit" style="margin:11px 0 0">
+        <b>Los parámetros de ${esc(nombrePeriodo(p))} todavía no están confirmados.</b>
+        Se está heredando la versión${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : " del documento"},
+        y eso incluye las metas y el mínimo de visitas semanales, que quedó en revisión.
+        Confírmalos —o edítalos en Ajustes— antes de sellar.
+        <div style="margin-top:8px"><button class="btn ghost sm" id="confirmarParams"
+          >Confirmar los parámetros de ${esc(nombrePeriodo(p))}</button></div></div>`}
+      ${faltan ? `<div class="note crit" style="margin:11px 0 0">
+        Faltan <b>${faltan}</b> ${faltan === 1 ? "ejecutivo" : "ejecutivos"} con la facturación del
+        periodo. Si sellas ahora, el cumplimiento queda firme sin ese peso.</div>` : ""}
+    </div>`;
+}
+
+/* Confirmar es guardar, para este periodo, exactamente los valores que ya se
+   están heredando. La base estampa quién y cuándo, y la bitácora lo registra
+   como cualquier otro cambio de parámetros. Si los valores tienen que cambiar,
+   se editan en Ajustes: acá solo se hace explícito lo que ya regía. */
+async function confirmarParametros(){
+  const p = periodoBono();
+  if (paramsConfirmados(p)) return toast("Ya están confirmados");
+  const ver = versionDe(p);
+  const valor = JSON.parse(JSON.stringify(paramsDe(p)));
+  modal(`<h3>Confirmar los parámetros de ${esc(nombrePeriodo(p))}</h3>
+    <p>Se guarda una versión propia de este periodo con los valores que ya se están
+    heredando${ver ? ` de ${esc(nombreMes(ver.vigente_desde))}` : ""}. No cambia ningún número:
+    deja constancia de que alguien los revisó para este mes.</p>
+    <p class="pie">Mínimo de visitas: <b>${esc(reglaVisitas(valor.requisitos, p).corto)}</b> ·
+    cobertura <b>${valor.requisitos.cobertura_pct}%</b> ·
+    puntualidad <b>${valor.requisitos.puntualidad_pct}%</b>.
+    Si alguno tiene que cambiar, edítalo en Ajustes en vez de confirmar.</p>
+    <div class="field"><label>Nota <span class="hint">(opcional)</span></label>
+      <input type="text" id="notaConfirmar" placeholder="Ej.: revisado con Gabriel, sin cambios"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="okConfirmar">Confirmar</button>
+    </div>`);
+  $("#okConfirmar").onclick = async () => {
+    const b = $("#okConfirmar"); b.disabled = true; b.textContent = "Guardando…";
+    const nota = ($("#notaConfirmar").value || "").trim()
+              || `Confirmados para ${nombrePeriodo(p)} sin cambios`;
+    const { error } = await sb.from("bono_parametros")
+      .upsert({ vigente_desde:p, valor, nota }, { onConflict:"vigente_desde" });
+    b.disabled = false; b.textContent = "Confirmar";
+    if (error) return toast("No se pudo confirmar: " + error.message);
+    cerrarModal(); await cargarFacturacion(); render();
+    toast(`Parámetros de ${nombrePeriodo(p)} confirmados`);
+  };
+}
+
+async function cerrarPeriodo(){
+  const p = periodoBono();
+  if (selloDe(p)) return toast("Este periodo ya está sellado");
+  /* Sellar es decir «estos son los números». No se puede decir eso sobre
+     parámetros que nadie confirmó para este periodo. */
+  if (!paramsConfirmados(p))
+    return toast(`Antes de sellar, confirma los parámetros de ${nombrePeriodo(p)}`);
+  const foto = fotoPeriodo(p);
+  const faltan = ejecutivosDelBono().filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  modal(`<h3>Cerrar el periodo ${esc(nombrePeriodo(p))}</h3>
+    <p>Se guarda una foto de los números de los ${Object.keys(foto.ejecutivos).length} ejecutivos y de
+    los parámetros con los que se calcularon. A partir de ahí el periodo <b>deja de recalcularse</b>:
+    si después se corrige una gestión, se ve en la bitácora pero el monto liquidado no cambia.</p>
+    ${faltan ? `<div class="err">Faltan ${faltan} ${faltan===1?"ejecutivo":"ejecutivos"} con la
+      facturación cargada. Se puede sellar igual, pero el cumplimiento quedará firme sin ese peso.</div>` : ""}
+    <div class="field"><label>Nota del cierre <span class="hint">(opcional)</span></label>
+      <input type="text" id="notaCierre" placeholder="Ej.: cierre revisado con Gabriel"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="okCerrar">Cerrar y sellar</button>
+    </div>`);
+
+  $("#okCerrar").onclick = async () => {
+    const b = $("#okCerrar"); b.disabled = true; b.textContent = "Sellando…";
+    const { error } = await sb.from("periodos_cerrados")
+      .insert({ periodo:p, foto, nota: ($("#notaCierre").value || "").trim() || null });
+    if (error){ b.disabled = false; b.textContent = "Cerrar y sellar";
+      return toast("No se pudo cerrar: " + error.message); }
+    cerrarModal();
+    await cargarFacturacion(); render();
+    toast(`Periodo ${nombrePeriodo(p)} cerrado y sellado`);
+  };
+}
+
+async function anularCierre(){
+  const p = periodoBono();
+  const s = selloDe(p);
+  if (!s) return toast("Este periodo no está sellado");
+
+  modal(`<h3>Anular el cierre de ${esc(nombrePeriodo(p))}</h3>
+    <p>El periodo vuelve a calcularse con los datos de hoy. La foto anterior <b>no se borra</b>:
+    queda guardada y anulada, con tu nombre, y la anulación entra en la bitácora.</p>
+    <div class="field"><label>Por qué se anula</label>
+      <input type="text" id="notaAnular" placeholder="Ej.: faltaba la facturación de Vanessa"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn danger" style="flex:1" id="okAnular">Anular el cierre</button>
+    </div>`);
+
+  $("#okAnular").onclick = async () => {
+    const nota = ($("#notaAnular").value || "").trim();
+    if (!nota) return toast("Escribe por qué se anula: queda en la bitácora");
+    const b = $("#okAnular"); b.disabled = true; b.textContent = "Anulando…";
+    const { error } = await sb.from("periodos_cerrados")
+      .update({ anulado_en: new Date().toISOString(), anulado_nota: nota }).eq("id", s.id);
+    if (error){ b.disabled = false; b.textContent = "Anular el cierre";
+      return toast("No se pudo anular: " + error.message); }
+    cerrarModal();
+    await cargarFacturacion(); render();
+    toast("Cierre anulado — el periodo vuelve a calcularse");
+  };
+}
+
+/* ---- La bolsa en pantalla ------------------------------------------------
+   Va en Incentivos y no en el Panel porque no es una cifra del mes: es la
+   única que mira los cinco periodos a la vez. Se muestra aunque el veredicto
+   sea malo —sobre todo si es malo—: una condición de pago que ya no se puede
+   cumplir tiene que verse, no descubrirse en diciembre. */
+function bloqueBolsa(){
+  const ejec = ejecutivosDelBono();
+  if (!ejec.length) return "";
+  const B    = paramsDe(periodoHoy());
+  const cfg  = B.bolsa || BONO_DEF.bolsa;
+  const filas = ejec.map(u => ({ u, b:bolsaRetenida(u.correo) }));
+  const ref   = filas[0].b;
+  const porCumpl = ref.criterio === "cumplimiento";
+  const nadie = filas.every(x => x.b.estado === "perdida");
+  const alguno= filas.some(x => x.b.estado === "perdida");
+
+  /* Los mismos tres colores que la llave en el Panel, para que «no alcanza»
+     se lea igual acá y allá. `chip` ya existe y es el que usa la tabla de la
+     llave; no se inventa un badge nuevo. */
+  const sem = { cumple:["ok","Duplica"], en_carrera:["warn","En carrera"],
+                perdida:["crit","No alcanza"], no_alcanza:["crit","No alcanza"],
+                por_definir:["warn","Falta el umbral"] };
+
+  return `
+  <div class="card ctrl" style="margin-top:12px">
+    <div class="ctrl-h">
+      <h3>La bolsa retenida</h3>
+      <span class="sub">El ${100 - B.pago_mensual}% de cada periodo, acumulado. Se evalúa una sola vez
+        al cierre del proyecto, no mes a mes</span>
+    </div>
+
+    ${porCumpl ? `<div class="note" style="margin:0 0 12px">
+      <b>Se mide el cumplimiento del proyecto entero, no el mes a mes.</b> Es la decisión de dirección
+      del 23/08/2026: lo que se compara con la meta final —${B.metas.reactivacion_pp} p.p. de
+      reactivación, +${B.metas.facturacion_pct}% de facturación y ${B.metas.ventas_mes} ventas por
+      periodo— es el logro acumulado, no el promedio de los meses. Un mes flojo al principio no deja
+      a nadie fuera; por eso el equipo sigue optando a la duplicación.
+      ${ref.pidePct === null ? `<div style="margin-top:8px"><b>Falta fijar el umbral</b> de
+        cumplimiento acumulado con el que la bolsa se duplica. Mientras no esté cargado, el CRM
+        muestra en cuánto va cada uno y no emite veredicto: se carga en
+        <b>Ajustes → Parámetros del incentivo</b>.</div>` : ""}</div>`
+    : nadie ? `<div class="note crit" style="margin:0 0 12px">
+      <b>Con la condición acordada, hoy nadie duplica.</b> Se pide la llave abierta en
+      ${cfg.periodos_con_llave} de ${ref.detalle.length} periodos, y el primero cerró sin llave
+      para todo el equipo. No es un dato que falte ni un cálculo a medias: es la regla aplicada a
+      lo que pasó. La bolsa se sigue acumulando y se paga íntegra al cierre; lo que no se activa es
+      la duplicación. Si la condición tiene que cambiar, se edita en
+      <b>Ajustes → Parámetros del incentivo</b> y rige desde el periodo que se elija.</div>`
+    : alguno ? `<div class="note warn" style="margin:0 0 12px">
+      Hay ejecutivos que ya no pueden cumplir la condición de la duplicación. Su bolsa se sigue
+      acumulando y se paga al cierre; lo que pierden es el factor.</div>` : ""}
+
+    <div class="ctrl-scroll">
+    <table class="tbl-ctrl" id="tblBolsa">
+      <thead><tr>
+        <th>Ejecutivo</th>
+        <th title="Suma de lo retenido en los periodos que ya cerraron">Bolsa acumulada</th>
+        <th title="${porCumpl
+          ? "Logro acumulado contra la meta final del proyecto, con los mismos pesos"
+          : "En cuántos de los periodos ya corridos tuvo los tres requisitos"}"
+          >${porCumpl ? "Cumplimiento del proyecto" : "Periodos con llave"}</th>
+        <th title="Periodos del proyecto que todavía no terminan">Por correr</th>
+        <th title="Si la condición se cumple, la bolsa se multiplica por el factor acordado">Al cierre</th>
+        <th>Duplicación</th>
+      </tr></thead>
+      <tbody>
+      ${filas.map(({u, b}) => {
+        const [cls, txt] = sem[b.estado] || ["warn", "En carrera"];
+        return `<tr>
+          <td class="nom">${esc(u.nombre)}</td>
+          <td class="num fuerte">${pct1(b.acumulada)}</td>
+          <td class="num ${b.estado === "perdida" || b.estado === "no_alcanza" ? "alerta" : ""}">${
+            porCumpl ? pct1(b.proyecto.total) + (b.proyecto.completo ? ""
+              : ` <span class="tenue">sobre el ${b.proyecto.pesoMedido}%</span>`)
+            : `${b.conLlave} de ${b.corridos}`}</td>
+          <td class="num tenue">${b.faltan || "—"}</td>
+          <td class="num fuerte">${pct1(b.alCierre)}</td>
+          <td class="num"><span class="chip ${cls}">${txt}</span></td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    <p class="pie">Todo en <b>porcentaje del sueldo base</b>: las remuneraciones no viven en el CRM.
+      ${porCumpl
+        ? `El <b>cumplimiento del proyecto</b> mira el logro acumulado contra la meta final, con los
+           pesos de siempre; lo que todavía no se puede medir —la facturación, mientras el banco no
+           entregue el dato— sale del reparto en vez de puntuarse con un cero, y por eso la columna
+           dice sobre qué porcentaje del peso está calculada. El veredicto se emite una sola vez, al
+           cerrar el proyecto: hasta entonces todos figuran <b>en carrera</b>, porque lo están.
+           ${ref.pidePct === null ? "El umbral de duplicación todavía no está cargado."
+             : `El umbral acordado es <b>${ref.pidePct}%</b>.`}`
+        : `La columna <b>Periodos con llave</b> cuenta solo los periodos que ya cerraron — un periodo
+           que todavía no termina no se cuenta como perdido, porque no lo está. La condición vigente
+           pide la llave abierta en <b>${cfg.periodos_con_llave} de ${ref.detalle.length}</b> periodos.`}
+      El factor de duplicación es <b>×${cfg.factor}</b>.</p>
+  </div>`;
+}
+
+function viewBono(){
+  if (S.user.rol === "Ejecutivo")
+    return `<div class="card"><h3>Solo para supervisión</h3>
+      <p style="margin:0">El seguimiento del incentivo lo revisan el Analista y el Manager.</p></div>`;
+
+  const p = periodoBono();
+  const B = paramsDe(p);
+  const ejec = ejecutivosDelBono();
+  const periodos = periodosProyecto();
+  const v = ventanaPeriodo(p);
+  const abierto = hoyISO() <= v.fin && hoyISO() >= v.ini;
+  const sello = selloDe(p);
+  const ver  = versionDe(p);
+
+  const res = ejec.map(u => incentivoDe(u.correo, p));
+  const habilitados = res.filter(x => x.llave.estado === "activo").length;
+  const conBono     = res.filter(x => x.pago > 0).length;
+  const prom = res.length ? res.reduce((n,x) => n + x.cumpl.total, 0) / res.length : 0;
+  const faltaFact   = ejec.filter(u => crecimientoFact(u.correo, p) === null).length;
+
+  return `
+  <h2 style="margin:0 0 3px">Incentivos</h2>
+  <div class="sub">Periodo del ${esc(textoPeriodo(p))} — se paga en ${esc(nombrePeriodo(p))}${
+    abierto && !sello ? " · el periodo sigue abierto, los números se mueven" : ""}</div>
+
+  ${cardSello(p, sello, ver, abierto)}
+
+  ${B.solo_llave ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+    <h3 style="margin-bottom:4px">Este periodo paga la llave y nada más</h3>
+    <div class="note" style="margin-bottom:0">
+      ${esc(nombrePeriodo(p))} se liquida con el <b>bono base del ${B.base_incumple_uno}%</b> para todo
+      el que tenga la llave, cumpla dos requisitos o los tres. El gradual <b>no se abre</b>.
+      <div style="margin-top:8px">La razón es que este periodo se cierra sin la facturación de
+      agosto —el banco entrega el dato un mes después— y así se acordó. Dejar el gradual abierto
+      significaría que cargar esa facturación en septiembre mueve un monto ya firmado: se le
+      quedaría debiendo a alguien o se le habría pagado de menos. Con el techo puesto,
+      <b>el número del acta no puede cambiar</b> por nada que se cargue o se corrija después.</div>
+      <div style="margin-top:8px">El cumplimiento se sigue mostrando abajo porque es información
+      del periodo, pero no entra al monto. Rige solo acá: los periodos siguientes calculan normal.</div>
+    </div>
+  </div>` : ""}
+
+  <div class="stat-row" style="margin-top:12px">
+    <div class="stat"><div class="lbl">Con la llave abierta</div><div class="val">${habilitados}</div>
+      <div class="sub">de ${ejec.length} cumplen los 3 requisitos</div></div>
+    <div class="stat"><div class="lbl">Con incentivo</div><div class="val">${conBono}</div>
+      <div class="sub">${B.solo_llave ? `cobran la llave del ${B.base_incumple_uno}%`
+        : `llegan al ${B.piso}% de cumplimiento`}</div></div>
+    <div class="stat"><div class="lbl">Cumplimiento promedio</div><div class="val">${pct1(prom)}</div>
+      <div class="sub">del equipo, sobre lo medible</div></div>
+    <div class="stat"><div class="lbl">Facturación pendiente</div><div class="val">${faltaFact}</div>
+      <div class="sub">${faltaFact === 1 ? "ejecutivo sin monto cargado" : "ejecutivos sin monto cargado"}</div></div>
+  </div>
+
+  ${faltaFact && !sello ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+    <h3 style="margin-bottom:4px">Falta la facturación de ${faltaFact} ${
+      faltaFact === 1 ? "ejecutivo" : "ejecutivos"} en este periodo</h3>
+    <div class="note" style="margin-bottom:0">
+      Es el ${B.pesos.facturacion}% del peso y el CRM no la ve: sale de la plataforma de BBVA.
+      Mientras falte, el cumplimiento que se muestra está calculado solo sobre lo demás y
+      <b>no sirve para liquidar</b>. Se carga en <b>Ajustes → Facturación del periodo</b>.
+    </div>
+  </div>` : ""}
+
+  <div class="card" style="margin-top:12px">
+    <div class="bn-top">
+      <label class="fsel"><span>Periodo</span>
+        <select id="selPeriodoBono">${periodos.map(x =>
+          `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
+        </select></label>
+      <button class="btn" id="bonoLibro">Descargar el libro del periodo</button>
+      <button class="btn ghost" id="pdfTodos"
+        title="Un PDF con el acta de cada ejecutivo, una por página">Actas en PDF</button>
+    </div>
+    <details class="aj-mas" style="margin-bottom:0">
+      <summary>Qué trae el libro</summary>
+      <div class="cuerpo">
+        <p>Un Excel con el cálculo <b>hecho en fórmulas, no en valores</b>: cada porcentaje del
+        resumen apunta a las filas de gestión que lo producen. Se puede abrir sin el CRM y rehacer
+        la cuenta a mano, que es lo que hace falta cuando el número se conversa con la persona.</p>
+        <p>Trae una hoja <b>por cada ejecutivo</b> con sus tres requisitos, sus objetivos contra la
+        meta del mes y el detalle de sus gestiones con los días de demora calculados; una de
+        <b>Resumen</b> con el equipo completo; una de <b>Evolución</b> con todos los periodos del
+        proyecto; las hojas de datos —gestiones, cartera y clientes nuevos—; una <b>dinámica</b> ya
+        armada, y una de <b>Parámetros</b> donde están las metas, los tramos y los feriados.</p>
+        <p>Cambiar una celda de Parámetros recalcula el libro entero. Sirve para responder «¿y si
+        el feriado hubiera contado?» sin volver al sistema. <b>Ningún sueldo entra al archivo</b>:
+        el cálculo llega hasta el porcentaje, igual que acá.</p>
+      </div>
+    </details>
+  </div>
+
+  ${bloqueBolsa()}
+
+  ${ejec.length ? ejec.map(u => tarjetaEjecutivo(u, p)).join("")
+    : `<div class="card"><p style="margin:0">No hay ejecutivos activos cargados.</p></div>`}
+
+  <div class="card">
+    <details class="explica" style="margin-top:0;border-top:0;padding-top:0">
+      <summary>Cómo se lee este cálculo</summary>
+    <div class="aj-reglas" style="margin-top:12px">
+      <div class="kv"><dt>La llave no suma</dt><dd>Los tres requisitos habilitan el cálculo, no aportan al monto.
+        Con los tres, se calcula normal. Con uno incumplido, solo el bono base del ${B.base_incumple_uno}%.
+        Con dos o más, no corresponde incentivo.</dd></div>
+      <div class="kv"><dt>El periodo corta el 18</dt><dd>Del 19 al 18 del mes siguiente. Nada acá se mide por mes calendario.</dd></div>
+      <div class="kv"><dt>Reactivación</dt><dd>Comercios retenidos y recuperados sobre la cartera asignada,
+        solo los que tienen Customer ID. Las ventas nuevas por RUC cuentan aparte, en su propio objetivo.</dd></div>
+      <div class="kv"><dt>Facturación</dt><dd>El CRM no la ve. Se carga el monto inicial y el final del periodo
+        y el crecimiento se calcula solo.</dd></div>
+      <div class="kv"><dt>Visitas efectivas</dt><dd>Las que el CRM marca como <b>cumple visita</b>: presencial o virtual
+        <b>y</b> con el cliente respondiendo. El mínimo del periodo es de <b>${esc(reglaVisitas(B.requisitos, p).largo)}</b>.</dd></div>
+      <div class="kv"><dt>La bolsa retenida</dt><dd>Cada periodo se paga el ${B.pago_mensual}% y se retiene el ${
+        100 - B.pago_mensual}%. Las retenciones forman una sola bolsa que se evalúa <b>una sola vez, al cierre
+        del proyecto</b>, contra el cumplimiento acumulado y no mes a mes: un periodo flojo no deja a nadie
+        fuera de la duplicación.</dd></div>
+      <div class="kv"><dt>Sin sueldos</dt><dd>Todo se expresa en porcentaje del sueldo base. Las remuneraciones
+        no viven en el CRM y no tienen por qué.</dd></div>
+    </div>
+    </details>
+  </div>`;
+}
+
+/* =========================================================================
+   Carga de la facturación, en Ajustes
+   ========================================================================= */
+function cardFacturacion(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const p = periodoBono();
+  const B = paramsDe(p);
+  const ejec = ejecutivosDelBono();
+  const sello = selloDe(p);
+  const totalBase = ejec.reduce((n,u) => n + (baseFactDe(u.correo) || 0), 0);
+  const faltaBase = ejec.filter(u => baseFactDe(u.correo) === null).length;
+
+  return `
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      <b>La base del proyecto se carga una sola vez.</b> El acuerdo del 12 de agosto la congeló, así
+      que ya no se pide periodo a periodo: todos los periodos crecen contra ella. Se guarda con tu
+      nombre y la fecha, y cualquier cambio queda en la bitácora.
+    </div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Facturación de la base inicial</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const b = FACT_BASE.find(x => x.correo === u.correo) || {};
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>${b.actualizado_por
+            ? `<div class="bn-det">fijada por ${esc(b.actualizado_por)}</div>` : ""}</td>
+          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+            data-base="${esc(u.correo)}" value="${b.monto == null ? "" : esc(b.monto)}" placeholder="S/"></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+    <div class="pie" style="margin-top:9px">${totalBase
+      ? `Suman <b>${soles(totalBase)}</b>. El acuerdo con BBVA fija la base del proyecto en S/ 35,3 millones: si el total no cuadra, falta repartir alguno.`
+      : "Todavía no se fijó la base de ningún ejecutivo. Sin ella el objetivo de facturación no se puede calcular."}</div>
+    <button class="btn block" id="baseGuardar" style="margin-top:12px">Guardar la base del proyecto</button>
+  </div>
+
+  <div class="card">
+    <div class="pie" style="margin:0 0 13px">
+      Es el ${B.pesos.facturacion}% del peso del incentivo y el CRM no puede verlo: sale de la
+      plataforma de BBVA. De cada periodo solo hace falta <b>el monto de cierre</b>; el crecimiento
+      se calcula contra la base de arriba.
+    </div>
+    <label class="fsel" style="margin-bottom:10px"><span>Periodo</span>
+      <select id="selPeriodoFact">${periodosProyecto().map(x =>
+        `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
+      </select></label>
+
+    ${sello ? `<div class="note" style="margin:0 0 11px">Este periodo está <b>sellado</b>. Puedes
+      corregir el monto, pero el incentivo liquidado no cambia hasta que se anule el cierre.</div>` : ""}
+    ${faltaBase ? `<div class="note crit" style="margin:0 0 11px">Faltan <b>${faltaBase}</b>
+      ${faltaBase === 1 ? "ejecutivo" : "ejecutivos"} sin base fijada arriba: para ${
+      faltaBase === 1 ? "ese" : "esos"} el crecimiento no se puede calcular.</div>` : ""}
+
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Base</th>
+        <th style="text-align:right">Cierre del periodo</th><th style="text-align:right">Crecimiento</th></tr></thead>
+      <tbody>${ejec.map(u => {
+        const f = factDe(u.correo, p) || {};
+        const ini = inicioFact(u.correo, p);
+        const cr = crecimientoFact(u.correo, p);
+        return `<tr>
+          <td><b>${esc(u.nombre)}</b>${f.actualizado_por
+            ? `<div class="bn-det">último cambio: ${esc(f.actualizado_por)}</div>` : ""}</td>
+          <td style="text-align:right" class="mono">${ini.monto === null
+            ? `<span style="color:var(--muted)">sin base</span>` : esc(soles(ini.monto))}</td>
+          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+            data-fact="fin|${esc(u.correo)}" value="${f.monto_final == null ? "" : esc(f.monto_final)}" placeholder="S/"></td>
+          <td style="text-align:right">${cr === null ? "—"
+            : `<b class="${cr >= B.metas.facturacion_pct ? "si" : ""}">${cr >= 0 ? "+" : ""}${cr.toFixed(1)}%</b>`}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+    <button class="btn block" id="factGuardar" style="margin-top:12px">Guardar el cierre del periodo</button>
+  </div>`;
+}
+
+async function guardarBaseFact(){
+  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
+  const lista = [];
+  document.querySelectorAll("[data-base]").forEach(el => {
+    const m = num(el.value);
+    if (m !== null) lista.push({ correo: el.dataset.base, monto: m });
+  });
+  if (!lista.length) return toast("No hay montos que guardar");
+  if (lista.some(x => !(x.monto >= 0))) return toast("Hay un monto que no es un número válido");
+
+  const b = $("#baseGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("facturacion_base").upsert(lista, { onConflict:"correo" });
+  b.disabled = false; b.textContent = "Guardar la base del proyecto";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); render();
+  toast("Base del proyecto guardada");
+}
+
+async function guardarFacturacion(){
+  const p = ($("#selPeriodoFact") && $("#selPeriodoFact").value) || periodoBono();
+  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
+  /* Solo se manda el monto de cierre. El inicial ya no se pide acá: vive en la
+     base del proyecto, y no mandarlo evita pisarlo con un nulo sin querer. */
+  const lista = [];
+  document.querySelectorAll("[data-fact]").forEach(el => {
+    const correo = el.dataset.fact.split("|")[1];
+    const m = num(el.value);
+    if (m !== null) lista.push({ periodo:p, correo, monto_final:m });
+  });
+  if (lista.some(f => !(f.monto_final >= 0))) return toast("Hay montos que no son números válidos");
+  if (!lista.length) return toast("No hay montos que guardar");
+
+  const b = $("#factGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("facturacion").upsert(lista, { onConflict:"periodo,correo" });
+  b.disabled = false; b.textContent = "Guardar el cierre del periodo";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); render();
+  toast(`Facturación de ${nombrePeriodo(p)} guardada`);
+}
+
+/* =========================================================================
+   Los parámetros del modelo
+
+   La revisión de octubre estaba prevista desde el principio: si las metas o
+   los pesos cambian, se cambian acá y no en el código.
+   ========================================================================= */
+const CAMPOS_BONO = [
+  ["metas.reactivacion_pp",      "Meta de reactivación",        "p.p."],
+  ["metas.facturacion_pct",      "Meta de facturación",         "%"],
+  ["metas.ventas_mes",           "Ventas por periodo",          ""],
+  ["pesos.reactivacion",         "Peso de reactivación",        "%"],
+  ["pesos.facturacion",          "Peso de facturación",         "%"],
+  ["pesos.venta",                "Peso de venta",               "%"],
+  ["requisitos.cobertura_pct",   "Cobertura mínima",            "%"],
+  /* Las dos unidades del mínimo de visitas. `visitas_periodo` es la que rige
+     desde el 19/08; la semanal se deja visible para poder leer y corregir las
+     versiones viejas —el periodo 1— sin tener que entrar a la base. Vaciar
+     `visitas_periodo` devuelve el periodo a la regla semanal. */
+  ["requisitos.visitas_periodo", "Visitas efectivas en el periodo",""],
+  ["requisitos.visitas_semana",  "Visitas por semana (regla vieja)",""],
+  ["requisitos.puntualidad_pct", "Puntualidad mínima",          "%"],
+  ["piso",                       "Piso del incentivo",          "%"],
+  ["pago_en_piso",               "Paga en el piso",             "%"],
+  ["pago_en_meta",               "Paga al 100%",                "%"],
+  ["sobre",                      "Sobrecumplimiento hasta",     "%"],
+  ["tope",                       "Tope de pago",                "%"],
+  ["base_incumple_uno",          "Bono base (1 requisito caído)","%"],
+  ["pago_mensual",               "Se paga cada mes",            "%"],
+  /* La bolsa retenida: en cuántos periodos hace falta la llave abierta para
+     que se duplique, y por cuánto se multiplica. Se editan acá y viajan con
+     la versión, como todo lo demás. */
+  ["bolsa.cumplimiento_pct",     "Bolsa: umbral de cumplimiento","%"],
+  ["bolsa.periodos_con_llave",   "Bolsa: periodos con llave",   ""],
+  ["bolsa.factor",               "Bolsa: factor al cierre",     "×"]
+];
+/* ---- La ruta mensual hacia la meta --------------------------------------
+   El documento de incentivos no reparte la meta en cinco partes iguales: da
+   más aire a los primeros meses, que son los del aprendizaje. Esa curva es
+   contra lo que se mide cada periodo, así que se edita acá como cualquier
+   otro parámetro y viaja con la versión: cambiarla en octubre no reescribe
+   agosto. */
+function cardCurva(val){
+  const periodos = periodosProyecto();
+  const cur = val.curva || {};
+  const fila = (clave, titulo, uni, metaFinal) => {
+    const lista = Array.isArray(cur[clave]) ? cur[clave] : [];
+    return `
+    <div class="bn-curva-fila">
+      <div class="t">${esc(titulo)}<span>meta del proyecto: +${esc(metaFinal)}${esc(uni)}</span></div>
+      <div class="ins">${periodos.map((pp, i) => `
+        <label class="field">
+          <span>${esc(nombreMes(pp).split(" ")[0])}</span>
+          <input class="in-num" type="text" inputmode="decimal"
+                 data-bono="curva.${clave}.${i}"
+                 value="${esc(lista[i] !== undefined ? lista[i] : metaFinal)}">
+        </label>`).join("")}</div>
+    </div>`;
+  };
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Ruta mensual hacia la meta</div>
+    <div class="pie" style="margin:-4px 0 11px">
+      Los valores son <b>acumulados</b>: al segundo periodo se esperan 8 p.p. en total, no 8 más.
+      Contra esto se mide el avance del proyecto en cada periodo, y por eso el último punto tiene
+      que coincidir con la meta del proyecto. La venta no entra acá: se mide mes a mes.
+    </div>
+    ${fila("reactivacion_pp", "Reactivación del portafolio", " p.p.", val.metas.reactivacion_pp)}
+    ${fila("facturacion_pct", "Facturación", "%", val.metas.facturacion_pct)}
+  </div>`;
+}
+
+/* ---- Los días que no son de trabajo -------------------------------------
+   Sábados y domingos los sabe el calendario. Los feriados no: cambian de un
+   año a otro, y una empresa puede tener además sus propios días libres. Se
+   escriben acá, viajan con la versión y por eso corregir el calendario en
+   noviembre no reescribe la puntualidad de agosto. */
+/* ---- Cómo se mide la cobertura -----------------------------------------
+   Es el único requisito de la llave cuya definición cambia entre periodos, y
+   por eso no va como un número más sino con su propia explicación al lado:
+   quien lo mueva tiene que saber qué está moviendo.
+
+   El primer mes de campo se fue en coordinar con los ejecutivos de BBVA. Sin
+   la respuesta del banco no hay teléfono al que llamar, así que exigir una
+   gestión por comercio medía algo que todavía no dependía del ejecutivo de
+   Stratis. Lo que sí dependía de él era cargar el Customer ID. */
+function cardCoberturaBase(val){
+  const actual = (val.requisitos || {}).cobertura_base || "gestion";
+  const op = (id, tit, txt) => `
+    <div class="opt ${actual === id ? "on" : ""}" data-cobbase="${id}">
+      <span class="rd"></span><span><b>${tit}</b><span>${txt}</span></span>
+    </div>`;
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Qué cuenta como cartera cubierta</div>
+    <div class="pie" style="margin:-4px 0 10px">
+      Se guarda con la versión del periodo, así que cambiarlo no reescribe los meses
+      ya medidos: cada uno se sigue liquidando con la regla que regía cuando se trabajó.
+      En las tres, un comercio cuenta una vez: cinco gestiones sobre la misma bodega
+      son un comercio gestionado, no cinco.
+    </div>
+    <div class="opts">
+      ${op("contacto", "Un contacto logrado en el periodo",
+           "La regla de régimen. Cuenta el comercio con un correo al ejecutivo de BBVA —el medio que deja constancia— o con una gestión efectiva con el cliente, no un intento. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
+      ${op("gestion", "Al menos un intento de gestión",
+           "Cuenta el comercio que recibió contacto o intento de contacto, sobre la cartera asignada")}
+      ${op("registro", "El registro del Customer ID en el CRM",
+           "Cuenta la ficha cargada, se haya trabajado o no, sobre la cartera asignada. Es la regla del primer mes, cuando el cuello estaba en la respuesta de BBVA")}
+    </div>
+  </div>`;
+}
+
+function cardFeriados(val){
+  const lista = Array.isArray(val.feriados) ? val.feriados : FERIADOS_DEF;
+  const delProyecto = lista.filter(f => f >= PROYECTO.inicio && f <= PROYECTO.fin);
+  const nombre = iso => {
+    const d = new Date(iso + "T12:00:00Z");
+    return `${d.getUTCDate()} ${MESES_ES[d.getUTCMonth()].slice(0,3)}`;
+  };
+  const finde = iso => { const d = new Date(iso + "T12:00:00Z").getUTCDay(); return d === 0 || d === 6; };
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Días que no son de trabajo</div>
+    <div class="pie" style="margin:-4px 0 10px">
+      Los sábados y domingos ya no cuentan como día trabajado, no hace falta escribirlos. Acá van
+      los <b>feriados</b>: una gestión del día anterior a un feriado sigue estando a tiempo si se
+      registra el primer día hábil siguiente.
+    </div>
+    <div class="bn-fer">${delProyecto.map(f =>
+      `<span class="${finde(f) ? "off" : ""}">${esc(nombre(f))}${finde(f) ? " · cae fin de semana" : ""}</span>`
+      ).join("") || `<span class="off">sin feriados cargados</span>`}</div>
+    <label class="field" style="margin-top:9px">
+      <span style="font-size:12px;color:var(--muted)">Fechas, separadas por coma (AAAA-MM-DD)</span>
+      <textarea id="feriadosParam" rows="2" spellcheck="false"
+        style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${esc(lista.join(", "))}</textarea>
+    </label>
+  </div>`;
+}
+
+function leerRuta(obj, ruta){ return ruta.split(".").reduce((o,k) => o[k], obj); }
+function ponerBono(obj, ruta, valor){
+  const ks = ruta.split("."); const ult = ks.pop();
+  ks.reduce((o,k) => o[k], obj)[ult] = valor;
+}
+/* Qué versión se está editando. Por defecto la que rige hoy; se puede elegir
+   otra para corregir una que se cargó mal, o crear una nueva desde el periodo
+   en que empieza a regir. */
+/* ---- La confirmación mensual de los parámetros -------------------------
+   Hasta acá una versión de parámetros regía hacia adelante en silencio: si
+   nadie tocaba nada, octubre se liquidaba con la versión de agosto y en ningún
+   lado quedaba que alguien hubiera mirado si eso seguía siendo lo acordado.
+
+   Para las visitas semanales eso importa especialmente —el número está en
+   revisión con BBVA por la geografía de las carteras— pero vale para todos los
+   parámetros: cada periodo tiene que tener una versión propia, confirmada por
+   alguien con nombre y fecha, aunque los valores sean idénticos a los del mes
+   anterior. Confirmar no es tocar: es hacerse cargo. */
+const paramsConfirmados = p => PARAMS.some(x => String(x.vigente_desde) === String(p));
+
+const periodoParam = () => S.pParam || (versionDe(periodoHoy()) || {}).vigente_desde || periodoHoy();
+
+function cardParametrosBono(){
+  if (S.user.rol === "Ejecutivo") return "";
+  const pv    = periodoParam();
+  const edita = PARAMS.find(x => x.vigente_desde === pv);
+  const val   = edita ? Object.assign(JSON.parse(JSON.stringify(BONO_DEF)), edita.valor) : paramsDe(pv);
+  const suma  = val.pesos.reactivacion + val.pesos.facturacion + val.pesos.venta;
+  const usada = periodosProyecto().filter(x => (versionDe(x) || {}).vigente_desde === pv);
+  const selladas = usada.filter(periodoSellado);
+
+  /* Lo que rige, en cinco líneas. Antes había que leer diecinueve casillas de
+     texto para saber qué exige el modelo este mes, y las casillas son para
+     editar, no para enterarse. El resumen se arma de los mismos parámetros que
+     el editor guarda, así que no puede quedar desfasado. */
+  const rvP = reglaVisitas(val.requisitos, pv);
+  const esc2 = escalaDe(val);
+  const bol  = val.bolsa || BONO_DEF.bolsa;
+  const M    = metaPeriodo(pv, val);
+  const resumen = `
+    <!-- Una sola columna a propósito: esto ya vive dentro de una columna de
+         Ajustes, y partirlo otra vez deja renglones de cuatro palabras. -->
+    <div class="aj-reglas aj-reglas-1">
+      <div class="kv"><dt>Metas del proyecto</dt><dd>+${val.metas.reactivacion_pp} p.p. de reactivación ·
+        +${val.metas.facturacion_pct}% de facturación · ${val.metas.ventas_mes} ventas por ejecutivo al mes</dd></div>
+      <div class="kv"><dt>La meta de este periodo</dt><dd>${M.i >= 1 ? `mes ${M.i} de ${M.total}: ` : ""}+${
+        M.reactivacion_pp} p.p. acumulados${M.facturacion_pct ? ` · +${M.facturacion_pct}% de facturación`
+        : " · la facturación todavía no se mide"} · ${M.ventas_mes} ventas</dd></div>
+      <div class="kv"><dt>La llave</dt><dd>cobertura ${val.requisitos.cobertura_pct}% ·
+        ${esc(rvP.corto)} de visitas efectivas · puntualidad ${val.requisitos.puntualidad_pct}%</dd></div>
+      <div class="kv"><dt>Cuánto se paga</dt><dd>con 2 de 3 requisitos, ${val.base_incumple_uno}% fijo.
+        Con los 3, gradual desde ${esc2[0][0]}% de cumplimiento (${esc2[0][1]}% del sueldo) hasta
+        ${esc2[esc2.length-1][0]}% (${esc2[esc2.length-1][1]}%, el tope)</dd></div>
+      <div class="kv"><dt>Cuándo se paga</dt><dd>${val.pago_mensual}% con la remuneración del mes y
+        ${100 - val.pago_mensual}% a la bolsa retenida, que se duplica (×${bol.factor}) ${
+        (bol.criterio || (bol.periodos_con_llave ? "periodos_con_llave" : "cumplimiento")) === "cumplimiento"
+          ? (bol.cumplimiento_pct == null
+              ? "según el cumplimiento acumulado del proyecto — falta cargar el umbral"
+              : `si el cumplimiento acumulado del proyecto llega al ${bol.cumplimiento_pct}%`)
+          : `solo con la llave abierta en ${bol.periodos_con_llave} de ${periodosProyecto().length} periodos`}</dd></div>
+    </div>`;
+
+  return `
+  <div class="card">
+    ${resumen}
+
+    <details class="aj-mas" style="margin-top:13px">
+      <summary>Editar esta versión de los parámetros</summary>
+      <div class="cuerpo aj-editor">
+
+    <div class="pie" style="margin:0 0 13px">
+      <b>Los parámetros tienen fecha de vigencia.</b> Cada periodo se calcula con la versión que
+      regía entonces, así que cambiar una meta hoy <b>no reescribe lo ya liquidado</b>. Para la
+      revisión de octubre se crea una versión nueva vigente desde ese periodo; la de agosto queda
+      como está.
+    </div>
+
+    <div class="sel-row" style="margin-bottom:12px">
+      <label class="fsel"><span>Versión que se está editando</span>
+        <select id="selVersionParam">
+          ${PARAMS.slice().sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
+            .map(x => `<option value="${esc(x.vigente_desde)}"${x.vigente_desde === pv ? " selected" : ""}
+              >Vigente desde ${esc(nombreMes(x.vigente_desde))}</option>`).join("")}
+          ${PARAMS.some(x => x.vigente_desde === pv) ? "" :
+            `<option value="${esc(pv)}" selected>Nueva, vigente desde ${esc(nombreMes(pv))}</option>`}
+        </select></label>
+      <label class="fsel"><span>Crear una versión nueva desde</span>
+        <select id="selNuevaVersion">
+          <option value="">—</option>
+          ${periodosProyecto().filter(x => !PARAMS.some(y => y.vigente_desde === x))
+            .map(x => `<option value="${esc(x)}">${esc(nombreMes(x))}</option>`).join("")}
+        </select></label>
+    </div>
+
+    <div class="pie" style="margin:-4px 0 12px">
+      ${edita ? `Creada por <b>${esc(edita.creado_por || "—")}</b>${
+        edita.creado_en ? " el " + fmtFecha(String(edita.creado_en).slice(0,10)) : ""}. ` : "Versión nueva, todavía sin guardar. "}
+      ${usada.length ? `Rige ${usada.length === 1 ? "el periodo" : "los periodos"}
+        <b>${usada.map(x => esc(nombreMes(x))).join(", ")}</b>.` : "Todavía no rige ningún periodo."}
+    </div>
+
+    ${selladas.length ? `<div class="note crit" style="margin:0 0 11px">
+      ${selladas.length === 1 ? "El periodo" : "Los periodos"}
+      <b>${selladas.map(x => esc(nombreMes(x))).join(", ")}</b>
+      ${selladas.length === 1 ? "ya está sellado" : "ya están sellados"}: cambiar esta versión
+      <b>no altera lo liquidado</b>. Para que cambie hay que anular el cierre.</div>` : ""}
+
+    ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
+
+    ${cardCurva(val)}
+    ${cardCoberturaBase(val)}
+    ${cardFeriados(val)}
+
+    <div class="bn-params">
+      ${CAMPOS_BONO.map(([ruta, label, uni]) => `
+        <label class="field">
+          <span style="font-size:12px;color:var(--muted)">${esc(label)}${uni ? ` (${uni})` : ""}</span>
+          <input class="in-num" type="text" inputmode="decimal" data-bono="${esc(ruta)}"
+                 value="${esc(leerRuta(val, ruta))}">
+        </label>`).join("")}
+    </div>
+    <div class="field" style="margin-top:11px">
+      <label>Nota del cambio <span class="hint">(queda en la bitácora)</span></label>
+      <input type="text" id="notaParam" value="${esc(edita && edita.nota || "")}"
+             placeholder="Ej.: revisión de octubre acordada con BBVA">
+    </div>
+    <div style="display:flex;gap:9px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="bonoGuardar" style="flex:1;min-width:180px">Guardar esta versión</button>
+      <button class="btn ghost" id="bonoReset">Volver a los del documento</button>
+    </div>
+
+      </div>
+    </details>
+  </div>`;
+}
+
+async function guardarParametros(){
+  const pv = periodoParam();
+  const nuevo = paramsDe(pv);
+  let malo = "";
+  document.querySelectorAll("[data-bono]").forEach(el => {
+    const txt = String(el.value).trim();
+    /* Vaciar el mínimo del periodo no es escribir un cero: es decir «este
+       periodo se mide con la regla semanal», que es como quedó medido el
+       primero. Un cero pediría cero visitas, que no es lo mismo. */
+    if (txt === "" && el.dataset.bono === "requisitos.visitas_periodo"){
+      ponerBono(nuevo, el.dataset.bono, null);
+      return;
+    }
+    const n = Number(txt.replace(",", "."));
+    if (!isFinite(n) || n < 0 || txt === "") malo = el.dataset.bono;
+    else ponerBono(nuevo, el.dataset.bono, n);
+  });
+  if (malo) return toast("Hay un valor que no es un número: " + malo);
+
+  /* El selector de cobertura no es un número, así que va aparte de los
+     campos numéricos: se lee del botón marcado. */
+  const opBase = document.querySelector("[data-cobbase].on");
+  if (opBase) nuevo.requisitos.cobertura_base = opBase.dataset.cobbase;
+
+  const campoFer = $("#feriadosParam");
+  if (campoFer){
+    const fs = campoFer.value.split(/[,\s;]+/).map(x => x.trim()).filter(Boolean);
+    const mala = fs.find(x => !/^\d{4}-\d{2}-\d{2}$/.test(x) || isNaN(new Date(x + "T12:00:00Z")));
+    if (mala) return toast(`«${mala}» no es una fecha. Van como 2026-12-25, separadas por coma.`);
+    nuevo.feriados = [...new Set(fs)].sort();
+  }
+  const suma = nuevo.pesos.reactivacion + nuevo.pesos.facturacion + nuevo.pesos.venta;
+  if (Math.round(suma) !== 100) return toast(`Los pesos suman ${suma}%: tienen que sumar 100%`);
+  /* La curva tiene que ser creciente y terminar en la meta del proyecto. Una
+     curva que baja diría que se puede perder avance ya logrado, y una que no
+     llega a la meta haría que cumplir el último mes no fuera cumplir. */
+  const malaCurva = [
+    ["reactivacion_pp", "reactivación", nuevo.metas.reactivacion_pp],
+    ["facturacion_pct", "facturación",  nuevo.metas.facturacion_pct]
+  ].map(([k, nom, fin]) => {
+    const c = (nuevo.curva || {})[k] || [];
+    for (let i = 1; i < c.length; i++)
+      if (c[i] < c[i-1]) return `La ruta de ${nom} baja del mes ${i} al ${i+1}: es un acumulado, no puede retroceder.`;
+    if (c.length && Math.abs(c[c.length-1] - fin) > 0.001)
+      return `La ruta de ${nom} termina en ${c[c.length-1]} y la meta del proyecto es ${fin}: tienen que coincidir.`;
+    return "";
+  }).find(Boolean);
+  if (malaCurva) return toast(malaCurva);
+
+  if (nuevo.piso >= 100)  return toast("El piso tiene que ser menor al 100%");
+  if (nuevo.sobre <= 100) return toast("El sobrecumplimiento tiene que ser mayor al 100%");
+
+  const b = $("#bonoGuardar"); b.disabled = true; b.textContent = "Guardando…";
+  const { error } = await sb.from("bono_parametros").upsert(
+    { vigente_desde: pv, valor: nuevo, nota: ($("#notaParam") && $("#notaParam").value || "").trim() || null },
+    { onConflict:"vigente_desde" });
+  b.disabled = false; b.textContent = "Guardar esta versión";
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); render();
+  toast(`Parámetros vigentes desde ${nombreMes(pv)} guardados`);
+}
+
+function bindBono(){
+  if ($("#selPeriodoBono")) $("#selPeriodoBono").onchange = e => { S.pBono = e.target.value; render(); };
+  if ($("#bonoLibro")) $("#bonoLibro").onclick = e => descargarLibroIncentivos(e.currentTarget);
+  if ($("#confirmarParams")) $("#confirmarParams").onclick = () => confirmarParametros();
+  if (typeof bindPdfIncentivo === "function") bindPdfIncentivo();
+  if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
+  if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
+  if ($("#baseGuardar"))    $("#baseGuardar").onclick     = () => guardarBaseFact();
+  if ($("#bonoGuardar"))    $("#bonoGuardar").onclick     = () => guardarParametros();
+  if ($("#cerrarPeriodo"))  $("#cerrarPeriodo").onclick   = () => cerrarPeriodo();
+  if ($("#anularCierre"))   $("#anularCierre").onclick    = () => anularCierre();
+  if ($("#selVersionParam")) $("#selVersionParam").onchange = e => { S.pParam = e.target.value; render(); };
+  if ($("#selNuevaVersion")) $("#selNuevaVersion").onchange = e => {
+    if (e.target.value){ S.pParam = e.target.value; render();
+      toast(`Versión nueva desde ${nombreMes(S.pParam)} — ajusta los valores y guarda`); }
+  };
+  document.querySelectorAll("[data-cobbase]").forEach(el => el.onclick = () => {
+    document.querySelectorAll("[data-cobbase]").forEach(x =>
+      x.classList.toggle("on", x === el));
+  });
+  if ($("#bonoReset")) $("#bonoReset").onclick = () => {
+    document.querySelectorAll("[data-bono]").forEach(el => el.value = leerRuta(BONO_DEF, el.dataset.bono));
+    if ($("#feriadosParam")) $("#feriadosParam").value = FERIADOS_DEF.join(", ");
+    document.querySelectorAll("[data-cobbase]").forEach(x =>
+      x.classList.toggle("on", x.dataset.cobbase === BONO_DEF.requisitos.cobertura_base));
+    toast("Valores del documento cargados — falta guardar");
+  };
+}
+
+/* =========================================================================
+   Reporte de avance — la presentación que se arma sola
+
+   Hasta acá la presentación se hacía a mano: alguien miraba el Panel, anotaba
+   los números en un archivo y los pegaba en las láminas. Eso tiene un costo
+   que no se ve hasta que aparece: entre la fecha del dato y la fecha de la
+   reunión siempre hay días, y en esos días los números cambiaron. Lo que se
+   presenta deja de ser lo que hay.
+
+   Acá el reporte se calcula del mismo lugar del que sale el Panel, al momento
+   de mirarlo. La pantalla es la fuente; el PowerPoint es una copia de esa
+   pantalla en la plantilla de Stratis, para la reunión. Si un número está
+   mal, se corrige el registro y el reporte cambia solo: no hay una segunda
+   versión de la verdad que haya que mantener al día.
+
+   Dos cosas que no se cruzan:
+
+     · Los números se calculan, no se escriben. Nadie puede tipear un 114.
+     · El relato se escribe, no se calcula. Los hitos, las lecturas y las
+       metas viven en reporte_config y se editan en Ajustes.
+
+   Y una restricción que es del negocio y no de la pantalla: nada de lo que
+   sale de acá menciona el CRM. El CRM es la herramienta de gestión de Stratis,
+   y en una lámina para quien financia el proyecto se lee como una etapa del
+   proceso comercial que no es.
+
+   LO QUE CAMBIÓ EL 26/08. Hasta esa fecha acá decía, además, que el reporte
+   nunca abre por ejecutivo. Ya no: se acordó una sola presentación para la
+   gestión interna, para BBVA y para Mastercard, en vez de tres formatos
+   paralelos que nadie mantiene sincronizados. El archivo trae los dos bloques,
+   separados por una lámina divisoria: adelante el proyecto, que es lo que ve
+   Mastercard, y atrás el detalle por ejecutivo. Se presenta entero o se corta
+   en la divisoria; lo que no pasa es que existan dos verdades.
+   ========================================================================= */
+
+const REP_COLOR = {
+  navy:"#0C1137", azul:"#3B43FB", azul2:"#232C86", azul3:"#8189FD",
+  naranja:"#F86F35", verde:"#0BBC96", gris:"#3F5073", gris2:"#A0ABBC"
+};
+const repCol = k => REP_COLOR[k] || REP_COLOR.gris;
+
+/* Los dos tonos de los recuadros del reporte.
+   El fondo de la plantilla de Stratis es un degradado que va del blanco a un
+   azul muy claro (#EFF3FC). Un recuadro pintado de #F6F9FF —que era lo que
+   había— queda POR ENCIMA de ese tono en la parte baja de la lámina: existe,
+   ocupa lugar y no se ve. La primera versión de estas láminas se revisó sobre
+   fondo gris de prueba, donde todo se leía; sobre la plantilla de verdad, la
+   mitad de los recuadros desaparecía.
+   REP_BANDA está deliberadamente por debajo del fondo, y REP_LINEA es un
+   borde que se distingue del degradado en cualquier punto de la lámina. */
+const REP_BANDA = "DDE4F4";
+const REP_LINEA = "B9C6E0";
+const repHex = k => repCol(k).replace("#", "");
+
+/* Los fondos son las láminas de la plantilla de Stratis, exportadas como
+   imagen. Viven en el repositorio y no dentro del HTML: el CRM lo abren los
+   ejecutivos desde el celular y no tienen por qué descargar 700 KB de fondos
+   que solo usa el reporte. Se piden recién al generar el PowerPoint. */
+const REP_FONDOS = { caratula:"reporte/caratula.jpg", contenido:"reporte/contenido.jpg",
+                     cierre:"reporte/cierre.jpg" };
+const REP_PPTX_CDN = "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js";
+
+const repProyecto = () => Object.assign({}, REPORTE_DEF.proyecto, REPORTE.proyecto || {});
+const repObjetivo = id => (REPORTE.objetivos || REPORTE_DEF.objetivos).find(o => o.id === id) || {};
+const repNota = k => (REPORTE.notas || {})[k] || "";
+
+/* ---- Los números --------------------------------------------------------
+   Una sola función para toda la pantalla y para el PowerPoint. Si el reporte
+   y la lámina alguna vez discrepan, es porque alguien calculó dos veces; acá
+   se calcula una. */
+
+/* ---- Comercios gestionados: UNA sola fuente para todas las láminas -------
+   Devuelve un Map de customer_id → fecha del primer hecho que cuenta como
+   gestión, limitado a la cartera y recortado al periodo.
+
+   Que esto viva en un solo lugar no es prolijidad: es lo que evita que la
+   cifra grande de la lámina 2, la curva de la 3 y el escalón del embudo de la
+   4 digan tres números distintos con el mismo nombre. Ya pasó una vez —el
+   corte del jueves salía 71 contra un acumulado de 52— y se arregló
+   escribiendo la definición dos veces, que es exactamente la forma de que
+   vuelva a pasar. Ahora se escribe una.
+
+   La regla la fijó José el 27/08: cuenta el correo al banco o al comercio, el
+   contacto efectivo, la reunión o visita realizada y el cierre registrado.
+   El intento sin resultado no cuenta. Ver `esGestionValida` en el core. */
+/* La línea de tiempo de gestión de cada comercio.
+   Cada hecho registrado, con su fecha y si CALIFICA como gestión. De acá salen
+   las tres respuestas que el reporte necesita, y las tres con la misma regla:
+   el acumulado del embudo, el corte de un jueves y los trabajados de una
+   semana. Escribir la definición más de una vez ya provocó que el corte del
+   jueves superara al acumulado (71 contra 52); ahora hay una sola. */
+function repLineaGestion(f){
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = new Set(cart.map(c => String(c.customer_id)));
+  const m = new Map();
+  const poner = (cid, d, orden, ok) => {
+    if (!enCartera.has(cid) || !d || d > f.hoy) return;
+    /* Una fecha anterior al arranque se pega al arranque en vez de tirarse: el
+       dedazo del 13 de febrero es un dato mal tecleado, no un dato falso, y se
+       corrige en su ficha. Acá solo se le impide mover el periodo. */
+    if (d < f.ini) d = f.ini;
+    if (!m.has(cid)) m.set(cid, []);
+    m.get(cid).push({ d, orden, ok });
+  };
+  [...DB.todos(), ...DB.bbva()].filter(r => !esReconstruida(r)).forEach(g =>
+    poner(String(g.Customer_id), repDia(g.Fecha_Contacto),
+      String(g.Hora_Contacto || "") + "|" + String(g.Creado_En || ""),
+      esGestionValida(g)));
+  /* El cierre no es una interacción: vive en la ficha. Entra a la línea de
+     tiempo como el hecho que terminó el caso, en su fecha de cierre, para que
+     compita por «la última actividad» igual que todo lo demás. */
+  const sinFecha = new Set();
+  cart.filter(tieneCierreRegistrado).forEach(c => {
+    const d = c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "";
+    if (d) poner(String(c.customer_id), d, "zzzz", true);
+    else    sinFecha.add(String(c.customer_id));   // cerrado, pero sin cuándo
+  });
+  /* La negociación no es un hecho con fecha sino un ESTADO: nace con el primer
+     contacto efectivo y vive hasta que alguien cierra el caso. Se guarda esa
+     fecha —no un evento más— para poder contestar «¿estaba en negociación al
+     jueves?» sin que la negociación compita por ser «la última actividad».
+     Es la misma regla que `comercioGestionado` en el core; acá se necesita
+     ubicada en el tiempo porque el embudo se dibuja también a una fecha de
+     corte. */
+  const negocia = new Map();
+  const cerrado = new Set(cart.filter(tieneCierreRegistrado).map(c => String(c.customer_id)));
+  DB.todos().filter(r => !esReconstruida(r) && esEfectivo(r.Resultado)).forEach(r => {
+    const cid = String(r.Customer_id);
+    if (!enCartera.has(cid) || cerrado.has(cid)) return;
+    const d = repDia(r.Fecha_Contacto);
+    if (!d || d > f.hoy) return;
+    if (!negocia.has(cid) || d < negocia.get(cid)) negocia.set(cid, d);
+  });
+  m.forEach(a => a.sort((x, y) => x.d.localeCompare(y.d) || x.orden.localeCompare(y.orden)));
+  m.sinFechaDeCierre = sinFecha;
+  m.negociaDesde = negocia;
+  return m;
+}
+
+/* ¿La ÚLTIMA actividad del comercio dentro de la ventana califica?
+ *
+ * Regla que fijó José el 27/08: «se tomará la actividad más reciente». No
+ * basta con que en algún momento haya habido un correo; lo que decide es en
+ * qué quedó el comercio. Un correo del 14 seguido de una llamada sin
+ * respuesta del 25 dice que el caso se enfrió, y el embudo tiene que decirlo.
+ *
+ * Con `desde` vacío mira toda la historia hasta `hasta`: eso es el acumulado.
+ * Con los dos puestos mira solo esa semana: eso es «trabajados». */
+function repUltimaCalifica(linea, desde, hasta){
+  /* El último DÍA, no el último hecho. Un correo a las 15:03 y un WhatsApp sin
+     respuesta a las 15:25 son el mismo día de trabajo, y el día cuenta si algo
+     de ese día califica —si no, la regla castigaría el seguimiento—. Ver
+     `ultimoDiaConActividad` en el core, que es la misma regla para la Cartera:
+     las dos pantallas tienen que dar el mismo conjunto, y hay una prueba que
+     lo exige. */
+  let dia = null, ok = false;
+  for (let i = 0; i < linea.length; i++){
+    const x = linea[i];
+    if (desde && x.d < desde) continue;
+    if (hasta && x.d > hasta) continue;
+    if (dia === null || x.d > dia){ dia = x.d; ok = x.ok; }   // la línea viene ordenada
+    else if (x.d === dia) ok = ok || x.ok;
+  }
+  return ok;
+}
+
+/* Los comercios gestionados hasta una fecha. Sin fecha, los de hoy. */
+function repIdsGestionados(linea, hasta){
+  const out = new Set();
+  linea.forEach((hist, cid) => { if (repUltimaCalifica(hist, null, hasta)) out.add(cid); });
+  /* Un cierre sin fecha no se puede ubicar en el tiempo, pero el hecho es
+     cierto: cuenta en el acumulado y nunca como avance de una semana. */
+  (linea.sinFechaDeCierre || new Set()).forEach(cid => out.add(cid));
+  /* Negociación vigente a esa fecha. Va SOLO en el acumulado y nunca en
+     `repTrabajadosEntre`: una negociación abierta es un caso gestionado, pero
+     no es trabajo de esta semana si esta semana nadie lo tocó. Meterla en la
+     serie semanal inflaría la actividad con casos que nadie miró. */
+  (linea.negociaDesde || new Map()).forEach((desde, cid) => {
+    if (!hasta || desde <= hasta) out.add(cid);
+  });
+  return out;
+}
+
+/* Cuántos comercios se TRABAJARON entre dos fechas.
+ *
+ * No es lo mismo que «cuántos entraron a gestión»: el 26/08 la tarjeta decía 3
+ * esta semana contra 467 la anterior —un 99% de caída— porque contaba el
+ * PRIMER toque de cada comercio. Con el portafolio ya cubierto casi ningún
+ * comercio es nuevo, así que esa cifra se desploma sola aunque el equipo
+ * trabaje más que nunca. Un indicador que baja cuando el trabajo sube no es un
+ * indicador. Un comercio retomado esta semana es trabajo de esta semana. */
+function repTrabajadosEntre(linea, desde, hasta){
+  let n = 0;
+  linea.forEach(hist => { if (repUltimaCalifica(hist, desde, hasta)) n++; });
+  return n;
+}
+
+function fotoReporte(){
+  const P = repProyecto();
+  const hoy = hoyISO();
+  const ini = P.inicio || PROYECTO.inicio, fin = P.fin || PROYECTO.fin;
+
+  const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000) + 1;
+  const total    = dias(ini, fin);
+  const corrido  = Math.min(total, Math.max(0, dias(ini, hoy)));
+  const restante = Math.max(0, total - corrido);
+  const semanas  = restante / 7;
+
+  /* El universo es el portafolio que entregó BBVA, no lo que el CRM alcanzó a
+     cargar. Esa diferencia es justamente lo que el embudo tiene que mostrar:
+     si el denominador fuera lo cargado, el primer escalón daría 100% siempre
+     y la lámina no diría nada. */
+  const asignadaMetas = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    .reduce((n, u) => n + metaVigente(u.correo, mesHoy()).n, 0);
+  const portafolio = Number(P.base_comercios) > 0 ? Number(P.base_comercios) : asignadaMetas;
+
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const nuevos = CLIENTES.filter(c => esClienteNuevo(c));
+  const ges = DB.todos();
+
+  /* Cada escalón cuenta comercios, no gestiones: un comercio visitado tres
+     veces es un comercio, no tres. Confundirlos era el error que hacía ver
+     el embudo más ancho de lo que estaba. */
+  const conAlguna   = new Set(ges.map(g => String(g.Customer_id)));
+  const conRespuesta= new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
+  const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
+  /* Los gestionados salen de una sola función compartida con las láminas
+     semanales, para que las tres digan el mismo número. */
+  const linea      = repLineaGestion({ ini, hoy });
+  const conGestion = repIdsGestionados(linea);
+
+  const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
+  /* Cada escalón sigue siendo parte del anterior, y con la regla ancha del
+     27/08 eso ya no hay que forzarlo: un contacto efectivo ES una gestión y
+     una visita realizada TAMBIÉN, así que los dos escalones de abajo caen
+     dentro del de arriba por definición y no por una intersección puesta a
+     mano. La intersección se conserva igual, escrita, porque documenta la
+     relación y porque el día que la regla vuelva a moverse el embudo no se
+     va a romper en silencio. */
+  const y = (a, b) => new Set([...a].filter(x => b.has(x)));
+  const contacto    = enCartera(conAlguna);
+  const gestion     = enCartera(conGestion);
+  /* Efectividad = el cliente respondió de verdad, y eso incluye la visita: una
+     reunión realizada ES una respuesta concreta, más fuerte que una llamada
+     atendida. Contar solo los contactos efectivos dejaba la posibilidad de que
+     un comercio visitado no apareciera en el escalón de arriba, y entonces el
+     embudo se ensanchaba hacia abajo. Hoy no hay ninguno así —las 27 visitas
+     tienen contacto efectivo detrás—, y justamente por eso conviene fijarlo
+     ahora: la unión hace que el anidamiento sea cierto por construcción y no
+     por suerte. (José, 27/08: «se contará contactos y visitas concretadas».) */
+  /* LA CADENA SE ARMA HACIA ABAJO, cada escalón desde el de arriba. Es la
+     regla que confirmó José el 27/08: gestión son los leads de retención que
+     cuentan; efectividad es la respuesta DE ESA gestión; visitas son las
+     concretadas DE ESA efectividad; y la retención es el resultado final.
+
+     Hasta esa tarde cada escalón se intersectaba contra `conGestion` por
+     separado. Hoy da el mismo número —las 27 visitas tienen contacto efectivo
+     detrás y las 6 retenciones tienen visita—, pero «da lo mismo hoy» no es lo
+     mismo que «no se puede romper»: bastaba una visita sin respuesta
+     registrada para que el embudo se ensanchara hacia abajo. Ahora cada
+     conjunto es subconjunto del anterior por construcción. */
+  const respondio    = new Set([...conRespuesta, ...conVisita]);
+  const gestionSet   = y(conGestion, new Set(cart.map(c => String(c.customer_id))));
+  const efectivoSet  = y(respondio, gestionSet);
+  const visitaSet    = y(conVisita, efectivoSet);
+  const objetivoSet  = new Set(cart.filter(c => esRetencion(c) || esRecuperado(c))
+                                   .map(c => String(c.customer_id)));
+
+  const efectividad = enCartera(efectivoSet);
+  const visita      = enCartera(visitaSet);
+  /* Lo que quedaba fuera del embudo por no tener correo detrás. Con la regla
+     ancha ya no queda nada afuera; se sigue calculando —y declarando si
+     apareciera— porque una cifra que se borra es una cifra que nadie vuelve a
+     mirar el día que deja de ser cero. */
+  /* Lo que queda FUERA de la cadena. No se recorta en silencio: un comercio
+     retenido sin visita registrada es un resultado real —o una visita que
+     nadie anotó—, y en los dos casos hay que verlo. Hoy los tres son cero;
+     se calculan igual, porque una cifra que se borra es una cifra que nadie
+     vuelve a mirar el día que deja de ser cero. */
+  const sinRespaldo = {
+    efectivos:   enCartera(respondio)  - efectividad,
+    visitas:     enCartera(conVisita)  - visita,
+    retenciones: objetivoSet.size - y(objetivoSet, visitaSet).size
+  };
+
+  const retenidos   = cart.filter(esRetencion).length;
+  const recuperados = cart.filter(esRecuperado).length;
+  const objetivo    = retenidos + recuperados;
+  const perdidos    = cart.filter(c => c.resultado_gestion === "PERDIDO").length;
+  const ventasNuevas= nuevos.filter(esVentaNueva).length;
+
+  /* El ritmo de campo se mide sobre los días en que efectivamente hubo
+     actividad, no sobre los días corridos del proyecto. Dividir entre los
+     corridos castiga las dos primeras semanas, que fueron de coordinación
+     con los ejecutivos de BBVA y no de calle. */
+  /* Las fechas de campo se recortan al periodo del proyecto. Una sola gestión
+     con la fecha mal tecleada —el 26/08 había una del 13 de febrero, cinco
+     meses antes del arranque— estiraba «días de campo» de 38 a 195 y dividía
+     por cinco todos los ritmos: el reporte decía 3,3 comercios por día donde
+     el equipo venía haciendo 17, y la proyección al cierre salía por el piso.
+     Un dedazo en una fila no puede mover el ritmo de la campaña.
+     El dato mal tecleado no se toca ni se esconde: se corrige en su ficha. Acá
+     solo se deja de usar para medir un periodo al que no pertenece. */
+  const fechas = [...new Set(ges.map(g => String(g.Fecha_Contacto).slice(0,10))
+    .filter(d => d && d >= ini && d <= hoy))].sort();
+  const diasActivos = fechas.length;
+  const primera = fechas[0] || "";
+  const diasDeCampo = primera ? Math.max(1, dias(primera, hoy)) : 0;
+  /* Cuántas quedaron fuera del periodo: se declara en el reporte en vez de
+     descartarlas en silencio. */
+  const fueraDePeriodo = ges.filter(g => {
+    const d = String(g.Fecha_Contacto).slice(0,10);
+    return d && (d < ini || d > hoy);
+  }).length;
+  const porDia = diasDeCampo ? contacto / diasDeCampo : 0;
+  const faltanContactar = Math.max(0, portafolio - contacto);
+  /* ---- La cobertura se proyecta sobre GESTIÓN, no sobre contacto ---------
+     Desde que el segundo escalón del embudo es la gestión, medir la cobertura
+     con el contacto a secas mete un tercer denominador en el mismo documento:
+     el embudo dice 68 de 841, la lectura decía «faltan 738 por contactar» y
+     nadie sabía cuál de los dos era el avance. Ahora las dos cuentas usan la
+     misma definición y el deck habla de una sola cosa. El contacto sigue
+     calculándose —se declara como fichas con algún intento— pero no proyecta
+     nada. */
+  const porDiaGestion = diasDeCampo ? gestion / diasDeCampo : 0;
+  const faltanGestionar = Math.max(0, portafolio - gestion);
+  const diasParaCubrir = porDiaGestion > 0 ? Math.ceil(faltanGestionar / porDiaGestion) : null;
+  const fechaCobertura = diasParaCubrir === null ? "" :
+    new Date(new Date(hoy).getTime() + diasParaCubrir * 86400000).toISOString().slice(0,10);
+  const distritos = new Set(cart.map(c => c.distrito).filter(Boolean)).size;
+
+  const pct = n => portafolio ? n / portafolio * 100 : 0;
+  /* Sin divisor no hay conversión. Devolver 0% cuando el escalón anterior está
+     en cero es una afirmación falsa —«0% de las visitas» al lado de 3
+     retenciones— y encima suena a fracaso donde solo falta el dato. */
+  const cnv = (n, d) => d ? n / d * 100 : null;
+
+  /* ---- El embudo, redefinido el 26/08 y ajustado el 27/08 --------------
+     Antes el segundo escalón era «Contacto»: se registró al menos un intento.
+     Con 795 de 802 fichas tocadas, ese escalón daba 99% y no decía nada — un
+     embudo cuyo primer tramo no se angosta es un adorno.
+
+     El 26/08 el escalón pasó a ser GESTIÓN medida solo por correo. Esa regla
+     dejaba fuera trabajo que sí tiene resultado, y José la corrigió el 27/08:
+     hay gestión cuando quedó al menos un hecho con resultado detrás —correo al
+     banco o al comercio, contacto efectivo, reunión o visita realizada, o un
+     cierre registrado, ganado o perdido—. Debajo va EFECTIVIDAD, que es lo que
+     antes se llamaba gestión: los contactos que obtuvieron respuesta.
+
+     Lo que sigue sin contar es el intento sin nada detrás: la llamada que
+     nadie contestó, el chat sin respuesta, la visita fallida. Ese trabajo no
+     desaparece —sigue registrado, en la línea de tiempo y en el historial de
+     cada ejecutivo—; lo que no hace es mover el escalón. */
+  const embudo = [
+    { k:"portafolio",  label:"Portafolio asignado", n:portafolio, color:"navy",
+      pct:100, conv:null, texto:"" },
+    /* El `sub` es la redacción que puso José sobre la lámina el 27/08. El
+       rótulo solo nombra el escalón; abajo dice, en las palabras del comité,
+       qué hecho lo mueve. «Gestión» a secas obligaba a leer las notas del pie
+       para saber qué se estaba contando. */
+    { k:"gestion",     label:"Gestión",      sub:"Clientes impactados por los ejecutivos",
+      n:gestion, color:"azul2",
+      pct:pct(gestion),     conv:cnv(gestion, portafolio),      texto:"del portafolio" },
+    { k:"efectividad", label:"Efectividad",  sub:"Respuesta concreta por parte del cliente",
+      n:efectividad, color:"azul",
+      pct:pct(efectividad), conv:cnv(efectividad, gestion),     texto:"de los gestionados" },
+    { k:"visita",      label:"Visitas",      sub:"Presenciales o virtuales",
+      n:visita, color:"naranja",
+      pct:pct(visita),      conv:cnv(visita, efectividad),      texto:"de los efectivos" },
+    { k:"objetivo",    label:"Retenciones",  sub:"Comercios recuperados",
+      n:objetivo, color:"verde",
+      pct:pct(objetivo),    conv:cnv(objetivo, visita),         texto:"de las visitas" }
+  ];
+
+  /* ---- Facturación: el único objetivo cuyo dato no genera el CRM --------
+     Lo carga el Analista periodo a periodo. Mientras no esté, el KPI se
+     muestra pendiente y se dice de dónde tiene que venir; inventar un número
+     acá sería exactamente lo que este reporte existe para evitar. */
+  const ejec = USUARIOS.filter(u => u.rol === "Ejecutivo" && u.activo !== false);
+  const baseDeclarada = Number(P.base_facturacion) || 0;
+  const baseSuma = ejec.reduce((n, u) => n + (baseFactDe(u.correo) || 0), 0);
+  const baseFact = baseSuma > 0 ? baseSuma : baseDeclarada;
+
+  const conMonto = FACTURACION.filter(f => f.monto_final !== null && f.monto_final !== undefined);
+  const ultimoP = conMonto.map(f => f.periodo).sort().pop() || "";
+  const cerrados = conMonto.filter(f => f.periodo === ultimoP);
+
+  /* ---- El total del periodo, cuando todavía no hay detalle por ejecutivo ---
+     La tabla `facturacion` guarda el monto de CADA ejecutivo, y de ahí sale el
+     incentivo. El comité, en cambio, necesita un total. El 26/08 llegó el
+     total del primer periodo —S/ 27 MM— sin el desglose.
+
+     Repartirlo entre los cuatro por regla de tres sería inventar cuatro
+     números que después alimentan un bono. Así que el total vive aparte, en el
+     relato del reporte, y solo se usa para la lámina: el detalle por ejecutivo
+     sigue vacío hasta que llegue de verdad, y el incentivo no se mueve.
+     Cuando el desglose llegue, manda el desglose. */
+  const totalDeclarado = Number(P.facturacion_periodo) || 0;
+  const factActual = cerrados.length
+    ? cerrados.reduce((n, f) => n + Number(f.monto_final || 0), 0)
+    : totalDeclarado;
+  const factEsDeclarada = !cerrados.length && totalDeclarado > 0;
+
+  const oF = repObjetivo("facturacion");
+  const metaPct = Number(oF.meta_pct) || 0;
+  const metaFact = baseFact * (1 + metaPct / 100);
+  const hayFact = baseFact > 0 && (cerrados.length > 0 || factEsDeclarada);
+  const crecimiento = hayFact ? (factActual - baseFact) / baseFact * 100 : null;
+
+  /* ---- La proyección al cierre del mes ---------------------------------
+     Idea de Gabriel, del 26/08: un mes a medio correr comparado contra un mes
+     entero siempre parece una caída, y esa comparación no dice nada. Lo que
+     se presenta es «vamos en X al día N, proyectado al cierre da Y, o sea Z%».
+
+     La proyección es LINEAL sobre días corridos, no hábiles: un comercio
+     factura el sábado igual que el martes, y la base contra la que se compara
+     también es un mes corrido. El método se escribe en la lámina —«sobre N de
+     M días»— para que cualquiera pueda rehacer la cuenta; una proyección sin
+     su regla a la vista es una cifra que hay que creer.
+
+     `facturacion_periodo_hasta` es la fecha del acumulado y se edita en
+     Ajustes. Sin ella no se proyecta nada: preferimos mostrar el acumulado
+     crudo antes que inventar un cierre de mes. */
+  const hastaFact = String(P.facturacion_periodo_hasta || "").slice(0, 10);
+  const mesFact = hastaFact.slice(0, 7);
+  const diasDelMes = mesFact
+    ? new Date(Date.UTC(Number(mesFact.slice(0,4)), Number(mesFact.slice(5,7)), 0)).getUTCDate() : 0;
+  const diaFact = hastaFact ? Number(hastaFact.slice(8,10)) : 0;
+  const proyectaFact = hayFact && factEsDeclarada && diaFact > 0 && diaFact < diasDelMes;
+  const factProyectada = proyectaFact ? factActual * diasDelMes / diaFact : null;
+  const crecProyectado = proyectaFact ? (factProyectada - baseFact) / baseFact * 100 : null;
+
+  const oR = repObjetivo("reactivacion");
+  const oV = repObjetivo("venta");
+  const metaR = Number(oR.meta) || 0, metaV = Number(oV.meta) || 0;
+  const ritmo = (meta, hecho) => (semanas > 0 && meta > hecho) ? (meta - hecho) / semanas : 0;
+
+  /* La meta de facturación DEL MES, que es contra la que se lee el mes en
+     curso. La meta al cierre del proyecto —base × (1 + meta_pct)— mide otra
+     cosa y en un mes a medio correr no dice nada. Se carga en Ajustes; sin
+     ella la tarjeta cae a la meta del proyecto, como antes. */
+  const metaMes = Number(P.facturacion_meta_mes) || 0;
+
+  const kpis = [
+    { id:"facturacion", nombre:oF.nombre, peso:oF.peso, color:oF.color, listo:hayFact,
+      /* La cifra grande es el MONTO proyectado al cierre del mes, no su
+         variación porcentual. Es el formato que José fijó el 27/08 sobre el
+         deck que se presenta: las otras dos tarjetas muestran un hecho —5
+         comercios, 8 afiliaciones— y esta mostraba un juicio. El porcentaje
+         sigue existiendo y se lee solo, comparando el monto contra la meta
+         que está dos líneas más abajo. */
+      cifra: !hayFact ? "—"
+        : repSoles(proyectaFact ? factProyectada : factActual),
+      sub: !hayFact ? "falta cargar la facturación del periodo"
+        : proyectaFact ? "proyectado al cierre de " + repMesLargo(hastaFact)
+                       : "acumulado del periodo",
+      filas: [
+        ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
+        [proyectaFact ? "Acumulado al " + repFecha(hastaFact)
+          : factEsDeclarada ? (P.facturacion_periodo_etiqueta || "Facturación del periodo")
+                            : (ultimoP ? "Cierre de " + nombrePeriodo(ultimoP) : "Último periodo cerrado"),
+         hayFact ? repSoles(factActual) : "pendiente"],
+        metaMes > 0
+          ? ["Meta al cierre del mes", repSoles(metaMes)]
+          : [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
+      ],
+      pie: !hayFact ? "Se carga en Ajustes › Facturación del periodo"
+        : proyectaFact
+          ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días` +
+            (metaMes > 0
+              ? ` · ${factProyectada >= metaMes ? "supera" : "falta"} ${repSoles(Math.abs(factProyectada - metaMes))} contra la meta del mes`
+              : ` · meta al cierre ${repSoles(metaFact)}`)
+          : (factEsDeclarada ? "Total del periodo · falta el detalle por ejecutivo"
+             : metaFact > factActual ? "Falta sumar " + repSoles(metaFact - factActual) + " de facturación"
+                                     : "Meta de facturación alcanzada"),
+      avance: hayFact && metaPct
+        ? Math.max(0, proyectaFact ? crecProyectado : crecimiento) / metaPct * 100 : null },
+
+    { id:"reactivacion", nombre:oR.nombre, peso:oR.peso, color:oR.color, listo:true,
+      cifra: String(objetivo),
+      sub: objetivo === 1 ? "comercio con objetivo cumplido" : "comercios con objetivo cumplido",
+      filas: [
+        [oR.etiqueta_meta || "Meta al cierre", metaR + " comercios"],
+        ["Avance sobre la meta", metaR ? repPct(objetivo / metaR * 100) : "—"],
+        /* Mismo denominador que el embudo: lo que falta para cubrir el
+           portafolio con GESTIÓN, no con un intento cualquiera. */
+        ["Faltan por gestionar", faltanGestionar + " comercios"]
+      ],
+      pie: ritmo(metaR, objetivo) > 0
+        ? "Hacen falta " + repNum(ritmo(metaR, objetivo), 1) + " por semana"
+        : "Meta de reactivación alcanzada",
+      avance: metaR ? objetivo / metaR * 100 : null },
+
+    { id:"venta", nombre:oV.nombre, peso:oV.peso, color:oV.color, listo:true,
+      cifra: String(ventasNuevas),
+      sub: ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas",
+      filas: [
+        [oV.etiqueta_meta || "Meta al cierre", metaV + " afiliaciones"],
+        ["Avance sobre la meta", metaV ? repPct(ventasNuevas / metaV * 100) : "—"],
+        ["Ritmo actual", repNum(corrido ? ventasNuevas / (corrido / 7) : 0, 1) + " por semana"]
+      ],
+      pie: ritmo(metaV, ventasNuevas) > 0
+        ? "Hacen falta " + repNum(ritmo(metaV, ventasNuevas), 1) + " por semana"
+        : "Meta de venta alcanzada",
+      avance: metaV ? ventasNuevas / metaV * 100 : null }
+  ];
+
+  const base = { hoy, ini, fin, total, corrido, restante, semanas,
+    ritmoR: ritmo(metaR, objetivo), ritmoV: ritmo(metaV, ventasNuevas),
+    metaR, metaV, metaPct,
+    portafolio, asignadaMetas, registrados:cart.length,
+    contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
+    /* Los conjuntos, no solo sus tamaños. Las láminas usan los números; esto
+       existe para que una prueba pueda comprobar el ANIDAMIENTO comercio por
+       comercio y no solo que las cuentas vayan de mayor a menor —dos escalones
+       pueden ir en orden y aun así contener comercios distintos, y ahí el
+       embudo deja de ser un embudo sin que ninguna cifra se vea rara—. */
+    cadena: { gestion:[...gestionSet], efectividad:[...efectivoSet],
+              visita:[...visitaSet],   objetivo:[...objetivoSet] },
+    embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
+    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
+    porDiaGestion, faltanGestionar,
+    baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
+    hastaFact, diaFact, diasDelMes, proyectaFact, factProyectada, crecProyectado,
+    faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
+
+  /* Las vistas y el evolutivo cuelgan de la misma foto, y se calculan después
+     porque necesitan `portafolio` y `objetivo` ya resueltos. Van acá y no en
+     una segunda función pública para que siga habiendo un solo lugar donde
+     este reporte saca sus números. */
+  base.tres = repVistas(base);
+  base.evo  = repEvolutivo(base);
+  return base;
+}
+
+/* =========================================================================
+   LAS TRES VISTAS Y EL EVOLUTIVO SEMANAL
+
+   Lo de arriba mira el proyecto como un todo. Esto lo parte en las tres vistas
+   que se acordaron el 26/08 —base de retención, leads dentro de la cartera y
+   leads fuera— y agrega el corte semanal contra el periodo anterior.
+
+   DOS NÚMEROS DE GESTIÓN, A PROPÓSITO. El acuerdo dice contar solo gestiones
+   respaldadas por un correo al cliente. Hoy hay 931 gestiones al cliente y 390
+   por correo: aplicar la regla a secas borraría de un plumazo más de la mitad
+   del trabajo registrado, y esconder la brecha sería peor. Cada vista muestra
+   las dos cifras, y la distancia entre ellas ES el indicador: mide cuánto del
+   trabajo hecho todavía no tiene con qué sustentarse frente al banco.
+
+   Y «sin marcar» no se reparte por descarte. Una ficha de venta cuyo origen
+   nadie indicó no es una venta de afuera: es una ficha sin marcar, y se cuenta
+   en su propia columna. Repartirla al montón más grande daría un reporte más
+   prolijo y menos cierto.
+   ========================================================================= */
+
+/* Los dos periodos que se comparan. El del bono corre del 19 al 18; el primero
+   arrancó el 20/07 porque ese fue el día uno del proyecto, no el 19. */
+const REP_PERIODOS = [
+  { k:"p1", nombre:"Primer periodo", desde:"2026-07-20", hasta:"2026-08-18" },
+  { k:"p2", nombre:"Periodo en curso", desde:"2026-08-19", hasta:"2026-09-18" }
+];
+
+const repDia = iso => String(iso || "").slice(0, 10);
+
+/* ---- Cuándo NO se puede comparar contra la semana pasada ------------------
+   El 27/08/2026 cambió qué cuenta como comercio gestionado: pasó a mandar la
+   actividad más reciente, y por día. La cuenta de hoy y la que el comité vio el
+   jueves miden cosas distintas, así que su resta no es un avance ni un
+   retroceso: es el cambio de regla. Dibujarla como «−11 desde el jueves»
+   obliga a explicar en la sala algo que no pasó en el campo.
+
+   Se apaga sola: en cuanto el corte del jueves caiga bajo la regla nueva, la
+   comparación vuelve sin que nadie tenga que acordarse de sacar nada. */
+const REGLA_GESTION_DESDE = "2026-08-27";
+const repReglaCambio = corte => String(corte || "") < REGLA_GESTION_DESDE;
+
+/* Qué hace que una gestión cuente como respaldada. Es correo al cliente; la
+   copia a BBVA lo refuerza y se cuenta aparte, porque es la única marca de
+   copia que el CRM sabe registrar hoy. El acuerdo pide «con nosotros en
+   copia», que todavía no tiene campo: mientras no lo tenga, se declara lo que
+   sí se puede probar y no se hace pasar una cosa por la otra. */
+const repRespaldada = r => r.Tipo_Contacto === "correo";
+
+function repFunnelDe(fichas, ges, ejecutivos){
+  const ids = new Set(fichas.map(c => String(c.customer_id)));
+  const mias = ges.filter(g => ids.has(String(g.Customer_id)));
+  /* «Trabajados» acá tiene que ser la MISMA gestión que en el embudo y en la
+     Cartera. Hasta el 27/08 era `tocados` —comercios con al menos un intento
+     registrado—, que es la definición que se retiró esa mañana: daba 834 de
+     841 donde la regla da 617, y dejaba a dos ejecutivos en 100% de cobertura
+     con casos suyos sin gestionar. Un tercer número para la misma palabra, en
+     el mismo documento. */
+  const gestionado = c => comercioGestionado(c, DB.historiaDe(c.customer_id), null);
+  const gestionados = new Set(fichas.filter(gestionado).map(c => String(c.customer_id)));
+
+  const fila = (nombre, cartera, gs) => {
+    const tocados  = new Set([...new Set(gs.map(g => String(g.Customer_id)))]
+                       .filter(cid => gestionados.has(cid)));
+    const respald  = gs.filter(repRespaldada);
+    const visitas  = gs.filter(g => g.Cumple_Visita === "SI");
+    return {
+      nombre,
+      cartera,
+      gestiones:   gs.length,
+      respaldadas: respald.length,
+      conCopia:    gs.filter(g => g.Copia_BBVA).length,
+      comercios:   tocados.size,
+      conRespaldo: new Set(respald.map(g => String(g.Customer_id))).size,
+      visitas:     visitas.length,
+      conVisita:   new Set(visitas.map(g => String(g.Customer_id))).size,
+      /* La cobertura de una vista es cuántos de sus comercios recibieron al
+         menos una gestión, no cuántas gestiones se hicieron. Un comercio
+         tocado ocho veces sigue siendo un comercio. */
+      cobertura:   cartera ? tocados.size / cartera * 100 : null
+    };
+  };
+
+  const filas = ejecutivos.map(u => fila(
+    u.nombre,
+    fichas.filter(c => c.asignado_correo === u.correo).length,
+    mias.filter(g => g.Correo_Stratis === u.correo)
+  ));
+  return { filas, total: fila("Equipo", fichas.length, mias) };
+}
+
+function repVistas(f){
+  const ges = DB.todos().filter(esGestionCliente);
+  const ejecutivos = USUARIOS
+    .filter(u => u.rol === "Ejecutivo" && u.activo !== false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  const cartera = CLIENTES.filter(c => !esClienteNuevo(c));
+  const dentro  = CLIENTES.filter(leadDentroDeBase);
+  const fuera   = CLIENTES.filter(leadFueraDeBase);
+  const sinMarcar = CLIENTES.filter(leadSinMarcar);
+
+  /* El universo de la vista de retención es la base congelada que entregó
+     BBVA —841—, no las fichas que el CRM alcanzó a cargar. La diferencia no se
+     disimula: se declara, porque es trabajo pendiente de carga y no un
+     redondeo. */
+  const sinFicha = Math.max(0, f.portafolio - cartera.length);
+
+  const retencion = repFunnelDe(cartera, ges, ejecutivos);
+  /* La cobertura del equipo se mide contra la base que entregó BBVA, no contra
+     las fichas que el CRM alcanzó a cargar. Medida contra lo cargado daría
+     90% cuando de los 841 comercios asignados se tocaron 108: sería un número
+     cierto respondiendo la pregunta equivocada. La de cada ejecutivo sí va
+     contra su cartera, que es lo que le tocó y lo que puede trabajar. */
+  retencion.total.cobertura = f.portafolio ? retencion.total.comercios / f.portafolio * 100 : null;
+
+  /* El trabajo que hoy no cae en ninguna de las tres vistas, porque está en
+     fichas de venta cuyo origen nadie marcó todavía. Se calcula y se muestra:
+     si no, los tres bloques suman menos que el proyecto y nadie sabe por qué.
+     Al 26/08 son 25 gestiones y 19 visitas — más de un tercio de las visitas
+     del proyecto escondidas en una columna vacía. */
+  const pendF = repFunnelDe(sinMarcar, ges, ejecutivos);
+  const pend = Object.assign({}, pendF.total,
+    { porEjecutivo: pendF.filas.map(x => x.visitas) });
+
+  return {
+    sinFicha,
+    sinMarcar: sinMarcar.length,
+    pendiente: pend,
+    vistas: [
+      { k:"retencion", nombre:"Base de retención", foco:true,
+        universo: f.portafolio,
+        pie: sinFicha > 0
+          ? sinFicha + " de los " + f.portafolio + " asignados todavía no tienen ficha en el CRM"
+          : "Los " + f.portafolio + " comercios asignados tienen ficha",
+        cierre: { label:"Retenidos y recuperados", n: f.objetivo },
+        datos: retencion },
+
+      { k:"dentro", nombre:"Leads dentro de cartera", foco:false,
+        universo: dentro.length,
+        pie: "Oportunidades de venta nacidas en un comercio que ya estaba en la base",
+        cierre: { label:"Ventas cerradas", n: dentro.filter(esVentaNueva).length },
+        datos: repFunnelDe(dentro, ges, ejecutivos) },
+
+      { k:"fuera", nombre:"Leads fuera de cartera", foco:false,
+        universo: fuera.length,
+        pie: sinMarcar.length > 0
+          ? sinMarcar.length + " fichas de venta esperan que alguien indique de dónde salieron"
+          : "Oportunidades de venta en comercios ajenos a la base",
+        cierre: { label:"Ventas cerradas", n: fuera.filter(esVentaNueva).length },
+        datos: repFunnelDe(fuera, ges, ejecutivos) }
+    ]
+  };
+}
+
+/* ---- El evolutivo semana a semana, un periodo contra el otro -------------
+   Comparar los totales de un periodo cerrado contra uno que va por su segunda
+   semana no dice nada: el que va corriendo siempre pierde. Por eso se comparan
+   dos cosas distintas y se muestran las dos:
+
+     · la serie semanal completa de cada periodo, que enseña la FORMA —dónde
+       se concentró el trabajo—, y
+     · el acumulado al mismo día de cada periodo, que es la única comparación
+       que se puede leer como «vamos mejor» o «vamos peor». */
+function repEvolutivo(f){
+  const ges = DB.todos().filter(esGestionCliente);
+  const dia = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+
+  const serie = p => {
+    const hasta = p.hasta < f.hoy ? p.hasta : f.hoy;
+    const dentro = ges.filter(g => {
+      const d = repDia(g.Fecha_Contacto);
+      return d >= p.desde && d <= hasta;
+    });
+    const largo = dia(p.desde, hasta) + 1;
+    const semanas = [];
+    for (let i = 0; i * 7 < largo; i++){
+      const de = new Date(new Date(p.desde).getTime() + i * 7 * 86400000).toISOString().slice(0,10);
+      const a  = new Date(new Date(p.desde).getTime() + (i * 7 + 6) * 86400000).toISOString().slice(0,10);
+      const aTope = a < hasta ? a : hasta;
+      const gs = dentro.filter(g => { const d = repDia(g.Fecha_Contacto); return d >= de && d <= aTope; });
+      semanas.push({
+        n: i + 1, desde: de, hasta: aTope,
+        gestiones: gs.length,
+        respaldadas: gs.filter(repRespaldada).length,
+        visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+        parcial: aTope < a
+      });
+    }
+    return { ...p, hasta, largo, semanas,
+      gestiones: dentro.length,
+      respaldadas: dentro.filter(repRespaldada).length,
+      visitas: dentro.filter(g => g.Cumple_Visita === "SI").length };
+  };
+
+  const p1 = serie(REP_PERIODOS[0]);
+  const p2 = serie(REP_PERIODOS[1]);
+
+  /* El corte justo: los mismos días corridos en los dos periodos. */
+  const corridos = p2.largo;
+  const alMismoDia = p => {
+    const tope = new Date(new Date(p.desde).getTime() + (corridos - 1) * 86400000)
+      .toISOString().slice(0,10);
+    const gs = ges.filter(g => { const d = repDia(g.Fecha_Contacto); return d >= p.desde && d <= tope; });
+    return { hasta: tope,
+      gestiones: gs.length,
+      respaldadas: gs.filter(repRespaldada).length,
+      visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+      comercios: new Set(gs.map(g => String(g.Customer_id))).size };
+  };
+
+  const a = alMismoDia(REP_PERIODOS[0]), b = alMismoDia(REP_PERIODOS[1]);
+  const var_ = (x, y) => x ? (y - x) / x * 100 : null;
+
+  return { p1, p2, corridos,
+    comparado: {
+      p1: a, p2: b,
+      gestiones: var_(a.gestiones, b.gestiones),
+      respaldadas: var_(a.respaldadas, b.respaldadas),
+      visitas: var_(a.visitas, b.visitas),
+      comercios: var_(a.comercios, b.comercios)
+    } };
+}
+
+/* =========================================================================
+   EL DECK DE DIRECTORIO
+
+   El reporte de avance abre el proyecto en trece láminas porque su trabajo es
+   sostener una conversación de gestión: quién hizo qué, dónde se traba, qué
+   falta cargar. Un comité de dirección no tiene esa conversación. Tiene otra,
+   más corta y más difícil: si el proyecto llega o no llega, y qué hay que
+   decidir hoy para que llegue.
+
+   Por eso esto no es un resumen del otro. Es otro documento con otra pregunta:
+
+     · Nada de operación. No aparece la herramienta con la que se gestiona, ni
+       el nombre de ninguna persona del equipo, ni el plan de incentivos. En
+       una lámina de comité con la marca, eso se lee como ruido interno.
+     · Una proyección explícita. El avance de hoy no dice nada sin el ritmo:
+       106 comercios en 38 días no es «poco», es «así se llega a tanto en
+       diciembre». La lámina lo dice y se hace cargo.
+     · Siete láminas. Si hace falta una octava, es que algo de las siete no
+       estaba dicho como corresponde.
+
+   Los números salen de `fotoReporte()`, exactamente los mismos que el reporte
+   largo. Dos documentos con dos relatos y una sola fuente: si alguna vez
+   discrepan es porque alguien calculó dos veces, y acá se calcula una.
+   ========================================================================= */
+
+
+/* ---- El corte de la semana cumplida ------------------------------------
+   El comité no se reúne para ver una foto: se reúne para ver si la foto se
+   movió. Todo lo que sigue existe para poder decir «esto era el jueves, esto
+   es hoy», que es la única forma de que un número acumulado signifique algo.
+
+   La semana cierra los JUEVES, que es como lo mira el equipo. El corte es el
+   último jueves ya cumplido; lo que va del viernes a hoy es la semana en
+   curso, y se muestra aparte porque todavía no terminó. */
+function repJueves(hoy){
+  const d = new Date(hoy + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() !== 4) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ---- Lo que está comprometido de acá al viernes -------------------------
+   Todas las demás láminas miran hacia atrás. Esta mira hacia adelante, y es la
+   única que responde la pregunta con la que alguien se levanta de la reunión:
+   ¿qué hay puesto en el calendario para esta semana?
+
+   Va de HOY al viernes de esta misma semana. Si hoy ya es viernes, muestra el
+   viernes; si es sábado o domingo —que en campaña pasa—, toma el viernes
+   siguiente, porque una ventana vacía no es información, es un error de
+   cuenta. Solo citas abiertas: una cita ya cerrada dejó de ser un compromiso y
+   pasó a ser una visita, que se cuenta en el embudo. */
+function repAgenda(f){
+  const d = new Date(f.hoy + "T12:00:00Z");
+  const dow = d.getUTCDay();                    // 0 domingo … 6 sábado
+  const faltan = dow === 0 ? 5 : dow === 6 ? 6 : (5 - dow);
+  const vie = new Date(d.getTime() + faltan * 86400000).toISOString().slice(0,10);
+  const desde = f.hoy;
+
+  const cart = new Set(CLIENTES.filter(c => !esClienteNuevo(c)).map(c => String(c.customer_id)));
+  /* Solo cartera: lo comprometido que muestra este deck es de retención. Una
+     reunión agendada con un lead de venta es trabajo real y se ve en el CRM,
+     pero acá inflaría una lámina que dice medir otra cosa.
+
+     Y la cita YA CONCRETADA sigue contando en su día. Hasta el 27/08 acá solo
+     entraban las abiertas, así que la columna de hoy se vaciaba sola a medida
+     que el equipo cumplía: a las 5 de la tarde un jueves de diez visitas
+     mostraba tres, y esas tres eran las que faltaban. La lámina se llama «lo
+     comprometido para esta semana» y el compromiso del jueves son diez, se
+     hayan hecho o no. Lo que no cuenta es lo que dejó de ser un compromiso:
+     la reagendada —que ya se cuenta en su fecha nueva y si no se contaría dos
+     veces— y la descartada. */
+  const vive = s => { const e = estadoCita(s); return e !== "reagendada" && e !== "descartada"; };
+  const citas = citasTodas()
+    .filter(s => cart.has(String(s.customer_id)))
+    .filter(vive)
+    .filter(s => {
+      const fe = String(s.fecha_objetivo || "").slice(0,10);
+      return fe >= desde && fe <= vie;
+    });
+
+  const dias = [];
+  for (let x = new Date(desde + "T12:00:00Z"); x.toISOString().slice(0,10) <= vie;
+       x = new Date(x.getTime() + 86400000)){
+    const iso = x.toISOString().slice(0,10);
+    const delDia = citas.filter(s => String(s.fecha_objetivo).slice(0,10) === iso);
+    dias.push({ iso, dia: DIAS_ES[x.getUTCDay()],
+      n: delDia.length,
+      /* Cuántas de ese día ya ocurrieron. La columna se dibuja en dos tonos con
+         esto: el compromiso del día completo, y adentro lo que ya está hecho. */
+      hechas: delDia.filter(s => seConcreto(estadoCita(s))).length,
+      presencial: delDia.filter(s => s.modalidad === "PRESENCIAL").length,
+      virtual:    delDia.filter(s => s.modalidad === "VIRTUAL").length });
+  }
+
+  /* Comercios habilitados y sin cita puesta. Es el otro lado de la misma
+     lámina: lo comprometido dice qué va a pasar, esto dice cuánto todavía
+     puede entrar. Sin ese contraste, «12 visitas» no se sabe si es mucho. */
+  /* Acá sí manda «sin cita ABIERTA»: mide cuántos comercios todavía se pueden
+     agendar, y uno cuya visita ya se hizo vuelve a estar disponible. */
+  const conCita = new Set(citasTodas().filter(s => !s.cerrado_en)
+    .filter(s => cart.has(String(s.customer_id))).map(s => String(s.customer_id)));
+  const sinAgendar = CLIENTES.filter(c => !esClienteNuevo(c)
+    && (c.resultado_gestion || "PENDIENTE") === "PENDIENTE"
+    && habilitadoEn(c.customer_id) && !conCita.has(String(c.customer_id))).length;
+
+  return { desde, vie, dias, sinAgendar,
+    total: citas.length,
+    hechas: citas.filter(s => seConcreto(estadoCita(s))).length,
+    presencial: citas.filter(s => s.modalidad === "PRESENCIAL").length,
+    virtual:    citas.filter(s => s.modalidad === "VIRTUAL").length,
+    /* Cuántas de esas citas son de comercios que ya están gestionados: mide si
+       lo comprometido continúa un trabajo o abre uno nuevo. */
+    deGestionados: citas.filter(s => cart.has(String(s.customer_id))
+      && repIdsGestionados(f.linea || new Map()).has(String(s.customer_id))).length };
+}
+
+/* El embudo tal como estaba a una fecha. Cada escalón cuenta comercios, no
+   gestiones, igual que el embudo de siempre: si acá contara gestiones, el
+   avance de la semana saldría inflado y las dos láminas no cerrarían. */
+function repEmbudoAl(fecha, f){
+  const hasta = g => repDia(g.Fecha_Contacto) <= fecha;
+  const ges = DB.todos().filter(esGestionCliente).filter(hasta);
+  /* El mismo mapa de gestionados que usa el embudo de hoy, recortado a la
+     fecha. Antes acá se repetía la definición y se quedó atrás una hora
+     cuando la regla cambió: la prueba de que ningún escalón del corte puede
+     superar al de hoy lo agarró dando 71 contra 52. Ahora hay una sola
+     definición y no se puede volver a desalinear. */
+  const conGestion = repIdsGestionados(
+    (f && f.linea) || repLineaGestion(f || { ini:"0000-01-01", hoy:fecha }), fecha);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const enCartera = s2 => cart.filter(c => s2.has(String(c.customer_id))).length;
+  const idsDe = f2 => new Set(ges.filter(f2).map(g => String(g.Customer_id)));
+  const y = (a, b) => new Set([...a].filter(x => b.has(x)));
+
+  const cerradoAl = c => {
+    /* Sin fecha de cierre no se puede decir cuándo pasó. Se cuenta en el
+       acumulado —el hecho es cierto— y se deja fuera del corte anterior, así
+       aparece como avance de la semana en vez de desaparecer. */
+    const d = c.cerrado_en ? String(c.cerrado_en).slice(0, 10) : null;
+    return d !== null && d <= fecha;
+  };
+  return {
+    contacto:    enCartera(idsDe(() => true)),
+    gestion:     enCartera(conGestion),
+    efectividad: enCartera(y(idsDe(g => esEfectivo(g.Resultado)), conGestion)),
+    visita:      enCartera(y(idsDe(g => g.Cumple_Visita === "SI"), conGestion)),
+    objetivo:    cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
+  };
+}
+
+/* ---- Las dos semanas, día a día ----------------------------------------
+   Una barra por semana dice cuánto se hizo; no dice si vamos mejor o peor,
+   porque la semana en curso siempre es más corta y siempre parece una caída.
+   Dos líneas acumuladas puestas sobre el mismo eje —día 1 a día 7— sí lo
+   dicen: a igual día, la de esta semana está por encima o por debajo de la
+   anterior, y eso se lee sin explicación al lado.
+
+   Se acumula a propósito. El conteo suelto de cada día rebota tanto que la
+   comparación se pierde en el ruido; el acumulado tiene una sola pregunta y
+   la responde con la altura. */
+function repSemanaDia(f){
+  const corte = repJueves(f.hoy);
+  const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  /* Solo cartera, por lo mismo que en `repSemanal`: la curva de la tarjeta y
+     su cifra tienen que contar el mismo universo. */
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const ges = DB.todos().filter(esGestionCliente)
+                        .filter(g => idsCart.has(String(g.Customer_id)));
+
+  /* La serie cuenta comercios TRABAJADOS en la ventana. Ver
+     `repTrabajadosEntre`: contar el primer toque hacía que la tarjeta dijera 3
+     contra 467 el 26/08. */
+  const act = f.linea || repLineaGestion(f);
+
+  const enDia = (d, k) => {
+    if (k === "visitas")
+      return ges.filter(g => g.Cumple_Visita === "SI" && repDia(g.Fecha_Contacto) === d).length;
+    return cart.filter(c => (esRetencion(c) || esRecuperado(c))
+      && c.cerrado_en && String(c.cerrado_en).slice(0,10) === d).length;
+  };
+
+  /* La semana anterior va del viernes al jueves del corte; la actual arranca
+     el viernes siguiente. Los dos arreglos tienen siete casillas para que el
+     día 3 de una caiga sobre el día 3 de la otra.
+
+     «contactos» no se acumula sumando días: un comercio trabajado el lunes y
+     otra vez el miércoles es UN comercio trabajado en la semana, no dos. Por
+     eso su acumulado se recalcula sobre la ventana [desde, día] en vez de ir
+     sumando. Los otros dos sí son hechos que no se repiten sobre el mismo
+     comercio dentro de la semana y se pueden acumular. */
+  const serie = (desde, k, tope) => {
+    const out = [];
+    let acum = 0;
+    for (let i2 = 0; i2 < 7; i2++){
+      const d = mas(desde, i2);
+      if (tope && d > tope){ out.push(null); continue; }
+      if (k === "contactos") out.push(repTrabajadosEntre(act, desde, d));
+      else { acum += enDia(d, k); out.push(acum); }
+    }
+    return out;
+  };
+
+  const iniPrev = mas(corte, -6), iniAct = mas(corte, 1);
+  const series = ["contactos", "retenciones", "visitas"].map(k => ({
+    k,
+    previa: serie(iniPrev, k),
+    actual: serie(iniAct, k, f.hoy)
+  }));
+  const diasAct = Math.min(7, Math.round((new Date(f.hoy) - new Date(iniAct)) / 86400000) + 1);
+  return { corte, iniPrev, iniAct, diasAct, series,
+    /* El punto justo de comparación: dónde iba la semana pasada al mismo día
+       en que va la actual. Comparar contra su total sería comparar siete días
+       contra tres. */
+    alMismoDia: series.map(x => ({ k:x.k,
+      previa: x.previa[diasAct - 1] || 0,
+      actual: x.actual[diasAct - 1] || 0 })) };
+}
+
+/* Las tres series que mira el comité, semana a semana. Semanas de viernes a
+   jueves; la última, la que va corriendo, se marca como incompleta para que
+   nadie lea una caída donde solo faltan días. */
+function repSemanal(f){
+  const corte = repJueves(f.hoy);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  /* SOLO CARTERA. Este deck mide retención: la venta nueva se menciona al pie
+     del embudo y no entra en ningún conteo. Hasta el 27/08 `ges` traía TODAS
+     las gestiones, así que «Visitas realizadas» sumaba las visitas hechas a
+     leads de venta: 16 esa semana, de las cuales 6 eran de venta. La lámina 2
+     decía «+9 comercios visitados» y la 3 «16 visitas», y la diferencia no era
+     la unidad —que también— sino que estaban contando universos distintos. */
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const ges = DB.todos().filter(esGestionCliente)
+                        .filter(g => idsCart.has(String(g.Customer_id)));
+
+  /* Comercios trabajados en cada semana, con la misma regla que la lámina del
+     día a día: la última actividad DENTRO de la semana tiene que calificar. Un
+     comercio puede aparecer en dos semanas si se trabajó en las dos, y eso es
+     correcto: la serie mide actividad semanal, no cobertura acumulada. */
+  const act = f.linea || repLineaGestion(f);
+
+  const dias = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
+
+  /* Se arma hacia atrás desde el corte y se corta en el arranque: así el
+     último jueves siempre cae en el borde de una semana y la comparación
+     contra la anterior es contra un periodo del mismo largo. */
+  const bordes = [];
+  for (let d = corte; d >= f.ini; d = mas(d, -7)) bordes.unshift(d);
+
+  const semanas = bordes.map((fin, i) => {
+    const desde = i === 0 ? f.ini : mas(bordes[i - 1], 1);
+    const enRango = d => d && d >= desde && d <= fin;
+    return {
+      desde, hasta: fin, completa: true,
+      contactos: repTrabajadosEntre(act, desde, fin),
+      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
+        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
+      retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
+        && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
+    };
+  });
+
+  /* La semana en curso: del viernes siguiente al corte hasta hoy. */
+  const desdeC = mas(corte, 1);
+  if (desdeC <= f.hoy){
+    const enRango = d => d && d >= desdeC && d <= f.hoy;
+    semanas.push({
+      desde: desdeC, hasta: f.hoy, completa: false,
+      dias: dias(desdeC, f.hoy) + 1,
+      contactos: repTrabajadosEntre(act, desdeC, f.hoy),
+      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
+      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
+        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
+      retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
+        && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
+    });
+  }
+
+  const cerradas = semanas.filter(x => x.completa);
+  const ultima = cerradas[cerradas.length - 1] || null;
+  const previa = cerradas[cerradas.length - 2] || null;
+  const curso  = semanas.find(x => !x.completa) || null;
+
+  const dif = k => (previa && ultima && previa[k])
+    ? (ultima[k] - previa[k]) / previa[k] * 100
+    : (ultima && ultima[k] ? null : null);
+
+  /* ---- El promedio, y el pico que lo distorsiona -----------------------
+     Comparar solo contra la semana anterior funciona hasta que la semana
+     anterior fue excepcional. El 26/08 lo fue: entre el 17 y el 18 de agosto
+     salió el envío masivo del cierre del primer periodo y la semana llegó a
+     480 comercios trabajados contra un promedio de 146. Leído contra esa
+     semana, cualquier semana normal parece un derrumbe.
+
+     Se agrega el promedio de las semanas cerradas como segunda referencia, y
+     se detecta el pico con la cuenta —no con una fecha escrita a mano—: una
+     semana que más que duplica el promedio de las demás es un pico y la
+     lámina lo dice. Así la advertencia sigue valiendo el mes que viene, cuando
+     el pico sea otro y en otra fecha. */
+  const promedioDe = k => {
+    if (!cerradas.length) return null;
+    return cerradas.reduce((n, x) => n + (x[k] || 0), 0) / cerradas.length;
+  };
+  /* La semana bajo sospecha es la ÚLTIMA CERRADA —la que termina en el corte—,
+     porque es contra ella que se compara la semana en curso en cada tarjeta.
+     La primera versión miraba `previa`, que es una semana antes, y por eso el
+     pico real del 14 al 20/08 no se detectaba: la advertencia no salía justo
+     cuando hacía falta.
+
+     El promedio contra el que se la juzga se calcula SIN ella: si se incluyera,
+     el propio pico se subiría la vara y dejaría de detectarse. */
+  const picoDe = k => {
+    const otras = cerradas.slice(0, -1);
+    if (!ultima || otras.length < 2) return null;
+    const prom = otras.reduce((n, x) => n + (x[k] || 0), 0) / otras.length;
+    if (!prom || ultima[k] < prom * 2) return null;
+    return { semana: ultima, veces: ultima[k] / prom, promedioOtras: prom };
+  };
+
+  return { corte, semanas, ultima, previa, curso,
+    promedio: { contactos: promedioDe("contactos"), retenciones: promedioDe("retenciones"),
+                visitas: promedioDe("visitas") },
+    pico: { contactos: picoDe("contactos"), retenciones: picoDe("retenciones"),
+            visitas: picoDe("visitas") },
+    series: [
+      /* La unidad va en el nombre. «Visitas efectivas» a secas se confundía con
+         el escalón «Visitas» del embudo, que cuenta COMERCIOS visitados: 14
+         visitas pueden caer sobre 6 comercios nuevos y otros ya visitados, y
+         las dos cifras juntas parecían un error de cuenta. */
+      /* Orden y color del embudo: trabajados, visitas, retenciones — azul,
+         naranja, verde. Hasta el 27/08 esta lámina iba trabajados, retenciones,
+         visitas, y encima pintaba las visitas de verde y las retenciones de
+         naranja, justo al revés que el embudo de la lámina anterior. El mismo
+         concepto con dos colores en dos láminas seguidas hace que la leyenda
+         no sirva de nada. */
+      { k:"contactos",   nombre:"Comercios trabajados", color:"azul2" },
+      { k:"visitas",     nombre:"Visitas realizadas", color:"naranja" },
+      { k:"retenciones", nombre:"Retenciones concretadas", color:"verde" }
+    ],
+    variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
+                 visitas: dif("visitas") } };
+}
+
+
+const repNum = (n, d) => Number(n || 0).toFixed(d === undefined ? 0 : d).replace(".", ",");
+const repPct = n => (n === null || n === undefined) ? "—" : repNum(n, n < 10 ? 1 : 0) + "%";
+const repSoles = n => {
+  const v = Number(n || 0);
+  return v >= 1000000 ? "S/ " + repNum(v / 1000000, 2) + " MM"
+       : "S/ " + v.toLocaleString("es-PE", { maximumFractionDigits:0 });
+};
+/* «afiliación» + «es» daba «afiliaciónes». El plural en español no siempre es
+   la palabra más una letra, así que se escriben las dos formas. */
+/* La línea de abajo del embudo. Desde el 26/08 lleva también lo que quedó
+   fuera de los escalones por no tener correo detrás: es trabajo hecho al que
+   le falta el respaldo, y esconderlo sería quedarse con un embudo más prolijo
+   y menos cierto. */
+const repAparte = f => {
+  const sr = f.sinRespaldo || { efectivos:0, visitas:0, retenciones:0 };
+  const falta = [];
+  if (sr.efectivos) falta.push(`${sr.efectivos} ${sr.efectivos === 1 ? "contacto efectivo" : "contactos efectivos"}`);
+  if (sr.visitas)   falta.push(`${sr.visitas} ${sr.visitas === 1 ? "visita" : "visitas"}`);
+  /* Y la retención cerrada sin visita registrada. Es la única de las tres que
+     no se puede leer como «trabajo sin respaldo»: o el comercio se retuvo por
+     teléfono —resultado real— o hubo una visita que nadie anotó. Las dos
+     cosas hay que verlas, así que se declara aparte y con sus palabras en vez
+     de sumarse a la lista de arriba. */
+  const ret = sr.retenciones
+    ? ` · ${sr.retenciones} ${sr.retenciones === 1
+        ? "retención cerrada sin visita registrada"
+        : "retenciones cerradas sin visita registrada"}`
+    : "";
+  return `${f.ventasNuevas} ${f.ventasNuevas === 1 ? "afiliación nueva" : "afiliaciones nuevas"} ` +
+    `fuera del portafolio · ${f.perdidos} ${f.perdidos === 1 ? "comercio perdido" : "comercios perdidos"}` +
+    (falta.length ? ` · ${falta.join(" y ")} sin correo de respaldo, fuera del embudo` : "") + ret;
+};
+const repFecha = iso => fmtFecha(String(iso || "").slice(0,10));
+/* En una lámina el 13/08/2026 se lee como un dato de sistema; el 13 de agosto
+   de 2026 se lee como una fecha. Es la diferencia entre un volcado y algo
+   escrito para alguien. */
+const repFechaLarga = iso => {
+  const f = String(iso || "").slice(0,10).split("-");
+  return f.length === 3 ? `${Number(f[2])} de ${MESES_ES[Number(f[1]) - 1]} de ${f[0]}` : "";
+};
+const repMesLargo = iso => {
+  const m = String(iso || "").slice(0,7);
+  return m ? nombreMes(m) : "";
+};
+
+/* ---- Los textos también llevan números -----------------------------------
+   Primera versión de esto: las dos lecturas del embudo eran texto libre, y
+   adentro decían «se contactó a 114 comercios: 8 por día». El embudo se
+   actualizaba solo y la frase de al lado seguía con los números de la semana
+   pasada — que es peor que no tener la frase, porque nadie mira dos veces un
+   párrafo que ya leyó.
+
+   El arreglo no es sacar los números del relato: sin ellos la lectura no dice
+   nada. Es que el relato pida el número en vez de guardarlo. Se escribe
+   {contacto} y al pintar se reemplaza por el que hay hoy. Sigue siendo texto
+   editable, pero ya no puede quedar viejo.
+
+   Lo que no está en esta lista no se puede escribir con llaves, y el CRM lo
+   avisa al guardar en vez de dejar un {loQueSea} suelto en la lámina. */
+function repDatos(f){
+  const e = k => f.embudo.find(x => x.k === k) || {};
+  /* El año va SIEMPRE que no sea el del corte. Sin él, una proyección de
+     cobertura que caía en noviembre de 2027 se leía «principios de noviembre»
+     y, al lado, «después del cierre» —que es el 18 de diciembre de 2026—.
+     Las dos frases eran ciertas y juntas parecían un error de cuenta: nadie
+     iba a adivinar que faltaba un año de distancia. */
+  const mesDe = iso => {
+    if (!iso) return "—";
+    const d = Number(iso.slice(8,10)), m = MESES_ES[Number(iso.slice(5,7)) - 1] || "";
+    const anio = iso.slice(0,4);
+    return (d <= 10 ? "principios de " : d <= 20 ? "mediados de " : "fines de ") + m
+         + (anio === String(f.hoy).slice(0,4) ? "" : " de " + anio);
+  };
+  return {
+    /* el embudo */
+    portafolio:f.portafolio, contacto:f.contacto, gestion:f.gestion,
+    visita:f.visita, objetivo:f.objetivo,
+    ventasNuevas:f.ventasNuevas, perdidos:f.perdidos, faltanContactar:f.faltanContactar,
+    /* «Contacto» dejó de ser un escalón del embudo el 26/08, pero sigue siendo
+       un número del proyecto y hay lecturas escritas que lo nombran: se calcula
+       aparte para que ningún texto guardado se quede en blanco de golpe. */
+    efectividad:f.efectividad,
+    pctContacto: repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0),
+    pctGestion:repPct(e("gestion").pct), pctEfectividad:repPct(e("efectividad").pct),
+    pctVisita:repPct(e("visita").pct),   pctObjetivo:repPct(e("objetivo").pct),
+    convContacto: repPct(f.portafolio ? f.contacto / f.portafolio * 100 : 0),
+    convGestion:repPct(e("gestion").conv), convEfectividad:repPct(e("efectividad").conv),
+    convVisita:repPct(e("visita").conv),   convObjetivo:repPct(e("objetivo").conv),
+    sinRespaldoEfectivos:(f.sinRespaldo || {}).efectivos || 0,
+    sinRespaldoVisitas:(f.sinRespaldo || {}).visitas || 0,
+    /* el ritmo */
+    gestiones:f.gestiones, distritos:f.distritos,
+    diasCampo:f.diasDeCampo, diasActivos:f.diasActivos,
+    porDia:repNum(f.porDia, f.porDia < 10 ? 1 : 0),
+    /* El ritmo medido en gestiones con resultado, no en fichas tocadas. Son
+       dos cosas distintas y hasta el 27/08 solo existía la segunda, así que
+       cualquier lectura sobre «el ritmo» hablaba del intento y no del avance. */
+    porDiaGestion: repNum(f.porDiaGestion, f.porDiaGestion < 10 ? 1 : 0),
+    faltanGestionar:f.faltanGestionar,
+    porSemana:repNum(f.porDia * 7, f.porDia * 7 < 10 ? 1 : 0),
+    mesCobertura:mesDe(f.fechaCobertura), fechaCobertura:repFecha(f.fechaCobertura),
+    /* La frase «antes del cierre» era una promesa escrita a mano que dejaba de
+       ser cierta sola. Acá la decide la fecha, no la memoria de quien escribió. */
+    coberturaVsCierre: !f.fechaCobertura ? "—"
+      : (f.fechaCobertura <= f.fin ? "antes del cierre" : "después del cierre"),
+    /* el calendario */
+    corte:repFecha(f.hoy), corteLargo:repFechaLarga(f.hoy),
+    dia:f.corrido, totalDias:f.total, restante:f.restante, semanas:repNum(f.semanas, 1),
+    pctCalendario:repPct(f.total ? f.corrido / f.total * 100 : 0),
+    cierre:repFecha(f.fin), cierreLargo:repFechaLarga(f.fin),
+    /* los objetivos */
+    baseFact:repSoles(f.baseFact), metaFact:repSoles(f.metaFact),
+    faltaFact:repSoles(Math.max(0, f.metaFact - f.factActual)),
+    crecimiento:f.hayFact
+      ? (f.crecimiento >= 0 ? "+" : "\u2212") + repNum(Math.abs(f.crecimiento), 1) + "%"
+      : "pendiente",
+    periodoFact: f.ultimoP ? nombrePeriodo(f.ultimoP) : "el último periodo cargado",
+    metaReactivacion:f.metaR, metaVenta:f.metaV,
+    ritmoReactivacion:repNum(f.ritmoR, 1), ritmoVenta:repNum(f.ritmoV, 1)
+  };
+}
+/* Solo cuentan como válidas las que de verdad traen un valor. Una clave que
+   existe pero devuelve undefined pasaría la validación y saldría impresa con
+   llaves en la lámina, que es el error que esto vino a evitar. */
+const REP_CLAVES = () => Object.entries(repDatos(fotoReporte()))
+  .filter(([, v]) => v !== undefined && v !== null).map(([k]) => k);
+
+/* Una llave desconocida se deja tal cual y se cuenta: el error tiene que
+   verse en la pantalla de edición, no aparecer en la lámina de la reunión. */
+function repTexto(t, d){
+  return String(t == null ? "" : t).replace(/\{([a-zA-Z]+)\}/g,
+    (todo, k) => (d && d[k] !== undefined && d[k] !== null) ? String(d[k]) : todo);
+}
+
+/* ---- La pantalla --------------------------------------------------------- */
+function viewReporte(){
+  if (!S.user || S.user.rol === "Ejecutivo")
+    return `<div class="card"><h3>Solo para supervisión</h3>
+      <p style="margin:0">El reporte de avance lo arman el Analista y el Manager.</p></div>`;
+
+  const f = fotoReporte();
+  const P = repProyecto();
+  const D = repDatos(f);
+  const lec = ((REPORTE.lecturas || {}).embudo) || [];
+  const hitos = REPORTE.hitos || [];
+  const relato = (REPORTE.relato || {}).hitos || "";
+
+  const avisos = [];
+  if (!f.portafolio) avisos.push("No hay portafolio asignado: cárgalo en Ajustes › Reporte o en Cartera asignada. Sin él, el embudo no tiene denominador.");
+  if (!f.hayFact) avisos.push("Falta la facturación del periodo, que es el objetivo de mayor peso. El reporte se genera igual, con ese KPI marcado como pendiente.");
+  if (!hitos.length) avisos.push("No hay hitos cargados: la lámina del relato saldrá vacía.");
+
+  /* El deck de directorio va a un comité con la marca, y su relato sale de los
+     mismos textos editables que el reporte largo. Un hito que mencione la
+     herramienta de gestión pasa de un documento interno a la sala del comité
+     sin que nadie lo note: acá no se bloquea —quien escribe manda— pero se
+     avisa antes, que es cuando todavía se puede corregir. */
+  const relatoEntero = JSON.stringify([REPORTE.hitos, REPORTE.relato, REPORTE.lecturas,
+                                       REPORTE.notas, REPORTE.acuerdos]);
+  if (/\bCRM\b/i.test(relatoEntero))
+    avisos.push("Algún texto del relato menciona el CRM. El deck de directorio va a un comité con la marca y no debería nombrar la herramienta con la que gestionamos: revísalo en «Editar el relato» antes de generarlo.");
+  if (/incentiv|\bbono\b|comisi[oó]n/i.test(relatoEntero))
+    avisos.push("Algún texto del relato menciona el plan de incentivos. Eso es interno y no va en material de comité.");
+
+  const paso = (e, i) => {
+    const ancho = f.portafolio ? Math.max(0.6, e.n / f.portafolio * 100) : 0;
+    return `<div class="rep-paso">
+      <div class="lbl">${esc(e.label)}</div>
+      <div class="via"><span style="width:${ancho}%;background:${repCol(e.color)}"></span></div>
+      <div class="num" style="color:${repCol(e.color)}">${e.n}</div>
+      <div class="pc">${repPct(e.pct)}</div>
+      <div class="cv">${i === 0 ? "" : repPct(e.conv) + " " + esc(e.texto)}</div>
+    </div>`;
+  };
+
+  const tarjetaKPI = k => `
+    <div class="rep-kpi${k.listo ? "" : " falta"}">
+      <div class="k-top">
+        <b>${esc(k.nombre)}</b>
+        <span class="k-peso" style="background:${repCol(k.color)}">${k.peso}%</span>
+      </div>
+      <div class="k-cifra" style="color:${repCol(k.color)}">${esc(k.cifra)}</div>
+      <div class="k-sub">${esc(k.sub)}</div>
+      <div class="k-filas">${k.filas.map(([a,b]) =>
+        `<div><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join("")}</div>
+      <div class="k-pie">${esc(k.pie)}</div>
+    </div>`;
+
+  return `
+  <div class="rep-h">
+    <div>
+      <h2 style="margin:0 0 3px">Reporte de avance</h2>
+      <div class="sub">${esc(P.cliente)} · corte al ${repFecha(f.hoy)} — día ${f.corrido} de ${f.total}
+        · quedan ${f.restante} días</div>
+    </div>
+    <div class="rep-acc">
+      <button class="btn" id="repDir">Deck de directorio</button>
+      <button class="btn ghost sm" id="repAjustes">Editar el relato</button>
+    </div>
+  </div>
+
+  ${avisos.map(a => `<div class="note crit" style="margin-bottom:11px">${esc(a)}</div>`).join("")}
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Del portafolio asignado al objetivo cumplido</h3>
+      <span>${f.portafolio} comercios asignados por BBVA${
+        f.portafolio && f.asignadaMetas && f.portafolio !== f.asignadaMetas
+          ? ` · la cartera cargada en el CRM suma ${f.asignadaMetas}` : ""}</span>
+    </div>
+    <div class="rep-embudo">${f.embudo.map(paso).join("")}</div>
+    <div class="rep-aparte">Además: ${repAparte(f)}</div>
+    ${lec.length ? `<div class="rep-lecturas">${lec.map(l => `
+      <div class="rep-lec">
+        <div class="t"><span class="pt" style="background:${repCol(l.color)}"></span>${esc(repTexto(l.titulo, D))}</div>
+        <p>${esc(repTexto(l.texto, D))}</p>
+      </div>`).join("")}</div>` : ""}
+    <div class="rep-pie">${esc(repTexto(repNota("embudo"), D))}</div>
+  </div>
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Avance contra los tres objetivos del proyecto</h3>
+      <span>Medidos al cierre, sobre la base congelada de ${f.portafolio} comercios${
+        f.baseFact ? " y " + repSoles(f.baseFact) : ""}</span>
+    </div>
+    <div class="rep-kpis">${f.kpis.map(tarjetaKPI).join("")}</div>
+    <div class="rep-cal">
+      <div class="t">Avance del calendario</div>
+      <div class="via"><span style="width:${(f.corrido / f.total * 100).toFixed(1)}%"></span></div>
+      <div class="pie">
+        <span>${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} corrido</span>
+        <span>Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}</span>
+      </div>
+    </div>
+    <div class="rep-pie">${esc(repTexto(repNota("kpis"), D))}</div>
+  </div>
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>Cómo se ha construido el proyecto</h3>
+      <span>Del arranque el ${repFecha(f.ini)} al cierre el ${repFecha(f.fin)}</span>
+    </div>
+    ${hitos.length ? `<div class="rep-hitos">${hitos.map(h => `
+      <div class="rep-hito">
+        <span class="pt" style="background:${repCol(h.color)}"></span>
+        <div class="f" style="color:${repCol(h.color)}">${esc(h.fecha)}</div>
+        <div class="t">${esc(repTexto(h.titulo, D))}</div>
+        <div class="d">${esc(repTexto(h.detalle, D)).replace(/\n/g, "<br>")}</div>
+      </div>`).join("")}</div>`
+      : `<div class="note">Todavía no hay hitos cargados.</div>`}
+    ${relato ? `<div class="rep-relato">${esc(repTexto(relato, D))}</div>` : ""}
+    <div class="rep-pie">${esc(repTexto(repNota("hitos"), D))}</div>
+  </div>
+
+  <div class="card">
+    <h3>De dónde sale cada número</h3>
+    <div class="rep-fuente">
+      <div><b>${f.gestiones}</b><span>gestiones registradas</span></div>
+      <div><b>${f.diasActivos}</b><span>días con actividad en campo</span></div>
+      <div><b>${f.distritos}</b><span>distritos con presencia</span></div>
+      <div><b>${repNum(f.porDia, 1)}</b><span>comercios contactados por día</span></div>
+    </div>
+    <details class="aj-mas">
+      <summary>Cómo se cuenta cada escalón del embudo</summary>
+      <div class="cuerpo">
+        <p><b>Portafolio asignado</b> es la base que entregó BBVA, congelada por el acuerdo del
+        12 de agosto. No es lo que hay cargado: si lo fuera, el primer escalón daría 100% siempre
+        y la lámina no diría nada.</p>
+        <p><b>Contacto</b> son los comercios de esa base con al menos un intento registrado.
+        <b>Gestión</b>, aquellos en los que hubo interacción con el comercio. <b>Visita</b>, los
+        que llegaron a una presencial o virtual con respuesta. <b>Objetivo</b>, los retenidos y
+        los recuperados: los dos salían de la cartera asignada.</p>
+        <p>Cada escalón cuenta <b>comercios y no gestiones</b>: un comercio visitado tres veces es
+        uno, no tres. Las afiliaciones nuevas van aparte porque nunca estuvieron en el portafolio.</p>
+        <p>La primera gestión del proyecto es del ${repFecha(f.primera)}; el ritmo se mide desde
+        ahí y no desde el arranque, porque las primeras semanas fueron de coordinación con los
+        ejecutivos de BBVA y no de calle.</p>
+      </div>
+    </details>
+    <details class="aj-mas">
+      <summary>Qué no sale en el reporte, y por qué</summary>
+      <div class="cuerpo">
+        <p>No aparece ninguna apertura por ejecutivo ni ningún nombre del equipo: el desempeño
+        individual es interno de Stratis y en una lámina para el cliente invita a una conversación
+        que no es la de esta reunión.</p>
+        <p>Tampoco aparece el CRM. Es la herramienta de gestión de Stratis, y puesta como escalón
+        del embudo se lee como una etapa del proceso comercial que no es.</p>
+        <p>Del modelo de incentivos no sale nada.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+/* ---- El PowerPoint -------------------------------------------------------
+   Se arma en el navegador, con la librería y los fondos que se bajan recién
+   al apretar el botón. La alternativa —tener un servidor que lo genere— es
+   más máquina de la que este proyecto necesita: son cinco láminas y los datos
+   ya están en la pantalla. */
+let _pptxLib = null;
+function cargarPptx(){
+  if (_pptxLib) return Promise.resolve(_pptxLib);
+  if (window.PptxGenJS){ _pptxLib = window.PptxGenJS; return Promise.resolve(_pptxLib); }
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = REP_PPTX_CDN;
+    s.onload = () => { _pptxLib = window.PptxGenJS;
+      _pptxLib ? ok(_pptxLib) : mal(new Error("La librería cargó pero no quedó disponible.")); };
+    s.onerror = () => mal(new Error("No se pudo bajar la librería de PowerPoint. Revisa la conexión o si la red bloquea jsdelivr.net."));
+    document.head.appendChild(s);
+  });
+}
+
+/* Los fondos se piden como imagen y se pasan a texto: PptxGenJS los quiere
+   así. Si alguno falla, la lámina sale con fondo blanco en vez de no salir. */
+async function bajarFondo(ruta){
+  try {
+    const r = await fetch(ruta, { cache:"force-cache" });
+    if (!r.ok) return null;
+    const b = await r.blob();
+    return await new Promise(ok => { const l = new FileReader();
+      l.onloadend = () => ok(l.result); l.readAsDataURL(b); });
+  } catch (e){ return null; }
+}
+
+/* Un solo camino para los dos documentos: se bajan la librería y los tres
+   fondos una vez y se le pasa el armador que corresponda. Duplicar esta
+   función para el deck de directorio habría duplicado también el manejo de
+   errores, que es la parte que nadie mira hasta que falla. */
+/* `armador` ya no tiene default: desde el 27/08 hay un solo documento, y un
+   default silencioso sería la puerta por la que vuelve el segundo. */
+async function generarPPTX(btn, armador){
+  const antes = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
+  try {
+    const [Pptx, caratula, contenido, cierre] = await Promise.all([
+      cargarPptx(),
+      bajarFondo(REP_FONDOS.caratula),
+      bajarFondo(REP_FONDOS.contenido),
+      bajarFondo(REP_FONDOS.cierre)
+    ]);
+    armador(new Pptx(), { caratula, contenido, cierre });
+    toast("PowerPoint generado");
+  } catch (e){
+    toast("No se pudo generar: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = antes; }
+  }
+}
+
+/* ---- Las dos láminas que comparten los dos documentos -------------------
+   El embudo y los tres objetivos son las láminas que José validó el 26/08:
+   «el diseño está bien». Viven acá, fuera de los dos armadores, por una razón
+   práctica y no de prolijidad: si cada documento tuviera su copia, el día que
+   alguien mueva una columna en una la otra queda distinta, y dos láminas que
+   dicen lo mismo con distinto aspecto se leen como dos versiones del dato.
+
+   Reciben un contexto con las herramientas de dibujo del armador que las
+   llama, así que no saben —ni les importa— en qué documento están.          */
+function repLaminaEmbudo(X, f){
+  /* ---- 3 · El embudo --------------------------------------------------- */
+  const e = X.lamina(X.fondos.contenido);
+  X.T(e, "Del portafolio asignado al objetivo cumplido",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  /* Con corte anterior, el subtítulo explica los dos tonos. Iba debajo de las
+     barras y ahí lo tapaban las tarjetas de lectura: una leyenda que no se ve
+     convierte un gráfico bien pensado en uno confuso. */
+  X.T(e, `${f.portafolio} comercios asignados por BBVA · datos al ${repFecha(f.hoy)}, día ${f.corrido} del proyecto`,
+    { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
+
+  const X_LBL = 0.57, W_LBL = 2.95, X_BAR = 3.70, W_BAR = 5.28,
+        X_VAL = 9.10, X_CNV = 10.55, W_CNV = 2.40,
+        /* La leyenda dibujada se come 0,30" que antes eran subtítulo, y los
+           sub-rótulos hacen la fila más alta. Se recupera apretando el aire
+           ENTRE filas —de 0,155" a 0,13"—, que es espacio muerto; bajar las
+           barras habría empujado la banda naranja sobre las tarjetas de
+           lectura. */
+        Y0 = 2.06, ALTO = 0.46, GAP = 0.13;
+
+  /* ---- La leyenda, dibujada -----------------------------------------------
+     Vivía metida en el subtítulo, en la misma línea que la fecha y el día del
+     proyecto: una leyenda que hay que buscar dentro de un párrafo no es una
+     leyenda. Va acá, con sus muestras de color, justo encima de las barras que
+     explica, y nombra SOLO lo que está dibujado —si ningún escalón bajó no hay
+     contorno, y anunciarlo obliga a buscar algo que no existe—. */
+  const bajo = X.corte && f.embudo.some(pp => X.corte[pp.k] !== undefined && X.corte[pp.k] > pp.n);
+  /* Ranuras de ancho fijo, no calculadas: pptxgenjs no mide texto, así que
+     encadenar posiciones a ojo termina con dos rótulos montados el día que uno
+     crece. Tres ranuras de 2,35" entran holgadas en los 5,28" de la barra más
+     el margen, y el texto más largo mide menos de dos. */
+  const muestra = (i2, dibuja, texto) => {
+    const lx = X_BAR + i2 * 2.35;
+    dibuja(lx);
+    X.T(e, texto, { x:lx + 0.26, y:1.66, w:2.00, h:0.24, fontSize:9.5, color:X.H("gris2") });
+  };
+  if (X.corte){
+    muestra(0, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:X.H("azul2"), transparency:60 }, line:{ type:"none" } }),
+      `al jueves ${repFecha(X.corteFecha)}`);
+    muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:X.H("azul2") }, line:{ type:"none" } }), "ganado esta semana");
+    if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
+      fill:{ color:"FFFFFF" }, line:{ color:X.H("naranja"), width:0.75, dashType:"dash" } }),
+      "casos que se enfriaron");
+  }
+  /* La variación de la barra es honesta —los dos lados salen de la misma regla
+     sobre la misma historia—, pero contra el DECK de la semana pasada no lo es:
+     ese se imprimió con el criterio viejo. Se dice, para que nadie reste de
+     memoria contra el número que recuerda. */
+  if (X.reglaCambio)
+    X.T(e, "Criterio de medición cambiado el " + repFecha(X.reglaDesde)
+       + ": estas cifras no son comparables con el deck de la semana pasada. La variación de las "
+       + "barras sí — las dos fechas están medidas con el criterio de hoy.",
+      { x:0.57, y:7.16, w:12.38, h:0.20, fontSize:8, color:X.H("naranja"), valign:"top" });
+  f.embudo.forEach((p, i) => {
+    const y = Y0 + i * (ALTO + GAP), col = X.H(p.color);
+    /* Con sub-rótulo el nombre sube y la explicación se le acuesta debajo; sin
+       él, el nombre se queda centrado en el alto de la barra. Así la fila del
+       portafolio —que no necesita explicación— no queda desalineada. */
+    X.T(e, p.label, { x:X_LBL, y, w:W_LBL, h: p.sub ? 0.26 : ALTO, fontSize:11.5, bold:true,
+      align:"right", valign: p.sub ? "bottom" : "middle",
+      color: (i === 0 || i === f.embudo.length - 1) ? X.H("navy") : X.H("gris") });
+    if (p.sub) X.T(e, p.sub, { x:X_LBL, y:y + 0.26, w:W_LBL, h:0.20, fontSize:8.5,
+      align:"right", valign:"top", color:X.H("gris2") });
+    const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
+    /* Con un corte anterior, la barra se parte en dos: el tono pleno es lo que
+       ya estaba el jueves y el claro es lo que se ganó desde entonces. Es la
+       misma barra de siempre —el largo total no cambia— y responde la pregunta
+       que un acumulado nunca responde solo: ¿esto se movió esta semana? */
+    const antes = X.corte ? (X.corte[p.k] !== undefined ? X.corte[p.k] : p.n) : null;
+    if (antes !== null && antes > p.n){
+      /* El escalón BAJÓ desde el jueves. Con la regla del 27/08 —manda la
+         actividad más reciente— eso puede pasar de verdad: un comercio que la
+         semana pasada tenía un correo como último hecho y esta semana acumuló
+         una llamada sin respuesta deja de contar. Es información, no un error
+         de cuenta, y por eso se dibuja en vez de recortarse en silencio: la
+         barra llena es lo que queda y el contorno vacío es lo que se enfrió.
+         Esconderlo dejaría un acumulado que solo sabe subir, que es la clase
+         de gráfico que nadie vuelve a mirar. */
+      const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w:Math.max(0.03, w), h:ALTO,
+        fill:{ color:col }, line:{ type:"none" } });
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR + w, y, w:Math.max(0.03, wa - w), h:ALTO,
+        fill:{ color:"FFFFFF" }, line:{ color:col, width:0.75, dashType:"dash" } });
+      X.T(e, "\u2212" + (antes - p.n), { x:X_BAR + wa + 0.06, y, w:0.60, h:ALTO,
+        fontSize:9.5, bold:true, color:X.H("naranja") });
+    } else if (antes === null || antes >= p.n){
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
+    } else {
+      /* Claro lo que ya estaba el jueves, pleno lo ganado esta semana. Va así
+         y no al revés porque lo que el comité mira es el avance: el tramo con
+         más peso visual tiene que ser el que se movió, no el que ya estaba. */
+      const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w:wa, h:ALTO,
+        fill:{ color:col, transparency:60 }, line:{ type:"none" } });
+      e.addShape(X.pptx.ShapeType.rect, { x:X_BAR + wa, y, w:Math.max(0.03, w - wa), h:ALTO,
+        fill:{ color:col }, line:{ type:"none" } });
+      X.T(e, "+" + (p.n - antes), { x:X_BAR + w + 0.06, y, w:0.52, h:ALTO,
+        fontSize:9.5, bold:true, color:X.H("gris2") });
+    }
+    X.T(e, p.n,           { x:X_VAL, y, w:0.60, h:ALTO, fontSize:18, bold:true, color:col, align:"left" });
+    X.T(e, repPct(p.pct), { x:X_VAL + 0.64, y, w:0.66, h:ALTO, fontSize:10, color:X.H("gris2") });
+    if (i > 0) X.T(e, (p.conv === null ? "— " : repPct(p.conv) + " ") + p.texto,
+      { x:X_CNV, y, w:W_CNV, h:ALTO, fontSize:10.5, color:X.H("gris") });
+  });
+
+  const yc = Y0 + f.embudo.length * (ALTO + GAP) - 0.02;
+  X.caja(e, X_BAR, yc, 7.25, 0.32, "FBDDCF");
+  X.T(e, "Además: " + repAparte(f),
+    { x:X_BAR + 0.18, y:yc + 0.07, w:6.90, h:0.20, fontSize:10, bold:true, color:X.H("naranja") });
+
+
+  /* Hasta tres lecturas. La tercera entró el 27/08 para dejar escrito qué se
+     hizo distinto esta semana: un embudo dice cuánto se movió, nunca por qué,
+     y esa pregunta la hace alguien en la sala todas las veces. El ancho sale
+     de cuántas hay, así que una sola ocupa la lámina y tres se reparten. */
+  const LEC = (((REPORTE.lecturas || {}).embudo) || []).slice(0, 3);
+  const YC = 5.46, HC = 1.34;
+  const WC = LEC.length >= 3 ? 3.926 : LEC.length === 2 ? 6.04 : 12.38;
+  LEC.forEach((l, i) => {
+    const x = 0.57 + i * (WC + 0.30);
+    X.caja(e, x, YC, WC, HC, "FFFFFF", REP_LINEA);
+    e.addShape(X.pptx.ShapeType.ellipse, { x:x + 0.24, y:YC + 0.245, w:0.14, h:0.14,
+      fill:{ color:X.H(l.color) }, line:{ type:"none" } });
+    /* Con tres tarjetas el título se parte en dos líneas y el texto necesita
+       cuatro: se le da altura al título y se baja un punto la letra del cuerpo,
+       porque la alternativa es que la última línea se apoye en el borde. */
+    const tres = LEC.length >= 3;
+    X.T(e, l.titulo, { x:x + 0.48, y:YC + (tres ? 0.16 : 0.21), w:WC - 0.72, h: tres ? 0.34 : 0.26,
+      fontSize: tres ? 10.5 : 12, bold:true, color:X.H("navy"), valign: tres ? "top" : "middle" });
+    X.T(e, l.texto,  { x:x + 0.24, y:YC + (tres ? 0.56 : 0.60), w:WC - 0.48, h: tres ? 0.72 : 0.66,
+      fontSize: tres ? 9 : 10.5, color:X.H("gris"), valign:"top" });
+  });
+  X.T(e, "Notas: " + repNota("embudo"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
+/* ---- La lámina que mira hacia adelante -----------------------------------
+   Visitas y reuniones comprometidas de hoy al viernes. Se dibuja con el mismo
+   vocabulario que las otras —tarjeta blanca, filete de color arriba, cifra
+   grande— para que no se lea como un anexo de otro documento.
+
+   No lleva nombres de nadie: en esta sala lo que importa es cuánto está
+   comprometido y para cuándo, no quién lo tiene. */
+function repLaminaAgenda(X, f){
+  const A = repAgenda(f);
+  const s = X.lamina(X.fondos.contenido);
+  X.T(s, "Lo comprometido para esta semana",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  X.T(s, `Visitas y reuniones ya agendadas con el comercio · del ${repFecha(A.desde)} al ${repFecha(A.vie)}`,
+    { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
+
+  /* Tres cifras de cabecera: el total y su composición. Una reunión virtual y
+     una visita en el local no cuestan lo mismo ni se agendan igual, así que
+     el total solo no alcanza para saber cómo viene la semana. */
+  const CAB = [
+    { n:String(A.total), et:"visitas y reuniones agendadas",
+      pie:`de hoy al viernes ${repFecha(A.vie)}`, color:"azul" },
+    { n:String(A.presencial), et:"presenciales en el local",
+      pie: A.total ? repPct(A.presencial / A.total * 100) + " de lo agendado" : "—", color:"naranja" },
+    { n:String(A.virtual), et:"reuniones virtuales",
+      pie: A.total ? repPct(A.virtual / A.total * 100) + " de lo agendado" : "—", color:"verde" }
+  ];
+  const WC3 = 3.926;
+  CAB.forEach((x, i) => {
+    const px = 0.57 + i * (WC3 + 0.30);
+    X.caja(s, px, 1.86, WC3, 1.60, "FFFFFF", REP_LINEA);
+    s.addShape(X.pptx.ShapeType.rect, { x:px, y:1.86, w:WC3, h:0.09,
+      fill:{ color:X.H(x.color) }, line:{ type:"none" } });
+    X.T(s, x.n,  { x:px + 0.26, y:2.10, w:WC3 - 0.52, h:0.72, fontSize:40, bold:true,
+      fontFace:X.NEG, color:X.H("navy") });
+    X.T(s, x.et, { x:px + 0.26, y:2.86, w:WC3 - 0.52, h:0.28, fontSize:11.5, color:X.H("gris") });
+    X.T(s, x.pie,{ x:px + 0.26, y:3.14, w:WC3 - 0.52, h:0.24, fontSize:10, color:X.H("gris2") });
+  });
+
+  /* Una columna por día, a la misma escala. El reparto es la mitad del dato:
+     ocho visitas repartidas en cuatro días y ocho el viernes son dos semanas
+     distintas, y solo una de las dos se puede cumplir. */
+  X.T(s, "Cómo se reparten en la semana",
+    { x:0.57, y:3.66, w:6.0, h:0.26, fontSize:11, bold:true, color:X.H("navy") });
+  const GY2 = 4.02, GH2 = 1.42, n = Math.max(1, A.dias.length);
+  /* Las columnas van centradas. Un lunes hay cinco y un jueves quedan dos: si
+     se anclaran a la izquierda, la lámina del jueves se vería rota en vez de
+     corta. El ancho también se adapta, con tope, para que dos columnas no se
+     conviertan en dos paredes. */
+  const WD = Math.min(1.50, (12.38 - (n - 1) * 0.22) / n);
+  const X0 = 0.57 + (12.38 - (n * WD + (n - 1) * 0.22)) / 2;
+  const tope = Math.max(1, ...A.dias.map(d => d.n));
+  A.dias.forEach((d, i) => {
+    const px = X0 + i * (WD + 0.22);
+    /* La pista gris de fondo deja ver los días vacíos: una columna que no está
+       y una columna en cero se leen distinto, y acá el cero es el dato. */
+    X.caja(s, px, GY2, WD, GH2, "EEF2F9");
+    const h = GH2 * d.n / tope;
+    /* Una barra, un número: las citas comprometidas de ese día. Estuvo un rato
+       partida en dos tonos —lo hecho y lo que faltaba— y era una pregunta que
+       esta lámina no hace: acá se muestra el compromiso, no su avance. Un
+       segundo tono obliga a leer una leyenda para entender una cifra que se
+       entendía sola. */
+    if (d.n) s.addShape(X.pptx.ShapeType.rect, { x:px, y:GY2 + GH2 - h, w:WD, h,
+      fill:{ color:X.H(d.iso === f.hoy ? "naranja" : "azul2") }, line:{ type:"none" } });
+    X.T(s, String(d.n), { x:px, y: d.n && h > 0.34 ? GY2 + GH2 - h + 0.06 : GY2 + GH2 - h - 0.28,
+      w:WD, h:0.26, fontSize:12, bold:true, align:"center",
+      color: d.n && h > 0.34 ? "FFFFFF" : X.H("gris2") });
+    X.T(s, d.dia, { x:px, y:GY2 + GH2 + 0.06, w:WD, h:0.22, fontSize:9.5,
+      bold: d.iso === f.hoy, align:"center", color:X.H(d.iso === f.hoy ? "naranja" : "gris") });
+    X.T(s, repFecha(d.iso).slice(0,5), { x:px, y:GY2 + GH2 + 0.28, w:WD, h:0.20,
+      fontSize:8.5, align:"center", color:X.H("gris2") });
+  });
+
+  X.caja(s, 0.57, 6.02, 12.38, 0.76, REP_BANDA);
+  s.addShape(X.pptx.ShapeType.rect, { x:0.57, y:6.02, w:0.10, h:0.76,
+    fill:{ color:X.H("naranja") }, line:{ type:"none" } });
+  X.T(s, A.total
+      ? `${A.total} ${A.total === 1 ? "cita comprometida" : "citas comprometidas"} de acá al viernes`
+        + (A.sinAgendar ? ` · ${A.sinAgendar} comercios ya habilitados y todavía sin cita puesta: ahí está el margen para ensanchar la semana que viene.` : ".")
+      : "Todavía no hay visitas ni reuniones agendadas para esta ventana."
+        + (A.sinAgendar ? ` Hay ${A.sinAgendar} comercios habilitados esperando que se les ponga fecha.` : ""),
+    { x:0.86, y:6.14, w:11.8, h:0.52, fontSize:12, color:X.H("gris") });
+  X.T(s, "Cada columna es el total de citas de ese día, se hayan concretado o no. "
+    + "La cita reagendada cuenta en su fecha nueva, no en la vieja.",
+    { x:0.57, y:6.90, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
+function repLaminaObjetivos(X, f){
+
+  const k = X.lamina(X.fondos.contenido);
+  X.T(k, "Avance contra los tres objetivos del proyecto",
+    { x:0.57, y:0.62, w:11.5, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  X.T(k, `Objetivos medidos al cierre del proyecto, sobre la base congelada de ${f.portafolio} comercios${
+    f.baseFact ? " y " + repSoles(f.baseFact) + " de facturación" : ""}`,
+    { x:0.57, y:1.20, w:11.5, h:0.32, fontSize:12, color:X.H("gris") });
+
+  const YK = 1.90, HK = 3.86, WK = 3.926;
+  f.kpis.forEach((x, i) => {
+    const px = 0.57 + i * (WK + 0.30), col = X.H(x.color);
+    X.caja(k, px, YK, WK, HK, "FFFFFF", "DDE2EC");
+    X.T(k, x.nombre, { x:px + 0.26, y:YK + 0.24, w:WK - 1.30, h:0.56, fontSize:12.5, bold:true, color:X.H("navy"), valign:"top" });
+    k.addShape(X.pptx.ShapeType.roundRect, { x:px + WK - 0.92, y:YK + 0.24, w:0.66, h:0.26,
+      fill:{ color:col }, line:{ type:"none" }, rectRadius:0.13 });
+    X.T(k, x.peso + "%", { x:px + WK - 0.92, y:YK + 0.245, w:0.66, h:0.26, fontSize:9.5, bold:true, color:"FFFFFF", align:"center" });
+    /* El cuerpo se elige por el largo de la cifra. Desde que Facturación
+       encabeza con el MONTO —«S/ 27,00 MM», once caracteres— los 40 puntos que
+       le quedan bien a un «6» partían la línea en dos y la segunda se montaba
+       sobre el subtítulo. Un número que no cabe no es un número grande. */
+    const cuerpo = String(x.cifra).length > 9 ? 25
+                 : String(x.cifra).length > 6 ? 31 : 40;
+    X.T(k, x.cifra, { x:px + 0.26, y:YK + 0.94, w:WK - 0.52, h:0.66, fontSize:cuerpo, bold:true, fontFace:X.NEG, color:col });
+    X.T(k, x.sub,   { x:px + 0.26, y:YK + 1.64, w:WK - 0.52, h:0.24, fontSize:10, color:X.H("gris2") });
+    /* En el deck de comité, la etiqueta de una meta no puede explicar cómo se
+       reparte el trabajo adentro. «Meta al cierre · 7 por ejecutivo/mes» es
+       cierto y es interno: en esa sala la meta son 140 afiliaciones y cómo se
+       organiza el equipo para llegar no es materia de la conversación. Se
+       corta la aclaración y se deja la meta; el número no cambia. */
+    const filas = X.comite
+      ? x.filas.map(([a, b]) => [/ejecutiv/i.test(a) ? String(a).split("·")[0].trim() : a, b])
+      : x.filas;
+    filas.forEach(([a, b], j) => {
+      const yy = YK + 2.04 + j * 0.44;
+      X.T(k, a, { x:px + 0.26, y:yy, w:WK - 1.55, h:0.38, fontSize:9.5, color:X.H("gris") });
+      X.T(k, b, { x:px + WK - 1.55, y:yy, w:1.29, h:0.38, fontSize:10, bold:true, color:X.H("navy"), align:"right" });
+    });
+    /* «Se carga en Ajustes › …» es una instrucción para quien opera el CRM, y
+       en un deck de comité con la marca nombra una herramienta que en esa sala
+       no existe. Si el dato falta, se dice que falta y punto. */
+    /* Dos frases que le hablan a quien opera el CRM y no al comité: la que
+       manda a cargar el dato en Ajustes, y la que aclara que falta el desglose
+       por persona. Las dos son ciertas adentro y ninguna corresponde afuera. */
+    const pie = !X.comite ? x.pie
+      : /Ajustes/i.test(x.pie) ? "Dato pendiente de carga"
+      : /por ejecutivo/i.test(x.pie) ? "Total declarado del periodo"
+      : x.pie;
+    X.caja(k, px + 0.20, YK + HK - 0.66, WK - 0.40, 0.46, REP_BANDA);
+    X.T(k, pie, { x:px + 0.20, y:YK + HK - 0.66, w:WK - 0.40, h:0.46, fontSize:10.5, bold:true, color:X.H("navy"), align:"center" });
+  });
+
+  const YB = 6.00;
+  X.T(k, "Avance del calendario", { x:0.57, y:YB, w:4.0, h:0.24, fontSize:10.5, bold:true, color:X.H("navy") });
+  k.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38, h:0.17, fill:{ color:"E4E8F0" }, line:{ type:"none" } });
+  k.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB + 0.34, w:12.38 * f.corrido / f.total, h:0.17,
+    fill:{ color:X.H("navy") }, line:{ type:"none" } });
+  X.T(k, `${repFecha(f.hoy)} · día ${f.corrido} de ${f.total} · ${repPct(f.corrido / f.total * 100)} del proyecto corrido`,
+    { x:0.57, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:X.H("gris") });
+  X.T(k, `Quedan ${f.restante} días — ${repNum(f.semanas, 1)} semanas hasta el ${repFecha(f.fin)}`,
+    { x:6.95, y:YB + 0.60, w:6.0, h:0.24, fontSize:10, color:X.H("gris"), align:"right" });
+  X.T(k, "Notas: " + repNota("kpis"),
+    { x:0.57, y:6.86, w:12.38, h:0.26, fontSize:9, color:X.H("gris2") });
+}
+
+function armarDirectorio(pptx, fondos){
+  const f = fotoReporte();
+  const D = repDatos(f);
+  const P = repProyecto();
+  const FUENTE = "Open Sans", NEG = "Open Sans ExtraBold";
+  const H = repHex;
+
+  pptx.defineLayout({ name:"S16", width:13.333, height:7.5 });
+  pptx.layout = "S16";
+  pptx.author = "Stratis LATAM";
+  pptx.title  = P.cliente + " — comité de dirección";
+
+  const lamina = fondo => {
+    const s = pptx.addSlide();
+    s.background = fondo ? { data:fondo } : { color:"FFFFFF" };
+    return s;
+  };
+  const T = (s, t, o) => s.addText(repTexto(t, D), Object.assign(
+    { fontFace:FUENTE, color:H("gris"), fontSize:11, margin:0, valign:"middle" }, o));
+  const caja = (s, x, y, w, h, fill, linea) => s.addShape(pptx.ShapeType.rect, {
+    x, y, w, h, fill:{ color:fill }, line: linea ? { color:linea, width:0.75 } : { type:"none" } });
+  const titulo = (s, t, sub) => {
+    T(s, t,   { x:0.57, y:0.62, w:11.9, h:0.5,  fontSize:20, bold:true, fontFace:NEG, color:H("navy") });
+    T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
+  };
+  const SEM = repSemanal(f);
+  /* La comparación contra el jueves SÍ se dibuja —tono claro lo que ya estaba,
+     tono pleno lo ganado esta semana—, porque los dos lados se recalculan acá
+     con la MISMA regla sobre la misma historia: es una comparación honesta.
+
+     Lo que no es comparable es contra el deck que el comité vio la semana
+     pasada, impreso con el criterio viejo. Eso se declara al pie y no se
+     resuelve escondiendo la variación: `reglaCambio` ya no suprime nada,
+     solo enciende la nota. Se apaga sola cuando el corte del jueves cae bajo
+     la regla nueva. */
+  const reglaCambio = repReglaCambio(SEM.corte);
+  const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
+              reglaCambio, reglaDesde: REGLA_GESTION_DESDE,
+              corte: repEmbudoAl(SEM.corte, f),
+              corteFecha: SEM.corte };
+
+  /* ---- 1 · Carátula ---------------------------------------------------- */
+  const c = lamina(fondos.caratula);
+  T(c, P.cliente, { x:0.82, y:5.02, w:8.6, h:0.52, fontSize:21, bold:true, fontFace:NEG, color:"FFFFFF" });
+  T(c, "Comité de dirección · desarrollo del proyecto",
+    { x:0.82, y:5.84, w:8.6, h:0.38, fontSize:14, color:"FFFFFF" });
+  T(c, "Corte al " + repFechaLarga(f.hoy),
+    { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
+
+  /* ---- 2 · Los indicadores acumulados al día de hoy ---------------------
+     Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
+     ocho segundos y salir sabiendo si el proyecto va bien. */
+  const a = lamina(fondos.contenido);
+  /* Cuánto se movió cada escalón del acumulado desde el corte del jueves. Sale
+     del MISMO objeto que usa la barra del embudo, no de una cuenta paralela:
+     dos láminas que dicen lo mismo tienen que leerlo del mismo lugar. */
+  /* `null` = esta tarjeta no tiene movimiento que declarar. */
+  const mov = k => (X.corte && X.corte[k] !== undefined) ? f[k] - X.corte[k] : null;
+  titulo(a, "Dónde está el proyecto hoy",
+    `Acumulado al ${repFechaLarga(f.hoy)} · día ${f.corrido} de ${f.total}, quedan ${f.restante}`);
+
+  const CIF = [
+    /* `mas:null` = esta tarjeta no tiene movimiento que declarar (el calendario
+       corre solo). Se distingue de `mas:0`, que sí lo tiene y vale cero. */
+    { n: repPct(f.corrido / f.total * 100), et:"del calendario corrido",
+      pie: `${f.restante} días hasta el cierre`, color:"gris", mas:null },
+    /* La cifra del comité es la GESTIÓN, no el contacto a secas: comercios
+       donde quedó un hecho con resultado —correo, contacto efectivo, reunión
+       realizada o cierre—. Decir «644 comercios contactados» y después mostrar
+       un embudo que arranca más abajo obliga a explicar la diferencia en voz
+       alta cada vez. El intento sin resultado sigue existiendo y se declara
+       debajo, en la misma tarjeta. */
+    /* El «+N» de esta lámina es la VARIACIÓN DEL ACUMULADO desde el jueves, la
+       misma que dibuja la barra del embudo dos láminas más adelante. Hasta el
+       27/08 acá salía la ACTIVIDAD de la semana —35 comercios trabajados, 14
+       visitas realizadas— y en el embudo la variación —−14 y +6—, las dos
+       rotuladas «esta semana» en láminas contiguas. Son dos cantidades ciertas
+       y distintas, y con la misma etiqueta se leen como una contradicción; un
+       revisor la encontró en la primera pasada. La actividad semanal vive en
+       la lámina 3, que es la que trata de eso. Acá manda el acumulado. */
+    /* El orden es el del embudo —gestión, visitas, retenciones— y no otro. Al
+       27/08 esta lámina ponía las retenciones antes que las visitas: dos
+       láminas seguidas contaban la misma historia en distinto orden y el ojo
+       tenía que reordenarla solo.
+
+       Y el COLOR de cada tarjeta es el de su escalón en el embudo. Antes acá
+       «visitados» era verde y «recuperados» naranja, y en el embudo al revés:
+       el mismo concepto con dos colores en láminas contiguas, que es la forma
+       más rápida de que una leyenda no sirva para nada. `k` amarra la tarjeta
+       a su escalón para que esto no se pueda volver a desincronizar a mano. */
+    /* `mas:null` en Gestión: esta tarjeta no declara su movimiento en texto.
+       Es el formato que José fijó el 27/08 sobre el deck que se presenta, y
+       tiene sentido: el movimiento de la gestión se ve —y con más precisión—
+       en la barra en dos tonos del embudo, dos láminas más adelante. Repetirlo
+       acá en texto era decir dos veces lo mismo, y con el criterio recién
+       cambiado era además lo primero que alguien iba a restar de memoria. Las
+       otras dos tarjetas sí lo declaran, porque no tienen barra propia. */
+    { k:"gestion", n: String(f.gestion), et:"comercios con gestión",
+      sub:"impactados por los ejecutivos", sinMovimiento:true,
+      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
+      mas: null },
+    { k:"visita", n: String(f.visita), et:"comercios visitados",
+      sub:"presenciales o virtuales",
+      pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
+      mas: mov("visita") },
+    { k:"objetivo", n: String(f.objetivo), et:"comercios recuperados",
+      sub:"con el objetivo de retención cumplido",
+      pie: f.metaR ? `meta al cierre: ${f.metaR}` : "",
+      mas: mov("objetivo") }
+  ];
+  /* El color sale del embudo, no de una lista paralela. */
+  const colDe = k => (f.embudo.find(p => p.k === k) || {}).color || "gris";
+  CIF.forEach(x => { if (x.k) x.color = colDe(x.k); });
+  const WC2 = 2.95, GC2 = 0.19;
+  CIF.forEach((x, i2) => {
+    const px = 0.57 + i2 * (WC2 + GC2);
+    caja(a, px, 1.90, WC2, 2.24, "FFFFFF", REP_LINEA);
+    a.addShape(pptx.ShapeType.rect, { x:px, y:1.90, w:WC2, h:0.09,
+      fill:{ color:H(x.color) }, line:{ type:"none" } });
+    T(a, x.n,   { x:px + 0.22, y:2.16, w:WC2 - 0.44, h:0.80, fontSize:40, bold:true,
+      fontFace:NEG, color:H("navy") });
+    /* Lo que se sumó desde el jueves, al lado de la cifra. Un acumulado sin el
+       movimiento de la semana obliga a preguntarlo, y esta lámina existe para
+       que no haya que preguntar nada. */
+    /* La línea del movimiento ocupa su sitio SIEMPRE, tenga o no algo que
+       decir: si solo aparece en las tarjetas que se movieron, las cuatro
+       etiquetas quedan a alturas distintas y la fila se ve rota. Y «sin
+       cambios» es información —el objetivo no se movió en la semana—, no un
+       hueco que convenga dejar en blanco.
+       Puede ser negativo: con la regla de la actividad más reciente un escalón
+       baja cuando un caso se enfría. Se dibuja con su signo y en naranja. */
+    /* Sin el año: la fecha completa hacía que «sin cambios desde el jueves
+       20/08/2026» se partiera en dos líneas y se montara sobre la cifra. El
+       año ya está en el subtítulo de la lámina. */
+    /* Con la unidad escrita. «+9 desde el jueves» al lado de «16 visitas
+       realizadas» en la lámina siguiente se lee como una contradicción, y no lo
+       es: acá se cuentan COMERCIOS que entraron al escalón y allá VISITAS
+       hechas. Las dos cifras son ciertas y miden cosas distintas; lo único que
+       faltaba era decir cuál es cuál. */
+    const jueves = " comercios desde el jueves " + repFecha(X.corteFecha).slice(0, 5);
+    if (x.mas !== null && x.mas !== undefined)
+      T(a, x.mas ? (x.mas > 0 ? "+" : "\u2212") + Math.abs(x.mas) + jueves
+                 : "sin cambios desde el jueves " + repFecha(X.corteFecha).slice(0, 5),
+        { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold: !!x.mas,
+          color: !x.mas ? H("gris2") : x.mas > 0 ? H(x.color) : H("naranja") });
+    T(a, x.et,  { x:px + 0.22, y:3.20, w:WC2 - 0.44, h:0.24, fontSize:11.5, color:H("gris") });
+    /* La aclaración que pidió José: el rótulo dice QUÉ se cuenta y el
+       sub-rótulo, con qué criterio. «Comercios con gestión» sin más obliga a
+       preguntar qué cuenta como gestión, y la respuesta no puede vivir solo en
+       las notas de otra lámina. */
+    if (x.sub) T(a, x.sub, { x:px + 0.22, y:3.44, w:WC2 - 0.44, h:0.20, fontSize:9,
+      italic:true, color:H("gris2") });
+    T(a, x.pie, { x:px + 0.22, y: x.sub ? 3.66 : 3.50, w:WC2 - 0.44, h:0.44,
+      fontSize:10, color:H("gris2") });
+  });
+
+  /* ---- La leyenda: qué escalón del embudo es cada tarjeta -----------------
+     Esta lámina y la del embudo cuentan lo mismo con dos formas distintas —
+     tarjetas y barras—. Con el color amarrado al escalón, una línea basta para
+     que quien mire las dos sepa que está viendo una sola historia.
+
+     Va arriba de las tarjetas, en el mismo sitio que la leyenda de la lámina
+     del embudo: dos leyendas en el mismo lugar se aprenden una sola vez. */
+  const LEY_Y = 1.58;
+  T(a, "Escalones del embudo:",
+    { x:0.57, y:LEY_Y, w:1.55, h:0.22, fontSize:9.5, color:H("gris2") });
+  let lgx = 2.20;
+  CIF.filter(x => x.k).forEach(x => {
+    a.addShape(pptx.ShapeType.rect, { x:lgx, y:LEY_Y + 0.05, w:0.18, h:0.13,
+      fill:{ color:H(x.color) }, line:{ type:"none" } });
+    T(a, (f.embudo.find(p => p.k === x.k) || {}).label || "",
+      { x:lgx + 0.24, y:LEY_Y, w:1.60, h:0.22, fontSize:9.5, bold:true, color:H("gris") });
+    lgx += 1.95;
+  });
+
+  T(a, "Avance del calendario", { x:0.57, y:4.42, w:4.0, h:0.24, fontSize:10.5, bold:true, color:H("navy") });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.74, w:12.38, h:0.20, fill:{ color:"D3DBEB" }, line:{ type:"none" } });
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:4.74, w:12.38 * f.corrido / f.total, h:0.20,
+    fill:{ color:H("navy") }, line:{ type:"none" } });
+  T(a, repFecha(f.ini), { x:0.57, y:5.02, w:4.0, h:0.24, fontSize:10, color:H("gris2") });
+  T(a, repFecha(f.fin), { x:8.95, y:5.02, w:4.0, h:0.24, fontSize:10, color:H("gris2"), align:"right" });
+
+  caja(a, 0.57, 5.60, 12.38, 1.34, REP_BANDA);
+  a.addShape(pptx.ShapeType.rect, { x:0.57, y:5.60, w:0.10, h:1.34,
+    fill:{ color:H("naranja") }, line:{ type:"none" } });
+  T(a, "La lectura", { x:0.86, y:5.72, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
+  T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, ${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} del portafolio tiene una gestión con resultado detrás. `
+     + `El tramo que define el resultado es lo que viene después: de esas gestiones, ${repPct(f.gestion ? f.efectividad / f.gestion * 100 : 0)} obtuvo respuesta, ${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} llegó a visita y ${repPct(f.gestion ? f.objetivo / f.gestion * 100 : 0)} cerró con el objetivo cumplido. `
+     + `Ahí es donde se decide el número de diciembre.`,
+    { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
+
+  /* El hueco donde debería estar «+N desde el jueves» necesita explicación: un
+     comité que la semana pasada vio un número y esta semana ve otro sin
+     variación va a restar de memoria, y esa resta no significa nada. */
+  if (X.reglaCambio)
+    T(a, "Criterio de medición cambiado el " + repFecha(X.reglaDesde)
+       + ": estas cifras no son comparables con el deck de la semana pasada. El movimiento desde "
+       + "el jueves sí — las dos fechas están medidas con el criterio de hoy.",
+      { x:0.57, y:7.06, w:12.38, h:0.20, fontSize:8, color:H("naranja"), valign:"top" });
+
+  /* ---- 3 · El desarrollo semanal ----------------------------------------
+     Tres series y su comparación contra la semana anterior. No es la misma
+     lámina que el acumulado: el acumulado nunca baja y por eso nunca alarma.
+     Esta puede bajar, y esa es exactamente su utilidad. */
+  const g = lamina(fondos.contenido);
+  titulo(g, "El desarrollo, semana a semana",
+    `Actividad de cada semana —no el acumulado— · semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
+
+  const DIA = repSemanaDia(f);
+  /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
+     pie: sin ella el tercio de abajo de la lámina quedaba vacío y las tres
+     curvas apretadas arriba. El alto que liberó el texto se lo lleva el
+     gráfico, que es lo que la lámina viene a mostrar. */
+  const SW = 3.95, SG = 0.28, SY = 1.80, SH = 4.80;
+  SEM.series.forEach((serie, i2) => {
+    const px = 0.57 + i2 * (SW + SG);
+    caja(g, px, SY, SW, SH, "FFFFFF", REP_LINEA);
+    g.addShape(pptx.ShapeType.rect, { x:px, y:SY, w:SW, h:0.09,
+      fill:{ color:H(serie.color) }, line:{ type:"none" } });
+    T(g, serie.nombre, { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
+      bold:true, fontFace:NEG, color:H("navy") });
+
+    const dd = DIA.series.find(x => x.k === serie.k) || { previa:[], actual:[] };
+    const comp = DIA.alMismoDia.find(x => x.k === serie.k) || { previa:0, actual:0 };
+    T(g, String(comp.actual), { x:px + 0.22, y:SY + 0.58, w:1.50, h:0.58, fontSize:30,
+      bold:true, fontFace:NEG, color:H(serie.color) });
+    /* El badge «▼ 79% vs. la semana pasada» salió el 27/08, con el formato que
+       José fijó sobre el deck que se presenta. La comparación no se pierde: la
+       curva clara es la semana pasada y el pie dice en cuánto iba al mismo
+       día. Lo que se va es el porcentaje, que sobre bases chicas grita —una
+       retención menos es «▼ 100%»— y en una lámina de comité se lee como una
+       alarma donde hay ruido. */
+    /* Dos referencias, no una: contra la semana pasada al mismo día —que es la
+       comparación honesta— y contra el promedio semanal, que es la que
+       sobrevive a una semana excepcional. */
+    /* El promedio semanal salió del pie por lo mismo: era la tercera cifra de
+       una línea que ya traía dos, y el pico de la semana del 14 —que es lo
+       que el promedio venía a matizar— ya no se compara con un porcentaje. */
+    /* Y el cierre de la semana pasada, que es el número que la curva rotula al
+       final de su línea. Sin nombrarlo, la tarjeta decía «la pasada iba en 10»
+       mientras el gráfico de al lado mostraba 14: dos cifras ciertas —al mismo
+       día y al cierre de la semana— que sin etiqueta se leen como un error de
+       cuenta. José lo marcó como «datos de visitas realizadas inconsistentes»,
+       y tenía razón en que la lámina no se explicaba. */
+    const cierrePrev = (() => {
+      const v2 = (dd.previa || []).filter(x => x !== null && x !== undefined);
+      return v2.length ? v2[v2.length - 1] : null;
+    })();
+    /* Y sobre cuántos comercios cayeron. «16 visitas» y «+9 comercios visitados»
+       en la lámina anterior solo cierran si se dice que 16 visitas pueden caer
+       sobre 10 comercios, y que de esos 10 hay 9 que nunca se habían visitado. */
+    const sobre = serie.k === "visitas" && SEM.curso
+      && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
+      ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
+    T(g, `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
+       + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : ""),
+      /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
+         una sola y sin sitio se montaba sobre la curva. */
+      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
+
+    /* Las dos líneas, acumuladas, sobre el mismo eje de siete días. */
+    const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 2.60;
+    const tope = Math.max(1, ...dd.previa.filter(x => x !== null),
+                             ...dd.actual.filter(x => x !== null));
+    g.addShape(pptx.ShapeType.rect, { x:GX, y:GY + GH, w:GW, h:0.015,
+      fill:{ color:"C6D0E6" }, line:{ type:"none" } });
+    const ejeX = k2 => GX + GW * k2 / 6;
+    const ejeY = val => GY + GH * (1 - val / tope);
+    /* pptxgenjs no dibuja líneas sueltas: cada tramo es un rectángulo fino
+       rotado, y se coloca centrado en el punto medio porque PowerPoint rota
+       sobre el centro de la forma y no sobre su esquina. */
+    const tramo = (x1, y1, x2, y2, color, transp) => {
+      const dx = x2 - x1, dy = y2 - y1, largo = Math.sqrt(dx*dx + dy*dy);
+      if (largo < 0.001) return;
+      g.addShape(pptx.ShapeType.rect, {
+        x:(x1 + x2) / 2 - largo / 2, y:(y1 + y2) / 2 - 0.021,
+        w:largo, h:0.042, fill:{ color:H(color), transparency: transp || 0 },
+        line:{ type:"none" }, rotate: Math.atan2(dy, dx) * 180 / Math.PI });
+    };
+    /* Cada punto lleva su nodo, y el último de cada línea lleva su cifra. Una
+       curva sin números obliga a estimar la altura contra un eje que no está
+       dibujado; con el valor al final de cada línea, las dos semanas se
+       comparan leyendo, no midiendo. */
+    let puesto = null;   // dónde quedó el rótulo anterior, para no pisarlo
+    const linea = (vals, transp, pleno) => {
+      for (let k2 = 1; k2 < vals.length; k2++){
+        if (vals[k2] === null || vals[k2 - 1] === null) continue;
+        tramo(ejeX(k2 - 1), ejeY(vals[k2 - 1]), ejeX(k2), ejeY(vals[k2]), serie.color, transp);
+      }
+      const R = pleno ? 0.13 : 0.10;
+      vals.forEach((v2, k2) => {
+        if (v2 === null) return;
+        g.addShape(pptx.ShapeType.ellipse, { x:ejeX(k2) - R/2, y:ejeY(v2) - R/2, w:R, h:R,
+          fill:{ color:H(serie.color), transparency: pleno ? 0 : 50 },
+          line:{ color:"FFFFFF", width: pleno ? 1.2 : 0.8 } });
+      });
+      const ult = vals.reduce((a, x, k2) => x === null ? a : k2, 0);
+      if (vals[ult] === null || vals[ult] === undefined) return;
+      /* La cifra de esta semana va ARRIBA del nodo y la de la pasada ABAJO.
+         No es capricho: las dos líneas terminan a un día de distancia y con
+         las dos cifras en la misma altura se leían como un solo número de dos
+         dígitos. Si el nodo está pegado al techo, la de arriba baja. */
+      const yv = ejeY(vals[ult]);
+      /* Arriba la de esta semana, abajo la de la pasada… salvo que abajo no
+         quepa: con la línea pegada al piso —una serie en cero— la cifra caía
+         encima de las fechas del eje. Entonces sube. */
+      const cabeArriba = yv - GY > 0.24;
+      const cabeAbajo  = yv + 0.28 <= GY + GH;
+      const arriba = pleno ? cabeArriba : (!cabeAbajo && cabeArriba);
+      let lx = Math.min(GX + GW - 0.46, Math.max(GX - 0.10, ejeX(ult) - 0.23));
+      let ly = arriba ? yv - 0.26 : yv + 0.08;
+      /* Las dos líneas terminan a un día de distancia, y cuando además caen a
+         la misma altura los dos rótulos quedan pegados y se leen como un solo
+         número: en la tarjeta de visitas del 26/08 salía «14 14». La regla de
+         arriba/abajo no alcanzaba porque con el nodo pegado al techo NINGUNO
+         de los dos cabe arriba y los dos bajan al mismo sitio.
+         Acá el segundo rótulo se aparta del primero: primero probando el otro
+         lado del nodo, y si tampoco, corriéndose en horizontal. */
+      if (puesto && Math.abs(lx - puesto.x) < 0.44 && Math.abs(ly - puesto.y) < 0.22){
+        /* Se apila SOBRE el anterior, no debajo: abajo está el eje con las
+           fechas, y una cifra encima de «27/08» es el mismo problema con otro
+           vecino. Solo baja si arriba se saldría de la tarjeta. */
+        ly = (puesto.y - 0.22 >= GY - 0.30) ? puesto.y - 0.22 : puesto.y + 0.22;
+      }
+      T(g, String(vals[ult]), {
+        x: lx, y: ly, w:0.46, h:0.20,
+        fontSize: pleno ? 10 : 8.5, bold:true, align:"center",
+        color: pleno ? H(serie.color) : H("gris2") });
+      puesto = { x:lx, y:ly };
+    };
+    linea(dd.previa, 62, false);   // la semana pasada, en claro
+    linea(dd.actual, 0, true);     // esta semana, en pleno
+    /* El eje lleva fechas, no «D1» y «D7»: nadie tiene por qué traducir un día
+       ordinal a un día del calendario mientras escucha. A la izquierda el
+       jueves de corte, a la derecha hoy —puesto bajo el nodo de hoy y no en el
+       borde, porque la semana en curso casi nunca llega al día siete. */
+    /* Día y mes, sin el año: en una caja de media pulgada «20/08/2026» se parte
+       en dos líneas y deja de leerse. El año ya está en el subtítulo. */
+    const dm = iso => repFecha(iso).slice(0, 5);
+    T(g, dm(DIA.corte), { x:GX - 0.34, y:GY + GH + 0.06, w:0.68, h:0.20,
+      fontSize:8, color:H("gris2"), align:"center" });
+    T(g, dm(f.hoy), { x:Math.min(GX + GW - 0.34, ejeX(DIA.diasAct - 1) - 0.34),
+      y:GY + GH + 0.06, w:0.68, h:0.20, fontSize:8, bold:true, color:H("navy"), align:"center" });
+    T(g, "Claro: semana pasada · Pleno: esta semana",
+      { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
+  });
+
+  /* La banda explicativa del pie salió el 27/08, con el formato que José fijó
+     sobre el deck que se presenta. Decía tres cosas ciertas —qué mide esta
+     lámina contra el embudo, que la comparación es al mismo día, y que la
+     semana del 14 fue un pico—, pero un comité no lee un párrafo de seis
+     líneas debajo de tres gráficos: los mira y pasa. Lo que la banda protegía
+     —que un −92% no se leyera como un derrumbe— ya no hace falta, porque el
+     porcentaje también salió: quedan las dos curvas, y una curva clara por
+     encima de la plena dice «la semana pasada iba mejor» sin ningún párrafo.
+
+     El subtítulo de la lámina sigue diciendo «Actividad de cada semana —no el
+     acumulado—», que es la única de las tres que evitaba una confusión real. */
+
+
+  /* ---- 4 y 5 · El embudo con el corte, y los tres objetivos --------------
+     Las dos láminas que José dio por buenas. Son exactamente las mismas que
+     las del reporte largo —misma función, mismo dibujo— y no una copia
+     parecida: el comité y la gestión tienen que estar mirando la misma
+     figura, o la conversación se vuelve sobre cuál de las dos está bien. */
+  repLaminaEmbudo(X, f);
+  repLaminaObjetivos(X, f);
+
+  /* ---- 6 · Lo comprometido para esta semana -----------------------------
+     Va acá, después de los objetivos y antes del cierre, y no al principio:
+     las cinco anteriores cuentan lo que ya pasó, y la sala se levanta con la
+     última que vio. Que la última sea lo que está puesto en el calendario
+     convierte el reporte en un compromiso en vez de un balance. */
+  repLaminaAgenda(X, f);
+
+  /* ---- 7 · Lámina de cierre --------------------------------------------- */
+  lamina(fondos.cierre);
+
+  pptx.writeFile({ fileName: `Directorio_${String(P.cliente).replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+/g,"_")}_${f.hoy.replace(/-/g,"")}.pptx` });
+}
+
+/* El «Reporte de avance» —el documento largo, de once láminas— se retiró el
+   27/08/2026. El deck de directorio quedó armado y validado, y sostener dos
+   documentos que cuentan lo mismo con distinto detalle era garantizar que
+   tarde o temprano dijeran cosas distintas: cada regla que cambiaba había que
+   aplicarla dos veces, y la segunda se olvidaba.
+
+   Con él se fueron sus láminas propias —las tres vistas, el evolutivo por
+   periodo, los acuerdos, los hitos—. Las dos que compartía con el deck
+   —el embudo y los tres objetivos— viven en `repLaminaEmbudo` y
+   `repLaminaObjetivos`, que es donde ya estaban. */
+
+/* ---- Editar el relato, desde Ajustes -------------------------------------
+   Seis bloques, uno por fila de reporte_config. Se editan de a uno y se
+   guardan enteros: un hito no se edita suelto porque el orden y la coherencia
+   entre hitos son de quien escribe, no de un formulario campo por campo. */
+/* Solo lo que el deck de directorio usa. «Hitos», «Relato» y «Acuerdos» se
+   retiraron el 27/08 junto con el reporte largo: eran los únicos que los
+   dibujaban, y dejar campos que no salen en ningún lado es peor que no
+   tenerlos —alguien los llena creyendo que se publican—. Los textos siguen
+   guardados en la base; lo que se quitó es la puerta para editarlos. */
+const REP_BLOQUES = [
+  { k:"proyecto",  t:"Marco del proyecto",  d:"Nombre de la campaña, fechas, la base congelada de comercios y la facturación del periodo" },
+  { k:"lecturas",  t:"Lecturas del embudo", d:"Las frases que acompañan el embudo — hasta tres" },
+  { k:"notas",     t:"Notas al pie",        d:"La letra chica de cada lámina — es donde se definen los escalones" },
+  { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" }
+];
+
+function cardReporte(){
+  const sello = k => {
+    const s = REPORTE["_" + k];
+    return s && s.cuando
+      ? `<span class="rep-sello">${esc(s.por || "—")} · ${repFecha(s.cuando)}</span>` : "";
+  };
+  return `
+  <div class="card">
+    <div class="note ok" style="margin-bottom:12px">
+      Acá se edita <b>lo que se escribe</b> del reporte. Los números no: esos se calculan de la
+      base cada vez que se abre la pestaña <b>Reporte</b>, y por eso nadie puede tipear uno mal.
+      Cada cambio queda en la bitácora con tu nombre.
+    </div>
+    ${REP_BLOQUES.map(b => `
+      <div class="rep-bloque">
+        <div class="txt"><b>${esc(b.t)}</b><div>${esc(b.d)}</div>${sello(b.k)}</div>
+        <button class="btn ghost sm" data-repedit="${b.k}">Editar</button>
+      </div>`).join("")}
+    <details class="aj-mas">
+      <summary>Por qué el relato vive en la base y no en la presentación</summary>
+      <div class="cuerpo">
+        <p>Una frase de una lámina que se presenta a quien financia el proyecto es un dato como
+        cualquier otro: tiene que poderse decir quién la escribió y cuándo cambió. Guardada en un
+        archivo que va y viene por correo, eso se pierde en la segunda versión.</p>
+        <p>El reporte no menciona el CRM ni abre por ejecutivo, y eso no depende de que alguien se
+        acuerde al armar la lámina: no hay dónde escribirlo.</p>
+      </div>
+    </details>
+  </div>`;
+}
+
+function bindReporte(){
+  if ($("#repDir"))     $("#repDir").onclick  = e => generarPPTX(e.currentTarget, armarDirectorio);
+  if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
+  document.querySelectorAll("[data-repedit]").forEach(b =>
+    b.onclick = () => modalReporte(b.dataset.repedit));
+}
+
+function modalReporte(clave){
+  const b = REP_BLOQUES.find(x => x.k === clave);
+  if (!b) return;
+  const valor = REPORTE[clave] !== undefined ? REPORTE[clave] : REPORTE_DEF[clave];
+  const texto = JSON.stringify(valor, null, 2);
+
+  /* Las llaves con su valor de hoy al lado. Sin esto hay que adivinar cómo se
+     llama cada una, y adivinar termina en un {contactos} impreso en la lámina. */
+  const D = repDatos(fotoReporte());
+  const llaves = `
+    <details class="aj-mas" style="margin:-4px 0 12px">
+      <summary>Los números que puedes escribir entre llaves</summary>
+      <div class="cuerpo">
+        <p>Lo que escribas entre llaves se reemplaza por el número de hoy cada vez que se abre
+        el reporte o se genera el PowerPoint. Así la frase no envejece.</p>
+        <div class="rep-llaves">${Object.entries(D).map(([k, v]) =>
+          `<div><code>{${esc(k)}}</code><span>${esc(v)}</span></div>`).join("")}</div>
+      </div>
+    </details>`;
+
+  modal(`<h3>${esc(b.t)}</h3>
+    <p style="margin:-4px 0 10px;font-size:12.8px;color:var(--muted);line-height:1.5">${esc(b.d)}.
+      Se edita el bloque completo. Si algo queda mal escrito, el CRM te lo dice antes de guardar
+      y nada se pierde.</p>
+    ${llaves}
+    <div class="field">
+      <textarea id="repTxt" rows="16" spellcheck="false"
+        style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55">${esc(texto)}</textarea>
+    </div>
+    <div id="repMsg"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="repOk">Guardar</button>
+    </div>`);
+
+  $("#repOk").onclick = async () => {
+    const msg = $("#repMsg");
+    let v;
+    try { v = JSON.parse($("#repTxt").value); }
+    catch (err){ return msg.innerHTML = `<div class="err">No se pudo leer: ${esc(err.message)}</div>`; }
+
+    const mal = validarBloqueReporte(clave, v);
+    if (mal) return msg.innerHTML = `<div class="err">${esc(mal)}</div>`;
+
+    const btn = $("#repOk"); btn.disabled = true; btn.textContent = "Guardando…";
+    const { error } = await sb.from("reporte_config")
+      .upsert({ clave, valor:v }, { onConflict:"clave" });
+    if (error){ btn.disabled = false; btn.textContent = "Guardar";
+      return msg.innerHTML = `<div class="err">No se pudo guardar: ${esc(error.message)}</div>`; }
+    cerrarModal();
+    await cargarReporte(); render();
+    toast(b.t + " actualizado");
+  };
+}
+
+/* Lo mínimo para que el reporte no salga roto. La base tiene sus propias
+   reglas; esto es para que el error se vea acá, con el texto todavía en
+   pantalla, y no después de guardar. */
+function validarBloqueReporte(clave, v){
+  const esObj = x => x && typeof x === "object" && !Array.isArray(x);
+
+  /* Una llave mal escrita —{contactos} en vez de {contacto}— no rompe nada:
+     simplemente sale impresa en la lámina. Por eso se caza acá, con el texto
+     todavía en pantalla, y no en la reunión. */
+  const validas = REP_CLAVES();
+  const malas = new Set();
+  (function mirar(x){
+    if (typeof x === "string") (x.match(/\{[a-zA-Z]+\}/g) || []).forEach(m => {
+      if (!validas.includes(m.slice(1, -1))) malas.add(m); });
+    else if (Array.isArray(x)) x.forEach(mirar);
+    else if (esObj(x)) Object.values(x).forEach(mirar);
+  })(v);
+  if (malas.size)
+    return `${[...malas].join(", ")} no ${malas.size === 1 ? "es una llave" : "son llaves"} que el reporte sepa calcular. `
+         + `Las que hay son: ${validas.map(k => "{" + k + "}").join(", ")}.`;
+  if (clave === "hitos" || clave === "objetivos"){
+    if (!Array.isArray(v)) return "Este bloque tiene que ser una lista, entre corchetes.";
+  } else if (!esObj(v)) return "Este bloque tiene que ser un objeto, entre llaves.";
+
+  if (clave === "hitos"){
+    for (const h of v){
+      if (!esObj(h) || !h.fecha || !h.titulo) return "Cada hito necesita al menos fecha y título.";
+      if (h.color && !REP_COLOR[h.color])
+        return `El color «${h.color}» no existe. Usa: ${Object.keys(REP_COLOR).join(", ")}.`;
+    }
+    if (v.length < 2) return "Con menos de dos hitos la línea de tiempo no se dibuja.";
+  }
+  if (clave === "objetivos"){
+    for (const o of v){
+      if (!esObj(o) || !o.id || !o.nombre) return "Cada objetivo necesita id y nombre.";
+      if (o.color && !REP_COLOR[o.color]) return `El color «${o.color}» no existe.`;
+    }
+    const suma = v.reduce((n, o) => n + (Number(o.peso) || 0), 0);
+    if (suma !== 100) return `Los pesos suman ${suma}% y tienen que sumar 100%.`;
+    ["facturacion","reactivacion","venta"].forEach(() => {});
+    for (const id of ["facturacion","reactivacion","venta"])
+      if (!v.some(o => o.id === id)) return `Falta el objetivo «${id}»: el reporte lo espera.`;
+  }
+  if (clave === "proyecto"){
+    if (!v.cliente) return "Falta el nombre de la campaña.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v.inicio || "")) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(String(v.fin || "")))
+      return "Las fechas van como 2026-07-20.";
+    if (String(v.fin) <= String(v.inicio)) return "El cierre tiene que ser posterior al arranque.";
+  }
+  if (clave === "lecturas"){
+    const l = v.embudo;
+    if (!Array.isArray(l)) return "«embudo» tiene que ser una lista de lecturas.";
+    for (const x of l){
+      if (!esObj(x) || !x.titulo || !x.texto) return "Cada lectura necesita título y texto.";
+      if (x.color && !REP_COLOR[x.color]) return `El color «${x.color}» no existe.`;
+    }
+    /* Tres desde el 27/08: la lámina reparte el ancho entre las que haya. */
+    if (l.length > 3) return "En la lámina entran tres lecturas; la cuarta se saldría del recuadro.";
+  }
+  return "";
+}
+
+/* =========================================================================
+   El libro del incentivo — la evidencia del cálculo, no su resumen
+
+   Hasta acá el CRM decía «te corresponde 22%» y había que creerle. Para una
+   reunión donde se conversa el pago de una persona eso no alcanza: hace falta
+   poder abrir el número, ver de qué filas sale y rehacer la cuenta delante de
+   ella. Un PDF con el resultado no sirve; una hoja con los datos pero sin la
+   cuenta, tampoco.
+
+   Por eso este libro no trae valores calculados sino FÓRMULAS. Cada
+   porcentaje del resumen es un SUMAR.SI.CONJUNTO que apunta a la hoja de
+   gestiones, y las metas, los pesos, los tramos y los feriados viven en una
+   hoja de parámetros editable. Si en la reunión alguien pregunta «¿y si el
+   feriado del 6 hubiera contado?», se cambia esa celda y el libro entero se
+   recalcula a la vista.
+
+   Tres consecuencias de esa decisión, y las tres son el punto:
+
+     · El cálculo se puede auditar sin el CRM. El archivo se sostiene solo.
+     · El cálculo se puede discutir. Se ve la cuenta, no solo el resultado.
+     · El cálculo se puede reproducir. Excel llega al mismo número que el CRM
+       o hay un error en alguno de los dos, y eso se descubre acá y no el día
+       del pago.
+
+   Lo que no entra: ningún sueldo. El libro llega hasta el porcentaje del
+   sueldo base, igual que el CRM. La conversión a soles se hace fuera.
+   ========================================================================= */
+
+/* ---- El motor del archivo ------------------------------------------------
+   La librería que usa el resto del CRM arma hojas rápido y bien, pero no
+   escribe estilos: en su edición abierta, los colores, los bordes y los
+   formatos condicionales simplemente no salen. Para un archivo que se abre
+   delante de la persona con la que se conversa su pago, eso no es un detalle
+   cosmético — un muro de celdas grises invita a no leerlo.
+
+   Así que este libro lo escribe ExcelJS, que sí sabe de estilos. Se carga solo
+   al apretar el botón, como los fondos del reporte. Lo que NO sabe hacer es
+   gráficos; a cambio, escribe archivos que Excel abre sin pedir reparaciones,
+   que es exactamente donde nos equivocamos la vez pasada.
+   ========================================================================= */
+const EXCELJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+
+/* La paleta de Stratis, la misma de la presentación y del CRM */
+const LX = {
+  navy:"FF0C1137", azul:"FF3B43FB", gris:"FF3F5073", gris2:"FFA0ABBC",
+  blanco:"FFFFFFFF", fondo:"FFF6F9FF", amarillo:"FFFFF7E6",
+  verdeBg:"FFE6F7F1", verdeTx:"FF0A7D5E", rojoBg:"FFFDEDEA", rojoTx:"FFB3341A",
+  linea:"FFDDE2EC"
+};
+
+let _exceljs = null;
+function cargarExcelJS(){
+  if (_exceljs) return Promise.resolve(_exceljs);
+  if (window.ExcelJS){ _exceljs = window.ExcelJS; return Promise.resolve(_exceljs); }
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = EXCELJS_CDN;
+    s.onload = () => { _exceljs = window.ExcelJS;
+      _exceljs ? ok(_exceljs) : mal(new Error("cargó pero no quedó disponible")); };
+    s.onerror = () => mal(new Error("no se pudo bajar la librería de Excel. Revisa la conexión o si la red bloquea cdnjs."));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---- Utilidades de celda ------------------------------------------------ */
+const L = i => { let n = i + 1, s = ""; while (n > 0){ const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = (n - r - 1) / 26; } return s; };
+const A1 = (c, f) => L(c) + f;
+/* Excel no entiende una fecha ISO como fecha: hay que darle el serial. La
+   época es el 30/12/1899 por el bisiesto de 1900 que Lotus inventó y que
+   Excel conserva por compatibilidad. */
+const serial = iso => {
+  const f = String(iso || "").slice(0,10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return "";
+  return Math.round((new Date(f + "T12:00:00Z") - new Date("1899-12-30T12:00:00Z")) / 86400000);
+};
+
+/* Una hoja no se escribe acá: se describe. Las celdas que empiezan con «=» son
+   fórmulas y no texto, que es toda la diferencia entre un libro que se
+   recalcula y una foto. */
+function hojaLibro(filas, opts){
+  return { filas, opts: opts || {} };
+}
+
+/* ---- El pintor ----------------------------------------------------------
+   Todo el diseño vive acá, en un solo lugar: si mañana cambia la paleta, se
+   cambia una vez y no hoja por hoja. */
+function pintarHoja(ws, d){
+  const o = d.opts, filas = d.filas;
+  const ancho = o.anchos || [];
+  const nCols = filas.reduce((n, f) => Math.max(n, f.length), 0);
+  ws.columns = Array.from({ length: nCols }, (_, i) => ({
+    width: ancho[i] || Math.min(34, Math.max(11, String((filas[o.cabecera - 1] || [])[i] || "").length + 3)) }));
+
+  filas.forEach((fila, r) => {
+    const f = r + 1;
+    fila.forEach((v, k) => {
+      const cel = ws.getCell(f, k + 1);
+      if (typeof v === "string" && v[0] === "=") cel.value = { formula: v.slice(1) };
+      else if (v !== null && v !== undefined && v !== "") cel.value = v;
+    });
+  });
+
+  const pintar = (f, k, estilo) => {
+    const cel = ws.getCell(f, k);
+    if (estilo.fill) cel.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:estilo.fill } };
+    if (estilo.font) cel.font = estilo.font;
+    if (estilo.align) cel.alignment = estilo.align;
+    if (estilo.borde) cel.border = { top:estilo.borde, left:estilo.borde, bottom:estilo.borde, right:estilo.borde };
+    if (estilo.fmt) cel.numFmt = estilo.fmt;
+  };
+
+  if (o.titulo){
+    pintar(o.titulo, 1, { font:{ name:"Calibri", size:16, bold:true, color:{ argb:LX.navy } } });
+    ws.getRow(o.titulo).height = 22;
+  }
+  if (o.sub) pintar(o.sub, 1, { font:{ size:10, italic:true, color:{ argb:LX.gris } } });
+
+  if (o.cabecera){
+    const r = ws.getRow(o.cabecera);
+    r.height = 30;
+    for (let k = 1; k <= nCols; k++)
+      pintar(o.cabecera, k, { fill:LX.navy,
+        font:{ bold:true, size:10, color:{ argb:LX.blanco } },
+        align:{ horizontal:"center", vertical:"middle", wrapText:true } });
+  }
+  /* Cabecera de hoja de datos: se marca sin pintarla, para no estorbar cuando
+     alguien pega encima o filtra. */
+  if (o.cabeceraSimple){
+    ws.getRow(o.cabeceraSimple).font = { bold:true, size:10, color:{ argb:LX.navy } };
+  }
+  (o.secciones || []).forEach(f => {
+    for (let k = 1; k <= nCols; k++)
+      pintar(f, k, { fill:LX.gris, font:{ bold:true, size:10, color:{ argb:LX.blanco } } });
+  });
+  (o.etiquetas || []).forEach(f => pintar(f, 1, { font:{ bold:true, size:10, color:{ argb:LX.navy } } }));
+  (o.notas || []).forEach(([f, k]) => pintar(f, k, { font:{ size:9, color:{ argb:LX.gris } } }));
+  (o.editables || []).forEach(([f, k]) => pintar(f, k, { fill:LX.amarillo,
+    borde:{ style:"thin", color:{ argb:LX.gris2 } } }));
+  (o.destacar || []).forEach(([f, k, color]) => pintar(f, k,
+    { font:{ bold:true, size:13, color:{ argb:color || LX.navy } } }));
+  (o.zebra || []).forEach(f => {
+    for (let k = 1; k <= nCols; k++) pintar(f, k, { fill:LX.fondo });
+  });
+  (o.fmt || []).forEach(([k, desde, hasta, formato]) => {
+    for (let f = desde; f <= hasta; f++) pintar(f, k, { fmt: formato });
+  });
+  /* Los números al centro de su columna. Una cifra alineada a la izquierda,
+     pegada al rótulo, se lee como si fuera parte del texto; centrada se ve que
+     es un dato. Jose lo hacía a mano en cada descarga. */
+  (o.centrar || []).forEach(([k, desde, hasta]) => {
+    for (let f = desde; f <= hasta; f++)
+      pintar(f, k, { align:{ horizontal:"center", vertical:"middle" } });
+  });
+
+  if (o.congelar) ws.views = [{ state:"frozen", xSplit:o.congelarX || 0, ySplit:o.congelar }];
+  if (o.filtro) ws.autoFilter = { from:{ row:o.filtro, column:1 },
+                                  to:{ row: Math.max(o.filtro + 1, filas.length), column: nCols } };
+
+  /* Semáforos: lo que hay que mirar primero en una reunión es si la llave
+     abrió, y eso tiene que verse sin leer. */
+  (o.semaforo || []).forEach(([rango, verdes, rojos]) => {
+    const reglas = [];
+    (verdes || []).forEach(t => reglas.push({ type:"cellIs", operator:"equal", formulae:[`"${t}"`],
+      style:{ fill:{ type:"pattern", pattern:"solid", fgColor:{ argb:LX.verdeBg } },
+              font:{ bold:true, color:{ argb:LX.verdeTx } } } }));
+    (rojos || []).forEach(t => reglas.push({ type:"cellIs", operator:"equal", formulae:[`"${t}"`],
+      style:{ fill:{ type:"pattern", pattern:"solid", fgColor:{ argb:LX.rojoBg } },
+              font:{ bold:true, color:{ argb:LX.rojoTx } } } }));
+    ws.addConditionalFormatting({ ref:rango, rules:reglas });
+  });
+}
+
+/* ---- Los datos crudos ---------------------------------------------------
+   Todo el proyecto, no solo el periodo elegido: sin la historia no se puede
+   mostrar el acumulado ni la evolución, y con dos hojas de datos distintas
+   los números terminarían discrepando entre sí. */
+function datosLibro(){
+  const periodos = periodosProyecto();
+  const idx = {}; periodos.forEach((p, i) => idx[p] = i + 1);
+  const ejec = ejecutivosDelBono();
+
+  /* Primera gestión de cada comercio dentro de cada periodo: es lo que
+     convierte la lista de gestiones en el conteo de cobertura sin pedirle a
+     Excel un conteo de valores únicos, que no se puede leer de un vistazo. */
+  const vistos = new Set();
+  /* La MISMA población que cuenta el bono, y por eso no es `DB.todos()`: el
+     libro existe para que alguien pueda rehacer el cálculo a mano y llegar al
+     mismo número. Si la hoja trajera solo las gestiones con el cliente, las
+     fórmulas de cobertura y puntualidad darían otra cosa que la pantalla, y la
+     reunión se iría en explicar la diferencia. Trabajo registrado, de los dos
+     lados, sin las filas que escribió la migración. */
+  const gestiones = DB.crudo
+    /* Y la misma segunda condición que el bono desde el 24/08: además de
+       ocurrir en la ventana, la gestión tiene que haber quedado registrada
+       antes del cierre. Una cargada con el periodo ya vencido no entra a ese
+       periodo —52 lo hacían en el primer cierre— y tampoco pasa al siguiente,
+       porque su fecha de gestión pertenece a este. Se marca con su periodo
+       real para poder verla, y se excluye de las cuentas. */
+    .filter(r => !esReconstruida(r)
+              && registradaEnPeriodo(r, periodoDe(String(r.Fecha_Contacto).slice(0,10))))
+    .slice()
+    .sort((a, b) => String(a.Fecha_Contacto).localeCompare(String(b.Fecha_Contacto)))
+    .map(r => {
+      const p = periodoDe(String(r.Fecha_Contacto).slice(0,10));
+      const clave = p + "|" + r.Correo_Stratis + "|" + r.Customer_id;
+      /* «Primera del comercio en el periodo» es la columna con la que el Excel
+         calcula la cobertura, así que tiene que contar lo MISMO que la
+         cobertura: comercios de la cartera de esa persona. Un comercio
+         trabajado que no está en su cartera —o un Customer ID sin ficha— es
+         trabajo, y por eso está en la hoja; pero no es cobertura de cartera, y
+         sumarlo hacía que el libro diera 312 donde la pantalla decía 311. */
+      const c = byId[String(r.Customer_id)];
+      const suyo = !!c && !esClienteNuevo(c) && c.asignado_correo === r.Correo_Stratis;
+      const primera = (vistos.has(clave) || !suyo) ? 0 : 1;
+      vistos.add(clave);
+      /* De qué clase es el comercio sobre el que cayó la gestión.
+         Es la columna que faltaba. El 25/08 se discutió una cobertura de 133
+         contra 132 y la diferencia era UN comercio dado de alta por RUC: por
+         nombre se ve igual que cualquiera de la cartera y solo el Customer ID
+         lo delata. Sin esta columna, la única forma de encontrarlo es cruzar
+         sellos del servidor a mano, que es lo que hubo que hacer. */
+      const tipo = !c                                  ? "Sin ficha en el CRM"
+                 : esClienteNuevo(c)                   ? "Alta por RUC · venta nueva"
+                 : c.asignado_correo !== r.Correo_Stratis ? "De otra cartera"
+                 :                                       "De su cartera";
+      const u = ejec.find(x => x.correo === r.Correo_Stratis);
+      return {
+        periodo:p, mes: idx[p] || 0,
+        nombre: u ? u.nombre : (r.Ejecutivo || r.Correo_Stratis),
+        correo: r.Correo_Stratis,
+        cid: String(r.Customer_id),
+        comercio: r.Nombre_Comercio || "",
+        distrito: r.Distrito || "",
+        fecha: String(r.Fecha_Contacto).slice(0,10),
+        /* El alta del comercio. NO mueve el plazo —lo movió durante unas horas
+           del 24/08 y se retiró: la ficha la crea el mismo ejecutivo, así que
+           no cargarla congelaba el plazo— pero explica muchas de las demoras y
+           es la objeción que hay que poder responder fila por fila. */
+        alta: String((byId[String(r.Customer_id)] || {}).creado_en || "").slice(0,10),
+        altaHora: horaDe((byId[String(r.Customer_id)] || {}).creado_en),
+        registro: String(r.Creado_En || "").slice(0,10),
+        /* La hora exacta en que el servidor recibió la fila. Es la única de las
+           tres fechas que no se teclea en ninguna pantalla, y por eso es la que
+           cierra la discusión: dice si la ficha y la gestión entraron en la
+           misma tanda o si de verdad se trabajó sobre una ficha ya creada. */
+        registroHora: horaDe(r.Creado_En),
+        medio: (tipoById(r.Tipo_Contacto) || {}).label
+             || nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto || "",
+        /* A quién se le escribió. Es la columna que permite filtrar la hoja y
+           ver por qué la cobertura da lo que da sin volver al sistema. */
+        destino: esAlBanco(r) ? "Ejecutivo BBVA" : "Comercio",
+        /* El veredicto de puntualidad viaja con la fila: la hoja del ejecutivo
+           lo agrupa por comercio y no puede recalcularlo con una fórmula sin
+           repetir la regla del alta en cuarenta sitios. */
+        aTiempo: aTiempo(r),
+        /* Los dos veredictos del CRM viajan con la fila para poder contrastarlos
+           contra lo que calcula Excel. Si alguna vez difieren, la hoja de
+           Contraste lo dice antes de que el acta salga. */
+        demora: demoraHabil(r),
+        tipo,
+        respondio: (esAlCliente(r) && esEfectivo(r.Resultado)) ? 1 : 0,
+        efectiva: (esAlCliente(r) && r.Cumple_Visita === "SI") ? 1 : 0,
+        primera
+      };
+    });
+
+  const cartera = CLIENTES.filter(c => !esClienteNuevo(c)).map(c => {
+    const u = ejec.find(x => x.correo === c.asignado_correo);
+    const pc = c.cerrado_en ? periodoDe(String(c.cerrado_en).slice(0,10)) : "";
+    return {
+      nombre: u ? u.nombre : (c.asignado || ""), correo: c.asignado_correo || "",
+      cid: String(c.customer_id), comercio: c.nombre_comercio || "",
+      distrito: c.distrito || "", estado: c.estado || "",
+      resultado: c.resultado_gestion || "PENDIENTE",
+      cierre: c.cerrado_en ? String(c.cerrado_en).slice(0,10) : "",
+      periodoCierre: pc, mesCierre: idx[pc] || 0,
+      cuenta: (esRetencion(c) || esRecuperado(c)) ? 1 : 0
+    };
+  });
+
+  const nuevos = CLIENTES.filter(esClienteNuevo).map(c => {
+    const u = ejec.find(x => x.correo === c.asignado_correo);
+    const f = String(c.cerrado_en || c.creado_en || "").slice(0,10);
+    const pc = f ? periodoDe(f) : "";
+    return { nombre: u ? u.nombre : (c.asignado || ""), correo: c.asignado_correo || "",
+             ruc: c.ruc || "", comercio: c.nombre_comercio || "", fecha: f,
+             periodo: pc, mes: idx[pc] || 0,
+             venta: esVentaNueva(c) ? 1 : 0 };
+  });
+
+  /* Las coordinaciones con el ejecutivo de BBVA. Entran al libro desde que la
+     cobertura de régimen las cuenta: un comercio se puede cubrir por un correo
+     al banco tanto como por una gestión efectiva con el cliente, y un libro que
+     no trae la mitad de la evidencia no se puede auditar. */
+  const coord = DB.bbva().map(r => ({
+    periodo: periodoDe(r.Fecha_Contacto),
+    mes: idx[periodoDe(r.Fecha_Contacto)] || 0,
+    nombre: r.Ejecutivo, correo: r.Correo_Stratis, cid: String(r.Customer_id),
+    comercio: (byId[String(r.Customer_id)] || {}).nombre_comercio || "",
+    fecha: r.Fecha_Contacto, medio: nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto,
+    /* La columna que decide: solo el correo deja constancia consultable. */
+    dejaConstancia: r.Tipo_Contacto === "bbva_correo" ? 1 : 0
+  }));
+
+  return { periodos, idx, ejec, gestiones, cartera, nuevos, coord };
+}
+
+/* ---- La hoja de parámetros ---------------------------------------------
+   El corazón editable del libro. Todo lo demás la mira. */
+/* Una celda de la hoja de Parámetros. La columna es B salvo cuando se pide la
+   D, que es donde viven las metas de antes del reajuste. */
+const P_ = (r, col) => `'Parámetros'!$${col ? L(col - 1) : "B"}$${r}`;
+const FIL = {                 // fila de cada parámetro en la hoja
+  periodo:2, mes:3, ini:4, fin:5, semanas:6,
+  metaReact:9, metaFact:10, metaVenta:11,
+  pesoReact:12, pesoFact:13, pesoVenta:14,
+  cobertura:17, visitas:18, puntualidad:19, coberturaBase:20,
+  piso:23, pagoPiso:24, pagoMeta:25, sobre:26, tope:27, base1:28, mensual:29,
+  feriados:32
+};
+function hojaParametros(p, d){
+  const B = paramsDe(p);
+  const M = metaPeriodo(p, B);
+  const rvLibro = reglaVisitas(B.requisitos, p);
+  const v = ventanaPeriodo(p);
+  const fer = Array.isArray(B.feriados) ? B.feriados : FERIADOS_DEF;
+  const filas = [
+    ["Parámetros del periodo", "", "Cambia cualquier celda azul y el libro entero se recalcula"],
+    ["Periodo", p, "El mes en que cierra y se paga"],
+    ["Mes del proyecto", M.i, `de ${M.total}`],
+    ["Desde", serial(v.ini), "La ventana del bono corre del 19 al 18"],
+    ["Hasta", serial(v.fin), ""],
+    ["Semanas del periodo", Math.round(semanasPeriodo(p) * 100) / 100, "No se redondea: escala el mínimo de visitas"],
+    ["", "", ""],
+    ["OBJETIVOS DEL PERIODO", "META DEL MES", ""],
+    ["Reactivación del portafolio", M.reactivacion_pp, "p.p. acumulados desde el arranque"],
+    ["Facturación", M.facturacion_pct, "% acumulado sobre la base congelada"],
+    ["Venta (afiliación)", M.ventas_mes, "por periodo, no se acumula"],
+    ["Peso de reactivación", B.pesos.reactivacion, "%"],
+    ["Peso de facturación", B.pesos.facturacion, "%"],
+    ["Peso de venta", B.pesos.venta, "%"],
+    ["", "", ""],
+    ["LLAVE DE ACCESO", "MÍNIMO", ""],
+    ["Cobertura de cartera", B.requisitos.cobertura_pct, "% de la cartera con al menos una gestión"],
+    /* Desde el periodo 2 el mínimo es del periodo y no de la semana; el libro
+       escribe el que rigió ese periodo, con su unidad, para que una hoja
+       vieja no se lea con la regla nueva. */
+    [rvLibro.porPeriodo ? "Visitas efectivas en el periodo" : "Visitas efectivas por semana",
+     rvLibro.meta,
+     rvLibro.porPeriodo
+       ? `presenciales o virtuales con respuesta · referencia ${rvLibro.porSemana} por semana y ${rvLibro.porDia} por día trabajado`
+       : `presenciales o virtuales con respuesta · ${rvLibro.pide} en el periodo`],
+    ["Puntualidad del registro", B.requisitos.puntualidad_pct, "% registrado a tiempo"],
+    /* Escribe «registro» o «gestion» y el libro entero recalcula la cobertura.
+       El primer mes se fue en coordinar con los ejecutivos de BBVA: sin la
+       respuesta del banco no había teléfono al que llamar, así que exigir una
+       gestión por comercio medía algo que no dependía del ejecutivo. */
+    ["Cómo se mide la cobertura", (B.requisitos.cobertura_base || "gestion"),
+     "«registro» = Customer ID cargados en el CRM · «gestion» = comercios con al menos una gestión"],
+    ["", "", ""],
+    ["TRAMOS DEL INCENTIVO", "VALOR", ""],
+    ["Piso", B.piso, "% de cumplimiento bajo el cual no hay incentivo"],
+    ["Paga en el piso", B.pago_en_piso, "% del sueldo base"],
+    ["Paga al 100%", B.pago_en_meta, "% del sueldo base"],
+    ["Sobrecumplimiento hasta", B.sobre, "%"],
+    ["Tope de pago", B.tope, "% del sueldo base"],
+    ["Bono base con un requisito caído", B.base_incumple_uno, "% del sueldo base"],
+    ["Se paga cada mes", B.pago_mensual, "% del incentivo; el resto se retiene al cierre"],
+    ["", "", ""],
+    ["FERIADOS", "", "No cuentan como día trabajado. Sábados y domingos tampoco, eso lo sabe el calendario"]
+  ];
+  fer.forEach(f => filas.push(["", serial(f), ""]));
+
+  /* ---- La escala del incentivo, como tabla ----------------------------
+     Estaba escrita como fórmula con cuatro números sueltos —piso, pago en el
+     piso, pago en la meta, tope—, que solo sabe describir dos rectas. Como
+     tabla de puntos puede describir cualquier curva, y sobre todo se puede
+     discutir en la reunión: se ve dónde empieza a pagar, cuánto sube por cada
+     punto de cumplimiento y dónde deja de subir.
+
+     Va al final de la hoja, después de los feriados, para no correr ninguna
+     de las filas que el resto del libro referencia por número. */
+  const esc = escalaDe(B);
+  filas.push(["", "", ""]);
+  const filaEscTit = filas.length + 1;
+  filas.push(["CUMPLIMIENTO", "% DEL SUELDO", "Entre dos puntos se interpola en línea recta"]);
+  const filaEsc = filas.length + 1;
+  esc.forEach(([x, y], i) => filas.push([x, y,
+    i === 0 ? "Bajo este punto no hay incentivo gradual: lo que se pague ahí lo decide la llave"
+    : i === esc.length - 1 ? "De acá no pasa, por más que el cumplimiento siga subiendo" : ""]));
+
+  const editables = [];
+  [FIL.mes, FIL.semanas, FIL.metaReact, FIL.metaFact, FIL.metaVenta,
+   FIL.pesoReact, FIL.pesoFact, FIL.pesoVenta, FIL.cobertura, FIL.visitas, FIL.puntualidad,
+   FIL.coberturaBase, FIL.piso, FIL.pagoPiso, FIL.pagoMeta, FIL.sobre, FIL.tope, FIL.base1, FIL.mensual
+  ].forEach(f => editables.push([f, 2]));
+  /* El primer feriado vive en FIL.feriados; el encabezado está una fila arriba.
+     Estaba corrido en uno y el primero salía como número crudo. */
+  for (let i = 0; i < fer.length; i++) editables.push([FIL.feriados + i, 2]);
+  for (let i = 0; i < esc.length; i++){ editables.push([filaEsc + i, 1]); editables.push([filaEsc + i, 2]); }
+
+  /* ---- Las metas de antes del reajuste ---------------------------------
+     Cuando el periodo trae `requisitos_previos`, el libro muestra las dos
+     columnas: contra qué se midió y contra qué se debía medir. Van en la
+     columna D y no en filas nuevas, porque todo el libro apunta a estas filas
+     por número y correrlas lo rompería entero. */
+  const prevL = B.requisitos_previos || null;
+  const extra = [];
+  if (prevL){
+    extra.push([FIL.cobertura - 1, 4, "META ORIGINAL"]);
+    extra.push([FIL.cobertura,     4, prevL.cobertura_pct]);
+    extra.push([FIL.visitas,       4, prevL.visitas_semana]);
+    extra.push([FIL.puntualidad,   4, prevL.puntualidad_pct]);
+    extra.forEach(([f, c, v]) => { filas[f-1] = filas[f-1] || ["", "", ""];
+      while (filas[f-1].length < c) filas[f-1].push("");
+      filas[f-1][c-1] = v; });
+    filas[FIL.cobertura-1][4]   = "Se bajó por única vez para este periodo";
+    filas[FIL.visitas-1][4]     = "No se reajustó: es el mínimo que no se alcanzó";
+    filas[FIL.puntualidad-1][4] = "Se bajó por única vez para este periodo";
+  }
+
+  const ws = hojaLibro(filas, {
+    titulo:1, anchos: prevL ? [38, 16, 54, 15, 40] : [38, 16, 62],
+    secciones:[8, 16, 22, 31, filaEscTit],
+    /* Las etiquetas son los rótulos de la columna A. Las filas de la escala no
+       llevan rótulo sino un número, así que quedan fuera. */
+    etiquetas:filas.map((_, i) => i + 1)
+      .filter(f => ![1, 8, 16, 22, 31, filaEscTit].includes(f) && f < filaEsc),
+    notas:filas.map((_, i) => [i + 1, 3])
+      .concat(prevL ? filas.map((_, i) => [i + 1, 5]) : []),
+    editables,
+    destacar: prevL ? [[FIL.cobertura, 4, LX.rojoTx], [FIL.visitas, 4, LX.rojoTx],
+                       [FIL.puntualidad, 4, LX.rojoTx]] : [],
+    /* Cada meta y cada mínimo se muestran con su unidad. La celda sigue siendo
+       un número editable: el formato pinta el «%» o el «p.p.», no lo escribe
+       dentro del valor, así que quien la cambie sigue tecleando 8 y no «8 p.p.». */
+    fmt:[[2, FIL.ini, FIL.fin, "dd/mm/yyyy"],
+         [2, FIL.semanas,   FIL.semanas,   U.semanas],
+         [2, FIL.metaReact, FIL.metaReact, U.ppEntero],
+         [2, FIL.metaFact,  FIL.metaFact,  U.pctEntero],
+         [2, FIL.metaVenta, FIL.metaVenta, U.ventas],
+         [2, FIL.pesoReact, FIL.pesoVenta, U.pctEntero],
+         [2, FIL.cobertura, FIL.cobertura, U.pctEntero],
+         [2, FIL.visitas,   FIL.visitas,   U.visitas],
+         [2, FIL.puntualidad, FIL.puntualidad, U.pctEntero],
+         [2, FIL.piso,      FIL.mensual,   U.pctEntero],
+         [2, FIL.feriados, FIL.feriados + fer.length - 1, "dd/mm/yyyy"],
+         [1, filaEsc, filaEsc + esc.length - 1, U.pctEntero],
+         [2, filaEsc, filaEsc + esc.length - 1, U.pctEntero]],
+    centrar:[[1, filaEsc, filaEsc + esc.length - 1],
+             [2, filaEsc, filaEsc + esc.length - 1]] });
+  return { ws, nFeriados: fer.length, filaEscala: filaEsc, nEscala: esc.length };
+}
+const RANGO_FERIADOS = n => `'Parámetros'!$B$${FIL.feriados}:$B$${FIL.feriados + n - 1}`;
+
+/* ---- Gestiones: la evidencia del tiempo de registro ---------------------
+   Las dos columnas que importan son fórmulas, no valores: DIAS.LAB entre la
+   gestión y el registro, saltando fines de semana y los feriados de la hoja
+   de parámetros. Quien quiera discutir un «fuera de plazo» puede ver la
+   cuenta en la celda. */
+function hojaGestiones(d, nFer){
+  const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio","Distrito",
+                "Fecha de gestión","Alta de la ficha","Fecha de registro",
+                "Días trabajados de demora","A tiempo",
+                "Medio","Dirigida a","Respondió","Visita efectiva","Primera del comercio en el periodo",
+                "Tipo de comercio","Entra al periodo","Cuenta para cobertura",
+                "A tiempo según el CRM","Días de demora según el CRM"];
+  const filas = [cols];
+  const INI = P_(FIL.ini), FIN = P_(FIL.fin);
+  d.gestiones.forEach((g, i) => {
+    const f = i + 2;
+    /* EL PLAZO ARRANCA EN LA FECHA DE LA GESTIÓN. Hasta el 26/08 esta hoja
+       arrancaba en `MAX(fecha de gestión, alta de la ficha)` con el argumento
+       de que nadie registra en una ficha que todavía no existe. El argumento
+       es cierto y la regla estaba mal: como la ficha la crea el mismo
+       ejecutivo, no cargarla congelaba el plazo, y 461 de las 800 fichas del
+       primer periodo entraron el 17 y el 18 de agosto. Tres de los cuatro
+       terminaban con puntualidad perfecta.
+
+       Se retiró del CRM el 24/08 y de la hoja del ejecutivo también, pero
+       ESTA hoja se quedó con la regla vieja dos días más. Como el resumen y
+       cada KPI se calculan sumando la columna L de acá, el mismo libro decía
+       una puntualidad arriba y otra en el detalle de cada persona. Un libro
+       que se contradice a sí mismo no sirve para sustentar una comisión.
+
+       El alta se queda en su columna, al lado, porque explica muchas de las
+       demoras. Explicar no es descontar. */
+    const desde = A1(7,f);
+    /* La dedup de cobertura, resuelta en la celda: cuenta 1 solo la PRIMERA
+       gestión de cada par ejecutivo-comercio que entra al periodo. Es la misma
+       cuenta que hace el CRM en `primera`, escrita de nuevo y por otro camino
+       para que las dos se puedan contrastar. */
+    const yaContado = `COUNTIFS($D$2:${A1(3,f)},${A1(3,f)},`
+                    + `$E$2:${A1(4,f)},${A1(4,f)},$S$2:${A1(18,f)},1)`;
+    filas.push([
+      g.periodo, g.mes, g.nombre, g.correo, g.cid, g.comercio, g.distrito,
+      serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
+      `=IF(${A1(9,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(9,f)},${RANGO_FERIADOS(nFer)}))`,
+      `=IF(${A1(10,f)}<=1,1,0)`,
+      g.medio, g.destino, g.respondio, g.efectiva, g.primera,
+      g.tipo,
+      /* Las DOS condiciones del periodo, a la vista y en una sola celda:
+         ocurrir dentro de la ventana y quedar registrada antes del cierre. La
+         segunda faltaba hasta el 24/08 y por eso 52 gestiones cargadas con el
+         periodo vencido seguían contando. */
+      `=IF(AND(${A1(7,f)}>=${INI},${A1(7,f)}<=${FIN},${A1(9,f)}<=${FIN}),1,0)`,
+      `=IF(AND(${A1(18,f)}=1,${A1(17,f)}="De su cartera",${yaContado}=1),1,0)`,
+      g.aTiempo ? 1 : 0,
+      g.demora
+    ]);
+  });
+  /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
+     la que se filtra, y un encabezado pintado estorba al pegar. */
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[8, 2, filas.length, "dd/mm/yyyy"], [9, 2, filas.length, "dd/mm/yyyy"],
+         [10, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[10,6,18,26,14,30,16,15,15,15,13,9,16,15,11,13,14,
+            24,13,16,15,17] });
+}
+
+/* ---- Coordinación con BBVA: la otra mitad de la cobertura --------------
+   Una fila por contacto con el ejecutivo del banco. La columna que importa es
+   la última: de todos los medios, solo el correo deja una constancia que se
+   puede volver a leer, y por eso es el único que cuenta como comercio cubierto
+   por este lado. */
+function hojaCoordBBVA(d){
+  const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio",
+                "Fecha del contacto","Medio","Deja constancia"];
+  const filas = [cols];
+  d.coord.forEach(c => filas.push([c.periodo, c.mes, c.nombre, c.correo, c.cid,
+    c.comercio, serial(c.fecha), c.medio, c.dejaConstancia]));
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[7, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[10,6,18,26,14,30,16,18,14] });
+}
+
+function hojaCartera(d, nG, nCo){
+  const cols = ["Ejecutivo","Correo","Customer ID","Comercio","Distrito","Estado",
+                "Resultado","Fecha de cierre","Periodo del cierre","Mes del cierre",
+                "Cuenta para reactivación","Contacto logrado en el periodo"];
+  const filas = [cols];
+  d.cartera.forEach((c, i) => {
+    const f = i + 2;
+    /* La regla de régimen, resuelta comercio por comercio y a la vista: cuenta
+       si hubo una gestión EFECTIVA con el cliente o un correo al ejecutivo de
+       BBVA, dentro del periodo que manda la hoja de Parámetros. Un comercio
+       con cinco gestiones sigue siendo un comercio: esta celda es 1 o 0. */
+    const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$O$2:$O$${nG},1)`;
+    const correo   = `COUNTIFS('Coordinación BBVA'!$E$2:$E$${nCo},${A1(2,f)},'Coordinación BBVA'!$B$2:$B$${nCo},${P_(FIL.mes)},'Coordinación BBVA'!$I$2:$I$${nCo},1)`;
+    filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
+      c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre,
+      c.cuenta, `=IF(${efectiva}+${correo}>0,1,0)`]);
+  });
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[8, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[18,26,14,30,16,11,12,15,14,12,20,24] });
+}
+
+function hojaNuevosLibro(d){
+  const cols = ["Ejecutivo","Correo","RUC","Razón social","Fecha","Periodo","Mes","Cuenta como venta"];
+  const filas = [cols];
+  d.nuevos.forEach(n => filas.push([n.nombre, n.correo, n.ruc, n.comercio,
+    n.fecha ? serial(n.fecha) : "", n.periodo, n.mes, n.venta]));
+  return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
+    fmt:[[5, 2, filas.length, "dd/mm/yyyy"]],
+    anchos:[18,26,14,30,13,10,6,17] });
+}
+
+/* ---- Las fórmulas del cálculo ------------------------------------------
+   Se arman una sola vez y se usan igual en el resumen y en cada hoja
+   individual, para que no haya dos versiones de la misma cuenta. */
+function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const C = n => `Cartera!$${n}$2:$${n}$${nC}`;
+  const N = n => `Nuevos!$${n}$2:$${n}$${nN}`;
+  /* El par «rango, criterio» que se repite en todas: ejecutivo y mes. */
+  const eG = `${G("D")},${correoRef}`, mG = `${G("B")},${mesRef}`;
+
+  const gestiones  = `COUNTIFS(${eG},${mG})`;
+  const cubiertos  = `SUMIFS(${G("Q")},${eG},${mG})`;
+  /* Los Customer ID que ese ejecutivo tiene cargados en el CRM. Es la otra
+     forma de medir cobertura, la que rige el primer mes. */
+  const registrados = `COUNTIFS(${C("B")},${correoRef})`;
+  /* Cuál de las dos manda lo decide la hoja de Parámetros, no esta fórmula:
+     así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
+  /* Los comercios con un contacto logrado: la columna que la hoja de Cartera
+     resuelve comercio por comercio, sumada para este ejecutivo. */
+  const contactados = `SUMIFS(Cartera!$L$2:$L$${nC},${C("B")},${correoRef})`;
+  /* Cuál de las tres manda lo decide la hoja de Parámetros, no esta fórmula:
+     así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
+  const cubre = `IF(${P_(FIL.coberturaBase)}="registro",${registrados},`
+              + `IF(${P_(FIL.coberturaBase)}="contacto",${contactados},${cubiertos}))`;
+  /* El denominador es parte de la regla: «contacto» mide sobre lo registrado,
+     las otras dos sobre lo que asignó BBVA. */
+  const coberturaPct = cel =>
+    `IF(${P_(FIL.coberturaBase)}="contacto",IF(${registrados}=0,0,${contactados}/${registrados}*100),`
+  + `IF(${cel}=0,0,${cubre}/${cel}*100))`;
+  /* Y la segunda condición de la regla de régimen: tener cargada toda la
+     cartera asignada, para que nadie suba su porcentaje cargando menos. */
+  const cumpleCobertura = (valor, minimo, cartera) =>
+    `IF(AND(${valor}>=${minimo},OR(${P_(FIL.coberturaBase)}<>"contacto",${registrados}>=${cartera})),"Sí","No")`;
+  const efectivas  = `SUMIFS(${G("P")},${eG},${mG})`;
+  const puntuales  = `SUMIFS(${G("L")},${eG},${mG})`;
+  const respuestas = `SUMIFS(${G("O")},${eG},${mG})`;
+  const acumulados = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},">0",${C("J")},"<="&${mesRef})`;
+  const delMes     = `SUMIFS(${C("K")},${C("B")},${correoRef},${C("J")},${mesRef})`;
+  const ventas     = `SUMIFS(${N("H")},${N("B")},${correoRef},${N("G")},${mesRef})`;
+  return { gestiones, cubiertos, registrados, contactados, cubre, coberturaPct, cumpleCobertura,
+           efectivas, puntuales, respuestas, acumulados, delMes, ventas };
+}
+
+/* El tramo gradual, leído de la TABLA de la hoja de Parámetros y no de una
+   fórmula clavada acá. Se arma una cadena de IF que interpola en línea recta
+   entre cada par de puntos: bajo el primero no paga —lo que se pague ahí lo
+   decide la llave, no la escala—, sobre el último paga el último valor.
+
+   Que la cadena se genere a partir de las filas significa que si mañana la
+   escala tiene cinco puntos en vez de dos, el libro la sigue sin que nadie
+   toque este archivo. */
+const X_ = f => `'Parámetros'!$A$${f}`;      // cumplimiento del punto
+const Y_ = f => `'Parámetros'!$B$${f}`;      // % del sueldo del punto
+function FORMULA_TRAMO(c, filaEsc, n){
+  let out = "", cierra = 0;
+  out += `IF(${c}<${X_(filaEsc)},0,`; cierra++;
+  for (let i = 1; i < n; i++){
+    const a = filaEsc + i - 1, b = filaEsc + i;
+    out += `IF(${c}<=${X_(b)},${Y_(a)}+(${c}-${X_(a)})/(${X_(b)}-${X_(a)})*(${Y_(b)}-${Y_(a)}),`;
+    cierra++;
+  }
+  return out + Y_(filaEsc + n - 1) + ")".repeat(cierra);
+}
+/* Lo que la llave garantiza por sí sola es el primer punto de la escala. */
+const CELDA_PISO = filaEsc => Y_(filaEsc);
+
+/* ---- Resumen: una fila por ejecutivo, todo fórmula ---------------------- */
+/* Cuántas visitas pide el periodo, escrito como fórmula para que el libro se
+   recalcule solo si alguien toca la celda del parámetro. Las dos reglas dan
+   fórmulas distintas y no da lo mismo cuál se escriba: con la vieja el mínimo
+   se escala por las semanas del periodo (25 × 4,43 = 111), con la nueva el
+   parámetro YA es el total del periodo y multiplicarlo otra vez pediría 177
+   visitas que nadie acordó. */
+function pideVisitasFormula(p){
+  const rv = reglaVisitas(paramsDe(p).requisitos, p);
+  return rv.porPeriodo ? P_(FIL.visitas)
+                       : `ROUND(${P_(FIL.visitas)}*${P_(FIL.semanas)},0)`;
+}
+
+function hojaResumen(p, d, nG, nC, nN){
+  const cols = ["Ejecutivo","Correo","Cartera asignada","Gestiones del periodo",
+                "Cobertura","Mínimo","¿Cobertura?",
+                "Visitas efectivas","Se piden","¿Visitas?",
+                "Puntualidad","Mínimo","¿Puntualidad?",
+                "Requisitos cumplidos","Llave",
+                "Reactivación acumulada (p.p.)","Meta del mes","Cumple reactivación",
+                "Facturación acumulada (%)","Meta del mes","Cumple facturación",
+                "Ventas del periodo","Meta del mes","Cumple venta",
+                "Cumplimiento ponderado","Tramo","Incentivo del periodo",
+                "Se paga ahora","Se retiene"];
+  /* Cuando el periodo trae los mínimos de antes del reajuste, el resumen del
+     equipo dice las dos cosas: lo que se paga y lo que se habría pagado. Es la
+     lámina 3 del reajuste, verificable celda por celda. */
+  const prevR = paramsDe(p).requisitos_previos || null;
+  if (prevR) cols.push("Requisitos con la meta original", "Incentivo con la meta original");
+  const filas = [
+    [`Resumen del equipo · periodo ${nombrePeriodo(p)}`],
+    ["Cada celda es una fórmula sobre las hojas de datos. Solo la facturación se toma del CRM: ese dato no lo genera el sistema."],
+    [],
+    cols];
+  d.ejec.forEach((u, i) => {
+    const f = i + 5;
+    const correoRef = `$B${f}`;
+    const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
+    const cart = carteraDe(u.correo, p).n;
+    const crec = crecimientoFact(u.correo, p);
+    filas.push([
+      u.nombre, u.correo, cart,
+      `=${F.gestiones}`,
+      `=${F.coberturaPct(`$C${f}`)}`,
+      `=${P_(FIL.cobertura)}`,
+      `=${F.cumpleCobertura(`$E${f}`, `$F${f}`, `$C${f}`)}`,
+      `=${F.efectivas}`,
+      `=${pideVisitasFormula(p)}`,
+      `=IF($H${f}>=$I${f},"Sí","No")`,
+      `=IF($D${f}=0,0,${F.puntuales}/$D${f}*100)`,
+      `=${P_(FIL.puntualidad)}`,
+      `=IF(AND($D${f}>0,$K${f}>=$L${f}),"Sí","No")`,
+      `=COUNTIF($G${f}:$M${f},"Sí")`,
+      `=IF($N${f}=3,"Habilitado",IF($N${f}=2,"Solo bono base","Sin incentivo"))`,
+      `=IF($C${f}=0,0,${F.acumulados}/$C${f}*100)`,
+      `=${P_(FIL.metaReact)}`,
+      `=IF($Q${f}=0,0,$P${f}/$Q${f}*100)`,
+      crec === null ? "" : Math.round(crec * 100) / 100,
+      `=${P_(FIL.metaFact)}`,
+      crec === null ? "" : `=IF($T${f}=0,0,$S${f}/$T${f}*100)`,
+      `=${F.ventas}`,
+      `=${P_(FIL.metaVenta)}`,
+      `=IF($W${f}=0,0,$V${f}/$W${f}*100)`,
+      /* El ponderado reparte solo entre lo medible. Dos motivos lo sacan del
+         reparto, y los dos tienen que estar en la fórmula: que no se haya
+         cargado el monto (celda vacía) y que el mes todavía no pida
+         facturación (meta en cero, los meses 1 y 2 de la ruta reajustada).
+         Si solo se mirara la celda vacía, un mes sin meta puntuaría 0% con el
+         peso más grande del modelo y hundiría el resultado de todos. */
+      `=IF(OR(ISBLANK($S${f}),$T${f}=0),($R${f}*${P_(FIL.pesoReact)}+$X${f}*${P_(FIL.pesoVenta)})/(${P_(FIL.pesoReact)}+${P_(FIL.pesoVenta)}),` +
+        `($R${f}*${P_(FIL.pesoReact)}+$U${f}*${P_(FIL.pesoFact)}+$X${f}*${P_(FIL.pesoVenta)})/100)`,
+      `=${FORMULA_TRAMO(`$Y${f}`, d.esc.fila, d.esc.n)}`,
+      /* Tres requisitos: la escala, pero nunca menos que el primer punto —la
+         llave paga por sí sola—. Dos: el bono base, fijo, sin mirar los
+         objetivos. Menos de dos: nada. */
+      `=IF($N${f}=3,MAX($Z${f},${CELDA_PISO(d.esc.fila)}),IF($N${f}=2,${P_(FIL.base1)},0))`,
+      `=$AA${f}*${P_(FIL.mensual)}/100`,
+      `=$AA${f}*(100-${P_(FIL.mensual)})/100`,
+      ...(prevR ? [
+        `=IF($E${f}>=${P_(FIL.cobertura, 4)},1,0)+IF($H${f}>=ROUND(${P_(FIL.visitas, 4)}*${
+          P_(FIL.semanas)},0),1,0)+IF(AND($D${f}>0,$K${f}>=${P_(FIL.puntualidad, 4)}),1,0)`,
+        `=IF($AD${f}>=2,${P_(FIL.base1)},0)`
+      ] : [])
+    ]);
+  });
+  const ult = 4 + d.ejec.length;
+  /* Cada columna con SU unidad, no todas con «0.0». Tres columnas seguidas
+     que dicen 18 / 18 / 18 y significan puntos porcentuales, porcentaje de
+     cumplimiento y ventas son tres cosas distintas leídas como una. */
+  const conUnidad = [
+    [["Cobertura","Puntualidad","Facturación acumulada (%)",
+      "Cumple reactivación","Cumple facturación","Cumple venta",
+      "Cumplimiento ponderado","Tramo","Incentivo del periodo",
+      "Se paga ahora","Se retiene"], U.pct],
+    [["Reactivación acumulada (p.p.)"], U.pp],
+    [["Meta del mes (p.p.)"], U.ppEntero],
+    [["Ventas","Meta de ventas"], U.ventas],
+    [["Visitas efectivas","Mínimo de visitas"], U.visitas],
+    [["Cartera asignada"], U.comercios]
+  ];
+  return hojaLibro(filas, {
+    titulo:1, sub:2, cabecera:4, congelar:4, congelarX:1, filtro:4,
+    fmt: conUnidad.flatMap(([nombres, f]) =>
+      nombres.map(n => cols.indexOf(n)).filter(i => i >= 0).map(i => [i + 1, 5, ult, f])),
+    centrar: cols.map((_, i) => [i + 1, 5, ult]).slice(1),
+    destacar: d.ejec.map((_, i) => [5 + i, cols.indexOf("Incentivo del periodo") + 1, LX.navy]),
+    semaforo: [
+      [`${L(cols.indexOf("Llave"))}5:${L(cols.indexOf("Llave"))}${ult}`, ["Habilitado"], ["Sin incentivo"]],
+      [`${L(cols.indexOf("¿Cobertura?"))}5:${L(cols.indexOf("¿Puntualidad?"))}${ult}`, ["Sí"], ["No"]]
+    ],
+    anchos:[18,26,10,12,10,8,10,10,9,9,11,8,11,11,15,14,11,13,14,11,13,10,11,12,13,9,12,11,10,15,16] });
+}
+
+/* ---- Una hoja por ejecutivo --------------------------------------------
+   La misma cuenta, en vertical y con el nombre arriba, porque la reunión es
+   con una persona y no con la tabla del equipo. Debajo, sus gestiones fuera
+   de plazo: es la pregunta que siempre aparece. */
+/* ---- Las unidades, dichas en la celda ----------------------------------
+   Un 18 suelto no dice nada: puede ser 18 puntos porcentuales de
+   reactivación, 18% de cobertura o 18 ventas. Excel deja escribir la unidad
+   dentro del formato, así que la celda sigue siendo un número —se puede
+   sumar, promediar y dinamizar— pero se lee con su unidad.
+
+   Ojo con el formato: es 0.0"%" y no 0.0%. El segundo multiplica por cien, y
+   nuestros valores ya vienen en escala 0-100; usarlo convertiría un 45,3% en
+   un 4530%. */
+const U = {
+  pct:   '0.0"%"',      // un porcentaje calculado
+  pctEntero: '0"%"',    // el mínimo o la meta, que siempre es redonda
+  pp:    '0.0" p.p."',  // puntos porcentuales de reactivación
+  ppEntero: '0" p.p."',
+  ventas:'0" ventas"',
+  visitas:'0" visitas"',
+  comercios:'0" comercios"',
+  gestiones:'0" gestiones"',
+  semanas:'0.00" semanas"'
+};
+
+/* La hora local del sello del servidor, en HH:MM.
+
+   `Creado_En` llega como ISO en UTC. La campaña trabaja en Lima —UTC-5, sin
+   horario de verano— así que la conversión es una resta fija; hacerla mal
+   correría todas las horas cinco puestos y la evidencia diría otra cosa. */
+function horaDe(iso){
+  const t = String(iso || "");
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(t)) return "";
+  const d = new Date(t);
+  if (isNaN(d)) return "";
+  const lima = new Date(d.getTime() - 5 * 3600000);
+  return String(lima.getUTCHours()).padStart(2,"0") + ":" + String(lima.getUTCMinutes()).padStart(2,"0");
+}
+
+function hojaEjecutivo(u, p, d, nG, nC, nN){
+  const B = paramsDe(p);
+  const correoRef = `$B$3`;
+  const F = formulasEjecutivo(correoRef, P_(FIL.mes), nG, nC, nN);
+  const cart = carteraDe(u.correo, p).n;
+  const crec = crecimientoFact(u.correo, p);
+
+  const suyas = d.gestiones.filter(g => g.correo === u.correo && g.periodo === p);
+  /* Los mínimos que regían antes del reajuste, si este periodo los guarda. */
+  const prev = B.requisitos_previos || null;
+
+  const filas = [
+    [u.nombre, "", "", "", ""],
+    [`Periodo ${nombrePeriodo(p)} · ${textoPeriodo(p)}`, "", "", "", ""],
+    ["Correo", u.correo, "", "", ""],
+    ["Cartera asignada", cart, "", "", ""],
+    ["", "", "", "", ""],
+    ["LLAVE DE ACCESO", "VALOR", "MÍNIMO", "¿CUMPLE?", "DE DÓNDE SALE",
+     ...(prev ? ["META ORIGINAL", "¿CUMPLÍA?"] : [])],
+    ["Cobertura de cartera", `=${F.coberturaPct("$B$4")}`, `=${P_(FIL.cobertura)}`,
+     `=${F.cumpleCobertura("$B$7", "$C$7", "$B$4")}`,
+     "Según la regla del periodo: la ficha cargada, el comercio con algún intento, o el comercio con contacto logrado sobre lo registrado",
+     ...(prev ? [`=${P_(FIL.cobertura, 4)}`, `=IF($B$7>=$F$7,"Sí","No")`] : [])],
+    ["Visitas efectivas", `=${F.efectivas}`, `=${pideVisitasFormula(p)}`,
+     `=IF($B$8>=$C$8,"Sí","No")`, "Presenciales o virtuales en las que se logró hablar",
+     ...(prev ? [`=ROUND(${P_(FIL.visitas, 4)}*${P_(FIL.semanas)},0)`, `=IF($B$8>=$F$8,"Sí","No")`] : [])],
+    ["Puntualidad del registro", `=IF($B$12=0,0,${F.puntuales}/$B$12*100)`, `=${P_(FIL.puntualidad)}`,
+     `=IF(AND($B$12>0,$B$9>=$C$9),"Sí","No")`, "Registradas el mismo día trabajado o el siguiente",
+     ...(prev ? [`=${P_(FIL.puntualidad, 4)}`, `=IF(AND($B$12>0,$B$9>=$F$9),"Sí","No")`] : [])],
+    ["Requisitos cumplidos", `=COUNTIF($D$7:$D$9,"Sí")`, 3, "", "Los tres habilitan el cálculo, dos dejan solo el bono base"],
+    ["Estado de la llave", `=IF($B$10=3,"Habilitado",IF($B$10=2,"Solo bono base","Sin incentivo"))`, "", "", ""],
+    ["Gestiones del periodo", `=${F.gestiones}`, "", "", "Todas las registradas en la ventana del bono"],
+    /* El porcentaje al lado del recuento. Son el mismo dato dicho de dos
+       maneras y hacen falta las dos: el recuento es lo que se puede contar en
+       el detalle de abajo, el porcentaje es contra lo que se mide el
+       requisito. Se calcula sobre las dos celdas de arriba, no sobre la
+       fórmula original, para que quien mueva una vea moverse la otra. */
+    ["Gestiones a tiempo", `=${F.puntuales}`, `=IF($B$12=0,0,$B$13/$B$12*100)`, "",
+     "Con demora de cero o un día trabajado · el porcentaje es sobre las gestiones del periodo"],
+    ["Comercios con respuesta", `=${F.respuestas}`, "", "", "El cliente contestó"],
+    ["", "", "", "", ""],
+    ["OBJETIVOS", "VA EN", "META DEL MES", "CUMPLIMIENTO", "PESO"],
+    ["Reactivación del portafolio", `=IF($B$4=0,0,${F.acumulados}/$B$4*100)`, `=${P_(FIL.metaReact)}`,
+     `=IF($C$17=0,0,$B$17/$C$17*100)`, `=${P_(FIL.pesoReact)}`],
+    ["Facturación", crec === null ? "" : Math.round(crec * 100) / 100, `=${P_(FIL.metaFact)}`,
+     crec === null ? "" : `=IF($C$18=0,0,$B$18/$C$18*100)`, `=${P_(FIL.pesoFact)}`],
+    ["Venta (afiliación)", `=${F.ventas}`, `=${P_(FIL.metaVenta)}`,
+     `=IF($C$19=0,0,$B$19/$C$19*100)`, `=${P_(FIL.pesoVenta)}`],
+    ["Comercios logrados en el periodo", `=${F.delMes}`, "", "",
+     "Los acumulados son los del proyecto entero; estos son los de este mes"],
+    ["", "", "", "", ""],
+    ["RESULTADO", "", "", "", ""],
+    ["Cumplimiento ponderado",
+     `=IF(OR(ISBLANK($B$18),$C$18=0),($D$17*$E$17+$D$19*$E$19)/($E$17+$E$19),($D$17*$E$17+$D$18*$E$18+$D$19*$E$19)/100)`,
+     "", "", crec === null ? "Sin la facturación cargada, su peso sale del reparto"
+           : (metaPeriodo(p, paramsDe(p)).facturacion_pct ? ""
+              : "Este mes la facturación todavía no se mide: su peso sale del reparto")],
+    ["Tramo que le corresponde", `=${FORMULA_TRAMO("$B$23", d.esc.fila, d.esc.n)}`,
+     "", "", "% del sueldo base según la escala de cumplimiento"],
+    /* El techo del periodo de marcha blanca va DENTRO de la fórmula y no en el
+       valor: quien abra el libro tiene que poder ver por qué el número no sube,
+       y tiene que seguir sin subir si toca las celdas de arriba. El MIN contra
+       el bono base es el techo; sin el techo la fórmula es la de siempre. */
+    ["Incentivo del periodo",
+     (B.solo_llave
+       ? `=MIN(${P_(FIL.base1)},IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0)))`
+       : `=IF($B$10=3,MAX($B$24,${CELDA_PISO(d.esc.fila)}),IF($B$10=2,${P_(FIL.base1)},0))`),
+     "", "", (B.solo_llave
+       ? "Periodo de marcha blanca: se paga la llave y el gradual no se abre. El tope está en la fórmula, así que cargar la facturación más adelante no mueve este número"
+       : "La llave paga por sí sola; los objetivos deciden cuánto más")],
+    ["Se paga con la remuneración", `=$B$25*${P_(FIL.mensual)}/100`, "", "", ""],
+    ["Se retiene hasta el cierre", `=$B$25*(100-${P_(FIL.mensual)})/100`, "", "", ""],
+    ["", "", "", "", ""],
+    /* ---- Qué habría pasado con las metas originales ----------------------
+       El acta y el libro dicen «15%» y eso solo no es evidencia: hay que poder
+       ver contra qué se llegó a ese 15%. Cuando el periodo trae las metas
+       anteriores, acá queda escrito el resultado con las dos varas. */
+    ...(prev ? [
+      ["CON LAS METAS ORIGINALES", "", "", "", ""],
+      ["Requisitos cumplidos", `=COUNTIF($G$7:$G$9,"Sí")`, 3, "",
+       "Contra los mínimos que regían antes del reajuste de este periodo"],
+      ["Incentivo que habría correspondido", `=IF($B$30>=2,${P_(FIL.base1)},0)`, "", "",
+       "La diferencia con la línea 25 es lo que aportó el reajuste"],
+      ["", "", "", "", ""]
+    ] : []),
+    /* ---- La evidencia, debajo del resumen -------------------------------
+       Los tres requisitos de arriba son tres números, y tres números no se
+       pueden conversar con la persona a la que le tocan. Acá va, fila por
+       fila, el trabajo del que salen: qué comercio, por qué medio, a quién se
+       le escribió, cuándo se hizo, cuándo entró el comercio al CRM, cuándo se
+       registró, y en qué columna cuenta cada gestión.
+
+       Las tres últimas columnas son las que cierran la cuenta: sumadas dan
+       exactamente los números de la llave. Quien quiera comprobar el 96,5% de
+       puntualidad puede filtrar «A tiempo = No» y contar las filas. */
+    ["SUS GESTIONES DEL PERIODO", "", "", "", "", "", "", "", ""],
+    /* «Cuenta para cobertura» salió el 24/08. En esta primera etapa la
+       cobertura cuenta el REGISTRO en el CRM y nada más, así que un «Sí» al
+       lado de una gestión se leía como si esa gestión hubiera logrado algo con
+       el comercio. El requisito sigue arriba con su número; acá el foco es el
+       plazo de registro, que es lo que estas filas evidencian. */
+    ["Fecha de gestión","Alta de la ficha","Fecha de registro","Hora del registro",
+     "Días corridos","Días trabajados","A tiempo","Comercio"]
+  ];
+  const inicio = filas.length + 1;
+  suyas.forEach((g, i) => {
+    const f = inicio + i;
+    /* El plazo arranca en la fecha de la GESTIÓN, no en el alta de la ficha.
+       Llegó a arrancar en el alta —«nadie registra en una ficha que todavía
+       no existe»— hasta que se vio lo que eso producía: como la ficha la crea
+       el mismo ejecutivo, no cargarla congelaba el plazo, y 461 de las 800
+       fichas entraron el 17 y el 18, los dos últimos días del periodo. Los
+       cuatro salían con puntualidad perfecta.
+
+       El alta se queda en su columna, al lado, porque explica muchas de las
+       demoras y quien lea la fila tiene que poder verlo. Explicar no es
+       descontar. */
+    const desde = A1(0,f);
+    filas.push([
+      serial(g.fecha), g.alta ? serial(g.alta) : "", serial(g.registro),
+      g.altaHora ? `${g.registroHora} · ficha ${g.altaHora}` : g.registroHora,
+      /* Los días corridos son los que cualquiera verifica restando dos fechas,
+         sin discutir el calendario; los trabajados son los que deciden el
+         requisito. Las dos a la vista evita la conversación de «pero ahí hubo
+         un feriado». */
+      `=IF(${A1(2,f)}<=${A1(0,f)},0,${A1(2,f)}-${A1(0,f)})`,
+      `=IF(${A1(2,f)}<=${desde},0,NETWORKDAYS(${desde}+1,${A1(2,f)},${RANGO_FERIADOS(d.nFer)}))`,
+      `=IF(${A1(5,f)}<=1,"Sí","No")`,
+      g.comercio
+    ]);
+  });
+  /* La línea que cierra. Las tres sumas dan los tres números del resumen de
+     arriba, y por eso están puestas debajo de la columna que las produce: si
+     alguna no cuadra, se ve sin buscarla. */
+  if (suyas.length){
+    const fin = inicio + suyas.length - 1;
+    /* «Cargados de N asignados» y no «asignados» a secas: esta lista son los
+       comercios que están en el CRM, y no siempre son todos los que BBVA
+       asignó. Alfredo Arrascue tiene 144 asignados y 105 cargados; llamar
+       «asignados» a los 105 escondería justo el dato que hay que ver. */
+    filas.push([
+      `=COUNTA(${A1(0,inicio)}:${A1(0,fin)})`, "", "", "",
+      `=COUNTIF(${A1(6,inicio)}:${A1(6,fin)},"No")`,
+      `=COUNTIF(${A1(6,inicio)}:${A1(6,fin)},"Sí")`,
+      "", ""
+    ]);
+    filas.push(["gestiones del periodo", "", "", "", "fuera de plazo", "a tiempo", "", ""]);
+    /* Y si hay trabajo sobre comercios que no están en esta lista, se dice:
+       la suma de la columna «Gestiones» no llegaría al total del periodo y
+       alguien tendría que salir a buscar la diferencia. */
+    /* Las tres sumas cierran contra el resumen de arriba: gestiones del
+       periodo, a tiempo, y comercios que cuentan para la cobertura. Si alguna
+       no cuadra, se ve sin buscarla. */
+    const huerfanas = suyas.filter(g => !g.alta).length;
+    if (huerfanas > 0)
+      filas.push(["", "", "", "", "", "", "",
+        `${huerfanas} ${huerfanas === 1 ? "gestión es" : "gestiones son"} de comercios sin ficha en el CRM: `
+        + `el trabajo existe y no se ve en ninguna ficha.`]);
+  }
+  const ultimaGestion = inicio + suyas.length - 1;
+  const bandas = [];
+  filas.forEach((fila, i) => {
+    const t = String(fila[0] || "");
+    if (t && t === t.toUpperCase() && t.length > 3 && !/^\d/.test(t)) bandas.push(i + 1);
+  });
+  const fIncentivo = filas.findIndex(x => x[0] === "Incentivo del periodo") + 1;
+  const fCab = filas.findIndex(x => x[0] === "Fecha de gestión") + 1;
+  /* Las etiquetas son solo los rótulos de la parte de arriba. Incluir el
+     encabezado de la tabla pintaba texto azul marino sobre fondo azul marino
+     —invisible— y las filas de fechas salían en negrita sin razón. */
+  const etiquetas = filas.map((x, i) => x[0] && !bandas.includes(i + 1)
+    && i > 1 && (i + 1) < fCab ? i + 1 : 0).filter(Boolean);
+  return hojaLibro(filas, {
+    titulo:1, sub:2, anchos:[16, 16, 16, 22, 13, 14, 11, 46, 60],
+    secciones:bandas,
+    /* La cabecera de la evidencia se pinta como cabecera de tabla, y la fila
+       de sumas se marca: es la que cierra la cuenta contra los tres números
+       del resumen. */
+    cabeceraSimple: fCab || 0,
+    filtro: fCab || 0,
+    zebra: suyas.length ? [inicio + suyas.length] : [],
+    etiquetas,
+    notas:filas.slice(0, fCab).map((_, i) => [i + 1, 5]),
+    destacar: fIncentivo ? [[fIncentivo, 2, "FFF86F35"]] : [],
+    fmt:[
+      /* Hasta la última gestión, no hasta el final de la hoja: la fila de
+         totales cae dentro del rango y su «332» se pintaba como fecha —salía
+         27/11/1900, que es el serial 332 leído como día—. */
+      [1, inicio, ultimaGestion, "dd/mm/yyyy"], [2, inicio, ultimaGestion, "dd/mm/yyyy"],
+      [3, inicio, ultimaGestion, "dd/mm/yyyy"],
+      /* La llave */
+      [2, 4, 4, U.comercios],                        // cartera asignada
+      [2, 7, 7, U.pct],  [3, 7, 7, U.pctEntero],     // cobertura
+      [2, 8, 8, U.visitas], [3, 8, 8, U.visitas],    // visitas efectivas
+      [2, 9, 9, U.pct],  [3, 9, 9, U.pctEntero],     // puntualidad
+      [2, 12, 12, U.gestiones], [2, 13, 13, U.gestiones],
+      [3, 13, 13, U.pct],                            // el % de puntualidad, al lado del recuento
+      [2, 14, 14, U.comercios],
+      /* Los objetivos: cada uno con SU unidad, que es justo lo que se
+         confundía al leer tres filas seguidas de números pelados. */
+      [2, 17, 17, U.pp],   [3, 17, 17, U.ppEntero],  // reactivación
+      [2, 18, 18, U.pct],  [3, 18, 18, U.pctEntero], // facturación
+      [2, 19, 19, U.ventas], [3, 19, 19, U.ventas],  // venta
+      [4, 17, 19, U.pct],                            // cumplimiento
+      [5, 17, 19, U.pctEntero],                      // peso
+      [2, 20, 20, U.comercios],
+      /* El resultado, todo en % del sueldo base */
+      [2, 23, 27, U.pct],
+      [4, inicio, ultimaGestion, "0"]
+    ],
+    /* Valor, mínimo y cumple, centrados en toda la hoja. El peso solo en el
+       bloque de objetivos: en la llave esa columna es texto explicativo y
+       centrarlo lo vuelve ilegible. Y la fecha de gestión, para que la tabla
+       de abajo no quede con la primera columna suelta a la izquierda. */
+    centrar:[[2, 4, filas.length], [3, 4, filas.length], [4, 4, filas.length],
+             [5, 16, 19], [1, fCab, filas.length], [5, fCab, filas.length],
+             [7, fCab, filas.length]],
+    cabecera: fCab,
+    semaforo: [[`D${bandas[0] + 1}:D${bandas[0] + 3}`, ["Sí"], ["No"]]] });
+}
+
+/* ---- Evolución: cómo se movió el proyecto periodo a periodo ------------- */
+function hojaEvolucion(d){
+  const cols = ["Periodo","Mes","Ejecutivo","Llave","Requisitos cumplidos",
+                "Cobertura %","Visitas efectivas","Puntualidad %",
+                "Reactivación acumulada (p.p.)","Meta del mes","Ventas","Meta",
+                "Cumplimiento ponderado","Incentivo del periodo","Se paga","Se retiene"];
+  const filas = [
+    ["Evolución del proyecto"],
+    ["Un renglón por ejecutivo y periodo, para ver de dónde viene el número de hoy."],
+    [],
+    cols];
+  /* Solo los periodos que ya arrancaron.
+     Antes se listaban los cinco del proyecto, y los meses que todavía no
+     empiezan salían con números: cobertura 100% —porque se mide por el
+     Customer ID ya cargado, que no depende de la ventana—, reactivación
+     acumulada igual a la de hoy, y un ponderado que baja mes a mes porque la
+     meta sube mientras el acumulado se queda quieto. Nada de eso está mal
+     calculado; el problema es que se lee como un pronóstico, y lo que dice
+     ese pronóstico es «vas a fallar». Un periodo que no ha empezado no tiene
+     resultado: no va en la tabla. */
+  const hoy = hoyISO();
+  const corridos = d.periodos.filter(pp => (ventanaPeriodo(pp).ini || "9999") <= hoy);
+  const enCurso  = periodoHoy();
+  corridos.forEach(pp => {
+    const M = metaPeriodo(pp, paramsDe(pp));
+    d.ejec.forEach(u => {
+      const x = incentivoDe(u.correo, pp);
+      const ll = x.llave, cu = x.cumpl;
+      filas.push([pp + (pp === enCurso ? " (en curso)" : ""), M.i, u.nombre, TEXTO_LLAVE[ll.estado], ll.cumplidos,
+        Math.round(ll.cobertura.valor * 10) / 10, ll.efectivas,
+        Math.round(ll.puntualidad.valor * 10) / 10,
+        Math.round(cu.pp * 100) / 100, M.reactivacion_pp,
+        cu.ventas, M.ventas_mes,
+        Math.round(cu.total * 10) / 10, Math.round(x.pago * 100) / 100,
+        Math.round(x.mensual * 100) / 100, Math.round(x.retenido * 100) / 100]);
+    });
+  });
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4, congelar:4, filtro:4,
+    /* Las mismas unidades que en la hoja de cada ejecutivo: esta tabla se lee
+       en horizontal y sin ellas tres columnas seguidas de «100,0» no dicen si
+       son porcentajes, puntos o visitas. */
+    fmt:[[6, 5, filas.length, U.pct], [7, 5, filas.length, U.visitas],
+         [8, 5, filas.length, U.pct], [9, 5, filas.length, '0.00" p.p."'],
+         [10, 5, filas.length, U.ppEntero],
+         [11, 5, filas.length, U.ventas], [12, 5, filas.length, U.ventas],
+         [13, 5, filas.length, U.pct],
+         [14, 5, filas.length, U.pct], [15, 5, filas.length, U.pct], [16, 5, filas.length, U.pct]],
+    centrar:[[2, 5, filas.length], [5, 5, filas.length], [6, 5, filas.length],
+             [7, 5, filas.length], [8, 5, filas.length], [9, 5, filas.length],
+             [10, 5, filas.length], [11, 5, filas.length], [12, 5, filas.length],
+             [13, 5, filas.length], [14, 5, filas.length], [15, 5, filas.length],
+             [16, 5, filas.length]],
+    semaforo:[[`D5:D${filas.length}`, ["Habilitado"], ["Sin incentivo"]]],
+    anchos:[10,6,18,15,11,11,10,12,15,11,9,8,13,13,10,10] });
+}
+
+/* ---- El cruce por medio: la dinámica, hecha con fórmulas ----------------
+   Ejecutivos en filas, medios en columnas, y cada celda un CONTAR.SI.CONJUNTO
+   que se ve. Hace lo mismo que una dinámica para la pregunta que de verdad se
+   hace en la reunión —«¿por dónde estás contactando?»— y no depende de que un
+   formato escrito a mano le guste a Excel. */
+function hojaCruce(d, nG){
+  const medios = [...new Set(d.gestiones.map(g => g.medio).filter(Boolean))].sort();
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const filas = [
+    ["Gestiones por ejecutivo y medio", "", ""],
+    ["Del periodo que está en Parámetros. Cada celda es una fórmula: se puede abrir y ver de dónde sale.", "", ""],
+    [],
+    ["Ejecutivo"].concat(medios).concat(["Total", "A tiempo", "Con respuesta", "Visitas efectivas"])
+  ];
+  d.ejec.forEach((u, i) => {
+    const f = filas.length + 1;
+    const fila = [u.nombre];
+    medios.forEach((m, k) => fila.push(
+      `=COUNTIFS(${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)},${G("M")},"${m}")`));
+    fila.push(`=SUM(${A1(1,f)}:${A1(medios.length,f)})`);
+    fila.push(`=SUMIFS(${G("L")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("O")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    fila.push(`=SUMIFS(${G("P")},${G("D")},"${u.correo}",${G("B")},${P_(FIL.mes)})`);
+    filas.push(fila);
+  });
+  const pri = 5, ult = filas.length;
+  const total = ["Total"];
+  for (let c = 1; c <= medios.length + 4; c++)
+    total.push(`=SUM(${A1(c,pri)}:${A1(c,ult)})`);
+  filas.push(total);
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4,
+    zebra:[filas.length],
+    etiquetas:d.ejec.map((_, i) => 5 + i).concat([filas.length]),
+    anchos:[22].concat(medios.map(() => 14)).concat([10,11,14,16]) });
+}
+
+/* ---- Contraste: las dos cuentas, una al lado de la otra -----------------
+
+   La hoja que este libro no tenía y que costó una semana de discusión.
+
+   El CRM calcula los tres requisitos y se los muestra a los ejecutivos todos
+   los días. Este libro los vuelve a calcular con fórmulas de Excel, por otro
+   camino y a partir de las mismas filas. Mientras nadie compare las dos
+   cuentas, pueden separarse sin que nadie se entere: es exactamente lo que
+   pasó con el plazo de registro, que en el CRM arrancaba en la fecha de la
+   gestión y en la hoja de Gestiones seguía arrancando en el alta de la ficha.
+   El mismo archivo decía dos puntualidades distintas.
+
+   Acá van las dos, con una columna que dice REVISAR cuando no coinciden. No
+   sirve para decidir cuál tiene razón —para eso hay que mirar la fila— sino
+   para saber que hay algo que mirar ANTES de que el acta salga firmada.
+
+   Si una fila dice REVISAR, el acta no sale hasta entender por qué. */
+function hojaContraste(d, nG, sello){
+  const G = n => `Gestiones!$${n}$2:$${n}$${nG}`;
+  const filas = [
+    ["Contraste · lo que calcula el CRM contra lo que calcula este libro", "", ""],
+    [`Periodo en Parámetros · libro extraído el ${sello}. Las dos cuentas salen de las mismas `
+     + `filas de la hoja Gestiones, por caminos distintos.`, "", ""],
+    [],
+    ["Ejecutivo",
+     "Gestiones\ndel periodo\nCRM", "Gestiones\ndel periodo\nfórmula", "¿Coincide?",
+     "Comercios\ncubiertos\nCRM", "Comercios\ncubiertos\nfórmula", "¿Coincide?",
+     "Gestiones\na tiempo\nCRM", "Gestiones\na tiempo\nfórmula", "¿Coincide?"]
+  ];
+  const PRI = filas.length + 1;
+  d.ejec.forEach(u => {
+    const f = filas.length + 1;
+    const e = `${G("D")},"${u.correo}"`, m = `${G("B")},${P_(FIL.mes)}`;
+    const igual = (a, b) => `=IF(${A1(a,f)}=${A1(b,f)},"Sí","REVISAR")`;
+    filas.push([
+      u.nombre,
+      /* La cuenta del CRM: el periodo lo decidió él, y viaja en la columna Mes. */
+      `=COUNTIFS(${e},${m})`,
+      /* La del libro: el periodo se decide en la celda, comparando fechas
+         contra Parámetros. Si el CRM asignó mal un periodo, acá se separa. */
+      `=SUMIFS(${G("S")},${e})`,
+      igual(1, 2),
+      `=SUMIFS(${G("Q")},${e},${m})`,
+      `=SUMIFS(${G("T")},${e})`,
+      igual(4, 5),
+      `=SUMIFS(${G("U")},${e},${m})`,
+      `=SUMIFS(${G("L")},${e},${G("S")},1)`,
+      igual(7, 8)
+    ]);
+  });
+  const ULT = filas.length;
+  filas.push([]);
+  filas.push(["¿Todo cuadra?",
+    `=IF(COUNTIF(${A1(3,PRI)}:${A1(9,ULT)},"REVISAR")=0,"Sí · las dos cuentas dan lo mismo",`
+    + `"NO · hay filas que revisar antes de firmar el acta")`]);
+  filas.push([]);
+  filas.push(["Qué mirar si alguna dice REVISAR"]);
+  [["Gestiones del periodo",
+    "El CRM cuenta por la columna Mes; el libro compara fechas contra Parámetros. "
+    + "Difieren si una gestión quedó asignada a un periodo que no le toca, o si se "
+    + "registró después del cierre."],
+   ["Comercios cubiertos",
+    "El libro solo cuenta comercios con «Tipo de comercio» igual a «De su cartera». "
+    + "Una diferencia suele ser un alta por RUC o un comercio de otra cartera "
+    + "colándose por el nombre."],
+   ["Gestiones a tiempo",
+    "Las dos miden desde la fecha de la gestión hasta el registro. Si difieren, "
+    + "alguien cambió la regla en un lado y no en el otro."]
+  ].forEach(([q, por]) => filas.push([q, por]));
+
+  return hojaLibro(filas, { titulo:1, sub:2, cabecera:4,
+    etiquetas:d.ejec.map((_, i) => PRI + i).concat([ULT + 2, ULT + 4]),
+    notas:[[ULT + 6, 2], [ULT + 7, 2], [ULT + 8, 2]],
+    semaforo:[[`${A1(3,PRI)}:${A1(9,ULT)}`, ["Sí"], ["REVISAR"]]],
+    anchos:[26, 13, 13, 12, 13, 13, 12, 13, 13, 12] });
+}
+
+/* ---- El libro ----------------------------------------------------------- */
+/* El sello de extracción. El libro de un cierre es una foto, y una foto sin
+   fecha no sirve de evidencia: la discusión de la cobertura de agosto se fue
+   media hora en que un número era del 24 y el resto del 18. */
+function selloExtraccion(){
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} `
+       + `a las ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function armarLibroIncentivos(p){
+  const d = datosLibro();
+  const par = hojaParametros(p, d);
+  d.nFer = par.nFeriados;
+  d.esc  = { fila: par.filaEscala, n: par.nEscala };
+  const nG = d.gestiones.length + 1, nC = d.cartera.length + 1, nN = d.nuevos.length + 1;
+  const nCo = d.coord.length + 1;
+
+  /* El orden importa: lo que se mira en la reunión va primero, los datos
+     crudos al final. Nadie abre un libro por la hoja de 4000 filas. */
+  const hojas = [
+    ["Resumen",    hojaResumen(p, d, nG, nC, nN)],
+    ["Parámetros", par.ws],
+    ["Contraste",  hojaContraste(d, nG, selloExtraccion())]
+  ];
+  d.ejec.forEach(u => hojas.push([nombreHoja(u.nombre), hojaEjecutivo(u, p, d, nG, nC, nN)]));
+  hojas.push(["Evolución", hojaEvolucion(d)]);
+  hojas.push(["Por medio", hojaCruce(d, nG)]);
+  hojas.push(["Gestiones", hojaGestiones(d, par.nFeriados)]);
+  hojas.push(["Coordinación BBVA", hojaCoordBBVA(d)]);
+  hojas.push(["Cartera",   hojaCartera(d, nG, nCo)]);
+  hojas.push(["Nuevos",    hojaNuevosLibro(d)]);
+  return { hojas, d, nG, nC, nN };
+}
+
+async function escribirLibro(hojas, nombre){
+  const ExcelJS = await cargarExcelJS();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Stratis CRM";
+  wb.created = new Date();
+  hojas.forEach(([n, desc]) => {
+    const ws = wb.addWorksheet(n, { views:[{ showGridLines:false }] });
+    pintarHoja(ws, desc);
+  });
+  /* Las hojas de datos sí llevan cuadrícula: ahí se lee fila por fila. */
+  ["Gestiones", "Cartera", "Nuevos"].forEach(n => {
+    const ws = wb.getWorksheet(n);
+    if (ws) ws.views = [{ showGridLines:true, state:"frozen", ySplit:1 }];
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* Excel no acepta ninguno de : \ / ? * [ ] en el nombre de una hoja, ni más
+   de 31 caracteres, y no deja dos hojas con el mismo nombre. */
+const HOJAS_USADAS = new Set();
+function nombreHoja(n){
+  let base = String(n || "Ejecutivo").replace(/[:\\/?*\[\]]/g, " ").trim().slice(0, 28) || "Ejecutivo";
+  let x = base, i = 2;
+  while (HOJAS_USADAS.has(x.toLowerCase())){ x = `${base} ${i++}`; }
+  HOJAS_USADAS.add(x.toLowerCase());
+  return x;
+}
+
+async function descargarLibroIncentivos(btn){
+  const antes = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Armando…"; }
+  HOJAS_USADAS.clear();
+  try {
+    const p = periodoBono();
+    const { hojas } = armarLibroIncentivos(p);
+    await escribirLibro(hojas,
+      `Incentivos_${p.replace("-", "")}_${hoyISO().replace(/-/g, "")}.xlsx`);
+    toast(`Libro de ${nombrePeriodo(p)} descargado`);
+  } catch (e){
+    toast("No se pudo armar el libro: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = antes || "Descargar el libro del periodo"; }
+  }
+}
+
+/* =========================================================================
+   El acta del incentivo, en PDF y por ejecutivo
+
+   Por qué existe: la reunión de incentivos es con una persona, y lo que queda
+   de esa reunión es una hoja. El libro de Excel sirve para auditar el cálculo
+   —tiene las fórmulas y los datos crudos— pero no es lo que se le entrega a
+   alguien para que confirme que está de acuerdo: son once hojas y trescientas
+   filas. Esto es una página.
+
+   Y es una página que se puede firmar. Ahí está la diferencia entre un
+   reporte y una evidencia: el pie lleva la fecha, la hora, quién lo generó y
+   dos líneas para las firmas. Un PDF sin eso es una impresión; con eso es un
+   documento de la conversación que ocurrió.
+
+   Se dibuja a mano con jsPDF en vez de convertir la hoja de Excel. Convertir
+   una hoja de cálculo a PDF produce exactamente eso —una hoja de cálculo
+   impresa, con sus columnas y su cuadrícula— y aquí hace falta un documento.
+
+   Lo que NO lleva, y es deliberado: ninguna cifra de sueldo. El cálculo llega
+   hasta «% del sueldo base» y ahí se detiene, igual que en el resto del CRM.
+   El monto lo pone Recursos Humanos con el dato que solo ellos tienen.
+   ========================================================================= */
+
+const JSPDF_CDN = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+
+/* La paleta del CRM, en la escala 0-255 que pide jsPDF. */
+const PX = {
+  navy:[12, 17, 55], azul:[59, 67, 251], gris:[63, 80, 115], gris2:[140, 152, 172],
+  linea:[221, 226, 236], fondo:[246, 249, 255],
+  ok:[10, 125, 94], okBg:[230, 247, 241], mal:[179, 52, 26], malBg:[253, 237, 234],
+  warn:[179, 101, 26], warnBg:[255, 244, 227], blanco:[255, 255, 255]
+};
+
+/* ---- Quién emite el acta -------------------------------------------------
+   No es quien apretó el botón. El acta la emite la jefatura de la campaña, y
+   el Analista puede generarla un domingo sin que por eso el papel salga a su
+   nombre: la conversación de incentivos la tiene el Manager.
+
+   Sale de la lista de usuarios y no de un nombre escrito acá. Si mañana la
+   campaña cambia de jefe, cambia el rol en Equipo y las actas siguientes salen
+   solas con el nombre nuevo; nadie tiene que acordarse de publicar la app. Y
+   si no hay Manager cargado —una demo, una base a medio poblar— el acta no se
+   queda sin emisor: sale a nombre de quien la generó, que es lo honesto. */
+function emisorActa(){
+  const yo = (S.user && (S.user.nombreCompleto || S.user.nombre)) || "";
+  const m = (typeof USUARIOS !== "undefined" ? USUARIOS : [])
+    .find(u => u.rol === "Manager" && u.activo !== false);
+  if (!m) return { nombre: yo, cargo:"", propio:true };
+  const nombre = m.nombreCompleto || m.nombre;
+  return { nombre, cargo:"Manager de la campaña", propio: nombre === yo };
+}
+
+function cargarJsPDF(){
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  return new Promise((ok, mal) => {
+    const s = document.createElement("script");
+    s.src = JSPDF_CDN;
+    s.onload = () => ok();
+    s.onerror = () => mal(new Error("No se pudo cargar el generador de PDF. Revisa la conexión."));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---- Lo que dice cada número, con su unidad -----------------------------
+   El mismo criterio que en el Excel: un 18 suelto puede ser 18 puntos
+   porcentuales, 18% o 18 ventas, y en una hoja que alguien va a firmar eso no
+   puede quedar a interpretación. */
+const pdfPct = v => (v === null || v === undefined || v === "") ? "—"
+  : (Math.round(Number(v) * 10) / 10).toString().replace(".", ",") + "%";
+const pdfPP  = v => (Math.round(Number(v) * 10) / 10).toString().replace(".", ",") + " p.p.";
+const pdfNum = (v, u) => `${Math.round(Number(v))}${u ? (u === "%" ? "%" : " " + u) : ""}`;
+
+function actaIncentivo(doc, u, p, x){
+  const B  = paramsDe(p);
+  const ll = x.llave, cu = x.cumpl;
+  const M  = metaPeriodo(p, B);
+  const W  = 210, m = 16;                       // A4 en mm
+  let y = 0;
+
+  /* La fuente que trae jsPDF es latin-1: lo que no está en esa tabla no sale
+     como el carácter, sale como basura. Una flecha «→» en medio del monto de
+     facturación se veía como «!'», y en una hoja que alguien va a firmar eso
+     no es un detalle estético.
+
+     De paso se unifica el separador decimal: el CRM formatea algunos números
+     con toFixed —que siempre usa punto— y otros con coma. Dentro de un mismo
+     documento tienen que verse iguales. */
+  const sanear = s => String(s)
+    .replace(/[→⇒➜]/g, "a").replace(/[—–]/g, "-")
+    .replace(/[«»""]/g, '"').replace(/['']/g, "'")
+    .replace(/…/g, "...").replace(/[⁄∕]/g, "/")
+    .replace(/(\d),(\d{3}\b)/g, "$1 $2")     // miles: 5,000,000 -> 5 000 000
+    .replace(/(\d)\.(\d)/g, "$1,$2")         // decimal: 1.3 -> 1,3
+    /* Lo que quede fuera de latin-1 se cae antes de llegar al PDF. */
+    .replace(/[^\x00-\xFF]/g, "");
+
+  const txt = (s, x0, y0, o) => {
+    o = o || {};
+    doc.setFont("helvetica", o.bold ? "bold" : (o.italic ? "italic" : "normal"));
+    doc.setFontSize(o.size || 9);
+    doc.setTextColor(...(o.color || PX.gris));
+    doc.text(sanear(s), x0, y0, { align: o.align || "left" });
+  };
+  const caja = (x0, y0, an, al, color) => {
+    doc.setFillColor(...color); doc.rect(x0, y0, an, al, "F");
+  };
+  const linea = y0 => {
+    doc.setDrawColor(...PX.linea); doc.setLineWidth(0.2); doc.line(m, y0, W - m, y0);
+  };
+
+  /* ---- Cabecera ------------------------------------------------------- */
+  caja(0, 0, W, 34, PX.navy);
+  txt("STRATIS LATAM", m, 12, { size:8, bold:true, color:[142, 150, 200] });
+  txt(u.nombre, m, 22, { size:19, bold:true, color:PX.blanco });
+  txt(u.correo, m, 28.5, { size:8.5, color:[168, 178, 216] });
+  txt("ACTA DE INCENTIVO", W - m, 12, { size:8, bold:true, color:[142, 150, 200], align:"right" });
+  txt(nombrePeriodo(p), W - m, 21, { size:13, bold:true, color:PX.blanco, align:"right" });
+  txt(textoPeriodo(p), W - m, 28.5, { size:8.5, color:[168, 178, 216], align:"right" });
+  y = 44;
+
+  /* ---- El estado, que es lo primero que se busca ----------------------- */
+  const est = ll.estado === "activo" ? { t:"HABILITADO", c:PX.ok,  bg:PX.okBg }
+            : ll.estado === "base"   ? { t:"SOLO BONO BASE", c:PX.warn, bg:PX.warnBg }
+                                     : { t:"SIN INCENTIVO", c:PX.mal, bg:PX.malBg };
+  caja(m, y - 6, W - 2*m, 16, est.bg);
+  txt(est.t, m + 5, y + 1.5, { size:12, bold:true, color:est.c });
+  txt(`${ll.cumplidos} de 3 requisitos de gestión`, m + 5, y + 6, { size:8, color:PX.gris });
+  txt("Cartera asignada", W - m - 5, y - 1, { size:8, color:PX.gris, align:"right" });
+  txt(pdfNum(ll.cartera.n, "comercios"), W - m - 5, y + 5, { size:11, bold:true, color:PX.navy, align:"right" });
+  y += 20;
+
+  /* ---- La llave -------------------------------------------------------- */
+  const seccion = t => {
+    txt(t, m, y, { size:9, bold:true, color:PX.navy });
+    y += 2; linea(y); y += 5;
+  };
+  /* ---- Las metas de antes del reajuste ---------------------------------
+     Cuando el periodo trae `requisitos_previos`, el acta muestra DOS columnas
+     de meta: contra qué se midió y contra qué se debía medir. Sin eso el papel
+     dice «15%» y no dice que hubo una excepción, que es exactamente lo que un
+     acta tiene que dejar por escrito.
+
+     El periodo que no los traiga se ve como siempre: una sola columna. La
+     excepción vive en la versión de parámetros, no acá. */
+  const prev = B.requisitos_previos || null;
+  const pideOrig = prev ? Math.round((prev.visitas_semana || 0) * ll.semanas) : 0;
+  const xVal  = prev ? 104 : 118;
+  const xOrig = 134;
+  const xMeta = prev ? 168 : 152;
+
+  /* Una excepción autorizada da por cumplido un requisito que no se cumplió.
+     El acta tiene que decir las DOS cosas: el número real —que no llegó— y
+     quién decidió darlo por cumplido. Un acta que solo muestre el visto verde
+     deja de ser evidencia de lo que pasó, que es para lo único que existe. */
+  const fila = (rot, valor, meta, ok, pie, orig, okOrig, exc) => {
+    txt(rot, m, y, { size:9, bold:true, color:PX.navy });
+    txt(valor, xVal, y, { size:9, color:PX.gris, align:"right" });
+    if (prev && orig !== undefined)
+      txt(orig, xOrig, y, { size:9, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
+    txt(meta, xMeta, y, { size:9, bold:!!prev, color:PX.gris2, align:"right" });
+    if (ok !== null){
+      /* Con excepción el sello no dice «Cumple»: dice que se dio por cumplido.
+         Es una palabra distinta porque es una cosa distinta. */
+      const c = exc ? PX.warn : (ok ? PX.ok : PX.mal);
+      caja(W - m - 22, y - 3.4, 22, 5, exc ? PX.fondo : (ok ? PX.okBg : PX.malBg));
+      txt(exc ? "Por excepción" : (ok ? "Cumple" : "No cumple"), W - m - 11, y,
+          { size: exc ? 6.8 : 7.5, bold:true, color:c, align:"center" });
+    }
+    if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    if (exc){
+      y += 4;
+      txt(`No alcanzó el mínimo. Requisito dado por cumplido por excepción autorizada por ${
+          exc.autoriza || "la dirección"}${exc.motivo ? " · " + exc.motivo : ""}.`,
+          m, y, { size:7.5, bold:true, color:PX.warn });
+    }
+    if (prev && orig !== undefined)
+      txt(okOrig ? "con la meta original, cumple" : "con la meta original, no alcanza",
+          W - m, y, { size:7.5, color: okOrig ? PX.gris2 : PX.mal, align:"right" });
+    y += 7;
+  };
+
+  const okCobOrig = !prev || ll.cobertura.valor >= prev.cobertura_pct;
+  const okVisOrig = !prev || ll.efectivas >= pideOrig;
+  const okPunOrig = !prev || (ll.gestiones > 0 && ll.puntualidad.valor >= prev.puntualidad_pct);
+  const conLaOriginal = [okCobOrig, okVisOrig, okPunOrig].filter(Boolean).length;
+
+  const nExc = (ll.excepciones || []).length;
+  seccion(prev ? `LLAVE DE ACCESO · ${ll.cumplidos} DE 3 CON LAS METAS REAJUSTADAS${
+                   nExc ? " Y UNA EXCEPCIÓN AUTORIZADA" : ""}`
+               : "LLAVE DE ACCESO");
+  txt(prev ? "LOGRADO" : "VALOR", xVal, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  if (prev) txt("META ORIGINAL", xOrig, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt(prev ? "META DEL REAJUSTE" : "MÍNIMO", xMeta, y - 3,
+      { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  fila("Cobertura de cartera", pdfPct(ll.cobertura.valor), pdfPct(ll.cobertura.meta),
+       ll.cobertura.ok, ll.cobertura.detalle,
+       prev ? pdfPct(prev.cobertura_pct) : undefined, okCobOrig, ll.cobertura.porExcepcion);
+  fila("Visitas efectivas", pdfNum(ll.efectivas, "visitas"), pdfNum(ll.pide, "visitas"),
+       ll.visitas.ok, `El periodo tiene ${ll.semanas.toFixed(1).replace(".", ",")} semanas${
+         prev ? " · este mínimo no se reajustó" : ""}`,
+       prev ? pdfNum(pideOrig, "visitas") : undefined, okVisOrig, ll.visitas.porExcepcion);
+  fila("Puntualidad del registro", pdfPct(ll.puntualidad.valor), pdfPct(ll.puntualidad.meta),
+       ll.puntualidad.ok, ll.puntualidad.detalle,
+       prev ? pdfPct(prev.puntualidad_pct) : undefined, okPunOrig, ll.puntualidad.porExcepcion);
+  y += 2;
+
+  /* ---- Los objetivos --------------------------------------------------- */
+  seccion("CUMPLIMIENTO DE OBJETIVOS");
+  txt("LOGRO", 100, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("META DEL MES", 136, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("CUMPLE", 164, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  txt("PESO", W - m, y - 3, { size:6.5, bold:true, color:PX.gris2, align:"right" });
+  cu.objetivos.forEach(o => {
+    txt(o.nombre, m, y, { size:9, bold:true, color:PX.navy });
+    txt(o.logro, 100, y, { size:9, color:PX.gris, align:"right" });
+    txt(o.meta,  136, y, { size:9, color:PX.gris2, align:"right" });
+    txt(o.cumpl === null ? "pendiente" : pdfPct(o.cumpl), 164, y,
+        { size:9, bold:true, color: o.cumpl === null ? PX.gris2 : PX.navy, align:"right" });
+    txt(pdfNum(o.peso, "%"), W - m, y, { size:9, color:PX.gris2, align:"right" });
+    y += 4;
+    txt(`${o.detalle}${o.metaPie ? " · " + o.metaPie : ""}`, m, y, { size:7.5, color:PX.gris2 });
+    y += 7;
+  });
+  if (cu.objetivos.some(o => o.cumpl === null)){
+    txt("La facturación todavía no está cargada: su peso sale del reparto y el ponderado está incompleto.",
+        m, y, { size:7.5, italic:true, color:PX.warn });
+    y += 6;
+  }
+  y += 2;
+
+  /* ---- El resultado ---------------------------------------------------- */
+  seccion("RESULTADO DEL PERIODO");
+  const res = (rot, valor, pie, fuerte) => {
+    txt(rot, m, y, { size: fuerte ? 10 : 9, bold:true, color:PX.navy });
+    txt(valor, W - m, y, { size: fuerte ? 13 : 9.5, bold:true,
+        color: fuerte ? PX.azul : PX.gris, align:"right" });
+    if (pie){ y += 4; txt(pie, m, y, { size:7.5, color:PX.gris2 }); }
+    y += fuerte ? 8 : 7;
+  };
+  const esc = escalaDe(B);
+  res("Cumplimiento ponderado", pdfPct(cu.total),
+      cu.completo ? "" : "Calculado solo sobre los objetivos que ya se pueden medir");
+  /* Con el techo del periodo puesto, poner «tramo que le corresponde: 0%»
+     junto al monto invita justo el reclamo que el techo existe para evitar:
+     «entonces si la facturación sube, me corresponde más». No corresponde
+     más. La línea se reemplaza por la que dice por qué. */
+  if (B.solo_llave)
+    res("Cómo se liquida este periodo", "Solo la llave",
+        `Acuerdo del periodo de marcha blanca: se paga el bono base del ${
+          B.base_incumple_uno}% y el gradual no se abre`);
+  else
+    res("Tramo que le corresponde", pdfPct(x.bruto),
+        `Del ${esc[0][0]}% al ${esc[esc.length-1][0]}% de cumplimiento`);
+  /* El rótulo dice el CONCEPTO, no solo el número. «Incentivo del periodo:
+     15%» deja abierto de dónde sale ese 15%; «Bono base por la llave de
+     gestión: 15%» lo cierra. En una hoja que alguien firma, esa diferencia es
+     la conversación entera. */
+  res(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo", pdfPct(x.pago), x.nota || "", true);
+  /* El equivalente, dicho con los dos números a la vista: «80% de 15%» explica
+     el 12% sin que nadie tenga que hacer la cuenta en la reunión. */
+  res("Se paga con la remuneración", pdfPct(x.mensual),
+      `${B.pago_mensual}% de ${pdfPct(x.pago)}`);
+  res("Se retiene hasta el cierre", pdfPct(x.retenido),
+      `${100 - B.pago_mensual}% de ${pdfPct(x.pago)} · se liquida al cerrar el proyecto`);
+
+  caja(m, y - 3, W - 2*m, 9, PX.fondo);
+  txt("Todos los porcentajes son sobre el sueldo base. El monto lo calcula Recursos Humanos.",
+      m + 4, y + 2.5, { size:7.5, italic:true, color:PX.gris });
+  y += 16;
+
+  /* La excepción, dicha con todas sus letras. Sin esto el acta deja constancia
+     de un 15% y no de por qué: lo que se está pagando no es haber llegado a la
+     meta, es haber llegado a la meta reajustada. */
+  if (prev){
+    const pagoOrig = conLaOriginal >= 2 ? B.base_incumple_uno : 0;
+    caja(m, y - 4, W - 2*m, 24, PX.fondo);
+    txt("Este periodo se midió con metas reajustadas, por única vez", m + 4, y,
+        { size:8.5, bold:true, color:PX.navy });
+    y += 4.5;
+    txt(`La dirección aprobó bajar la cobertura de ${pdfPct(prev.cobertura_pct)} a ${
+        pdfPct(ll.cobertura.meta)} y la calidad del registro de ${pdfPct(prev.puntualidad_pct)} a ${
+        pdfPct(ll.puntualidad.meta)} solo para este periodo.`, m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt(`El mínimo de visitas efectivas no se movió, y es el que no se alcanzó: ${
+        pdfNum(ll.efectivas, "")} de ${pdfNum(ll.pide, "")}.`, m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt(`Con las metas originales el resultado habría sido ${conLaOriginal} de 3 requisitos, y le habría `
+      + `correspondido ${pdfPct(pagoOrig)}.`, m + 4, y,
+        { size:7.5, bold:true, color: pagoOrig < x.pago ? PX.mal : PX.gris });
+    y += 4;
+    txt("El reajuste no cambia los objetivos del proyecto ni los mínimos de los periodos siguientes.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 11;
+  }
+
+  /* Lo que hace que este papel no se reabra. Quien lo firma tiene derecho a
+     saber, en el papel y no de palabra, que el número no depende de un dato
+     que todavía no llegó. */
+  if (B.solo_llave){
+    caja(m, y - 4, W - 2*m, 15, PX.fondo);
+    txt("Este monto es definitivo", m + 4, y, { size:8.5, bold:true, color:PX.navy });
+    y += 4.5;
+    txt("El periodo se liquida sin la facturación de agosto, que el banco entrega un mes después.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 4;
+    txt("Cargarla más adelante no cambia lo firmado acá: en este periodo se paga la llave y el gradual no se abre.",
+        m + 4, y, { size:7.5, color:PX.gris });
+    y += 12;
+  }
+
+  /* ---- Las firmas ------------------------------------------------------
+     Es lo que convierte la hoja en evidencia. Sin esto es una impresión. */
+  const firma = (x0, an, rot, nombre) => {
+    doc.setDrawColor(...PX.gris2); doc.setLineWidth(0.3);
+    doc.line(x0, y, x0 + an, y);
+    txt(rot, x0, y + 4, { size:7.5, bold:true, color:PX.navy });
+    if (nombre) txt(nombre, x0, y + 8, { size:7.5, color:PX.gris2 });
+  };
+  const an = (W - 2*m - 12) / 2;
+  const em = emisorActa();
+  firma(m, an, "Recibí conforme", u.nombre);
+  firma(m + an + 12, an, `Por Stratis${em.cargo ? " · " + em.cargo : ""}`, em.nombre);
+  y += 16;
+
+  /* ---- El pie: de dónde salió y cuándo -------------------------------- */
+  linea(y); y += 4;
+  const ahora = new Date();
+  const sello = x.sellado
+    ? `Periodo sellado el ${fmtFecha(String(x.selladoEn).slice(0,10))} — los números no cambian`
+    : "Periodo abierto: los números pueden moverse hasta el cierre";
+  txt(sello, m, y, { size:7.5, color: x.sellado ? PX.ok : PX.warn });
+  /* Quién EMITE el acta no es quién apretó el botón. La emite la jefatura de
+     la campaña, y así tiene que decirlo el papel aunque lo genere el Analista
+     un domingo. Quién lo generó queda igual, una línea abajo: es trazabilidad,
+     no autoría. */
+  txt(`Emitida el ${fmtFecha(hoyISO())} por ${em.nombre}${em.cargo ? " · " + em.cargo : ""}`,
+      W - m, y, { size:7.5, color:PX.gris2, align:"right" });
+  y += 4;
+  txt(`Generada desde el CRM a las ${String(ahora.getHours()).padStart(2,"0")}:${
+      String(ahora.getMinutes()).padStart(2,"0")}${
+      em.propio ? "" : ` por ${S.user.nombreCompleto || S.user.nombre}`}`,
+      W - m, y, { size:7.5, color:PX.gris2, align:"right" });
+  y += 4;
+  txt(`Parámetros vigentes: ${(versionDe(p) || {}).vigente_desde
+        ? "versión de " + nombreMes(versionDe(p).vigente_desde) : "los del documento"}`,
+      m, y, { size:7.5, color:PX.gris2 });
+}
+
+async function pdfIncentivo(u, p, btn){
+  const txtOrig = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Generando…"; }
+  try {
+    await cargarJsPDF();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    actaIncentivo(doc, u, p, incentivoDe(u.correo, p));
+    const limpio = String(u.nombre).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
+    doc.save(`Incentivo_${limpio}_${p}.pdf`);
+    toast(`Acta de ${u.nombre} generada`);
+  } catch (e){
+    toast("No se pudo generar el PDF: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = txtOrig; }
+  }
+}
+
+/* Todas las actas en un solo archivo, una por página: es lo que se archiva
+   cuando el periodo se cierra. */
+async function pdfIncentivoTodos(btn){
+  const txtOrig = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Generando…"; }
+  try {
+    await cargarJsPDF();
+    const { jsPDF } = window.jspdf;
+    const p = periodoBono();
+    const ejec = ejecutivosDelBono();
+    if (!ejec.length) return toast("No hay ejecutivos activos en la campaña");
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    ejec.forEach((u, i) => {
+      if (i) doc.addPage();
+      actaIncentivo(doc, u, p, incentivoDe(u.correo, p));
+    });
+    doc.save(`Actas_de_incentivo_${p}.pdf`);
+    toast(`${ejec.length} actas generadas`);
+  } catch (e){
+    toast("No se pudo generar el PDF: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = txtOrig; }
+  }
+}
+
+function bindPdfIncentivo(){
+  document.querySelectorAll("[data-pdfejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const u = ejecutivosDelBono().find(x => x.correo === el.dataset.pdfejec);
+    if (u) pdfIncentivo(u, periodoBono(), el);
+  });
+  document.querySelectorAll("[data-xlsejec]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    descargarGestionesDe(el.dataset.xlsejec, periodoBono());
+  });
+  const todos = document.querySelector("#pdfTodos");
+  if (todos) todos.onclick = () => pdfIncentivoTodos(todos);
+}
+
+/* =========================================================================
+   Sincronización — el CRM se actualiza solo
+
+   Tres disparadores, del más barato al más caro:
+
+     empuje    Postgres avisa por websocket apenas alguien graba algo.
+     reloj     cada 45 s, y solo si la pestaña está a la vista.
+     regreso   al volver a la pestaña, al recuperar el foco o la red.
+
+   Cualquiera de los tres llama a lo mismo, y lo primero que hace es preguntar
+   la firma del estado —pulso()—: dos conteos y una fecha. Si la firma no
+   cambió, no se baja nada. Solo cuando cambió se vuelven a traer cartera,
+   gestiones, metas y bitácora, y se vuelve a pintar la vista actual.
+
+   Regla que no se rompe: si hay un formulario abierto o un modal encima, no
+   se repinta nada. Se anota que hay novedades y se aplican cuando la persona
+   sale del formulario. Nadie pierde lo que estaba escribiendo.
+   ========================================================================= */
+
+const SYNC = {
+  canal:null, timer:null, vivo:false,
+  firma:null, cuando:null,
+  ocupado:false, pendiente:false, fallos:0
+};
+
+const RELOJ_SYNC = 45000;    // el latido cuando la pestaña está a la vista
+const ESPERA_EMPUJE = 1200;  // se agrupan las ráfagas de cambios
+
+/* No se toca la pantalla mientras se está escribiendo en ella */
+const escribiendo = () =>
+  /^form_/.test(S.tab) || ($("#overlay") && $("#overlay").innerHTML.trim() !== "");
+
+async function firmaRemota(){
+  const { data, error } = await sb.rpc("pulso");
+  if (error) return null;
+  const p = Array.isArray(data) ? data[0] : data;
+  if (!p) return null;
+  return `${p.comercios}|${p.gestiones}|${p.ultimo}`;
+}
+
+async function sincronizar(motivo){
+  if (!S.user || S.demo || SYNC.ocupado) return;
+  if (navigator.onLine === false) return;
+  SYNC.ocupado = true;
+  try {
+    const firma = await firmaRemota();
+    if (firma === null) { SYNC.fallos++; return; }
+    SYNC.fallos = 0;
+
+    if (firma === SYNC.firma && !SYNC.pendiente){ SYNC.cuando = Date.now(); return; }
+    if (escribiendo()){ SYNC.pendiente = true; return; }
+
+    /* Si los conteos remotos ya coinciden con lo que hay en pantalla, el
+       cambio lo hicimos nosotros al guardar: se recarga igual, pero sin
+       avisar como si fuera novedad de otro. */
+    const [nc, ng] = firma.split("|");
+    const eraNuestro = Number(nc) === CLIENTES.length && Number(ng) === DB.todos().length;
+
+    await recargarCartera();
+    await refrescar();
+    await cargarMetas();
+    await cargarSeguimientos();
+    await cargarFacturacion();
+    await cargarReporte();
+    await cargarAuditoria();
+
+    const primera = SYNC.firma === null;
+    SYNC.firma = firma; SYNC.cuando = Date.now(); SYNC.pendiente = false;
+    render();
+    if (motivo === "manual")                              toast("Actualizado");
+    else if (!primera && !eraNuestro)                     toast("Se actualizó con los últimos registros");
+  } catch (e){
+    SYNC.fallos++;
+  } finally {
+    SYNC.ocupado = false;
+    pintarPulso();
+  }
+}
+
+/* Las ráfagas se agrupan: diez inserciones seguidas son una sola recarga */
+let _debEmpuje;
+function empuje(){
+  clearTimeout(_debEmpuje);
+  _debEmpuje = setTimeout(() => sincronizar("empuje"), ESPERA_EMPUJE);
+}
+
+/* ---- El indicador del encabezado ---------------------------------------- */
+function haceCuanto(t){
+  if (!t) return "sin actualizar";
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 15)   return "al día";
+  if (s < 90)   return "hace un momento";
+  if (s < 3600) return `hace ${Math.round(s/60)} min`;
+  return `hace ${Math.round(s/3600)} h`;
+}
+
+function pintarPulso(){
+  const b = $("#btnSync");
+  if (!b) return;
+  const estado = SYNC.ocupado ? "carga" : SYNC.fallos > 1 ? "mal" : SYNC.vivo ? "vivo" : "tibio";
+  b.dataset.estado = estado;
+  b.title = (SYNC.vivo ? "En vivo · " : "Actualización periódica · ") +
+            haceCuanto(SYNC.cuando) +
+            (SYNC.pendiente ? " · hay novedades sin aplicar" : "") +
+            "\nToca para actualizar ahora";
+  b.classList.toggle("con-novedad", SYNC.pendiente);
+}
+
+/* ---- Arranque y parada --------------------------------------------------- */
+async function arrancarSync(){
+  detenerSync();
+  if (!S.user || S.demo) return;
+
+  SYNC.timer = setInterval(() => { if (!document.hidden) sincronizar("reloj"); }, RELOJ_SYNC);
+  SYNC._reloj = setInterval(pintarPulso, 20000);
+
+  SYNC._vis  = () => { if (!document.hidden) sincronizar("regreso"); };
+  SYNC._foco = () => sincronizar("regreso");
+  SYNC._red  = () => sincronizar("regreso");
+  document.addEventListener("visibilitychange", SYNC._vis);
+  window.addEventListener("focus", SYNC._foco);
+  window.addEventListener("online", SYNC._red);
+
+  /* El empuje es un extra: si el websocket no levanta, el reloj cubre igual */
+  try {
+    /* El websocket lleva su propio token: sin él, el RLS no deja pasar nada */
+    const { data } = await sb.auth.getSession();
+    const tok = data && data.session ? data.session.access_token : null;
+    if (tok && sb.realtime && sb.realtime.setAuth) sb.realtime.setAuth(tok);
+    SYNC.canal = sb.channel("crm-vivo")
+      .on("postgres_changes", { event:"*", schema:"public", table:"clientes" },      empuje)
+      .on("postgres_changes", { event:"*", schema:"public", table:"interacciones" }, empuje)
+      .subscribe(estado => { SYNC.vivo = estado === "SUBSCRIBED"; pintarPulso(); });
+  } catch (e){ SYNC.vivo = false; }
+
+  pintarPulso();
+}
+
+function detenerSync(){
+  clearInterval(SYNC.timer);  clearInterval(SYNC._reloj);
+  clearTimeout(_debEmpuje);
+  if (SYNC._vis)  document.removeEventListener("visibilitychange", SYNC._vis);
+  if (SYNC._foco) window.removeEventListener("focus", SYNC._foco);
+  if (SYNC._red)  window.removeEventListener("online", SYNC._red);
+  if (SYNC.canal){ try { sb.removeChannel(SYNC.canal); } catch(e){} }
+  Object.assign(SYNC, { canal:null, timer:null, vivo:false, firma:null,
+                        cuando:null, ocupado:false, pendiente:false, fallos:0 });
+}
+
+/* Al salir de un formulario se aplican las novedades que quedaron esperando */
+function aplicarPendientes(){
+  if (SYNC.pendiente && !escribiendo()) sincronizar("pendiente");
+}
+
+/* =========================================================================
+   Enlaces de interfaz y arranque
+   ========================================================================= */
+let qTimer = null;
+
+function bindExtras(){
+  const q = $("#q");
+  if (q){
+    q.oninput = e => {
+      S.q = e.target.value; S.limite = 40;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#q");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  const MAPA_F = { contacto:"fContacto", estadocli:"fEstadoCli", rubro:"fRubro",
+                   ejecutivo:"fEjecutivo", distrito:"fDistrito", cierre:"fCierre" };
+  /* Cualquier botón que traiga el par data-f + data-v pone ese filtro, esté
+     donde esté. Antes el selector nombraba las dos clases que existían aquel
+     día, y un botón nuevo en cualquier otro sitio quedaba mudo sin que nada
+     avisara: se veía, se pulsaba y no pasaba nada. */
+  document.querySelectorAll("button[data-f][data-v], .pill[data-f][data-v]").forEach(b => b.onclick = () => {
+    S[MAPA_F[b.dataset.f]] = b.dataset.v; S.limite = 40; render();
+  });
+  document.querySelectorAll("select[data-f]").forEach(el => el.onchange = () => {
+    S[MAPA_F[el.dataset.f]] = el.value; S.limite = 40; render();
+  });
+  const limpiar = () => { S.q = ""; S.fContacto = S.fEstadoCli = S.fRubro = S.fEjecutivo = S.fDistrito = "todos";
+    S.fCierre = "todos"; S.filtrosAbiertos = false; S.limite = 40; render(); };
+  ["limpiarFiltros","limpiarFiltros2"].forEach(id => { if ($("#"+id)) $("#"+id).onclick = limpiar; });
+  if ($("#mas")) $("#mas").onclick = () => { S.limite += 40; render(); };
+  if ($("#masFiltros")) $("#masFiltros").onclick = () => { S.filtrosAbiertos = !S.filtrosAbiertos; render(); };
+  if ($("#masReg")) $("#masReg").onclick = () => { S.limiteReg += 40; render(); };
+
+  /* Bitácora: buscador, filtros y por tandas dentro de su propio recuadro.
+     Se guarda todo, pero no se pinta todo: con la campaña corriendo son miles
+     de líneas, y la página no puede crecer sin fin. */
+  if ($("#masBit")) $("#masBit").onclick = () => {
+    const y = $("#cajaBit") ? $("#cajaBit").scrollTop : 0;   // no devolver al usuario al inicio
+    S.limiteBit += 25; render();
+    const c = $("#cajaBit"); if (c) c.scrollTop = y;
+  };
+  if ($("#limpiarBit")) $("#limpiarBit").onclick = () => {
+    S.qBit = ""; S.fBitAccion = S.fBitQuien = "todos"; S.limiteBit = LOTE_BIT; render(); };
+  if ($("#qBit")){
+    const cajaBit = $("#qBit");
+    cajaBit.oninput = e => {
+      S.qBit = e.target.value; S.limiteBit = LOTE_BIT;
+      clearTimeout(cajaBit._t);
+      cajaBit._t = setTimeout(() => { render(); const n = $("#qBit"); if (n){ n.focus();
+        n.setSelectionRange(n.value.length, n.value.length); } }, 260);
+    };
+  }
+  document.querySelectorAll("[data-fbit]").forEach(sel => sel.onchange = e => {
+    if (sel.dataset.fbit === "accion") S.fBitAccion = e.target.value;
+    else S.fBitQuien = e.target.value;
+    S.limiteBit = LOTE_BIT; render();
+  });
+
+  const qr = $("#qReg");
+  if (qr){
+    qr.oninput = e => {
+      S.qReg = e.target.value; S.limiteReg = 40;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#qReg");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => { S.fResultado = b.dataset.fr; S.limiteReg = 40; render(); });
+  if ($("[data-fr-sel]")) $("[data-fr-sel]").onchange = e => { S.fResultado = e.target.value; S.limiteReg = 40; render(); };
+  if ($("[data-fm-sel]")) $("[data-fm-sel]").onchange = e => { S.fMedio = e.target.value; S.limiteReg = 40; render(); };
+  if ($("[data-fe-sel]")) $("[data-fe-sel]").onchange = e => { S.fEjecReg = e.target.value; S.limiteReg = 40; render(); };
+  if ($("#limpiarReg")) $("#limpiarReg").onclick = () => {
+    S.qReg = ""; S.fResultado = S.fMedio = S.fEjecReg = "todos"; S.limiteReg = 40; render(); };
+  document.querySelectorAll("[data-fper]").forEach(b => b.onclick = () => {
+    S.fPeriodoReg = b.dataset.fper; S.limiteReg = 40; render(); });
+  /* La fila del tablero funciona como filtro: se toca y vuelve a soltar */
+  document.querySelectorAll("[data-fejec]").forEach(tr => tr.onclick = () => {
+    S.fEjecReg = S.fEjecReg === tr.dataset.fejec ? "todos" : tr.dataset.fejec;
+    S.limiteReg = 40; render(); });
+  if ($("#bajarReg")) $("#bajarReg").onclick = () => descargarGestiones();
+  if ($("#anularUbi")) $("#anularUbi").onclick = () => anularUbicacion(S.editId);
+  if ($("#ubiAqui")) $("#ubiAqui").onclick = () => ubicacionDeAqui();
+  if ($("#ubiGuardar")) $("#ubiGuardar").onclick = () => guardarUbicacion(S.editId);
+  if ($("#ubiTxt")) $("#ubiTxt").oninput = e => { if (S.form) S.form._ubiNueva = e.target.value; };
+  if ($("#verFaltanBBVA")) $("#verFaltanBBVA").onclick = () => {
+    S.fContacto = "sin_bbva"; S.limite = 40; render(); };
+
+  document.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => exportarCSV(b.dataset.exp));
+  if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
+  if ($("#expXlsx2")) $("#expXlsx2").onclick = e => exportarExcel(e.currentTarget);
+  if ($("#expBBVA"))  $("#expBBVA").onclick  = e => exportarBBVA(e.currentTarget);
+
+  if (typeof bindEquipo === "function") bindEquipo();
+  if (typeof bindMetas === "function") bindMetas();
+  if (typeof bindAcciones === "function") bindAcciones();
+  if (typeof bindBono === "function") bindBono();
+  if (typeof bindReporte === "function") bindReporte();
+  if ($("#ejecAgenda")) $("#ejecAgenda").onchange = e => { S.fEjecAgenda = e.target.value; render(); };
+
+  /* ---- Actividad del equipo -------------------------------------------- */
+  document.querySelectorAll('[data-f="actrango"]').forEach(b => b.onclick = () => {
+    S.fActRango = b.dataset.v; S.limiteAct = 120; render(); });
+  if ($("#ejecAct")) $("#ejecAct").onchange = e => { S.fActEjec = e.target.value; S.limiteAct = 120; render(); };
+  if ($("#tipoAct")) $("#tipoAct").onchange = e => { S.fActTipo = e.target.value; S.limiteAct = 120; render(); };
+  if ($("#desfAct")) $("#desfAct").onchange = e => { S.fActDesfase = e.target.checked; S.limiteAct = 120; render(); };
+  if ($("#masAct"))  $("#masAct").onclick  = () => { S.limiteAct += 120; render(); };
+  const qa = $("#qAct");
+  if (qa){
+    /* Mismo trato que el buscador de Registros: se espera a que la persona
+       deje de teclear y se le devuelve el cursor donde estaba, porque el
+       repintado reemplaza el campo entero. */
+    qa.oninput = e => {
+      S.qAct = e.target.value; S.limiteAct = 120;
+      clearTimeout(qTimer);
+      qTimer = setTimeout(() => {
+        render();
+        const n = $("#qAct");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 210);
+    };
+  }
+  /* Tocar una fila abre la ficha del comercio. Es lo único que hace esta
+     pantalla además de mirar: la corrección vive en la ficha, con sus reglas
+     y su bitácora, y la hace quien registró. */
+  document.querySelectorAll("[data-actcid]").forEach(tr => {
+    const ir = () => { const cid = tr.dataset.actcid;
+      if (!cid || !byId[cid]) return;
+      S.tab = "cartera"; S.cid = cid; render(); };
+    tr.onclick = ir;
+    tr.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); ir(); } };
+  });
+
+  /* ---- El calendario de visitas ---------------------------------------- */
+  document.querySelectorAll("[data-calmes]").forEach(b => b.onclick = () => {
+    S.calMes = b.dataset.calmes;
+    /* Al cambiar de mes el día elegido deja de tener sentido si no está en el
+       mes nuevo: se pone el primero, para que el panel de abajo siempre
+       corresponda con lo que se está mirando arriba. */
+    if (mesDe(S.calDia) !== S.calMes) S.calDia = S.calMes + "-01";
+    render();
+  });
+  if ($("[data-calhoy]")) $("[data-calhoy]").onclick = () => {
+    S.calDia = hoyISO(); S.calMes = mesDe(S.calDia); render();
+  };
+  document.querySelectorAll("[data-caldia]").forEach(b => b.onclick = () => {
+    S.calDia = b.dataset.caldia; render();
+  });
+  document.querySelectorAll("[data-reag]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); reagendarCita(b.dataset.reag);
+  });
+  /* Agendar. `stopPropagation` porque el botón vive dentro de filas y tarjetas
+     que ya tienen su propio clic —abrir la ficha—: sin esto, agendar abriría
+     además el comercio por detrás del modal. */
+  document.querySelectorAll("[data-agendar]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); agendarCita(b.dataset.agendar);
+  });
+  document.querySelectorAll("[data-agendar-dia]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); agendarDesdeCalendario(b.dataset.agendarDia);
+  });
+  if ($("#qCal")){
+    const cajaCal = $("#qCal");
+    cajaCal.oninput = e => {
+      S.qCal = e.target.value;
+      clearTimeout(cajaCal._t);
+      cajaCal._t = setTimeout(() => {
+        render();
+        const n = $("#qCal");
+        if (n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      }, 260);
+    };
+  }
+  /* La consulta de disponibilidad: se redibuja al cambiar cualquiera de los
+     tres campos, para que la respuesta se vea mientras se elige la franja. */
+  [["dispFecha","dispFecha"], ["dispDesde","dispDesde"], ["dispHasta","dispHasta"]]
+    .forEach(([id, clave]) => {
+      const el = $("#" + id);
+      if (el) el.onchange = () => { S[clave] = el.value; render(); };
+    });
+  /* El reloj del Panel: al cambiar de tipo de ventana se suelta el periodo
+     elegido, porque «2026-08» significa cosas distintas en cada uno. */
+  document.querySelectorAll("[data-vpanel]").forEach(b => b.onclick = () => {
+    if (S.vPanel !== b.dataset.vpanel){ S.vPanel = b.dataset.vpanel; S.pPanel = ""; }
+    render();
+  });
+  if ($("#pPanel")) $("#pPanel").onchange = e => { S.pPanel = e.target.value; render(); };
+  if ($("#verTodoPanel")) $("#verTodoPanel").onclick = () => { S.verTodo = !S.verTodo; render(); };
+  if ($("#salir")) $("#salir").onclick = salir;
+  if ($("#guardarNuevaClave")) $("#guardarNuevaClave").onclick = async () => {
+    const a = ($("#nc1").value || ""), b = ($("#nc2").value || "");
+    if (a.length < 8) return toast("La contraseña debe tener al menos 8 caracteres");
+    if (a !== b)      return toast("Las dos contraseñas no coinciden");
+    const btn = $("#guardarNuevaClave"); btn.disabled = true; btn.textContent = "Guardando…";
+    const { error } = await sb.auth.updateUser({ password:a, data:{ debe_cambiar:false } });
+    btn.disabled = false; btn.textContent = "Guardar contraseña";
+    if (error) return toast("No se pudo cambiar: " + error.message);
+    $("#nc1").value = ""; $("#nc2").value = "";
+    toast("Contraseña actualizada");
+  };
+  if ($("#recargar")) $("#recargar").onclick = async () => {
+    if (S.demo) return toast("En modo demostración no hay nada que recargar");
+    const b = $("#recargar"); b.disabled = true; b.textContent = "Actualizando…";
+    try { await refrescar(); toast("Datos actualizados"); }
+    catch (e) { toast("No se pudo actualizar: " + e.message); }
+    render();
+  };
+}
+
+/* ---- Cabecera ---------------------------------------------------------- */
+document.getElementById("btnSync").onclick = () => {
+  if (!S.user) return;
+  if (S.demo) return toast("En modo demo no hay nada que sincronizar");
+  sincronizar("manual");
+};
+document.getElementById("btnTheme").onclick = () => {
+  const d = document.documentElement.getAttribute("data-theme") === "dark";
+  document.documentElement.setAttribute("data-theme", d ? "light" : "dark");
+};
+document.getElementById("btnUser").onclick = () => {
+  if (!S.user) return;
+  modal(`
+    <h3>${esc(S.user.nombreCompleto || S.user.nombre)}</h3>
+    <p>${esc(S.user.correo)} · ${esc(S.user.rol)}<br>
+    Cartera visible: <b>${cartera().length}</b> clientes · Registros propios:
+    <b>${DB.todos().filter(r => r.Correo_Stratis === S.user.correo).length}</b></p>
+    <div style="display:flex;gap:9px;flex-wrap:wrap">
+      <button class="btn ghost" style="flex:1" id="mAjustes">Ajustes</button>
+      <button class="btn ghost" style="flex:1" id="mSalir">Cerrar sesión</button>
+    </div>`);
+  $("#mAjustes").onclick = () => { cerrarModal(); go("ayuda"); };
+  $("#mSalir").onclick   = () => { cerrarModal(); salir(); };
+};
+
+/* ---- Arranque ---------------------------------------------------------- */
+(async () => {
+  try {
+    if (!window.supabase && configurado())
+      throw new Error("No se pudo cargar la librería de Supabase desde internet. Revisa la conexión o si la red de la empresa bloquea jsdelivr.net.");
+    const listo = await iniciarSupabase();
+    if (!listo) return renderLogin();
+    sb.auth.onAuthStateChange((evento, session) => {
+      if (evento === "SIGNED_IN" && !S.user && session) entrar(session).catch(mostrarFallo);
+      if (evento === "SIGNED_OUT" && S.user) salir();
+    });
+    await comprobarSesion();
+  } catch (e) { mostrarFallo(e); }
+})();
+
+function mostrarFallo(e){
+  // Una sesión caducada no es una caída: se vuelve a la pantalla de ingreso.
+  if (/sesión caducó/i.test(String(e && e.message || e))){
+    S.user = null;
+    $("#app").classList.add("hidden");
+    return renderLogin({ error: String(e.message || e) });
+  }
+  $("#login").classList.remove("hidden");
+  $("#app").classList.add("hidden");
+  $("#login").innerHTML = `<div class="lg-card">
+    <div class="lg-logo"><div class="lg-mark">S</div>
+      <div><h1>Stratis CRM</h1><p>Campaña BBVA Adquirencia</p></div></div>
+    <div class="err"><b>No se pudo conectar con la base de datos.</b><br>${esc(e.message || e)}</div>
+    <div class="note">Revisa que la URL y la llave <code>anon</code> del proyecto sean correctas y que hayas ejecutado
+    <b>01_esquema.sql</b> y <b>02_datos.sql</b> en el SQL Editor de Supabase.</div>
+    <button class="btn block" style="margin-top:12px" onclick="location.reload()">Reintentar</button>
+  </div>`;
+}
+
