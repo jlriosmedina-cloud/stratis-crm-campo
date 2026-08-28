@@ -880,6 +880,84 @@ table.tbl tr:last-child td{border-bottom:0}
 .rep-paso .num{font-size:19px;font-weight:760;letter-spacing:-.6px;line-height:1}
 .rep-paso .pc{font-size:11.5px;color:var(--muted)}
 .rep-paso .cv{font-size:12px;color:var(--muted)}
+/* ---- El embudo por ejecutivo, en Registros ------------------------------
+   Los mismos cinco escalones de la lámina del directorio, uno por persona.
+   Vertical y en pequeños múltiplos: la pregunta es «cómo se compara cada uno
+   con el resto», y para eso hace falta ver los cuatro tableros a la vez, con
+   la misma escala y en el mismo orden. Cuatro embudos horizontales apilados
+   ocupan una pantalla entera y se comparan de memoria.
+
+   LOS COLORES. En claro son exactamente los de la lámina —#232C86, #3B43FB,
+   #F86F35, #0BBC96—, que es el punto: quien mira el CRM y quien mira el deck
+   tienen que ver el mismo embudo. Pasados por el validador, la separación
+   entre colores adyacentes y para daltonismo pasa; lo que no pasa es la banda
+   de luminosidad, y se acepta a sabiendas porque el parecido con la lámina es
+   el objetivo del gráfico.
+
+   En OSCURO no se puede hacer lo mismo, y no por estética: #232C86 sobre el
+   fondo de la tarjeta (#141d29) da 1,44:1 de contraste. La barra de Gestión
+   sencillamente desaparecería. Se sube un escalón cada tono, manteniendo el
+   matiz, y con eso los cuatro pasan el contraste 3:1 y quedan a ΔE 18,3 entre
+   los dos azules, que son los que se parecen.
+
+   Y en los dos modos cada barra lleva su número escrito: naranja y verde no
+   llegan a 3:1 contra el fondo claro, y ahí la regla obliga a etiqueta visible
+   o vista de tabla. Hay las dos —la tabla de siempre quedó justo debajo. */
+:root{
+  --emb-gestion:#232C86; --emb-efectividad:#3B43FB;
+  --emb-visita:#F86F35;  --emb-objetivo:#0BBC96;
+}
+:root[data-theme="dark"]{
+  --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
+  --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
+}
+.emb-grid{display:grid;gap:11px;grid-template-columns:1fr;margin-top:4px}
+@media(min-width:700px){ .emb-grid{grid-template-columns:1fr 1fr} }
+@media(min-width:1180px){ .emb-grid{grid-template-columns:repeat(3,1fr)} }
+.emb-p{border:1px solid var(--grid);border-radius:12px;padding:12px 13px 10px;background:var(--card)}
+.emb-p.equipo{border-color:var(--line);background:var(--surface-2)}
+.emb-p-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px}
+.emb-p-h .nm{font-size:13.5px;font-weight:700;letter-spacing:-.2px;color:var(--ink)}
+.emb-p-h .base{font-size:11.5px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.emb-p-h .base b{color:var(--ink-2);font-weight:650}
+/* La pista es el portafolio: el 100% del que se descuelga todo lo demás.
+   Dibujarlo como fondo y no como una quinta barra evita que el escalón que
+   nunca se mueve compita por la atención con los que sí. */
+.emb-cols{display:flex;align-items:flex-end;gap:2px;height:104px;
+  background:var(--plane);border-radius:7px;padding:6px 6px 0;position:relative}
+.emb-c{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0}
+/* El piso va en la línea, no acá: `min-height` en el CSS se lo aplicaría
+   también al cero y pintaría una barra donde no pasó nada. */
+.emb-c i{display:block;width:100%;border-radius:4px 4px 0 0}
+.emb-pies{display:flex;gap:2px;margin-top:7px}
+.emb-pie{flex:1;min-width:0;text-align:center}
+.emb-pie .n{font-size:15px;font-weight:760;letter-spacing:-.5px;line-height:1.1;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+/* `nowrap`: «RETENCIONES» partido en «RETENCIONE / S» es lo que pasa por
+   defecto en una columna de 62 px, y un rótulo cortado a mitad de palabra hace
+   dudar del número que tiene encima. Prefiere desbordar unos píxeles sobre el
+   relleno de la tarjeta —es la última columna— antes que partirse. */
+.emb-pie .l{font-size:9px;font-weight:700;letter-spacing:0;text-transform:uppercase;
+  color:var(--muted);margin-top:3px;white-space:nowrap}
+.emb-pie .cv{font-size:10.5px;color:var(--muted);margin-top:1px;font-variant-numeric:tabular-nums}
+.emb-ley{display:flex;flex-wrap:wrap;gap:6px 15px;margin:13px 0 0;font-size:12px;color:var(--ink-2)}
+.emb-ley span{display:flex;align-items:center;gap:6px}
+.emb-ley i{flex:none;width:10px;height:10px;border-radius:3px}
+.emb-ley em{font-style:normal;color:var(--muted)}
+/* La tabla de siempre, plegada debajo del embudo. No se borra: sigue teniendo
+   lo que el embudo no cuenta —lo que falta por cargar, el reparto por estado
+   del comercio y cuándo fue la última gestión de cada uno—. Y es, además, la
+   vista de tabla que el gráfico necesita: naranja y verde no llegan a 3:1
+   contra el fondo claro. */
+.emb-tabla-c{margin:0 0 14px}
+.emb-tabla-c > summary{cursor:pointer;font-size:12.5px;font-weight:650;color:var(--ink-2);
+  list-style:none;min-height:34px;display:flex;align-items:center;padding:0 2px}
+.emb-tabla-c > summary::-webkit-details-marker{display:none}
+.emb-tabla-c > summary:before{content:"▸";color:var(--muted);margin-right:7px;font-size:11px}
+.emb-tabla-c[open] > summary:before{content:"▾"}
+.emb-tabla-c[open] > summary{margin-bottom:2px}
+
 .rep-aparte{margin-top:12px;padding:9px 12px;border-radius:9px;background:var(--warn-bg);
   color:var(--warn-ink);font-size:12.5px;font-weight:640}
 .rep-lecturas{display:grid;gap:10px;margin-top:14px}
@@ -1256,13 +1334,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 
 /* Las cuatro cifras contra las que se juzga el periodo. Cada una con su
    mínimo escrito: un porcentaje sin umbral no dice si está bien o mal. */
-/* Una sola columna en el celular. Eran dos, y con las tarjetas del ejecutivo
-   —que llevan la frase de cuánto falta— dos columnas en 430 px partían
-   «necesitas 44 comercios con contacto logrado» en nueve renglones de tres
-   palabras. Esa frase es la que se lee de pie en la calle: si no entra, no
-   sirve. Desde 560 px vuelven las dos. */
-.kpis{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 14px}
-@media(min-width:560px){ .kpis{grid-template-columns:1fr 1fr} }
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 14px}
 .kpi{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
   padding:13px 14px;text-align:left;display:block;width:100%}
 button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inherit}
@@ -1372,11 +1444,7 @@ table.tbl-rz tr.total td{border-top:2px solid var(--line);font-weight:700;color:
 .alerta-gest .ag-n{font-size:34px;font-weight:800;line-height:1;color:var(--serious-ink);
   font-variant-numeric:tabular-nums;flex:none}
 .alerta-gest .ag-t{flex:1;min-width:0}
-/* `> b` y no `b`: el título de la alerta es el hijo directo, pero el párrafo
-   de abajo también lleva negritas —«cuenta la última gestión»— y con el
-   selector suelto heredaban el display:block. La palabra resaltada quedaba
-   sola en su renglón y la frase se leía partida en tres. */
-.alerta-gest .ag-t > b{display:block;font-size:14.5px;color:var(--serious-ink)}
+.alerta-gest .ag-t b{display:block;font-size:14.5px;color:var(--serious-ink)}
 .alerta-gest .ag-t span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:3px}
 .alerta-gest .ag-ir{flex:none;font-size:13px;font-weight:650;color:var(--serious-ink);white-space:nowrap}
 @media (max-width:640px){
@@ -1501,27 +1569,6 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
   .kpis{grid-template-columns:repeat(4,1fr);gap:12px}
   .kpi .val{font-size:28px}
 }
-
-/* ---- Las metas del ejecutivo --------------------------------------------
-   La tarjeta lleva dos líneas más que la de supervisión y las dos hacen
-   trabajo distinto. La primera dice CUÁNTO FALTA en unidades que se pueden
-   hacer hoy: es la única de la tarjeta que se lee de pie, en la calle, con el
-   celular en una mano, así que va en el color del texto principal y no en el
-   gris de las notas. La segunda es la leyenda, plegada: contra qué se mide.
-   Va cerrada porque no se necesita todos los días, y está porque «cobertura»
-   quiere decir dos cosas distintas en esta campaña y las dos salen en la
-   misma pantalla. */
-.kpi-falta{margin-top:9px;font-size:12.5px;line-height:1.45;color:var(--ink-2)}
-.kpi-falta b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
-.kpi-falta.ok{color:var(--muted)}
-.kpi-ley{margin-top:8px;font-size:11.5px;color:var(--muted);line-height:1.5}
-.kpi-ley > summary{cursor:pointer;font-weight:600;color:var(--ink-2);list-style:none;
-  padding:2px 0;min-height:24px;display:flex;align-items:center}
-.kpi-ley > summary::-webkit-details-marker{display:none}
-.kpi-ley > summary:before{content:"▸";color:var(--muted);margin-right:5px;font-size:10px}
-.kpi-ley[open] > summary:before{content:"▾"}
-.kpi-ley p{margin:4px 0 0}
-.kpi-ley b{color:var(--ink-2);font-weight:600}
 /* En la tablet ya caben dos: el mes y el día del que se habla. Apilarlas
    obligaba a bajar toda la rejilla para ver las visitas del día que se acababa
    de tocar, que es justo el gesto que el calendario existe para servir. La
