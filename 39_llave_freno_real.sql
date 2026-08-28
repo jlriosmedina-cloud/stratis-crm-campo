@@ -1,0 +1,71 @@
+-- =========================================================================
+-- 39 · Dónde estaba de verdad el freno
+--
+-- El 38 apostó a que la corrección se rompía en los hijos. La prueba —contra la
+-- base de verdad, dentro de una transacción que se deshace— dijo que no:
+-- `tg_reglas_interaccion` y `tg_reglas_seguimiento` ya traen la escotilla en su
+-- cláusula WHEN, y por eso las gestiones y las citas siguen a la llave sin
+-- problema. El freno estaba en el padre.
+--
+-- `fn_reglas_cliente`, en TODO update hecho por una sesión autenticada, hace
+-- `new.customer_id := old.customer_id`. El comercio nunca se renombraba, no
+-- había CASCADE, y `corregir_customer_id` terminaba intentando arrastrar a mano
+-- las gestiones hacia una llave que no existía: error de llave foránea. Ese es,
+-- palabra por palabra, el síntoma reportado: «me sigue saliendo el customer id
+-- antiguo».
+--
+-- `corregir_ruc` funcionaba de casualidad: `tg_zz_corregir_ruc` corre después y
+-- vuelve a escribir la llave desde la marca de sesión.
+--
+-- Tres cosas, entonces:
+--   1 · La misma escotilla que ya tienen los hijos, en el padre, y solo esa.
+--   2 · `fn_reglas_seguimiento` vuelve a como estaba: la rama que le puso el 38
+--       era código muerto que engañaba al que lo lea después.
+--   3 · El RPC deja de suponer que el renombre ocurrió: lo lee. Y manda la
+--       llave en mayúsculas, que es como la guarda la tabla, o la marca no
+--       coincide con lo que se escribe.
+--
+-- Se probó con el comercio 29664217 (12 gestiones, 10 citas): las 12 y las 10
+-- siguieron a la llave, un ejecutivo ajeno fue rechazado, once dígitos fueron
+-- rechazados, y con el freno viejo puesto a propósito el RPC se negó en vez de
+-- devolver un mensaje de éxito falso. Todo deshecho al terminar.
+--
+-- El cuerpo aplicado es el de la migración
+-- `corregir_customer_id_escotilla_en_reglas_cliente`.
+-- =========================================================================
+
+-- El cambio que importa, en tres funciones. Lo que va abajo es el hunk exacto;
+-- los cuerpos completos —que son los de siempre menos esta línea— quedan en la
+-- historia de migraciones de Supabase, en
+-- `corregir_customer_id_escotilla_en_reglas_cliente`.
+
+-- 1 · fn_reglas_cliente, dentro de `if auth.role() = 'authenticated'`, rama UPDATE.
+--     Antes:
+--        new.customer_id := old.customer_id;
+--     Ahora, con `v_corrigiendo` leído al entrar desde
+--     current_setting('app.corrigiendo_customer_id', true):
+--
+--        -- La llave no se edita... salvo cuando quien la cambia es el RPC de
+--        -- corrección, que deja su marca en la sesión. Sin marca, la regla de
+--        -- siempre. Es la misma puerta que ya tienen interacciones y seguimientos.
+--        if not (v_corrigiendo <> '' and new.customer_id = v_corrigiendo) then
+--          new.customer_id := old.customer_id;
+--        end if;
+
+-- 2 · fn_reglas_seguimiento vuelve a su cuerpo anterior al 38.
+
+-- 3 · corregir_customer_id:
+--     · v_actual y v_nuevo en mayúsculas, que es como la tabla guarda la llave;
+--     · v_correo := nullif(correo_actual(), '') —devuelve cadena vacía, nunca
+--       null, así que el aviso de «sesión no válida» jamás salía—;
+--     · y, después del update, se LEE que el renombre ocurrió:
+--
+--        if not exists (select 1 from public.clientes where customer_id = v_nuevo) then
+--          raise exception 'La correccion no se aplico: el comercio sigue siendo %.', v_actual
+--            using errcode = 'check_violation';
+--        end if;
+--
+--     Esa lectura es la que convierte un fracaso silencioso en un error visible.
+--     Sin ella el RPC llevaba meses devolviendo un mensaje de éxito por una
+--     corrección que no ocurría.
+--     corregir_ruc recibe el mismo arreglo de sesión.
