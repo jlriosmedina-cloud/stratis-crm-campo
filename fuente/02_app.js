@@ -3747,7 +3747,12 @@ function viewFicha(c){
     ${(mio || mandoTotal()) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       ${(mio || mandoTotal()) ? `<button class="btn ghost sm" data-editcli="${c.customer_id}">Editar comercio</button>` : ""}
       ${mio ? `<button class="btn ghost sm" data-delcli="${c.customer_id}" style="color:var(--crit-ink)">Eliminar</button>` : ""}
-      ${(!esDeCampo() || (edicionLibre() && esMiCliente(c)))
+      ${/* La ventana de edición no gobierna esto: corregir una llave mal
+            tecleada no mueve ningún indicador —el comercio conserva su
+            historia, su estado y su gestión; lo único que cambia es cómo se
+            llama—. Lo que sí se conserva es la otra mitad de la regla: solo
+            sobre lo propio, y con nombre en la bitácora. */
+        (!esDeCampo() || esMiCliente(c))
         ? `<button class="btn ghost sm" data-fixid="${c.customer_id}">Corregir ${esClienteNuevo(c) ? "RUC" : "Customer ID"}</button>` : ""}
     </div>` : ""}
   </div>
@@ -5044,9 +5049,13 @@ function confirmarEliminarCliente(cid){
 
    La llave con la que se cruza contra la cartera del banco. Si se registró
    con un dedazo, el comercio no le pega a nada en el archivo de BBVA, y hasta
-   ahora la única salida era borrarlo —perdiendo sus gestiones—
-   y volver a empezar. La corrección la hacen el Analista y el Manager: el
-   error lo comete quien registra, así que no debería revisarse a sí mismo.
+   ahora la única salida era borrarlo —perdiendo sus gestiones— y volver a
+   empezar.
+
+   La corrige quien registró el comercio, y supervisión cualquiera. Se movió del
+   escritorio a la calle por una razón simple: el dedazo lo descubre quien está
+   frente al comercio, y hacerlo esperar deja el dato malo en la base que se le
+   entrega al banco. Lo que se conserva es la bitácora con nombre y apellido.
    ------------------------------------------------------------------------- */
 function modalCorregirId(cid){
   const c = byId[String(cid)];
@@ -5059,16 +5068,14 @@ function modalCorregirId(cid){
   const nuevoCli = esClienteNuevo(c);
   const ROT = nuevoCli ? "RUC" : "Customer ID";
   const actual = nuevoCli ? (c.ruc || "") : c.customer_id;
-  if (esDeCampo()){
-    if (!esMiCliente(c))
-      return toast(`Solo puedes corregir el ${ROT} de los comercios que registraste`);
-    /* Se respeta la misma ventana de edición que gobierna el resto de sus
-       cambios: una regla, no dos. Cerrada la ventana queda el camino de
-       siempre, que es pedírselo al Analista o al Manager. */
-    if (!edicionLibre())
-      return toast(`La ventana de edición del periodo ya cerró: pídele al Analista que corrija el ${ROT}`);
-  }
-  const n = DB.delCliente(cid).length;
+  /* La ventana de edición NO gobierna esto. La ventana existe para que nadie
+     retoque gestiones pasadas y se mejore los indicadores; una llave mal
+     tecleada no mueve ningún indicador. Lo que sí sigue rigiendo es lo propio:
+     el ejecutivo corrige lo que él registró, supervisión cualquiera. */
+  if (esDeCampo() && !esMiCliente(c))
+    return toast(`Solo puedes corregir el ${ROT} de los comercios que registraste`);
+  const n     = DB.delCliente(cid).length;
+  const nCita = SEGUIMIENTOS.filter(s => String(s.customer_id) === String(cid)).length;
 
   modal(`
     <h3>Corregir el ${ROT}</h3>
@@ -5083,8 +5090,8 @@ function modalCorregirId(cid){
     </div>
     <div class="note" style="margin-bottom:12px">
       ${n ? `Sus <b>${n}</b> gestión${n===1?"":"es"} —con el comercio y con el banco—
-             se mueven con él; no se pierde nada. `
-          : "El comercio todavía no tiene ninguna gestión registrada. "}
+             se mueven con él` : "El comercio todavía no tiene ninguna gestión registrada"}${
+         nCita ? ` y también sus <b>${nCita}</b> cita${nCita===1?"":"s"}` : ""}; no se pierde nada.
       La corrección queda en la bitácora con tu nombre.
     </div>
     <div id="fixMsg"></div>
@@ -5101,15 +5108,25 @@ function modalCorregirId(cid){
     const nuevo = caja.value.trim();
     const msg = $("#fixMsg");
     if (!nuevo) return msg.innerHTML = `<div class="err">Escribe el ${esc(ROT)} correcto.</div>`;
-    if (nuevo === String(actual))
+    /* Sin distinguir mayúsculas: la base las normaliza, así que «29664217a» y
+       «29664217A» son el mismo comercio y no una corrección. */
+    if (nuevo.toUpperCase() === String(actual).toUpperCase())
       return msg.innerHTML = `<div class="err">Ese es el mismo que ya tiene.</div>`;
     if (nuevoCli && !esRucValido(nuevo))
       return msg.innerHTML = `<div class="err">El RUC debe tener 11 dígitos.</div>`;
     if (!nuevoCli && !/^[A-Za-z0-9._-]{3,30}$/.test(nuevo))
       return msg.innerHTML = `<div class="err">Entre 3 y 30 caracteres, sin espacios ni símbolos raros.</div>`;
+    /* Once dígitos es un RUC, y un RUC convierte la ficha en venta nueva sin
+       que nadie lo haya pedido: el comercio saldría del portafolio de retención
+       y de todos sus indicadores. La base también lo rechaza; se dice acá para
+       no hacer el viaje. */
+    if (!nuevoCli && /^\d{11}$/.test(nuevo))
+      return msg.innerHTML = `<div class="err">Ese número tiene forma de RUC. Un comercio de cartera no puede quedar identificado como venta nueva: si de verdad es una venta, regístrala como tal.</div>`;
     /* La llave dentro de la tabla es el customer_id en los dos casos; para un
-       RUC es su forma «NUEVO-…», la misma convención con la que se creó. */
-    const destino = nuevoCli ? "NUEVO-" + nuevo : nuevo;
+       RUC es su forma «NUEVO-…», la misma convención con la que se creó. La
+       base guarda el Customer ID en mayúsculas, así que se manda ya en
+       mayúsculas o lo que se busque después no existe. */
+    const destino = nuevoCli ? "NUEVO-" + nuevo : nuevo.toUpperCase();
     if (nuevoCli && CLIENTES.some(o => o.ruc === nuevo && o.customer_id !== c.customer_id))
       return msg.innerHTML = `<div class="err">El RUC ${esc(nuevo)} ya está registrado en la campaña.</div>`;
     if (byId[destino])
@@ -15735,10 +15752,107 @@ function cardReporte(){
 }
 
 function bindReporte(){
-  if ($("#repDir"))     $("#repDir").onclick  = e => generarPPTX(e.currentTarget, armarDirectorio);
+  if ($("#repDir"))     $("#repDir").onclick  = e => modalFacturacion(e.currentTarget);
   if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
   document.querySelectorAll("[data-repedit]").forEach(b =>
     b.onclick = () => modalReporte(b.dataset.repedit));
+}
+
+/* ---- La facturación se pregunta al descargar -----------------------------
+   Es el único número del deck que el CRM no puede calcular: lo declara el banco
+   y llega por fuera. Vivía en Ajustes › Editar el relato, dentro de un JSON, y
+   ahí envejecía sin que nadie se enterara — el 27/08 la lámina salió con un
+   acumulado de cuatro días antes y una proyección que no era la que José tenía
+   en la cabeza.
+
+   Ahora se pregunta en el momento exacto en que importa: al pedir el deck.
+   Precargado con lo último guardado, para que confirmar sea un clic y corregir
+   sea escribir encima. Y se guarda, así que la pantalla y la lámina no pueden
+   quedar diciendo cosas distintas.
+
+   La fecha del acumulado no es un adorno: sin ella no hay proyección al cierre
+   del mes, y el deck prefiere mostrar el acumulado crudo antes que inventar un
+   cierre. */
+/* Lo que se va a guardar, a partir de lo que se escribió. Va aparte del
+   diálogo por una razón práctica: `sb` es una const del script y una prueba no
+   la puede sustituir, así que si la conversión viviera dentro del `onclick` no
+   habría forma de comprobarla sin tocar la base. Acá se le puede preguntar
+   directamente cuánto es «29» en soles y si respeta el resto del bloque. */
+function facturacionDesde(montoMM, metaMM, hasta){
+  return Object.assign({}, REPORTE.proyecto || {}, {
+    facturacion_periodo: Math.round((Number(montoMM) || 0) * 1000000),
+    facturacion_meta_mes: Number(metaMM) > 0 ? Math.round(Number(metaMM) * 1000000) : 0,
+    facturacion_periodo_hasta: hasta || null });
+}
+
+/* Y el motivo por el que se rechaza, o cadena vacía si está bien. Misma idea:
+   la regla se puede probar sin abrir un diálogo ni tocar la base. */
+function validarFacturacion(montoMM, metaMM, hasta, hoy){
+  if (!(Number(montoMM) > 0))       return "Falta el alcance acumulado.";
+  if (hasta && hasta > hoy)         return "Esa fecha todavía no llegó.";
+  if (Number(metaMM) < 0)           return "La meta no puede ser negativa.";
+  return "";
+}
+
+function modalFacturacion(btn){
+  const P = repProyecto();
+  const mm = v => { const x = Number(v) || 0; return x ? (x / 1000000) : ""; };
+  const hoy = hoyISO();
+
+  modal(`<h3>Alcance de facturación</h3>
+    <p style="margin:-4px 0 12px;font-size:12.8px;color:var(--muted);line-height:1.5">
+      Es el único dato del deck que no sale del CRM: lo declara el banco. Se guarda al
+      generar, así que la pantalla y la lámina van a decir lo mismo.</p>
+    <div class="field">
+      <label>Alcance acumulado del periodo</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--muted);font-size:13px">S/</span>
+        <input id="facMonto" type="number" step="0.01" min="0" value="${esc(String(mm(P.facturacion_periodo)))}">
+        <span style="color:var(--muted);font-size:13px">MM</span>
+      </div>
+      <div class="hint">Lo facturado hasta la fecha de abajo, en millones de soles.</div>
+    </div>
+    <div class="field">
+      <label>Fecha de ese acumulado</label>
+      <input id="facHasta" type="date" max="${hoy}"
+             value="${esc(String(P.facturacion_periodo_hasta || "").slice(0,10))}">
+      <div class="hint">Con esta fecha el deck proyecta el cierre del mes. Sin ella muestra
+        el acumulado tal cual, sin proyectar.</div>
+    </div>
+    <div class="field">
+      <label>Meta de facturación del mes</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--muted);font-size:13px">S/</span>
+        <input id="facMeta" type="number" step="0.01" min="0" value="${esc(String(mm(P.facturacion_meta_mes)))}">
+        <span style="color:var(--muted);font-size:13px">MM</span>
+      </div>
+      <div class="hint">Contra esta se lee el mes en curso. Vacía, la lámina usa la meta al
+        cierre del proyecto.</div>
+    </div>
+    <div id="facMsg"></div>
+    <div style="display:flex;gap:9px">
+      <button class="btn ghost" style="flex:1" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn" style="flex:1" id="facOk">Guardar y generar</button>
+    </div>`);
+
+  $("#facOk").onclick = async () => {
+    const msg = $("#facMsg");
+    const monto = $("#facMonto").value;
+    const meta  = $("#facMeta").value;
+    const hasta = String($("#facHasta").value || "").slice(0,10);
+    const mal = validarFacturacion(monto, meta, hasta, hoy);
+    if (mal) return msg.innerHTML = `<div class="err">${esc(mal)}</div>`;
+
+    const b2 = $("#facOk"); b2.disabled = true; b2.textContent = "Guardando…";
+    const valor = facturacionDesde(monto, meta, hasta);
+    const { error } = await sb.from("reporte_config")
+      .upsert({ clave:"proyecto", valor }, { onConflict:"clave" });
+    if (error){ b2.disabled = false; b2.textContent = "Guardar y generar";
+      return msg.innerHTML = `<div class="err">No se pudo guardar: ${esc(error.message)}</div>`; }
+    cerrarModal();
+    await cargarReporte(); render();
+    await generarPPTX(btn, armarDirectorio);
+  };
 }
 
 function modalReporte(clave){
