@@ -1256,7 +1256,13 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 
 /* Las cuatro cifras contra las que se juzga el periodo. Cada una con su
    mínimo escrito: un porcentaje sin umbral no dice si está bien o mal. */
-.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 14px}
+/* Una sola columna en el celular. Eran dos, y con las tarjetas del ejecutivo
+   —que llevan la frase de cuánto falta— dos columnas en 430 px partían
+   «necesitas 44 comercios con contacto logrado» en nueve renglones de tres
+   palabras. Esa frase es la que se lee de pie en la calle: si no entra, no
+   sirve. Desde 560 px vuelven las dos. */
+.kpis{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 14px}
+@media(min-width:560px){ .kpis{grid-template-columns:1fr 1fr} }
 .kpi{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
   padding:13px 14px;text-align:left;display:block;width:100%}
 button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inherit}
@@ -1366,7 +1372,11 @@ table.tbl-rz tr.total td{border-top:2px solid var(--line);font-weight:700;color:
 .alerta-gest .ag-n{font-size:34px;font-weight:800;line-height:1;color:var(--serious-ink);
   font-variant-numeric:tabular-nums;flex:none}
 .alerta-gest .ag-t{flex:1;min-width:0}
-.alerta-gest .ag-t b{display:block;font-size:14.5px;color:var(--serious-ink)}
+/* `> b` y no `b`: el título de la alerta es el hijo directo, pero el párrafo
+   de abajo también lleva negritas —«cuenta la última gestión»— y con el
+   selector suelto heredaban el display:block. La palabra resaltada quedaba
+   sola en su renglón y la frase se leía partida en tres. */
+.alerta-gest .ag-t > b{display:block;font-size:14.5px;color:var(--serious-ink)}
 .alerta-gest .ag-t span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:3px}
 .alerta-gest .ag-ir{flex:none;font-size:13px;font-weight:650;color:var(--serious-ink);white-space:nowrap}
 @media (max-width:640px){
@@ -1491,6 +1501,27 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
   .kpis{grid-template-columns:repeat(4,1fr);gap:12px}
   .kpi .val{font-size:28px}
 }
+
+/* ---- Las metas del ejecutivo --------------------------------------------
+   La tarjeta lleva dos líneas más que la de supervisión y las dos hacen
+   trabajo distinto. La primera dice CUÁNTO FALTA en unidades que se pueden
+   hacer hoy: es la única de la tarjeta que se lee de pie, en la calle, con el
+   celular en una mano, así que va en el color del texto principal y no en el
+   gris de las notas. La segunda es la leyenda, plegada: contra qué se mide.
+   Va cerrada porque no se necesita todos los días, y está porque «cobertura»
+   quiere decir dos cosas distintas en esta campaña y las dos salen en la
+   misma pantalla. */
+.kpi-falta{margin-top:9px;font-size:12.5px;line-height:1.45;color:var(--ink-2)}
+.kpi-falta b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+.kpi-falta.ok{color:var(--muted)}
+.kpi-ley{margin-top:8px;font-size:11.5px;color:var(--muted);line-height:1.5}
+.kpi-ley > summary{cursor:pointer;font-weight:600;color:var(--ink-2);list-style:none;
+  padding:2px 0;min-height:24px;display:flex;align-items:center}
+.kpi-ley > summary::-webkit-details-marker{display:none}
+.kpi-ley > summary:before{content:"▸";color:var(--muted);margin-right:5px;font-size:10px}
+.kpi-ley[open] > summary:before{content:"▾"}
+.kpi-ley p{margin:4px 0 0}
+.kpi-ley b{color:var(--ink-2);font-weight:600}
 /* En la tablet ya caben dos: el mes y el día del que se habla. Apilarlas
    obligaba a bajar toda la rejilla para ver las visitas del día que se acababa
    de tocar, que es justo el gesto que el calendario existe para servir. La

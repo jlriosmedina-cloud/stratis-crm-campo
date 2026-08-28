@@ -7365,7 +7365,7 @@ function bloqueActividad(r, regs){
   const pide  = rvP.porSemana || rvP.meta;
 
   return `
-  <div class="pnl-h"><span class="pnl-n">2</span>
+  <div class="pnl-h"><span class="pnl-n">${vistaDeCampo() ? 4 : 2}</span>
     <div><b>La actividad</b><span>${esc(r.detalle)} — todo contado en gestiones</span></div>
   </div>
   <div class="stat-row">
@@ -7721,9 +7721,15 @@ function bloqueCorregir(r, regs){
   const puntos = [
     { n:sinUbi.length,   t:"Gestiones sin ubicación", d:"presenciales sin coordenada y sin exención",
       ir:`data-verges="sin_ubicacion"`, grave:true },
-    /* También para el ejecutivo desde el 24/08: es lo único de la llave que
-       puede corregir mientras el periodo sigue abierto. */
-    { n:tarde.length, t:"Gestiones fuera de plazo",
+    /* Se le abrió al ejecutivo el 24/08 —«es lo único de la llave que puede
+       corregir mientras el periodo sigue abierto»— y se le vuelve a cerrar el
+       28/08, porque eso es justamente el problema: la lista de las que
+       quedaron fuera de plazo es la puerta para mover la fecha a favor propio,
+       y la puntualidad es uno de los tres requisitos que le abren el
+       incentivo. El PORCENTAJE sí lo ve, con su mínimo y con cuántas le
+       faltan, en el bloque de sus metas; corregir una fecha es de supervisión.
+       Nadie debería poder editar la evidencia de su propia medición. */
+    { n: mando ? tarde.length : 0, t:"Gestiones fuera de plazo",
       d:"registradas más de un día trabajado después del contacto",
       ir:`data-verges="fuera_plazo"` },
     { n:sinCanal.length, t:"Comercios sin canal BBVA", d:"se registraron antes de que el dato fuera obligatorio",
@@ -7751,7 +7757,7 @@ function bloqueCorregir(r, regs){
   ].filter(x => x.n > 0);
 
   return `
-  <div class="pnl-h"><span class="pnl-n">${mando ? 5 : 4}</span>
+  <div class="pnl-h"><span class="pnl-n">5</span>
     <div><b>Lo que hay que corregir</b><span>${puntos.length ? "Cada uno lleva a su lista" : "Nada pendiente de corregir"}</span></div>
   </div>
   <div class="card">
@@ -7877,27 +7883,198 @@ function bloqueDetalle(r, regs){
   </div>`;
 }
 
-/* ---- Tu registro al día -------------------------------------------------
+/* ---- 1 · Tus metas -------------------------------------------------------
 
-   La puntualidad del registro estuvo oculta al ejecutivo hasta el 24/08. La
-   razón escrita era buena —«que el número esté a la vista todos los días
-   convierte una medición en una discusión diaria»— y resultó ser exactamente
-   al revés: uno de los cuatro cerró el primer periodo en 73,8% y perdió la
-   llave por un requisito que no podía ver. Nadie corrige lo que no mira.
+   Lo primero que ve el ejecutivo al abrir su panel, y hasta el 28/08 no
+   estaba: para saber contra qué lo miden tenía que entrar a Incentivos, que
+   es la pantalla que le dice cuánto va a cobrar. Mirar el requisito y mirar
+   la plata eran el mismo gesto, así que el requisito se miraba tarde. Uno de
+   los cuatro cerró el primer periodo con 73,8% de puntualidad y perdió la
+   llave por un mínimo que nunca tuvo delante.
 
-   Así que acá está, con las tres cosas que lo hacen accionable y no solo
-   informativo:
+   Las cuatro cifras salen de `llaveDe` y de `paramsDe` —las MISMAS funciones
+   con las que se liquida el incentivo—. No se recalcula nada acá a propósito:
+   el día que esta pantalla y la liquidación se separen, el ejecutivo va a
+   estar trabajando contra un número que no es el que le van a pagar.
 
-     · el porcentaje contra su mínimo, que es el veredicto;
-     · CUÁNTAS gestiones a tiempo le faltan, porque «te faltan 11» se puede
-       hacer hoy y «te falta 6,2 puntos» no;
-     · qué vence HOY. El plazo es un día trabajado: lo que se hizo el día
-       trabajado anterior deja de estar a tiempo cuando termine este. Esa es
-       la única frase de toda la pantalla que puede evitar el incumplimiento
-       en vez de contarlo.
+   Cada tarjeta lleva tres cosas y ninguna sobra:
 
-   No se muestra a supervisión: ellos tienen la tabla completa en el bloque de
-   la llave y en Incentivos. */
+     · el número con su MÍNIMO al lado, porque 87% no dice nada hasta que se
+       sabe si el piso es 80 o 90;
+     · cuánto FALTA en unidades que se pueden hacer hoy —«te faltan 6
+       comercios» se sale a buscar, «te faltan 3,4 puntos» no—;
+     · y una leyenda que dice contra qué se mide.
+
+   La leyenda no es adorno. «Cobertura» significa dos cosas distintas en esta
+   campaña y las dos salen en este mismo panel: acá arriba es la de la llave
+   —contacto logrado sobre lo que él cargó— y más abajo, en la alerta de lo
+   que falta por gestionar, es la regla del 27/08, que es la que ve BBVA en el
+   reporte. Las dos son correctas y miden cosas distintas. Un panel que
+   muestra los dos números sin decir cuál es cuál es el mismo problema que
+   este proyecto lleva dos semanas corrigiendo, servido en pantalla propia. */
+function bloqueMisMetas(r){
+  const correo = correoObservado() || (S.user && S.user.correo) || "";
+  if (!correo) return "";
+
+  /* La llave se mide SIEMPRE contra el periodo del bono, mire lo que mire el
+     selector de arriba. Un mes calendario o «todo el proyecto» no son ventanas
+     de liquidación: presentarlos como tales sería inventar un veredicto que
+     nadie va a aplicar. */
+  const p  = (r.id === "bono" && r.periodo) ? r.periodo : periodoHoy();
+  const ll = llaveDe(correo, p);
+  const B  = paramsDe(p);
+  const cob = ll.cobertura, vis = ll.visitas, pun = ll.puntualidad;
+
+  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
+                                   && enVentana(c.creado_en, p)).length;
+  const metaV  = B.metas.ventas_mes || 0;
+
+  const n1 = v => (Math.round((v || 0) * 10) / 10).toString().replace(".", ",");
+  const minCob  = cob.denom ? Math.ceil(cob.denom * cob.meta / 100) : 0;
+  const faltanV = Math.max(0, vis.pide - vis.efectivas);
+  const ayer    = diaTrabajadoAnterior(hoyISO());
+
+  const tarjeta = o => `
+    <div class="kpi">
+      <div class="lbl">${o.lbl}</div>
+      <div class="val num">${o.val}${o.pc ? `<span class="pc">%</span>` : ""}</div>
+      <div class="sub">${o.sub}</div>
+      ${medidor(o.pct, o.ok ? "" : tonoContra(o.pct, 100))}
+      <div class="kpi-falta ${o.ok ? "ok" : ""}">${o.falta}</div>
+      <details class="kpi-ley"><summary>Qué mide</summary><p>${o.ley}</p></details>
+    </div>`;
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">1</span>
+    <div><b>Tus metas del periodo ${esc(nombrePeriodo(p))}</b>
+      <span>${esc(textoPeriodo(p))} — las tres primeras abren tu incentivo, la cuarta es tu meta de ventas</span></div>
+  </div>
+
+  <div class="kpis">
+    ${tarjeta({
+      lbl:"Cobertura", val:n1(cob.valor), pc:true, ok:cob.ok,
+      pct: cob.meta ? cob.valor / cob.meta * 100 : 0,
+      sub:`${cob.cubiertos} de ${cob.denom} comercios · mínimo ${cob.meta}%`,
+      falta: cob.ok
+        ? (cob.porExcepcion ? "Dado por cumplido por autorización de supervisión."
+                            : "Estás sobre el mínimo.")
+        : `Para llegar al ${cob.meta}% necesitas <b>${minCob}</b> comercios con contacto logrado:
+           te faltan <b>${cob.faltan}</b>.${cob.cargaCompleta ? "" :
+           ` Además tienes que tener cargada toda tu cartera: faltan <b>${cob.faltanPorCargar}</b> por cargar.`}`,
+      ley:`Cuenta el comercio donde hubo un <b>contacto logrado</b> dentro del periodo: un correo
+        declarado al ejecutivo de BBVA, o una gestión efectiva con el cliente. Un comercio cuenta
+        una vez, por más veces que se le haya escrito, y va sobre los comercios que tú cargaste.
+        <b>No es el mismo número</b> que «te faltan por gestionar» de más abajo: aquella usa la
+        regla con la que se arma el reporte a BBVA —la última gestión de cada comercio—. Las dos
+        son correctas y miden cosas distintas; esta es la que decide tu incentivo.`
+    })}
+    ${tarjeta({
+      lbl:"Visitas efectivas", val:vis.efectivas, ok:vis.ok,
+      pct: vis.pide ? vis.efectivas / vis.pide * 100 : 0,
+      sub:`de ${vis.pide} que pide el periodo`,
+      falta: vis.ok ? "Ya llegaste al mínimo."
+                    : `Te faltan <b>${faltanV}</b> ${faltanV === 1 ? "visita efectiva" : "visitas efectivas"}.`,
+      ley:`Una visita cuenta cuando fue presencial o reunión virtual, el cliente <b>respondió</b> y
+        —si fue presencial— quedó la coordenada que tomó el GPS. Las visitas a la agencia del banco
+        no entran: este requisito mide terreno con el comercio.`
+    })}
+    ${tarjeta({
+      lbl:"Puntualidad del registro", val:n1(pun.valor), pc:true, ok:pun.ok,
+      pct: pun.meta ? pun.valor / pun.meta * 100 : 0,
+      sub:`${pun.puntuales} de ${ll.gestiones} a tiempo · mínimo ${pun.meta}%`,
+      /* Solo el número, sin salida a la lista. Ver CUÁLES quedaron fuera de
+         plazo es, en la práctica, la puerta para retocarlas: la corrección de
+         una fecha la hace supervisión, no quien la registró. */
+      falta: pun.ok
+        ? (ayer ? `Al día. Lo que hiciste el <b>${esc(fmtFecha(ayer))}</b> vence hoy.` : "Al día.")
+        : `Te faltan <b>${pun.faltan}</b> ${pun.faltan === 1 ? "gestión" : "gestiones"} a tiempo.${
+            ayer ? ` Lo que hiciste el <b>${esc(fmtFecha(ayer))}</b> vence hoy.` : ""}`,
+      ley:`El plazo son <b>días trabajados</b> entre la fecha que pones como fecha de la gestión y el
+        momento en que el CRM recibe el formulario: sábados, domingos y feriados no cuentan.
+        Registrar el mismo día o el día trabajado siguiente está dentro del plazo. Crear la ficha
+        del comercio también es trabajo tuyo, así que darla de alta tarde no corre el plazo.`
+    })}
+    ${tarjeta({
+      lbl:"Ventas nuevas", val:ventas, ok: metaV ? ventas >= metaV : true,
+      pct: metaV ? ventas / metaV * 100 : 0,
+      sub:`de ${metaV} del periodo`,
+      falta: metaV && ventas < metaV
+        ? `Te faltan <b>${metaV - ventas}</b> ${metaV - ventas === 1 ? "afiliación" : "afiliaciones"}.`
+        : "Meta cumplida.",
+      ley:`Cuenta la afiliación nueva <b>registrada</b> dentro del periodo, esté cerrada o no: es
+        como se mide en Incentivos y no se acumula de un periodo al siguiente. Más abajo,
+        «Ventas nuevas cerradas» cuenta otra cosa —solo las que ya cerraron—.`
+    })}
+  </div>
+
+  <div class="note ${ll.cumplidos === 3 ? "ok" : ll.cumplidos === 2 ? "warn" : "crit"}"
+       style="margin:0 0 14px">
+    <b>${ll.cumplidos} de 3 requisitos.</b>
+    ${ll.cumplidos === 3
+      ? "Con los tres, el incentivo se calcula completo."
+      : ll.cumplidos === 2
+        ? "Con dos requisitos se paga solo el bono base; el gradual no se abre."
+        : "Con menos de dos requisitos el periodo no genera incentivo."}
+    Los requisitos <b>habilitan</b> el cálculo: no suman monto por sí solos.
+    La meta de ventas sí pesa en cuánto se paga.
+    La barrita de cada tarjeta mide <b>cuánto llevas recorrido del mínimo</b>, no el porcentaje.
+  </div>`;
+}
+
+/* ---- 3 · En qué punto está cada comercio ---------------------------------
+
+   La cartera entera en una sola barra, y cada tramo lleva a su lista. Es la
+   pregunta que un ejecutivo se hace antes de salir —«¿de qué me tengo que
+   ocupar hoy?»— y que hasta ahora se respondía sumando a mano dos cifras de
+   dos bloques distintos.
+
+   «Retenido» y «Recuperado» van juntos en un solo tramo verde: los dos son el
+   objetivo cumplido y separarlos acá gastaría un color en una distinción que
+   no cambia qué hacer mañana. El desglose se dice en la leyenda.
+
+   «Por validar» va en gris a propósito. No es un estado tibio entre dos: es
+   el comercio cuya pelota está en la cancha del banco. Pintarlo del mismo
+   ámbar que «Por contactar» —lo que sí depende de él— haría ver como propia
+   una demora que no lo es. */
+function bloqueCadaComercio(r){
+  const cartera = universoPanel().filter(c => !esClienteNuevo(c));
+  if (!cartera.length) return "";
+  const total = cartera.length;
+  const cuenta = id => cartera.filter(c => estadoDerivado(c) === id).length;
+
+  const retenidos = cuenta("RETENIDO"), recuperados = cuenta("RECUPERADO");
+  const tramos = [
+    { label:"Por validar", n:cuenta("POR_VALIDAR"), color:"var(--muted)", ver:"POR_VALIDAR",
+      pie:"esperando que BBVA entregue o confirme los datos" },
+    { label:"Por contactar", n:cuenta("POR_CONTACTAR"), color:"var(--warn)", ver:"POR_CONTACTAR",
+      pie:"el banco ya respondió y falta hablar con el titular" },
+    { label:"En negociación", n:cuenta("EN_NEGOCIACION"), color:"var(--brand-2)", ver:"EN_NEGOCIACION",
+      pie:"hablaste con el titular y el caso sigue abierto" },
+    { label:"Objetivo cumplido", n:retenidos + recuperados, color:"var(--good)", ver:"RETENIDO",
+      pie:`${retenidos} retenido${retenidos === 1 ? "" : "s"} y ${recuperados} recuperado${
+        recuperados === 1 ? "" : "s"}` },
+    { label:"Perdido", n:cuenta("PERDIDO"), color:"var(--crit)", ver:"PERDIDO",
+      pie:"se fue o cerró" }
+  ].filter(x => x.n > 0);
+
+  return `
+  <div class="pnl-h"><span class="pnl-n">3</span>
+    <div><b>En qué punto está cada comercio</b>
+      <span>Tus ${total} comercios de cartera, hoy — toca un tramo para ver cuáles</span></div>
+  </div>
+  <div class="card">
+    <div class="g-barra">
+      ${tramos.map(x => `<span style="width:${(x.n / total * 100).toFixed(1)}%;background:${x.color}"
+        title="${esc(x.label)}: ${x.n}"></span>`).join("")}
+    </div>
+    <div class="g-leyenda">
+      ${tramos.map(x => `<button class="g-ley-x" data-verest="${x.ver}" title="Ver los comercios">
+        <i style="background:${x.color}"></i>${esc(x.label)} · <b>${x.n}</b></button>`).join("")}
+    </div>
+    <div class="pie">${tramos.map(x => `<b>${esc(x.label)}</b>: ${x.pie}`).join(" · ")}.</div>
+  </div>`;
+}
+
 /* ---- Tu periodo en números ----------------------------------------------
    El bloque que pidió José el 27/08 y que el panel no tenía: las ocho cifras
    con las que un ejecutivo decide qué hacer AHORA, en una sola fila y con las
@@ -7946,7 +8123,7 @@ function bloqueMiPeriodo(r){
   const cobertura = cartera.length ? Math.round(conGestion / cartera.length * 100) : 0;
 
   return `
-  <div class="pnl-h"><span class="pnl-n">1</span>
+  <div class="pnl-h"><span class="pnl-n">2</span>
     <div><b>Tu periodo en números</b><span>${esc(r.detalle)}</span></div>
   </div>
 
@@ -7979,8 +8156,8 @@ function bloqueMiPeriodo(r){
   <div class="stat-row">
     <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${visitas}</div>
       <div class="sub">gestiones que cumplen visita en el periodo</div></div>
-    <div class="stat"><div class="lbl">Ventas cerradas</div><div class="val">${ventas}</div>
-      <div class="sub">afiliaciones nuevas cerradas en el periodo</div></div>
+    <div class="stat"><div class="lbl">Ventas nuevas cerradas</div><div class="val">${ventas}</div>
+      <div class="sub">las que ya cerraron · tu meta de arriba cuenta las registradas</div></div>
     <button class="stat stat-link" data-verest="POR_CONTACTAR"><div class="lbl">Por contactar</div>
       <div class="val">${porContactar}</div>
       <div class="sub">BBVA respondió y falta hablar con el titular — <b>ver cuáles</b></div></button>
@@ -7989,87 +8166,56 @@ function bloqueMiPeriodo(r){
       <div class="sub">hablaste con el titular y el caso sigue abierto — <b>ver cuáles</b></div></button>
   </div>
 
+  ${/* Se llamaba «Cobertura de tu cartera» y arriba hay otra cifra que también
+        se llama cobertura y da otro número. Las dos son correctas: esta cuenta
+        con la regla del 27/08 —la del reporte a BBVA— y la de arriba con la de
+        la llave. Dos números con el mismo rótulo en la misma pantalla es
+        exactamente lo que hay que no hacer, así que este dice lo que cuenta. */""}
   <div class="cob-linea">
-    <div class="cob-t">Cobertura de tu cartera <b>${cobertura}%</b>
-      <span>${conGestion} de ${cartera.length} con gestión</span></div>
+    <div class="cob-t">Comercios con gestión al día <b>${cobertura}%</b>
+      <span>${conGestion} de ${cartera.length} · con la regla del reporte a BBVA, no con la de tu incentivo</span></div>
     <div class="pista"><i style="width:${cobertura}%"></i></div>
   </div>`;
 }
 
-function bloqueMiRegistro(){
-  if (!vistaDeCampo()) return "";
-  const correo = correoObservado() || (S.user && S.user.correo);
-  if (!correo) return "";
-  const p  = periodoHoy();
-  const ll = llaveDe(correo, p);
-  const q  = ll.puntualidad;
-  if (!ll.gestiones) return "";
+/* =========================================================================
+   El Panel del ejecutivo
+   =========================================================================
 
-  const hoy = hoyISO();
-  const ayer = diaTrabajadoAnterior(hoy);
-  /* Lo que se registró hoy, mirando el sello del servidor y no la fecha que se
-     tecleó: la pregunta es cuánto entró al CRM hoy. */
-  const hoyN = DB.crudo.filter(r => r.Correo_Stratis === correo
-    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)).length;
-  /* Y de eso, cuánto era trabajo de días anteriores: es el hábito que hay que
-     ver, no el total. */
-  const arrastre = DB.crudo.filter(r => r.Correo_Stratis === correo
-    && String(r.Creado_En || "").slice(0,10) === hoy && !esReconstruida(r)
-    && String(r.Fecha_Contacto || "").slice(0,10) < hoy).length;
+   Rehecho el 28/08. Antes eran siete bloques en el orden en que se fueron
+   escribiendo, y tres de ellos —el proyecto, la tabla por ejecutivo y el
+   detalle— eran pantallas de supervisión servidas a una persona que no toma
+   ninguna de esas decisiones: el reparto de la cartera del proyecto, la
+   comparación entre ejecutivos —que en su caso es una tabla de una sola
+   fila— y los gráficos de medios de contacto y respaldo de GPS. Información
+   correcta, para otro puesto. Lo que no estaba era lo primero que necesita:
+   contra qué lo miden.
 
-  const ok = q.ok && !q.porExcepcion;
-  const margen = q.puntuales - Math.ceil(ll.gestiones * q.meta / 100);
-  const fuera = ll.gestiones - q.puntuales;
+   Ahora son cinco, y el orden es el de una jornada:
 
-  return `
-  <div class="card">
-    <div class="ctrl-h">
-      <h3>Tu registro al día</h3>
-      <span class="chip ${ok ? "ok" : "crit"}">${pct1(q.valor)} · mínimo ${q.meta}%</span>
-    </div>
-    <div class="stat-row" style="margin-bottom:0">
-      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">Puntualidad del periodo</div>
-        <div class="val">${pct1(q.valor)}</div>
-        <div class="sub">${q.puntuales} de ${ll.gestiones} registradas dentro del plazo</div></div>
-      <div class="stat ${ok ? "" : "malo"}"><div class="lbl">${ok ? "Margen" : "Te faltan"}</div>
-        <div class="val">${ok ? margen : q.faltan}</div>
-        <div class="sub">${ok
-          ? `gestiones a tiempo de margen antes de bajar del ${q.meta}%`
-          : `gestiones a tiempo más para llegar al ${q.meta}%`}</div></div>
-      <div class="stat"><div class="lbl">Registradas hoy</div><div class="val">${hoyN}</div>
-        <div class="sub">${arrastre
-          ? `${arrastre} ${arrastre === 1 ? "era" : "eran"} de días anteriores`
-          : "todas del día de hoy"}</div></div>
-    </div>
+     1 · TUS METAS — los cuatro números que deciden su incentivo, con su
+         mínimo y con cuánto falta en unidades que se pueden hacer hoy.
+     2 · TU PERIODO — lo que lleva hecho, con la alerta de lo que falta por
+         gestionar arriba de todo, que es el único bloque que además dice a
+         quién ir a buscar.
+     3 · CADA COMERCIO — la cartera entera en una barra, cada tramo con su
+         lista.
+     4 · LA ACTIVIDAD — el ritmo.
+     5 · LO QUE HAY QUE CORREGIR — lo que está mal y se puede arreglar.
 
-    ${ayer ? `<div class="note ${fuera ? "warn" : ""}" style="margin-top:12px">
-      <b>Lo que hiciste el ${esc(fmtFecha(ayer))} vence hoy.</b>
-      El plazo es un día trabajado: si lo registras mañana, esas gestiones cuentan fuera de plazo
-      y ya no se pueden recuperar.
-    </div>` : ""}
+   Lo que se le sacó y por qué:
 
-    ${fuera && !vistaDeCampo() ? `<div style="margin-top:11px">
-      <button class="btn ghost sm" data-verges="fuera_plazo">Ver las ${fuera} fuera de plazo</button>
-    </div>` : ""}
+     · «El detalle» entero: son gráficos de supervisión sobre el trabajo del
+       equipo, y el suyo ya está en los bloques 2 y 4.
+     · «El proyecto» y la tabla por ejecutivo: deciden cosas que él no decide.
+     · «Gestiones fuera de plazo» de las correcciones: ver CUÁLES quedaron
+       fuera es la puerta para retocar la fecha a favor propio. El porcentaje
+       lo ve —está en el bloque 1, con su mínimo—; la lista la corrige
+       supervisión.
 
-    <details class="explica" style="margin-top:11px"><summary>Cómo se cuenta el plazo</summary>
-      <div class="cuerpo">
-        <p>Se cuentan los <b>días trabajados</b> entre la fecha que pones como fecha de la gestión y
-        el momento en que el CRM recibe el formulario. Sábados, domingos y feriados no cuentan.
-        Registrar el mismo día o el día trabajado siguiente está dentro del plazo.</p>
-        <p>Crear la ficha del comercio también es trabajo tuyo, así que cargarla tarde no corre el
-        plazo: si atendiste un comercio el lunes y recién lo das de alta el viernes, esa gestión
-        entra fuera de plazo aunque la registres el mismo minuto del alta.</p>
-      </div>
-    </details>
-  </div>`;
-}
-
+   Supervisión conserva todo, con más detalle, en su propio tablero.
+   ========================================================================= */
 function viewPanel(){
-  /* Supervisión tiene su propio tablero: mismas cuentas, otro orden de lectura.
-     El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
-     se le cambia la herramienta de trabajo en medio de una campaña sin que sea
-     su turno—. */
   if (!vistaDeCampo()) return viewTablero();
   const r = rangoPanel();
   universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
@@ -8080,20 +8226,11 @@ function viewPanel(){
   return `
   ${bannerComoEjec()}
   ${selectorPanel(r)}
+  ${bloqueMisMetas(r)}
   ${bloqueMiPeriodo(r)}
-  ${bloqueMiRegistro()}
-  ${bloqueProyecto()}
+  ${bloqueCadaComercio(r)}
   ${bloqueActividad(r, regs)}
-  ${bloqueEquipo(r)}
-  ${/* El seguimiento del incentivo lo miran el Analista y el Manager; al
-       ejecutivo no se le ofrece la pestaña y tampoco se le filtra por acá. */
-    (!vistaDeCampo() && !esBBVA()) ? bloqueLlave(r) : ""}
-  ${bloqueCorregir(r, regs)}
-  ${bloqueDetalle(r, regs)}
-  ${(!vistaDeCampo() && !esBBVA())
-    ? `<div class="pie" style="margin:14px 2px 0">Las descargas viven en
-        <b>Ajustes → Descargas</b>, junto con el archivo que se le manda a BBVA.</div>`
-    : ""}`;
+  ${bloqueCorregir(r, regs)}`;
 }
 
 /* =========================================================================
