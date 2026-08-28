@@ -1569,6 +1569,21 @@ const topeFechaContacto = () => {
    fechar en domingo es adelantarse a un día que no existe para la campaña. */
 const fechaSobreElTope = fecha => !!fecha && String(fecha).slice(0,10) > topeFechaContacto();
 
+/* El aviso, uno solo para todas las pantallas que piden una fecha de algo que
+   ya ocurrió. Existe como función y no escrito tres veces porque tres textos
+   distintos para la misma regla se convierten, en dos meses, en tres reglas
+   distintas: alguien ajusta uno y los otros dos se quedan diciendo lo viejo.
+
+   Y dice lo que hay que hacer antes que lo que está mal. «No se puede fechar
+   una gestión el 30/08» deja al ejecutivo mirando un formulario sin saber qué
+   escribir; «ingresa la fecha real» es una instrucción. La fecha concreta va
+   detrás porque es la que le ahorra abrir el calendario. */
+const avisoFechaReal = () => diaNoTrabajado(hoyISO())
+  ? `Ingresa la fecha real del contacto o gestión. Hoy es ${nombreDiaNoTrabajado(hoyISO())}:
+     el último día trabajado fue el ${fmtFecha(topeFechaContacto())}.`
+  : `Ingresa la fecha real del contacto o gestión: no puede ser posterior a hoy
+     (${fmtFecha(hoyISO())}).`;
+
 /* ---- Cuándo empieza a correr el plazo de registro ------------------------
 
    No cuando ocurrió el contacto: cuando el contacto SE PUDO REGISTRAR.
@@ -5183,7 +5198,14 @@ function modalCorregirId(cid){
    ========================================================================= */
 
 const FB_VACIO = () => ({
-  Fecha: hoyISO(),
+  /* En sábado, domingo o feriado la fecha viene VACÍA, igual que en el
+     formulario de gestión. Una coordinación con el banco es un registro como
+     cualquier otro y cuenta igual: el correo al ejecutivo de BBVA es uno de
+     los dos hechos que dan «contacto logrado» en la cobertura del incentivo.
+     Hasta el 28/08 acá decía `hoyISO()`, que es exactamente el mecanismo que
+     produjo las 58 gestiones fechadas en sábado: el formulario regalaba la
+     fecha del día y quien registraba la aceptaba. */
+  Fecha: fechaInicialContacto(),
   Hora: new Date().toTimeString().slice(0,5),
   Medio: "",
   Proposito: "",
@@ -5251,10 +5273,12 @@ function renderFormBBVA(){
     <h3>¿Cuándo fue?</h3>
     <div class="row2">
       <div class="field"><label>Fecha <span class="req">*</span></label>
-        <input type="date" data-b="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+        <input type="date" data-b="Fecha" value="${esc(f.Fecha)}" max="${topeFechaContacto()}"></div>
       <div class="field"><label>Hora</label>
         <input type="time" data-b="Hora" value="${esc(f.Hora)}"></div>
     </div>
+    ${diaNoTrabajado(hoyISO()) ? `<div class="note" style="margin:11px 0 0">
+      ${avisoFechaReal()}</div>` : ""}
   </div>
 
   <div class="card">
@@ -5342,7 +5366,11 @@ async function guardarBBVA(){
   const f = S.formBbva, c = byId[S.cid];
   const errores = [];
   if (!f.Fecha) errores.push("Indica la fecha de la coordinación.");
-  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura: no se puede registrar algo que todavía no pasó.");
+  /* El `max` del selector no alcanza: la fecha se puede teclear a mano y en
+     móvil algunos navegadores lo ignoran. Se comprueba también al guardar, que
+     es donde de verdad importa. Y contra el TOPE, no contra hoy: en sábado,
+     fechar en sábado es fechar en un día que no existe para la campaña. */
+  if (fechaSobreElTope(f.Fecha)) errores.push(avisoFechaReal());
   if (!f.Medio) errores.push("Indica por dónde se coordinó con el ejecutivo de BBVA.");
   if (!f.Proposito) errores.push("Indica para qué fue este contacto.");
   if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
@@ -5442,10 +5470,12 @@ function renderLoteBBVA(){
     <h3>Cuándo, por dónde y para qué</h3>
     <div class="row2">
       <div class="field"><label>Fecha <span class="req">*</span></label>
-        <input type="date" data-l="Fecha" value="${esc(f.Fecha)}" max="${hoyISO()}"></div>
+        <input type="date" data-l="Fecha" value="${esc(f.Fecha)}" max="${topeFechaContacto()}"></div>
       <div class="field"><label>Hora</label>
         <input type="time" data-l="Hora" value="${esc(f.Hora)}"></div>
     </div>
+    ${diaNoTrabajado(hoyISO()) ? `<div class="note" style="margin:11px 0 0">
+      ${avisoFechaReal()}</div>` : ""}
     <div class="opts" style="margin-top:11px">
       ${MEDIOS_BBVA.map(m => `
         <div class="opt ${f.Medio===m.id?"on":""}" data-lmedio="${m.id}">
@@ -5559,7 +5589,7 @@ async function guardarLoteBBVA(){
   const errores = [];
   if (!ids.length) errores.push("Marca al menos un comercio.");
   if (!f.Fecha) errores.push("Indica la fecha.");
-  if (f.Fecha && fechaFutura(f.Fecha)) errores.push("La fecha no puede ser futura.");
+  if (fechaSobreElTope(f.Fecha)) errores.push(avisoFechaReal());
   if (!f.Medio) errores.push("Indica por dónde se coordinó.");
   if (!f.Proposito) errores.push("Indica para qué fue el contacto.");
   if (!f.Respondio) errores.push("Indica si el ejecutivo de BBVA respondió.");
@@ -6474,10 +6504,10 @@ async function guardar(c){
   /* El `max` del selector no alcanza: la fecha se puede teclear a mano y en
      móvil algunos navegadores lo ignoran. La regla se comprueba también al
      guardar, que es donde de verdad importa. */
-  if (fechaSobreElTope(f.Fecha_Contacto))
-    errores.push(diaNoTrabajado(hoyISO())
-      ? `No se puede fechar una gestión el ${fmtFecha(f.Fecha_Contacto)}: hoy es ${nombreDiaNoTrabajado(hoyISO())} y el último día trabajado fue el ${fmtFecha(topeFechaContacto())}. Puedes registrar hoy, pero con la fecha real del contacto.`
-      : `No se puede guardar con fecha ${fmtFecha(f.Fecha_Contacto)}: es posterior a hoy (${fmtFecha(hoyISO())}). Una gestión se registra el día que ocurrió o después, nunca antes.`);
+  /* El mismo aviso que las dos pantallas de coordinación con BBVA: una regla,
+     un texto. Decía «No se puede fechar una gestión el 30/08…», que empieza por
+     lo que está mal en vez de por lo que hay que hacer. */
+  if (fechaSobreElTope(f.Fecha_Contacto)) errores.push(avisoFechaReal());
   if (!f.Tipo_Contacto) errores.push("Selecciona cómo se contactó al cliente.");
   if (!f.Resultado) errores.push("Indica cuál fue el resultado del intento.");
   if (!S.editId && RULES.requiereUbicacion(f.Tipo_Contacto) && !f.Ubicacion_Verificada && !f._sinUbicacion)
