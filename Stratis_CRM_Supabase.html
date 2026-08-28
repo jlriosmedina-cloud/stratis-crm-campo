@@ -880,6 +880,84 @@ table.tbl tr:last-child td{border-bottom:0}
 .rep-paso .num{font-size:19px;font-weight:760;letter-spacing:-.6px;line-height:1}
 .rep-paso .pc{font-size:11.5px;color:var(--muted)}
 .rep-paso .cv{font-size:12px;color:var(--muted)}
+/* ---- El embudo por ejecutivo, en Registros ------------------------------
+   Los mismos cinco escalones de la lámina del directorio, uno por persona.
+   Vertical y en pequeños múltiplos: la pregunta es «cómo se compara cada uno
+   con el resto», y para eso hace falta ver los cuatro tableros a la vez, con
+   la misma escala y en el mismo orden. Cuatro embudos horizontales apilados
+   ocupan una pantalla entera y se comparan de memoria.
+
+   LOS COLORES. En claro son exactamente los de la lámina —#232C86, #3B43FB,
+   #F86F35, #0BBC96—, que es el punto: quien mira el CRM y quien mira el deck
+   tienen que ver el mismo embudo. Pasados por el validador, la separación
+   entre colores adyacentes y para daltonismo pasa; lo que no pasa es la banda
+   de luminosidad, y se acepta a sabiendas porque el parecido con la lámina es
+   el objetivo del gráfico.
+
+   En OSCURO no se puede hacer lo mismo, y no por estética: #232C86 sobre el
+   fondo de la tarjeta (#141d29) da 1,44:1 de contraste. La barra de Gestión
+   sencillamente desaparecería. Se sube un escalón cada tono, manteniendo el
+   matiz, y con eso los cuatro pasan el contraste 3:1 y quedan a ΔE 18,3 entre
+   los dos azules, que son los que se parecen.
+
+   Y en los dos modos cada barra lleva su número escrito: naranja y verde no
+   llegan a 3:1 contra el fondo claro, y ahí la regla obliga a etiqueta visible
+   o vista de tabla. Hay las dos —la tabla de siempre quedó justo debajo. */
+:root{
+  --emb-gestion:#232C86; --emb-efectividad:#3B43FB;
+  --emb-visita:#F86F35;  --emb-objetivo:#0BBC96;
+}
+:root[data-theme="dark"]{
+  --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
+  --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
+}
+.emb-grid{display:grid;gap:11px;grid-template-columns:1fr;margin-top:4px}
+@media(min-width:700px){ .emb-grid{grid-template-columns:1fr 1fr} }
+@media(min-width:1180px){ .emb-grid{grid-template-columns:repeat(3,1fr)} }
+.emb-p{border:1px solid var(--grid);border-radius:12px;padding:12px 13px 10px;background:var(--card)}
+.emb-p.equipo{border-color:var(--line);background:var(--surface-2)}
+.emb-p-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px}
+.emb-p-h .nm{font-size:13.5px;font-weight:700;letter-spacing:-.2px;color:var(--ink)}
+.emb-p-h .base{font-size:11.5px;color:var(--muted);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.emb-p-h .base b{color:var(--ink-2);font-weight:650}
+/* La pista es el portafolio: el 100% del que se descuelga todo lo demás.
+   Dibujarlo como fondo y no como una quinta barra evita que el escalón que
+   nunca se mueve compita por la atención con los que sí. */
+.emb-cols{display:flex;align-items:flex-end;gap:2px;height:104px;
+  background:var(--plane);border-radius:7px;padding:6px 6px 0;position:relative}
+.emb-c{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0}
+/* El piso va en la línea, no acá: `min-height` en el CSS se lo aplicaría
+   también al cero y pintaría una barra donde no pasó nada. */
+.emb-c i{display:block;width:100%;border-radius:4px 4px 0 0}
+.emb-pies{display:flex;gap:2px;margin-top:7px}
+.emb-pie{flex:1;min-width:0;text-align:center}
+.emb-pie .n{font-size:15px;font-weight:760;letter-spacing:-.5px;line-height:1.1;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+/* `nowrap`: «RETENCIONES» partido en «RETENCIONE / S» es lo que pasa por
+   defecto en una columna de 62 px, y un rótulo cortado a mitad de palabra hace
+   dudar del número que tiene encima. Prefiere desbordar unos píxeles sobre el
+   relleno de la tarjeta —es la última columna— antes que partirse. */
+.emb-pie .l{font-size:9px;font-weight:700;letter-spacing:0;text-transform:uppercase;
+  color:var(--muted);margin-top:3px;white-space:nowrap}
+.emb-pie .cv{font-size:10.5px;color:var(--muted);margin-top:1px;font-variant-numeric:tabular-nums}
+.emb-ley{display:flex;flex-wrap:wrap;gap:6px 15px;margin:13px 0 0;font-size:12px;color:var(--ink-2)}
+.emb-ley span{display:flex;align-items:center;gap:6px}
+.emb-ley i{flex:none;width:10px;height:10px;border-radius:3px}
+.emb-ley em{font-style:normal;color:var(--muted)}
+/* La tabla de siempre, plegada debajo del embudo. No se borra: sigue teniendo
+   lo que el embudo no cuenta —lo que falta por cargar, el reparto por estado
+   del comercio y cuándo fue la última gestión de cada uno—. Y es, además, la
+   vista de tabla que el gráfico necesita: naranja y verde no llegan a 3:1
+   contra el fondo claro. */
+.emb-tabla-c{margin:0 0 14px}
+.emb-tabla-c > summary{cursor:pointer;font-size:12.5px;font-weight:650;color:var(--ink-2);
+  list-style:none;min-height:34px;display:flex;align-items:center;padding:0 2px}
+.emb-tabla-c > summary::-webkit-details-marker{display:none}
+.emb-tabla-c > summary:before{content:"▸";color:var(--muted);margin-right:7px;font-size:11px}
+.emb-tabla-c[open] > summary:before{content:"▾"}
+.emb-tabla-c[open] > summary{margin-bottom:2px}
+
 .rep-aparte{margin-top:12px;padding:9px 12px;border-radius:9px;background:var(--warn-bg);
   color:var(--warn-ink);font-size:12.5px;font-weight:640}
 .rep-lecturas{display:grid;gap:10px;margin-top:14px}
@@ -1563,7 +1641,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"28/08/2026 00:46", huella:"f5c915" };
+const BUILD = { sello:"28/08/2026 09:51", huella:"7b2169" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -8406,6 +8484,143 @@ const COLS_EQUIPO = [
     ttl:"RUC que Stratis captó y cerró; nunca estuvo en la cartera que entregó BBVA" }
 ];
 
+/* ---- El mismo embudo del directorio, ejecutivo por ejecutivo -------------
+ *
+ * Pedido de José el 28/08: que esta pantalla muestre lo mismo que la lámina
+ * «Del portafolio asignado al objetivo cumplido», pero abierta por persona.
+ *
+ * Lo importante no es el dibujo: es DE DÓNDE SALEN LOS NÚMEROS. No se vuelve a
+ * calcular nada acá. `fotoReporte()` ya construye la cadena —gestión →
+ * efectividad → visitas → retenciones, cada escalón sacado del anterior— y
+ * expone los CONJUNTOS de customer_id, no solo sus tamaños. Acá esos conjuntos
+ * se reparten por ejecutivo. Dos consecuencias que son el motivo de hacerlo
+ * así:
+ *
+ *   · la suma de los cuatro ejecutivos da EXACTAMENTE la cifra de la lámina,
+ *     porque cada comercio pertenece a uno y a un solo conjunto;
+ *   · y el día que la regla cambie —ya cambió dos veces en una semana— cambia
+ *     en un sitio. Una quinta definición de «gestión» viviendo en Registros es
+ *     exactamente el problema que este proyecto lleva dos semanas corrigiendo.
+ *
+ * El PORTAFOLIO es la pista sobre la que se dibujan las barras, no una quinta
+ * barra: es el 100% del que se descuelga todo lo demás. Y su nombre depende de
+ * lo que se sepa: si la cartera asignada por ejecutivo está cargada en Ajustes,
+ * dice «asignados»; si no, la base honesta es la cartera que tiene a su nombre
+ * en el CRM y se dice así. Los 841 de BBVA son de la campaña y no vienen
+ * repartidos por persona: inventar ese reparto para que la lámina cuadre sería
+ * fabricar el denominador contra el que se mide a alguien.
+ */
+const EMB_PASOS = [
+  { k:"gestion",     lbl:"Gestión",      cv:"del portafolio",
+    desc:"Clientes impactados: quedó un correo, un contacto efectivo, una reunión o un cierre" },
+  { k:"efectividad", lbl:"Efectividad",  cv:"de los gestionados",
+    desc:"Respuesta concreta del cliente, sobre esa gestión" },
+  { k:"visita",      lbl:"Visitas",      cv:"de los efectivos",
+    desc:"Presenciales o virtuales concretadas, sobre esa efectividad" },
+  { k:"objetivo",    lbl:"Retenciones",  cv:"de las visitas",
+    desc:"Retenidos y recuperados" }
+];
+
+function embudoEquipo(filas){
+  if (!filas.length) return "";
+  const f = fotoReporte();
+
+  /* Los conjuntos de la lámina, repartidos por dueño. Un comercio sin ficha
+     conocida no se le cuelga a nadie: se queda fuera y, si apareciera, la suma
+     de los ejecutivos dejaría de dar el total y hay que verlo. */
+  const dueno = id => (byId[String(id)] || {}).asignado_correo || "";
+  const porEjec = {};
+  EMB_PASOS.forEach(p => {
+    (f.cadena[p.k] || []).forEach(id => {
+      const c = dueno(id); if (!c) return;
+      (porEjec[c] = porEjec[c] || {})[p.k] = ((porEjec[c] || {})[p.k] || 0) + 1;
+    });
+  });
+
+  const conMeta = filas.every(x => x.asignada > 0);
+  const paneles = filas.map(x => ({
+    nombre: x.nombre,
+    base: conMeta ? x.asignada : x.registrados,
+    n: EMB_PASOS.map(p => (porEjec[x.correo] || {})[p.k] || 0)
+  }));
+  /* El equipo NO es la suma de las bases de arriba: el portafolio son los 841
+     que declaró BBVA para la campaña. Si lo cargado no suma eso, se dice. */
+  const equipo = {
+    nombre:"Equipo", equipo:true, base: f.portafolio || paneles.reduce((a,p) => a + p.base, 0),
+    n: EMB_PASOS.map(p => (f.cadena[p.k] || []).length)
+  };
+  const sumas = EMB_PASOS.map((p, i) => paneles.reduce((a, x) => a + x.n[i], 0));
+  const huerfanos = EMB_PASOS.map((p, i) => equipo.n[i] - sumas[i]);
+
+  const pct1 = v => (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const panel = x => {
+    /* Un cero NO dibuja barra. El mínimo existe para que un valor pequeño se
+       vea —una retención sobre 315 comercios es el 0,3% y sin piso serían cero
+       píxeles—, pero aplicárselo también al cero pinta una barra donde no pasó
+       nada, que es peor que no verla. */
+    const alto = n => (n && x.base) ? Math.max(1.8, n / x.base * 100) : 0;
+    return `
+    <div class="emb-p ${x.equipo ? "equipo" : ""}">
+      <div class="emb-p-h">
+        <span class="nm">${esc(x.nombre)}</span>
+        <span class="base"><b>${x.base || "—"}</b> ${
+          x.equipo ? "del portafolio" : (conMeta ? "asignados" : "a su nombre")}</span>
+      </div>
+      <div class="emb-cols">
+        ${EMB_PASOS.map((p, i) => `<div class="emb-c">
+          <i style="height:${alto(x.n[i]).toFixed(1)}%;min-height:${x.n[i] ? 3 : 0}px;background:var(--emb-${p.k})"
+             title="${esc(x.nombre)} · ${esc(p.lbl)}: ${x.n[i]} de ${x.base || "—"}${
+               x.base ? ` · ${pct1(x.n[i] / x.base * 100)}% del portafolio` : ""}"></i>
+        </div>`).join("")}
+      </div>
+      <div class="emb-pies">
+        ${EMB_PASOS.map((p, i) => {
+          /* Sin escalón anterior no hay conversión. Escribir «0%» cuando el de
+             arriba está en cero afirma algo falso y encima suena a fracaso
+             donde solo falta el dato. */
+          const prev = i === 0 ? x.base : x.n[i-1];
+          return `<div class="emb-pie">
+            <div class="n">${x.n[i]}</div>
+            <div class="l">${esc(p.lbl)}</div>
+            <div class="cv">${prev ? pct1(x.n[i] / prev * 100) + "%" : "—"}</div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  };
+
+  return `
+  <div class="card ctrl">
+    <div class="ctrl-h">
+      <h3>Del portafolio al objetivo cumplido, por ejecutivo</h3>
+      <span class="sub">El mismo embudo de la lámina del directorio · la altura de cada barra
+        es sobre el portafolio, el porcentaje de abajo es la conversión del escalón anterior</span>
+    </div>
+
+    <div class="emb-grid">
+      ${paneles.map(panel).join("")}
+      ${panel(equipo)}
+    </div>
+
+    <div class="emb-ley">
+      ${EMB_PASOS.map(p => `<span><i style="background:var(--emb-${p.k})"></i>
+        <b>${esc(p.lbl)}</b> <em>· ${esc(p.desc)}</em></span>`).join("")}
+    </div>
+
+    ${huerfanos.some(n => n !== 0) ? `<div class="note warn" style="margin:12px 0 0">
+      La suma de los ejecutivos no da el total del equipo: hay
+      ${huerfanos.map((n, i) => n ? `<b>${n}</b> en ${EMB_PASOS[i].lbl.toLowerCase()}` : "")
+        .filter(Boolean).join(", ")} sin ejecutivo asignado.</div>` : ""}
+
+    <p class="pie">Cada escalón sale del anterior: la efectividad se cuenta sobre lo gestionado y
+      las visitas sobre lo efectivo, así que el embudo no se puede ensanchar hacia abajo. Son los
+      <b>mismos conjuntos</b> con los que se arma la lámina del Reporte —no se recalculan acá—, y
+      por eso la suma de los cuatro da la cifra de la campaña.${conMeta ? "" :
+      " El portafolio de cada uno es <b>la cartera que tiene a su nombre en el CRM</b>: los 841 que asignó BBVA son de la campaña y no vienen repartidos por persona. Cargando la cartera asignada por ejecutivo en <b>Ajustes</b>, esta base pasa a ser la de BBVA."}
+      Las ventas nuevas no entran: son RUC que no salieron del portafolio de nadie.</p>
+  </div>`;
+}
+
 function tablaControl(filas){
   if (!filas.length) return "";
   /* Basta con que a UNO le falte la cartera cargada para que su guion pida
@@ -8620,7 +8835,17 @@ function viewRegistros(){
     <div class="stat"><div class="lbl">Sin ubicación</div><div class="val">${todos.filter(sinUbicacion).length}</div><div class="sub">presenciales sin ninguna coordenada</div></div>
   </div>
 
-  ${mando ? tablaControl(controlEquipo(todos)) : ""}
+  ${/* El embudo primero —es la pregunta con la que se abre el comité— y la
+        tabla debajo, plegada. La tabla no se borra: sigue teniendo las tres
+        cosas que el embudo no cuenta —lo que falta por cargar, el reparto por
+        estado del comercio y cuándo fue la última gestión de cada uno—. */
+    mando ? (() => {
+      const filas = controlEquipo(todos);
+      if (!filas.length) return "";
+      return embudoEquipo(filas)
+        + `<details class="emb-tabla-c"><summary>La tabla de siempre: en qué está parada la cartera de cada ejecutivo</summary>${
+             tablaControl(filas)}</details>`;
+    })() : ""}
 
   <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
