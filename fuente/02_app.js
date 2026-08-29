@@ -1577,12 +1577,23 @@ const fechaSobreElTope = fecha => !!fecha && String(fecha).slice(0,10) > topeFec
    Y dice lo que hay que hacer antes que lo que está mal. «No se puede fechar
    una gestión el 30/08» deja al ejecutivo mirando un formulario sin saber qué
    escribir; «ingresa la fecha real» es una instrucción. La fecha concreta va
-   detrás porque es la que le ahorra abrir el calendario. */
-const avisoFechaReal = () => diaNoTrabajado(hoyISO())
-  ? `Ingresa la fecha real del contacto o gestión. Hoy es ${nombreDiaNoTrabajado(hoyISO())}:
-     el último día trabajado fue el ${fmtFecha(topeFechaContacto())}.`
-  : `Ingresa la fecha real del contacto o gestión: no puede ser posterior a hoy
-     (${fmtFecha(hoyISO())}).`;
+   detrás porque es la que le ahorra abrir el calendario.
+
+   Un solo origen y dos formas de mostrarlo: `avisoFechaReal()` en texto plano
+   para la lista de errores —que se escapa— y `notaFechaReal()` con la primera
+   frase en negrita para los avisos de la pantalla. Es lo que faltaba el 29/08:
+   el mensaje al guardar ya era este, pero el aviso del formulario de gestión
+   se había quedado con su redacción vieja y decía lo mismo con otras palabras. */
+const AVISO_FECHA = () => diaNoTrabajado(hoyISO())
+  ? { que:"Ingresa la fecha real del contacto o gestión.",
+      por:`Hoy es ${nombreDiaNoTrabajado(hoyISO())}: la fecha más reciente que se puede poner es el `
+        + `${fmtFecha(topeFechaContacto())}, que fue el último día trabajado. Registrar hoy está bien; `
+        + `lo que no va es fechar la gestión en ${nombreDiaNoTrabajado(hoyISO())}.` }
+  : { que:"Ingresa la fecha real del contacto o gestión.",
+      por:`No puede ser posterior a hoy (${fmtFecha(hoyISO())}): una gestión se registra el día que `
+        + `ocurrió o después, nunca antes.` };
+const avisoFechaReal = () => { const a = AVISO_FECHA(); return a.que + " " + a.por; };
+const notaFechaReal  = () => { const a = AVISO_FECHA(); return `<b>${esc(a.que)}</b> ${esc(a.por)}`; };
 
 /* ---- Cuándo empieza a correr el plazo de registro ------------------------
 
@@ -5278,7 +5289,7 @@ function renderFormBBVA(){
         <input type="time" data-b="Hora" value="${esc(f.Hora)}"></div>
     </div>
     ${diaNoTrabajado(hoyISO()) ? `<div class="note" style="margin:11px 0 0">
-      ${avisoFechaReal()}</div>` : ""}
+      ${notaFechaReal()}</div>` : ""}
   </div>
 
   <div class="card">
@@ -5475,7 +5486,7 @@ function renderLoteBBVA(){
         <input type="time" data-l="Hora" value="${esc(f.Hora)}"></div>
     </div>
     ${diaNoTrabajado(hoyISO()) ? `<div class="note" style="margin:11px 0 0">
-      ${avisoFechaReal()}</div>` : ""}
+      ${notaFechaReal()}</div>` : ""}
     <div class="opts" style="margin-top:11px">
       ${MEDIOS_BBVA.map(m => `
         <div class="opt ${f.Medio===m.id?"on":""}" data-lmedio="${m.id}">
@@ -6006,21 +6017,14 @@ function renderFormulario(){
       <div class="field"><label>Fecha <span class="req">*</span></label><input type="date" data-f="Fecha_Contacto" value="${f.Fecha_Contacto}" max="${topeFechaContacto()}"></div>
       <div class="field" style="margin-bottom:0"><label>Hora <span class="req">*</span></label><input type="time" data-f="Hora_Contacto" value="${f.Hora_Contacto}"></div>
     </div>
-    ${!f.Fecha_Contacto ? `
-    <div class="note crit" style="margin-top:8px">
-      <b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))}, así que la fecha no viene puesta.</b>
-      Escribe el día en que de verdad ocurrió el contacto — como máximo el
-      <b>${esc(fmtFecha(topeFechaContacto()))}</b>, que fue el último día trabajado.
-      Puedes registrar hoy sin problema; lo que no va es fechar la gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.
-    </div>` : fechaSobreElTope(f.Fecha_Contacto) ? `
-    <div class="note crit" style="margin-top:8px">
-      ${diaNoTrabajado(hoyISO())
-        ? `<b>Hoy es ${esc(nombreDiaNoTrabajado(hoyISO()))} y no se puede fechar una gestión en ${esc(nombreDiaNoTrabajado(hoyISO()))}.</b>
-           El último día trabajado fue el <b>${esc(fmtFecha(topeFechaContacto()))}</b>: esa es la fecha
-           más reciente que se puede poner. Registrar hoy está bien; lo que se pide es la fecha real del contacto.`
-        : `<b>Esa fecha todavía no llega.</b> Una gestión se registra el día que ocurrió o después, nunca antes.
-           Hoy es ${esc(fmtFecha(hoyISO()))}. Si estás poniendo al día algo de días pasados, elige esa fecha.`}
-    </div>` : diaNoTrabajado(f.Fecha_Contacto) ? `
+    ${/* Los dos casos del tope —la fecha vacía porque hoy no es día trabajado, y
+          la fecha escrita por encima del tope— dicen exactamente lo mismo, así
+          que lo dicen con el mismo texto. Hasta el 29/08 eran tres redacciones
+          distintas de una sola regla: esta, la de la coordinación con BBVA y la
+          del error al guardar. */
+      (!f.Fecha_Contacto || fechaSobreElTope(f.Fecha_Contacto)) ? `
+    <div class="note crit" style="margin-top:8px">${notaFechaReal()}</div>`
+    : diaNoTrabajado(f.Fecha_Contacto) ? `
     <div class="note warn" style="margin-top:8px">
       <b>Ese día fue ${esc(nombreDiaNoTrabajado(f.Fecha_Contacto))}.</b> Se puede registrar —hay comercios que
       abren— y al guardar te lo voy a preguntar una vez. Si en realidad el contacto fue otro día,
