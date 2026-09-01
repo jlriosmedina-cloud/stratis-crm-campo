@@ -14318,11 +14318,11 @@ const repDia = iso => String(iso || "").slice(0, 10);
 /* ---- Cuándo NO se puede comparar contra la semana pasada ------------------
    El 27/08/2026 cambió qué cuenta como comercio gestionado: pasó a mandar la
    actividad más reciente, y por día. La cuenta de hoy y la que el comité vio el
-   jueves miden cosas distintas, así que su resta no es un avance ni un
-   retroceso: es el cambio de regla. Dibujarla como «−11 desde el jueves»
+   corte miden cosas distintas, así que su resta no es un avance ni un
+   retroceso: es el cambio de regla. Dibujarla como «−11 desde el corte»
    obliga a explicar en la sala algo que no pasó en el campo.
 
-   Se apaga sola: en cuanto el corte del jueves caiga bajo la regla nueva, la
+   Se apaga sola: en cuanto el corte semanal caiga bajo la regla nueva, la
    comparación vuelve sin que nadie tenga que acordarse de sacar nada. */
 const REGLA_GESTION_DESDE = "2026-08-27";
 const repReglaCambio = corte => String(corte || "") < REGLA_GESTION_DESDE;
@@ -14537,16 +14537,30 @@ function repEvolutivo(f){
 
 /* ---- El corte de la semana cumplida ------------------------------------
    El comité no se reúne para ver una foto: se reúne para ver si la foto se
-   movió. Todo lo que sigue existe para poder decir «esto era el jueves, esto
-   es hoy», que es la única forma de que un número acumulado signifique algo.
+   movió. Todo lo que sigue existe para poder decir «esto era el corte, esto es
+   hoy», que es la única forma de que un número acumulado signifique algo.
 
-   La semana cierra los JUEVES, que es como lo mira el equipo. El corte es el
-   último jueves ya cumplido; lo que va del viernes a hoy es la semana en
-   curso, y se muestra aparte porque todavía no terminó. */
-function repJueves(hoy){
+   LA SEMANA CIERRA EL MIÉRCOLES A LAS 23:59:59, y va del jueves al miércoles.
+   Cambió el 01/09/2026, y el motivo fue un número que no cuadraba: la lámina
+   semanal decía 1 retención donde el equipo había hecho 2. Las dos eran
+   correctas y estaban registradas; lo que pasaba es que una se cerró el jueves
+   27/08 y el corte de entonces era el JUEVES, así que ese jueves caía en la
+   semana que ya se había cerrado y no en la que el comité estaba mirando.
+
+   El día del cierre es un borde, y un borde tiene que caer donde nadie está
+   trabajando el número que se presenta. Con el corte en miércoles, el jueves
+   —el día en que se arma y se presenta el avance— es el PRIMER día de la
+   semana nueva, no el último de la vieja: lo que se cierra el jueves ya cuenta
+   para la semana que se está contando.
+
+   El corte es el último miércoles ya cumplido —por eso se empieza a mirar
+   desde ayer: si hoy es miércoles, el día todavía no termina y pertenece a la
+   semana en curso—. Y la semana en curso va del jueves siguiente HASTA HOY,
+   que es la fecha en que se descarga el reporte. */
+function repCorteSemana(hoy){
   const d = new Date(hoy + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - 1);
-  while (d.getUTCDay() !== 4) d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() !== 3) d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -14670,7 +14684,7 @@ function repEmbudoAl(fecha, f){
    comparación se pierde en el ruido; el acumulado tiene una sola pregunta y
    la responde con la altura. */
 function repSemanaDia(f){
-  const corte = repJueves(f.hoy);
+  const corte = repCorteSemana(f.hoy);
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   /* Solo cartera, por lo mismo que en `repSemanal`: la curva de la tarjeta y
@@ -14691,9 +14705,10 @@ function repSemanaDia(f){
       && c.cerrado_en && String(c.cerrado_en).slice(0,10) === d).length;
   };
 
-  /* La semana anterior va del viernes al jueves del corte; la actual arranca
-     el viernes siguiente. Los dos arreglos tienen siete casillas para que el
-     día 3 de una caiga sobre el día 3 de la otra.
+  /* La semana anterior va del jueves al miércoles del corte; la actual
+     arranca el jueves siguiente y llega hasta hoy —la fecha en que se descarga
+     el reporte—. Los dos arreglos tienen siete casillas para que el día 3 de
+     una caiga sobre el día 3 de la otra.
 
      «contactos» no se acumula sumando días: un comercio trabajado el lunes y
      otra vez el miércoles es UN comercio trabajado en la semana, no dos. Por
@@ -14728,11 +14743,12 @@ function repSemanaDia(f){
       actual: x.actual[diasAct - 1] || 0 })) };
 }
 
-/* Las tres series que mira el comité, semana a semana. Semanas de viernes a
-   jueves; la última, la que va corriendo, se marca como incompleta para que
-   nadie lea una caída donde solo faltan días. */
+/* Las tres series que mira el comité, semana a semana. Semanas de JUEVES A
+   MIÉRCOLES —el corte es el miércoles a las 23:59:59, ver `repCorteSemana`—; la
+   última, la que va corriendo, llega hasta hoy y se marca como incompleta para
+   que nadie lea una caída donde solo faltan días. */
 function repSemanal(f){
-  const corte = repJueves(f.hoy);
+  const corte = repCorteSemana(f.hoy);
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   /* SOLO CARTERA. Este deck mide retención: la venta nueva se menciona al pie
      del embudo y no entra en ningún conteo. Hasta el 27/08 `ges` traía TODAS
@@ -14754,7 +14770,7 @@ function repSemanal(f){
   const mas = (d, n) => new Date(new Date(d).getTime() + n * 86400000).toISOString().slice(0,10);
 
   /* Se arma hacia atrás desde el corte y se corta en el arranque: así el
-     último jueves siempre cae en el borde de una semana y la comparación
+     último miércoles siempre cae en el borde de una semana y la comparación
      contra la anterior es contra un periodo del mismo largo. */
   const bordes = [];
   for (let d = corte; d >= f.ini; d = mas(d, -7)) bordes.unshift(d);
@@ -14773,7 +14789,8 @@ function repSemanal(f){
     };
   });
 
-  /* La semana en curso: del viernes siguiente al corte hasta hoy. */
+  /* La semana en curso: del jueves siguiente al corte hasta HOY, que es la
+     fecha en que se descarga el reporte. */
   const desdeC = mas(corte, 1);
   if (desdeC <= f.hoy){
     const enRango = d => d && d >= desdeC && d <= f.hoy;
@@ -15253,7 +15270,7 @@ function repLaminaEmbudo(X, f){
   if (X.corte){
     muestra(0, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:X.H("azul2"), transparency:60 }, line:{ type:"none" } }),
-      `al jueves ${repFecha(X.corteFecha)}`);
+      `al corte del ${repFecha(X.corteFecha)}`);
     muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:X.H("azul2") }, line:{ type:"none" } }), "ganado esta semana");
     if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
@@ -15281,12 +15298,12 @@ function repLaminaEmbudo(X, f){
       align:"right", valign:"top", color:X.H("gris2") });
     const w = f.portafolio ? Math.max(0.055, W_BAR * p.n / f.portafolio) : 0.055;
     /* Con un corte anterior, la barra se parte en dos: el tono pleno es lo que
-       ya estaba el jueves y el claro es lo que se ganó desde entonces. Es la
+       ya estaba al corte y el claro es lo que se ganó desde entonces. Es la
        misma barra de siempre —el largo total no cambia— y responde la pregunta
        que un acumulado nunca responde solo: ¿esto se movió esta semana? */
     const antes = X.corte ? (X.corte[p.k] !== undefined ? X.corte[p.k] : p.n) : null;
     if (antes !== null && antes > p.n){
-      /* El escalón BAJÓ desde el jueves. Con la regla del 27/08 —manda la
+      /* El escalón BAJÓ desde el corte. Con la regla del 27/08 —manda la
          actividad más reciente— eso puede pasar de verdad: un comercio que la
          semana pasada tenía un correo como último hecho y esta semana acumuló
          una llamada sin respuesta deja de contar. Es información, no un error
@@ -15304,7 +15321,7 @@ function repLaminaEmbudo(X, f){
     } else if (antes === null || antes >= p.n){
       e.addShape(X.pptx.ShapeType.rect, { x:X_BAR, y, w, h:ALTO, fill:{ color:col }, line:{ type:"none" } });
     } else {
-      /* Claro lo que ya estaba el jueves, pleno lo ganado esta semana. Va así
+      /* Claro lo que ya estaba al corte, pleno lo ganado esta semana. Va así
          y no al revés porque lo que el comité mira es el avance: el tramo con
          más peso visual tiene que ser el que se movió, no el que ya estaba. */
       const wa = f.portafolio ? Math.max(0.02, W_BAR * antes / f.portafolio) : 0.02;
@@ -15530,14 +15547,14 @@ function armarDirectorio(pptx, fondos){
     T(s, sub, { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:H("gris") });
   };
   const SEM = repSemanal(f);
-  /* La comparación contra el jueves SÍ se dibuja —tono claro lo que ya estaba,
+  /* La comparación contra el corte SÍ se dibuja —tono claro lo que ya estaba,
      tono pleno lo ganado esta semana—, porque los dos lados se recalculan acá
      con la MISMA regla sobre la misma historia: es una comparación honesta.
 
      Lo que no es comparable es contra el deck que el comité vio la semana
      pasada, impreso con el criterio viejo. Eso se declara al pie y no se
      resuelve escondiendo la variación: `reglaCambio` ya no suprime nada,
-     solo enciende la nota. Se apaga sola cuando el corte del jueves cae bajo
+     solo enciende la nota. Se apaga sola cuando el corte semanal cae bajo
      la regla nueva. */
   const reglaCambio = repReglaCambio(SEM.corte);
   const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
@@ -15557,7 +15574,7 @@ function armarDirectorio(pptx, fondos){
      Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
      ocho segundos y salir sabiendo si el proyecto va bien. */
   const a = lamina(fondos.contenido);
-  /* Cuánto se movió cada escalón del acumulado desde el corte del jueves. Sale
+  /* Cuánto se movió cada escalón del acumulado desde el corte semanal. Sale
      del MISMO objeto que usa la barra del embudo, no de una cuenta paralela:
      dos láminas que dicen lo mismo tienen que leerlo del mismo lugar. */
   /* `null` = esta tarjeta no tiene movimiento que declarar. */
@@ -15576,7 +15593,7 @@ function armarDirectorio(pptx, fondos){
        un embudo que arranca más abajo obliga a explicar la diferencia en voz
        alta cada vez. El intento sin resultado sigue existiendo y se declara
        debajo, en la misma tarjeta. */
-    /* El «+N» de esta lámina es la VARIACIÓN DEL ACUMULADO desde el jueves, la
+    /* El «+N» de esta lámina es la VARIACIÓN DEL ACUMULADO desde el corte, la
        misma que dibuja la barra del embudo dos láminas más adelante. Hasta el
        27/08 acá salía la ACTIVIDAD de la semana —35 comercios trabajados, 14
        visitas realizadas— y en el embudo la variación —−14 y +6—, las dos
@@ -15625,7 +15642,7 @@ function armarDirectorio(pptx, fondos){
       fill:{ color:H(x.color) }, line:{ type:"none" } });
     T(a, x.n,   { x:px + 0.22, y:2.16, w:WC2 - 0.44, h:0.80, fontSize:40, bold:true,
       fontFace:NEG, color:H("navy") });
-    /* Lo que se sumó desde el jueves, al lado de la cifra. Un acumulado sin el
+    /* Lo que se sumó desde el corte, al lado de la cifra. Un acumulado sin el
        movimiento de la semana obliga a preguntarlo, y esta lámina existe para
        que no haya que preguntar nada. */
     /* La línea del movimiento ocupa su sitio SIEMPRE, tenga o no algo que
@@ -15635,18 +15652,18 @@ function armarDirectorio(pptx, fondos){
        hueco que convenga dejar en blanco.
        Puede ser negativo: con la regla de la actividad más reciente un escalón
        baja cuando un caso se enfría. Se dibuja con su signo y en naranja. */
-    /* Sin el año: la fecha completa hacía que «sin cambios desde el jueves
+    /* Sin el año: la fecha completa hacía que «sin cambios desde el corte del
        20/08/2026» se partiera en dos líneas y se montara sobre la cifra. El
        año ya está en el subtítulo de la lámina. */
-    /* Con la unidad escrita. «+9 desde el jueves» al lado de «16 visitas
+    /* Con la unidad escrita. «+9 desde el corte» al lado de «16 visitas
        realizadas» en la lámina siguiente se lee como una contradicción, y no lo
        es: acá se cuentan COMERCIOS que entraron al escalón y allá VISITAS
        hechas. Las dos cifras son ciertas y miden cosas distintas; lo único que
        faltaba era decir cuál es cuál. */
-    const jueves = " comercios desde el jueves " + repFecha(X.corteFecha).slice(0, 5);
+    const desdeCorte = " comercios desde el corte del " + repFecha(X.corteFecha).slice(0, 5);
     if (x.mas !== null && x.mas !== undefined)
-      T(a, x.mas ? (x.mas > 0 ? "+" : "\u2212") + Math.abs(x.mas) + jueves
-                 : "sin cambios desde el jueves " + repFecha(X.corteFecha).slice(0, 5),
+      T(a, x.mas ? (x.mas > 0 ? "+" : "\u2212") + Math.abs(x.mas) + desdeCorte
+                 : "sin cambios desde el corte del " + repFecha(X.corteFecha).slice(0, 5),
         { x:px + 0.22, y:2.96, w:WC2 - 0.44, h:0.24, fontSize:10, bold: !!x.mas,
           color: !x.mas ? H("gris2") : x.mas > 0 ? H(x.color) : H("naranja") });
     T(a, x.et,  { x:px + 0.22, y:3.20, w:WC2 - 0.44, h:0.24, fontSize:11.5, color:H("gris") });
@@ -15695,13 +15712,13 @@ function armarDirectorio(pptx, fondos){
      + `Ahí es donde se decide el número de diciembre.`,
     { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
 
-  /* El hueco donde debería estar «+N desde el jueves» necesita explicación: un
+  /* El hueco donde debería estar «+N desde el corte» necesita explicación: un
      comité que la semana pasada vio un número y esta semana ve otro sin
      variación va a restar de memoria, y esa resta no significa nada. */
   if (X.reglaCambio)
     T(a, "Criterio de medición cambiado el " + repFecha(X.reglaDesde)
        + ": estas cifras no son comparables con el deck de la semana pasada. El movimiento desde "
-       + "el jueves sí — las dos fechas están medidas con el criterio de hoy.",
+       + "el corte sí — las dos fechas están medidas con el criterio de hoy.",
       { x:0.57, y:7.06, w:12.38, h:0.20, fontSize:8, color:H("naranja"), valign:"top" });
 
   /* ---- 3 · El desarrollo semanal ----------------------------------------
@@ -15710,7 +15727,7 @@ function armarDirectorio(pptx, fondos){
      Esta puede bajar, y esa es exactamente su utilidad. */
   const g = lamina(fondos.contenido);
   titulo(g, "El desarrollo, semana a semana",
-    `Actividad de cada semana —no el acumulado— · semanas cerradas los jueves · última cumplida al ${repFechaLarga(SEM.corte)}`);
+    `Actividad de cada semana —no el acumulado— · la semana cierra el miércoles a las 23:59 · última cumplida al ${repFechaLarga(SEM.corte)}`);
 
   const DIA = repSemanaDia(f);
   /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
