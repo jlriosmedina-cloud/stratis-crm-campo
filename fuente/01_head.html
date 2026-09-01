@@ -911,9 +911,16 @@ table.tbl tr:last-child td{border-bottom:0}
   --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
   --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
 }
-.emb-grid{display:grid;gap:11px;grid-template-columns:1fr;margin-top:4px}
-@media(min-width:700px){ .emb-grid{grid-template-columns:1fr 1fr} }
-@media(min-width:1180px){ .emb-grid{grid-template-columns:repeat(3,1fr)} }
+/* El reparto se decide por el ANCHO DISPONIBLE, no por el de la ventana. Las
+   media queries de antes miraban el viewport y servían mientras el embudo
+   viviera solo en Registros, a pantalla completa. Desde el 01/09 el mismo
+   componente se dibuja también en la columna izquierda del Tablero —la mitad
+   de ancho— y ahí las tres columnas dejaban 54 px por escalón: «EFECTIVIDAD»
+   se desbordaba encima de «VISITAS» y los rótulos se leían pegados. Con
+   `auto-fit` y un mínimo de 300 px cada panel siempre tiene sitio para sus
+   cuatro rótulos, y el número de columnas lo pone el contenedor. */
+.emb-grid{display:grid;gap:11px;margin-top:4px;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .emb-p{border:1px solid var(--grid);border-radius:12px;padding:12px 13px 10px;background:var(--card)}
 .emb-p.equipo{border-color:var(--line);background:var(--surface-2)}
 .emb-p-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:10px}
@@ -939,7 +946,7 @@ table.tbl tr:last-child td{border-bottom:0}
    dudar del número que tiene encima. Prefiere desbordar unos píxeles sobre el
    relleno de la tarjeta —es la última columna— antes que partirse. */
 .emb-pie .l{font-size:9px;font-weight:700;letter-spacing:0;text-transform:uppercase;
-  color:var(--muted);margin-top:3px;white-space:nowrap}
+  color:var(--muted);margin-top:3px;white-space:nowrap;padding:0 2px}
 .emb-pie .cv{font-size:10.5px;color:var(--muted);margin-top:1px;font-variant-numeric:tabular-nums}
 .emb-ley{display:flex;flex-wrap:wrap;gap:6px 15px;margin:13px 0 0;font-size:12px;color:var(--ink-2)}
 .emb-ley span{display:flex;align-items:center;gap:6px}
@@ -1348,6 +1355,36 @@ button.kpi:hover{border-color:var(--brand-2)}
 .medidor i{display:block;height:100%;border-radius:999px;background:var(--good)}
 .medidor.ojo i{background:var(--warn)}
 .medidor.alerta i{background:var(--crit)}
+/* Verde, ámbar y rojo son un VEREDICTO: dicen «llegó», «va justo», «no llega».
+   Solo pueden ir donde hay un mínimo contra el cual llegar. Efectividad y
+   Objetivo no tienen mínimo —son conversiones, no requisitos—, y pintarlas de
+   verde afirmaba un aprobado que nadie definió: un 23,3% de efectividad salía
+   con la misma barra verde que una puntualidad de 100% sobre su mínimo de 95%.
+   Estas dos van en el color de marca, que informa proporción y no juzga. */
+.medidor.neutro i{background:var(--brand-2)}
+
+/* ---- Las cinco tarjetas del embudo (José, 01/09) -------------------------
+   Cuatro escalones más la calidad del registro. Cada escalón lleva su color
+   del embudo en una cinta a la izquierda —los mismos cuatro de la lámina del
+   directorio y de Registros— para que la tarjeta de arriba y la barra de abajo
+   se lean como la misma cosa. El color NO va solo: al lado siempre está el
+   rótulo escrito y la cifra, porque los cuatro tonos no pasan el contraste que
+   se le puede exigir a un dato leído a solas.
+
+   En móvil y tablet caen a dos columnas y la quinta ocupa el ancho completo:
+   la calidad del registro no es un escalón y no debe leerse como el quinto. */
+.kpis-embudo{grid-template-columns:1fr 1fr}
+.kpi-paso{position:relative;overflow:hidden}
+.kpi-paso::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--paso,var(--brand-2))}
+.kpi-paso{padding-left:16px}
+.kpi-conv{display:inline-block;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.kpi-calidad{grid-column:1 / -1}
+/* La nota explica de dónde salen las cinco tarjetas; no compite con ellas.
+   Sin tamaño propio heredaba el del cuerpo y se leía como el contenido
+   principal de la pantalla, que es justo lo que no es. */
+.kpi-nota{margin:-4px 2px 14px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.kpi-nota b{color:var(--ink-2)}
 
 /* `minmax(0,1fr)` en la pista ancha: sin eso, una tabla con encabezados que no
    parten empuja el ancho de la página entera. Es el desborde horizontal más
@@ -1444,8 +1481,14 @@ table.tbl-rz tr.total td{border-top:2px solid var(--line);font-weight:700;color:
 .alerta-gest .ag-n{font-size:34px;font-weight:800;line-height:1;color:var(--serious-ink);
   font-variant-numeric:tabular-nums;flex:none}
 .alerta-gest .ag-t{flex:1;min-width:0}
-.alerta-gest .ag-t b{display:block;font-size:14.5px;color:var(--serious-ink)}
+/* HIJO DIRECTO, no descendiente. El titular de la alerta es un <b> a nivel del
+   bloque y va en su propia línea; los <b> que resaltan una palabra DENTRO del
+   párrafo explicativo son otra cosa y tienen que quedarse en línea. Con el
+   selector de descendencia, «la ÚLTIMA gestión» partía la frase en tres
+   renglones y el aviso se leía como una lista de fragmentos. */
+.alerta-gest .ag-t > b{display:block;font-size:14.5px;color:var(--serious-ink)}
 .alerta-gest .ag-t span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.alerta-gest .ag-t span b{color:var(--ink);font-weight:700}
 .alerta-gest .ag-ir{flex:none;font-size:13px;font-weight:650;color:var(--serious-ink);white-space:nowrap}
 @media (max-width:640px){
   .alerta-gest{flex-wrap:wrap;gap:10px}
@@ -1503,15 +1546,21 @@ table.tbl-act tr.act-dia span{color:var(--muted);font-size:12px;margin-left:9px}
 }
 
 table.tbl-tab{border-collapse:collapse;width:100%;font-size:13px}
+/* Ocho columnas desde el 01/09 —los cuatro escalones del embudo más la
+   cobertura—, y la tabla vive en la columna izquierda del Tablero, que es la
+   mitad del ancho. Con 16 px de separación el encabezado «COBERTURA» quedaba
+   fuera del recuadro: la tabla desplazaba, pero un dato que hay que ir a
+   buscar es un dato que nadie mira. Se aprieta la separación y la pista de la
+   barra hasta que las ocho entran en 1400 px. */
 table.tbl-tab th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--muted);text-align:right;padding:0 0 8px 16px;white-space:nowrap}
+  color:var(--muted);text-align:right;padding:0 0 8px 10px;white-space:nowrap}
 table.tbl-tab th:first-child{text-align:left;padding-left:0}
-table.tbl-tab td{padding:9px 0 9px 16px;border-top:1px solid var(--grid);text-align:right;
+table.tbl-tab td{padding:9px 0 9px 10px;border-top:1px solid var(--grid);text-align:right;
   font-variant-numeric:tabular-nums;white-space:nowrap}
 table.tbl-tab td:first-child{text-align:left;font-weight:600;padding-left:0}
 table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 .barra-fila{display:flex;align-items:center;gap:9px;justify-content:flex-end}
-.barra-fila .pista{width:62px;height:7px;border-radius:999px;background:var(--plane);
+.barra-fila .pista{width:46px;height:7px;border-radius:999px;background:var(--plane);
   overflow:hidden;flex:none}
 .barra-fila .pista i{display:block;height:100%;border-radius:999px;background:var(--brand-2)}
 .barra-fila .cifra{width:36px;text-align:right}
@@ -1567,6 +1616,10 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 
 @media(min-width:900px){
   .kpis{grid-template-columns:repeat(4,1fr);gap:12px}
+  /* Con sitio, los cuatro escalones van en fila —que es como se lee un
+     embudo— y la calidad debajo, ocupando el ancho, que es su lugar: no es
+     un escalón, es la condición de que los cuatro sean ciertos. */
+  .kpis-embudo{grid-template-columns:repeat(4,1fr)}
   .kpi .val{font-size:28px}
 }
 /* En la tablet ya caben dos: el mes y el día del que se habla. Apilarlas
@@ -1595,7 +1648,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
   .stat-row .stat .sub{font-size:11px;line-height:1.38}
 }
 @media(min-width:1180px){
-  .cols-tab{grid-template-columns:minmax(0,1fr) 322px;gap:12px}
+  .cols-tab{grid-template-columns:minmax(0,1fr) 300px;gap:12px}
   .tab-cab h2{font-size:21px}
   /* Dos columnas primero: el mes y el día. La cola pasa debajo, a lo ancho. */
   .cal3{grid-template-columns:minmax(0,1fr) 330px}

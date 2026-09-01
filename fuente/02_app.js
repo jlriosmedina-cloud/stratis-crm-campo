@@ -324,10 +324,10 @@ const tieneCierreRegistrado = c => !!c && CIERRES_REGISTRADOS.includes(c.resulta
    tarde, le devuelve 40 comercios; a Vanessa, cuyos seguimientos del 24/08
    fueron seis días después del correo del 18, le devuelve 3. Esos 16 de
    Vanessa sí se enfriaron. */
-function ultimoDiaConActividad(regs, hasta, extraDia){
+function ultimoDiaConActividad(regs, hasta, extraDia, desde){
   let dia = null, ok = false;
   const ver = (d, califica) => {
-    if (!d || (hasta && d > hasta)) return;
+    if (!d || (hasta && d > hasta) || (desde && d < desde)) return;
     if (dia === null || d > dia){ dia = d; ok = califica; }
     else if (d === dia) ok = ok || califica;
   };
@@ -340,28 +340,48 @@ function ultimoDiaConActividad(regs, hasta, extraDia){
   return dia === null ? null : { d: dia, ok };
 }
 
-const ultimaActividad = (c, regs, hasta) => ultimoDiaConActividad(
-  regs, hasta, tieneCierreRegistrado(c) && c.cerrado_en ? c.cerrado_en : null);
+const ultimaActividad = (c, regs, hasta, desde) => ultimoDiaConActividad(
+  regs, hasta, tieneCierreRegistrado(c) && c.cerrado_en ? c.cerrado_en : null, desde);
 
 /* ¿El titular ya contestó, y a qué altura? La negociación no es un hecho con
    fecha propia sino un ESTADO: nace del primer contacto efectivo y vive hasta
    que alguien cierra el caso. Por eso se pregunta «¿había contacto efectivo al
    día X?» y no «¿cuál fue el último hecho?». */
-const huboContactoEfectivo = (regs, hasta) => (regs || []).some(r =>
-  !esReconstruida(r) && esEfectivo(r.Resultado)
-  && (!hasta || String(r.Fecha_Contacto || "").slice(0,10) <= hasta));
+const huboContactoEfectivo = (regs, hasta, desde) => (regs || []).some(r => {
+  if (esReconstruida(r) || !esEfectivo(r.Resultado)) return false;
+  const d = String(r.Fecha_Contacto || "").slice(0,10);
+  return !!d && (!hasta || d <= hasta) && (!desde || d >= desde);
+});
 
-function comercioGestionado(c, regs, hasta){
-  /* Cerrado sin fecha de cierre: no se puede ubicar, pero pasó. */
-  if (tieneCierreRegistrado(c) && !c.cerrado_en) return true;
+/* ---- La ventana: «gestionado» ¿desde cuándo? -----------------------------
+   Pedido de José el 01/09. Hasta ese día la pregunta era «¿alguna vez quedó
+   un hecho con resultado?», y con la campaña avanzada esa pregunta ya no
+   sirve para trabajar: un comercio atendido el 18/08 seguía figurando
+   gestionado el 19, el 20 y en diciembre. El ejecutivo abría «faltan por
+   gestionar», veía una lista corta y se quedaba sin saber a quién retomar.
+
+   Desde ahora la gestión se cuenta POR PERIODO —del 19 al 18, el mismo del
+   bono—: «si trabajé un comercio el 18/08, me debería figurar pendiente el
+   19/08 ya que es un nuevo periodo». Con `desde` puesto la función contesta
+   dentro de esa ventana; sin `desde` sigue contestando el acumulado, que es
+   lo que necesitan el embudo del Reporte y la lámina del directorio.
+
+   La negociación vigente también se acota: si el cliente contestó el 18/08 y
+   nadie lo tocó después, el 19 hay que volver a tocarlo. Un caso abierto no
+   es trabajo del periodo nuevo hasta que alguien lo trabaje. */
+function comercioGestionado(c, regs, hasta, desde){
+  /* Cerrado sin fecha de cierre: no se puede ubicar, pero pasó. En el
+     acumulado cuenta; dentro de una ventana no se puede afirmar que ocurrió
+     ahí, y afirmarlo sería regalar cobertura de un periodo al siguiente. */
+  if (tieneCierreRegistrado(c) && !c.cerrado_en) return !desde;
   /* Negociación vigente (José, 27/08): el cliente contestó y el caso sigue
      abierto. Eso cuenta como gestionado aunque después nadie haya atendido una
      llamada, y la asimetría con el correo es deliberada: un correo enviado
      prueba que se intentó, una respuesta prueba que hay conversación. Lo
      primero se enfría con el silencio; lo segundo ya ocurrió y no se
      desanda —hasta que el ejecutivo cierre el caso—. */
-  if (!tieneCierreRegistrado(c) && huboContactoEfectivo(regs, hasta)) return true;
-  const u = ultimaActividad(c, regs, hasta);
+  if (!tieneCierreRegistrado(c) && huboContactoEfectivo(regs, hasta, desde)) return true;
+  const u = ultimaActividad(c, regs, hasta, desde);
   return !!u && u.ok;
 }
 
@@ -439,6 +459,25 @@ const ultimoDiaCalifica = filas => {
   const u = ultimoDiaConActividad(filas, null, null);
   return !!u && u.ok;
 };
+
+/* ---- Una visita efectiva es un COMERCIO, no una fila ---------------------
+   Segunda mitad del pedido de José del 01/09: «las visitas solo van a contar
+   por comercio con visita efectiva concretada, no por la cantidad de visitas
+   realizadas a un comercio, esto tanto para los indicadores como para los
+   KPI's».
+
+   Antes el Tablero decía 40 y el embudo del Reporte decía 38 sobre exactamente
+   el mismo trabajo: el Tablero contaba filas con `Cumple_Visita = SI` y el
+   embudo contaba comercios distintos. Dos ejecutivos que vuelven al mismo
+   comercio para cerrarlo hacían subir un número y no el otro, y el que subía
+   era justo el que se compara contra el mínimo del periodo.
+
+   Ahora hay una sola función y la usan los dos, más la llave del bono. La
+   consecuencia hay que decirla: volver a visitar un comercio ya visitado NO
+   suma para el mínimo. Suma cerrar uno nuevo. */
+const comerciosConVisita = filas => new Set((filas || [])
+  .filter(r => r && r.Cumple_Visita === "SI" && !esReconstruida(r))
+  .map(r => String(r.Customer_id))).size;
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -2269,7 +2308,13 @@ const RULES = {
          Acá decía `regs.some(...)` hasta el 27/08 por la tarde. Preguntaba
          «¿alguna vez?» donde la regla pregunta «¿en qué quedó?», y por eso la
          Cartera de Vanessa mostraba 6 pendientes contra los 38 del embudo. */
-      _gestionado: comercioGestionado(c, regs, hoyISO()),
+      /* DOS respuestas, porque son dos preguntas distintas y confundirlas es
+         lo que rompía la Cartera. `_gestionado` es «¿lo trabajé en ESTE
+         periodo?» —del 19 al 18— y es la que manda en todo lo operativo: el
+         filtro de la Cartera, la alerta del panel y lo que el ejecutivo tiene
+         que hacer hoy. `_gestionadoHist` es «¿alguna vez?», que es lo que
+         necesita el historial de la ficha y nunca una lista de pendientes. */
+      _gestionado: comercioGestionado(c, regs, hoyISO(), ventanaPeriodo(periodoHoy()).ini),
       /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
       _banco: regs.filter(esGestionBanco).length,
       _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
@@ -2277,6 +2322,19 @@ const RULES = {
       _todas: regs.length,
       _ultimo:null
     };
+    /* El acumulado se calcula SOLO SI ALGUIEN LO PIDE. Ninguna pantalla lo usa
+       —la operativa va por periodo—, pero la hoja que se le manda a BBVA sí, y
+       hay una prueba que exige que la columna `Cuenta_Como_Gestion` y esto den
+       lo mismo. Calcularlo de oficio en las 841 fichas costaba 170 ms en cada
+       dibujado por un dato que casi nunca se lee; como propiedad perezosa
+       cuesta cero hasta que se pregunta, y una vez preguntado se guarda. */
+    let histCache;
+    Object.defineProperty(b, "_gestionadoHist", { configurable:true, enumerable:false,
+      get(){
+        if (histCache === undefined) histCache = comercioGestionado(c, regs, hoyISO());
+        return histCache;
+      } });
+
     if (!gest.length){
       /* Sin gestiones al comercio no hay nada que resumir de él, pero sí puede
          haber última coordinación con el banco: se guarda para la ficha. */
@@ -3223,17 +3281,26 @@ function verCarteraLista(tipo, ejecutivo, esperado){
   S.filtrosAbiertos = false; S.limite = 40;
   go("cartera");
 
+  /* El aviso cuenta EXACTAMENTE lo que acaba de filtrar. Hasta el 01/09 acá se
+     preguntaba `_intentos > 0` —«¿lo tocaron alguna vez?»—, que era una TERCERA
+     definición de gestionado: ni la del filtro que se acababa de aplicar ni la
+     del Panel del que se venía. Un aviso que dice un número distinto del que
+     muestra la lista debajo es peor que no decir nada. */
   const n = cartera().filter(c => {
     if (esClienteNuevo(c)) return false;
     if (ejecutivo && c.asignado !== ejecutivo) return false;
     if (tipo === "registrado") return true;
-    return (c._base || RULES.recomputarBase(c.customer_id))._intentos > 0;
+    return !!(c._base || RULES.recomputarBase(c.customer_id))._gestionado;
   }).length;
 
-  const que = tipo === "registrado" ? "registrados en el CRM" : "gestionados";
+  const que = tipo === "registrado" ? "registrados en el CRM" : "gestionados en el periodo en curso";
+  /* Y si el Panel venía mirando otro tramo —agosto, o todo el proyecto—, la
+     diferencia es real y se dice cuál es, en vez de dejar que el número baile.
+     La Cartera no tiene selector de tramo: siempre habla del periodo de hoy. */
   const dif = esperado != null && Number(esperado) !== n;
   toast(`${n} ${n === 1 ? "comercio" : "comercios"} ${que}${ejecutivo ? " de " + ejecutivo : ""}` +
-        (dif ? ` · en el Panel dice ${esperado} porque allá se cuenta solo el rango elegido` : ""));
+        (dif ? ` · en el Panel dice ${esperado} porque allá está elegido otro tramo; la Cartera `
+             + `siempre muestra el periodo en curso` : ""));
 }
 
 /* Del Panel a la cartera, por el punto en que está parado el comercio */
@@ -3299,7 +3366,35 @@ const cerrarModal = () => $("#overlay").innerHTML = "";
    no había nada. Una pantalla en blanco no da ninguna pista —ni al que la
    sufre ni al que la tiene que arreglar— y es la peor forma de fallar que
    tiene una aplicación. Ahora se ve qué pasó y hay un botón para recargar. */
+/* ---- Una memoria que dura lo que dura un dibujado --------------------------
+   `repLineaGestion` recorre TODAS las gestiones, todas las coordinaciones con
+   el banco y todas las fichas cerradas para armar la línea de tiempo. Es la
+   pieza cara, y desde el 01/09 la piden tres cosas de la misma pantalla —las
+   tarjetas del Tablero, la tabla por ejecutivo y el embudo— que además tienen
+   que dar el mismo resultado por definición.
+
+   Recalcularla tres veces no la hace más cierta: la hace más lenta. La caché
+   se vacía al empezar cada dibujado, así que nunca sobrevive a un cambio de
+   datos y no puede mostrar algo viejo; y si alguien la olvidara, lo peor que
+   pasa es que se vuelve a calcular. */
+let CACHE_RENDER = new Map();
+/* La huella entra en la clave: si cambió el volumen de datos —una carga, una
+   ficha nueva, una gestión guardada— la clave cambia sola y el cálculo se
+   rehace. No es una prueba criptográfica y no pretende serlo; es el seguro
+   barato para el caso en que alguien pida la línea de tiempo fuera de un
+   dibujado, que es donde la caché no tendría quién la vacíe. */
+const huellaDatos = () => {
+  try { return CLIENTES.length + ':' + DB.crudo.length + ':' + AUDITORIA.length; }
+  catch (e) { return 'x'; }
+};
+const memoRender = (clave, calcular) => {
+  const k = clave + '#' + huellaDatos();
+  if (!CACHE_RENDER.has(k)) CACHE_RENDER.set(k, calcular());
+  return CACHE_RENDER.get(k);
+};
+
 function render(){
+  CACHE_RENDER = new Map();
   try { renderInterno(); }
   catch (e){
     const v = $("#view");
@@ -3631,11 +3726,12 @@ function viewCartera(){
          trabajo, sin importar si contestaron. Se podía preguntar por los que no
          se tocaron y por los que respondieron, pero no por el conjunto. -->
     <div class="seg" role="group" aria-label="Situación del comercio">
-      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados"],["sin_gestion","Faltan por gestionar"],
+      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados este periodo"],
+         ["sin_gestion","Faltan por gestionar"],
          ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
         .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
-          k === "gestionado" ? ` title="Comercios cuya ÚLTIMA gestión es un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado"`
-          : k === "sin_gestion" ? ` title="Comercios cuya última gestión fue un intento sin respuesta, o que no se han tocado. Los primeros se ven trabajados y no lo están: son los que hay que retomar"` : ""
+          k === "gestionado" ? ` title="Comercios cuya ÚLTIMA gestión DENTRO DE ESTE PERIODO (${esc(textoPeriodo(periodoHoy()))}) es un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado. El periodo corre del 19 al 18: lo trabajado el 18 no cuenta para el que arranca el 19"`
+          : k === "sin_gestion" ? ` title="Comercios que en ESTE PERIODO (${esc(textoPeriodo(periodoHoy()))}) todavía no tienen un hecho con resultado: no se han tocado, o lo último que quedó fue un intento sin respuesta. Los segundos se ven trabajados y no lo están: son los que hay que retomar"` : ""
         }>${l}</button>`).join("")}
     </div>
     ${avisoPorActualizar()}
@@ -6842,7 +6938,9 @@ function controlEquipo(regs){
       esperaBbva:   enEstado("POR_VALIDAR"),
       porContactar: enEstado("POR_CONTACTAR"),
       /* Del periodo que se esté mirando arriba, no de toda la campaña. */
-      visitas: lista.filter(r => r.Cumple_Visita === "SI").length,
+      /* Comercios con visita concretada, no filas: volver al mismo comercio
+         no suma dos veces (José, 01/09). */
+      visitas: comerciosConVisita(lista),
       retenciones: suyos.filter(esRetencion).length,
       ventas:      suyos.filter(esRecuperado).length,
       sinLead:     suyos.filter(esVentaNueva).length,
@@ -6907,14 +7005,23 @@ const EMB_PASOS = [
   { k:"efectividad", lbl:"Efectividad",  cv:"de los gestionados",
     desc:"Respuesta concreta del cliente, sobre esa gestión" },
   { k:"visita",      lbl:"Visitas",      cv:"de los efectivos",
-    desc:"Presenciales o virtuales concretadas, sobre esa efectividad" },
+    desc:"Comercios con visita presencial o virtual concretada, sobre esa efectividad" },
   { k:"objetivo",    lbl:"Retenciones",  cv:"de las visitas",
     desc:"Retenidos y recuperados" }
 ];
 
-function embudoEquipo(filas){
+/* `opts` existe para que el Tablero pueda dibujar ESTE MISMO embudo con la
+   ventana del periodo en vez del acumulado de la campaña. Es la única
+   diferencia entre la imagen 1 y la imagen 3: los mismos cuatro conjuntos, la
+   misma regla, el mismo componente; distinto tramo de tiempo, y dicho arriba.
+   Sin `opts` se comporta igual que siempre (Registros, acumulado). */
+function embudoEquipo(filas, opts){
   if (!filas.length) return "";
-  const f = fotoReporte();
+  const o = opts || {};
+  /* `fotoReporte` es cara: se llama una vez y solo si hace falta. */
+  const f = (o.cadena && o.portafolio !== undefined) ? null : fotoReporte();
+  const cadena = o.cadena || f.cadena;
+  const portafolio = o.portafolio !== undefined ? o.portafolio : f.portafolio;
 
   /* Los conjuntos de la lámina, repartidos por dueño. Un comercio sin ficha
      conocida no se le cuelga a nadie: se queda fuera y, si apareciera, la suma
@@ -6922,7 +7029,7 @@ function embudoEquipo(filas){
   const dueno = id => (byId[String(id)] || {}).asignado_correo || "";
   const porEjec = {};
   EMB_PASOS.forEach(p => {
-    (f.cadena[p.k] || []).forEach(id => {
+    (cadena[p.k] || []).forEach(id => {
       const c = dueno(id); if (!c) return;
       (porEjec[c] = porEjec[c] || {})[p.k] = ((porEjec[c] || {})[p.k] || 0) + 1;
     });
@@ -6937,8 +7044,8 @@ function embudoEquipo(filas){
   /* El equipo NO es la suma de las bases de arriba: el portafolio son los 841
      que declaró BBVA para la campaña. Si lo cargado no suma eso, se dice. */
   const equipo = {
-    nombre:"Equipo", equipo:true, base: f.portafolio || paneles.reduce((a,p) => a + p.base, 0),
-    n: EMB_PASOS.map(p => (f.cadena[p.k] || []).length)
+    nombre:"Equipo", equipo:true, base: portafolio || paneles.reduce((a,p) => a + p.base, 0),
+    n: EMB_PASOS.map(p => (cadena[p.k] || []).length)
   };
   const sumas = EMB_PASOS.map((p, i) => paneles.reduce((a, x) => a + x.n[i], 0));
   const huerfanos = EMB_PASOS.map((p, i) => equipo.n[i] - sumas[i]);
@@ -6983,9 +7090,9 @@ function embudoEquipo(filas){
   return `
   <div class="card ctrl">
     <div class="ctrl-h">
-      <h3>Del portafolio al objetivo cumplido, por ejecutivo</h3>
-      <span class="sub">El mismo embudo de la lámina del directorio · la altura de cada barra
-        es sobre el portafolio, el porcentaje de abajo es la conversión del escalón anterior</span>
+      <h3>${esc(o.titulo || "Del portafolio al objetivo cumplido, por ejecutivo")}</h3>
+      <span class="sub">${o.sub || `El mismo embudo de la lámina del directorio · la altura de cada barra
+        es sobre el portafolio, el porcentaje de abajo es la conversión del escalón anterior`}</span>
     </div>
 
     <div class="emb-grid">
@@ -7006,7 +7113,7 @@ function embudoEquipo(filas){
     <p class="pie">Cada escalón sale del anterior: la efectividad se cuenta sobre lo gestionado y
       las visitas sobre lo efectivo, así que el embudo no se puede ensanchar hacia abajo. Son los
       <b>mismos conjuntos</b> con los que se arma la lámina del Reporte —no se recalculan acá—, y
-      por eso la suma de los cuatro da la cifra de la campaña.${conMeta ? "" :
+      por eso la suma de los cuatro da la cifra de la campaña.${o.pie ? " " + o.pie : ""}${conMeta ? "" :
       " El portafolio de cada uno es <b>la cartera que tiene a su nombre en el CRM</b>: los 841 que asignó BBVA son de la campaña y no vienen repartidos por persona. Cargando la cartera asignada por ejecutivo en <b>Ajustes</b>, esta base pasa a ser la de BBVA."}
       Las ventas nuevas no entran: son RUC que no salieron del portafolio de nadie.</p>
   </div>`;
@@ -7525,7 +7632,7 @@ function cardReparto(base){
 function bloqueActividad(r, regs){
   const gestiones  = regs.length;
   const respuestas = regs.filter(x => esEfectivo(x.Resultado)).length;
-  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const efectivas  = comerciosConVisita(regs);
   const tocados    = new Set(regs.map(x => String(x.Customer_id)));
   const comercios  = tocados.size;
   /* La tabla de abajo cuenta «Trabajados» solo sobre la cartera asignada,
@@ -7547,7 +7654,7 @@ function bloqueActividad(r, regs){
 
   return `
   <div class="pnl-h"><span class="pnl-n">2</span>
-    <div><b>La actividad</b><span>${esc(r.detalle)} — todo contado en gestiones</span></div>
+    <div><b>La actividad</b><span>${esc(r.detalle)} — en gestiones, salvo las visitas y los comercios tocados, que van en comercios</span></div>
   </div>
   <div class="stat-row">
     ${/* Sin salto a Registros en la vista de campo: esa pestaña es de
@@ -7562,7 +7669,7 @@ function bloqueActividad(r, regs){
          <button class="stat stat-link" data-verges="efectivos"><div class="lbl">Con respuesta</div><div class="val">${respuestas}</div>
           <div class="sub">gestiones · tasa de respuesta ${gestiones ? Math.round(respuestas/gestiones*100) : 0}% sobre las ${gestiones} del periodo — <b>ver cuáles</b></div></button>`}
     <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${efectivas}</div>
-      <div class="sub">gestiones que cumplen visita</div></div>
+      <div class="sub">comercios con visita concretada, no visitas hechas</div></div>
     <div class="stat"><div class="lbl">Comercios tocados</div><div class="val">${comercios}</div>
       <div class="sub">comercios distintos con al menos una gestión${
         tocadosNuevos ? ` · ${comercios - tocadosNuevos} de cartera + ${tocadosNuevos} venta${
@@ -7571,17 +7678,22 @@ function bloqueActividad(r, regs){
       <div class="sub">${dias ? `${(gestiones/dias).toFixed(1)} gestiones por día` : "sin movimiento"}</div></div>
     <div class="stat ${sem && ritmo < pide ? "malo" : ""}"><div class="lbl">Ritmo semanal</div>
       <div class="val">${sem ? ritmo.toFixed(1) : "—"}</div>
-      <div class="sub">visitas efectivas por semana y por ejecutivo · referencia ${pide}${
+      <div class="sub">comercios con visita efectiva por semana y por ejecutivo · referencia ${pide}${
         rvP.porPeriodo ? ` · el mínimo son ${rvP.pide} en el periodo` : ""}</div></div>
   </div>
-  <details class="explica suelta"><summary>Por qué acá dice ${efectivas} gestiones y en la Cartera otro número</summary>
+  <details class="explica suelta"><summary>Qué cuenta gestiones y qué cuenta comercios en este bloque</summary>
       <div class="cuerpo">
-        <p>Este bloque cuenta <b>gestiones</b>: cada registro es uno, aunque sea el cuarto intento con
-        el mismo comercio. La Cartera cuenta <b>comercios</b>: uno que recibió tres visitas efectivas
-        sigue siendo un comercio. Los dos números son correctos y miden cosas distintas; por eso
-        cada uno dice su unidad.</p>
-        <p>El <b>ritmo semanal</b> es el requisito del incentivo: ${pide} visitas efectivas por semana
-        y por ejecutivo. Las semanas no se redondean y no se cuentan días que todavía no ocurren.</p>
+        <p><b>Gestiones</b> y <b>Con respuesta</b> cuentan registros: cada uno es uno, aunque sea el
+        cuarto intento con el mismo comercio. <b>Visitas efectivas</b> y <b>Comercios tocados</b>
+        cuentan comercios: uno al que se volvió tres veces sigue siendo un comercio. Los dos números
+        son correctos y miden cosas distintas; por eso cada uno dice su unidad.</p>
+        <p>Las visitas pasaron a contarse por comercio el 01/09, y con eso dejaron de tener dos
+        cifras según la pantalla: el mismo número sale acá, en el Tablero, en el embudo del Reporte
+        y en el requisito del incentivo. La consecuencia es directa: <b>volver sobre un comercio ya
+        visitado no acerca al mínimo</b>; lo acerca visitar uno nuevo.</p>
+        <p>El <b>ritmo semanal</b> es el requisito del incentivo: ${pide} comercios con visita
+        efectiva por semana y por ejecutivo. Las semanas no se redondean y no se cuentan días que
+        todavía no ocurren.</p>
       </div>
   </details>`;
 }
@@ -7607,7 +7719,7 @@ const COLS_PANEL = [
   { k:"sinTocar",    th:"Sin tocar",        extra:true, ttl:"Asignados que no recibieron ninguna gestión en el periodo",
     val:f => f.asignada ? f.sinTocar : "—" },
   { k:"gestiones",   th:"Gestiones",        extra:true, val:f => f.gestiones || "—" },
-  { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Gestiones que cumplen visita", val:f => f.efectivas || "—" },
+  { k:"efectivas",   th:"Visitas efectivas",extra:true, ttl:"Comercios con visita concretada, no visitas hechas", val:f => f.efectivas || "—" },
   { k:"tasa",        th:"% respuesta",      extra:true, ttl:"Gestiones con respuesta sobre gestiones",
     val:f => f.tasa === null ? "—" : Math.round(f.tasa) + "%" },
   /* Estuvo oculta al ejecutivo hasta el 24/08, con el argumento de no
@@ -7834,7 +7946,7 @@ function bloqueLlave(r){
       <thead><tr>
         <th>Ejecutivo</th>
         <th title="Comercios asignados con al menos una gestión en el periodo">Cobertura · mín ${req.cobertura_pct}%</th>
-        <th title="Presenciales o virtuales en las que se logró hablar. Desde el periodo 2 el mínimo se mide en el periodo completo; antes se escalaba por semanas">Visitas efectivas · mín ${esc(reglaVisitas(req, p).corto)}</th>
+        <th title="COMERCIOS con visita presencial o virtual concretada —en la que se logró hablar—, no visitas hechas: volver sobre el mismo comercio no suma dos veces. Desde el periodo 2 el mínimo se mide en el periodo completo; antes se escalaba por semanas">Visitas efectivas · mín ${esc(reglaVisitas(req, p).corto)}</th>
         <th title="Registradas el mismo día trabajado o el siguiente; sábados, domingos y feriados no cuentan">Puntualidad · mín ${req.puntualidad_pct}%</th>
         <th>Llave</th><th>Cumplimiento</th><th>Incentivo</th>
       </tr></thead>
@@ -8112,9 +8224,18 @@ function bloqueMiPeriodo(r){
   const cartera = mios.filter(c => !esClienteNuevo(c));
   const nuevos  = mios.filter(c => esClienteNuevo(c));
 
-  /* Un comercio está gestionado con el mismo criterio de siempre: lo dice su
-     resumen, que ya lo calcula una vez por ficha. */
-  const gestionado = c => !!(c._base || RULES.recomputarBase(c.customer_id) || c._base || {})._gestionado;
+  /* Un comercio está gestionado con el mismo criterio de siempre —lo dice su
+     resumen, que ya lo calcula una vez por ficha— y desde el 01/09 acotado AL
+     PERIODO: del 19 al 18. Lo trabajado el 18/08 no cubre el periodo que
+     arranca el 19/08; el comercio vuelve a la lista. Es lo que hace que esta
+     alerta y la cobertura del bono hablen del mismo tramo. */
+  /* Se pregunta contra el tramo que el ejecutivo tiene elegido arriba, no
+     contra el periodo de hoy: si mira agosto, la lista tiene que ser la de
+     agosto. `_gestionado` responde por el periodo en curso y es el que usa la
+     Cartera; acá se necesita el del selector. */
+  const gestionado = c => (r.id === "bono" && r.periodo === periodoHoy())
+    ? !!(c._base || RULES.recomputarBase(c.customer_id) || {})._gestionado
+    : comercioGestionado(c, DB.historiaDe(c.customer_id), r.fin, r.ini);
   const conGestion = cartera.filter(gestionado).length;
   const faltan     = cartera.length - conGestion;
   /* De los que faltan, cuántos ni siquiera tienen un intento. Es la diferencia
@@ -8131,7 +8252,7 @@ function bloqueMiPeriodo(r){
   const ayer  = diaTrabajadoAnterior(hoyISO());
   const deAyer = ayer ? mias.filter(x => String(x.Fecha_Contacto).slice(0,10) === ayer) : [];
 
-  const visitas = delPeriodo.filter(x => x.Cumple_Visita === "SI").length;
+  const visitas = comerciosConVisita(delPeriodo);
   const ventas  = nuevos.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
   const negociando  = cartera.filter(c => estadoDerivado(c) === "EN_NEGOCIACION").length;
   const porContactar= cartera.filter(c => estadoDerivado(c) === "POR_CONTACTAR").length;
@@ -8145,14 +8266,17 @@ function bloqueMiPeriodo(r){
   ${faltan ? `<button class="alerta-gest" data-verfaltan="1">
     <div class="ag-n">${faltan}</div>
     <div class="ag-t"><b>comercios te faltan por gestionar</b>
-      <span>Cuenta la <b>última</b> gestión de cada uno: vale si le mandaste un correo
-      —al banco o al comercio—, si el cliente te respondió, si hiciste la reunión o si
-      cerraste el caso. Si lo último que quedó fue un intento sin respuesta, el comercio
-      vuelve a esta lista.${
-        sinTocar ? ` ${sinTocar} de ellos no tienen todavía ningún intento.` : ""}</span></div>
+      <span>Cuenta la <b>última</b> gestión de cada uno <b>dentro de este periodo</b>
+      (${esc(r.detalle || textoPeriodo(periodoHoy()))}): vale si le mandaste un correo —al banco o al
+      comercio—, si el cliente te respondió, si hiciste la reunión o si cerraste el caso.
+      Si lo último que quedó fue un intento sin respuesta, el comercio vuelve a esta lista.
+      El periodo corre del 19 al 18, así que lo que trabajaste el 18 no cubre el periodo que
+      arranca el 19: esos comercios vuelven a aparecer acá.${
+        sinTocar ? ` ${sinTocar} de ellos no tienen todavía ningún intento en la campaña.` : ""}</span></div>
     <div class="ag-ir">Ver cuáles →</div>
   </button>` : `<div class="note ok" style="margin:0 0 12px">
-    <b>No te falta ninguno.</b> Los ${cartera.length} comercios de tu cartera tienen gestión.</div>`}
+    <b>No te falta ninguno.</b> Los ${cartera.length} comercios de tu cartera tienen gestión
+    en este periodo (${esc(r.detalle || textoPeriodo(periodoHoy()))}).</div>`}
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Customer ID</div><div class="val">${cartera.length}</div>
@@ -8170,7 +8294,7 @@ function bloqueMiPeriodo(r){
 
   <div class="stat-row">
     <div class="stat"><div class="lbl">Visitas efectivas</div><div class="val">${visitas}</div>
-      <div class="sub">gestiones que cumplen visita en el periodo</div></div>
+      <div class="sub">comercios con visita concretada en el periodo · volver a uno ya visitado no suma otra vez</div></div>
     <div class="stat"><div class="lbl">Ventas cerradas</div><div class="val">${ventas}</div>
       <div class="sub">afiliaciones nuevas cerradas en el periodo</div></div>
     <button class="stat stat-link" data-verest="POR_CONTACTAR"><div class="lbl">Por contactar</div>
@@ -8311,16 +8435,63 @@ function cifrasTablero(r, regs){
   const p    = r.periodo || periodoHoy();
   const req  = paramsDe(p).requisitos;
   const ejec = ejecutivosPanel();
-  const filas = ejec.map(u => filaEjecutivo(u, r));
+  const filas = ejec.map(u => filaEjecutivo(u, r, { sinCadena:true }));
+
+  /* ---- La cadena, acotada al tramo que se está mirando -------------------
+     Pedido de José el 01/09: «este tablero debe estar alineado a la imagen 2 y
+     la imagen 3, solo que de manera global y detallada». Así que el Tablero
+     deja de calcular sus propias cifras y pasa a leer LOS MISMOS CUATRO
+     CONJUNTOS que el Reporte y que el embudo por ejecutivo de Registros. Lo
+     único distinto es la ventana —acá el periodo del bono, allá el acumulado
+     de la campaña— y eso se dice arriba de la pantalla, escrito.
+
+     De acá salen los cuatro escalones y también las columnas de la tabla de
+     abajo: si el KPI y la tabla salen del mismo conjunto no pueden discrepar,
+     que era exactamente lo que pasaba (282 acá, 653 allá, 40 visitas contra
+     38). */
+  /* Y se recorta a lo que la pantalla está mirando: si un supervisor entró
+     «como» un ejecutivo, los cuatro conjuntos son los de ese ejecutivo. Sin
+     este recorte la cabecera mostraría la campaña entera debajo del nombre de
+     una persona. */
+  const visiblesPanel = new Set(universoPanel().map(c => String(c.customer_id)));
+  const recorte = s => new Set([...(s || [])].filter(id => visiblesPanel.has(id)));
+  const cadenaFull = cadenaEntre(r.ini, r.fin);
+  const cadena = {
+    gestion:     recorte(cadenaFull.gestion),
+    efectividad: recorte(cadenaFull.efectividad),
+    visita:      recorte(cadenaFull.visita),
+    objetivo:    recorte(cadenaFull.objetivo)
+  };
+  const dueno  = id => (byId[String(id)] || {}).asignado_correo || "";
+  const porEjec = {};
+  EMB_PASOS.forEach(k => {
+    (cadena[k.k] || new Set()).forEach(id => {
+      const c = dueno(id); if (!c) return;
+      (porEjec[c] = porEjec[c] || {})[k.k] = ((porEjec[c] || {})[k.k] || 0) + 1;
+    });
+  });
+  /* Cada fila del equipo se reescribe con el número del conjunto compartido.
+     La fila conserva todo lo suyo —gestiones, puntualidad, silencio—; lo que
+     cambia es que «gestionados» y «visitas» dejan de tener una segunda
+     definición local. */
+  filas.forEach(f => {
+    const e = porEjec[f.correo] || {};
+    f.trabajados = e.gestion     || 0;
+    f.efectivos  = e.efectividad || 0;
+    f.efectivas  = e.visita      || 0;
+    f.logrado    = e.objetivo    || 0;
+    f.sinTocar   = Math.max(0, (f.asignada || 0) - f.trabajados);
+    f.pct        = f.asignada ? f.logrado / f.asignada * 100 : null;
+  });
 
   const asignada   = filas.reduce((n,f) => n + (f.asignada || 0), 0);
-  const gestionados= filas.reduce((n,f) => n + (f.trabajados || 0), 0);
-  const efectivas  = regs.filter(x => x.Cumple_Visita === "SI").length;
+  const gestionados= cadena.gestion.size;
+  const efectivos  = cadena.efectividad.size;
+  const efectivas  = cadena.visita.size;
   const puntuales  = regs.filter(aTiempo).length;
 
   const base = universoPanel();
-  const cumplidos = base.filter(c => !esClienteNuevo(c)
-    && (esRetencion(c) || esRecuperado(c)) && enRango(c.cerrado_en, r)).length;
+  const cumplidos = cadena.objetivo.size;
   const ventas = base.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r)).length;
 
   /* Las visitas que pide el tramo mirado, por persona y prorrateadas: solo se
@@ -8335,11 +8506,25 @@ function cifrasTablero(r, regs){
      día más corrido. Ver `diasExtraTrabajados` en el core. */
   const pideVisitas = pideVisitasRango(req, r, ejec.length || 1, ejec.map(u => u.correo));
 
+  /* El portafolio de la cabecera: lo que declaró BBVA para la campaña cuando
+     se está mirando al equipo completo, y la cartera asignada de la persona
+     cuando se está mirando a una. Es la pista sobre la que se dibuja el
+     embudo, no un quinto escalón. */
+  const portafolio = correoObservado()
+    ? (asignada || filas.reduce((n,f) => n + (f.registrados || 0), 0))
+    : (Number(repProyecto().base_comercios) > 0 ? Number(repProyecto().base_comercios) : asignada);
+
   return {
-    filas, asignada, gestionados, efectivas, puntuales, cumplidos, ventas, req, sem, rv, pideVisitas,
+    filas, asignada, gestionados, efectivos, efectivas, puntuales, cumplidos, ventas,
+    req, sem, rv, pideVisitas, cadena, portafolio,
     cobertura:   asignada ? gestionados / asignada * 100 : null,
     calidad:     regs.length ? puntuales / regs.length * 100 : null,
-    gestiones:   regs.length
+    gestiones:   regs.length,
+    /* Las conversiones del embudo, que son las que hacen que esta pantalla se
+       lea igual que la lámina: cada escalón sobre el de arriba. */
+    convEfectividad: gestionados ? efectivos / gestionados * 100 : null,
+    convVisita:      efectivos   ? efectivas / efectivos   * 100 : null,
+    convObjetivo:    efectivas   ? cumplidos / efectivas   * 100 : null
   };
 }
 
@@ -8351,46 +8536,67 @@ const medidor = (pct, tono) =>
 const tonoContra = (valor, minimo) =>
   valor === null ? "" : (valor >= minimo ? "" : (valor >= minimo * 0.8 ? "ojo" : "alerta"));
 
+/* Los CUATRO ESCALONES del embudo, en el orden de la lámina del directorio y
+   con la misma regla: Gestión → Efectividad → Visitas → Objetivo. Cada tarjeta
+   trae, además de su cifra, la conversión desde el escalón de arriba —que es
+   lo que convierte cuatro números sueltos en un embudo— y su mínimo cuando lo
+   tiene. La quinta, Calidad del registro, no es un escalón: es la condición de
+   que los otros cuatro sean ciertos, y por eso va al final y se ve distinta.
+   (José, 01/09: el tablero alineado a la lámina y al embudo por ejecutivo.) */
 function kpisTablero(x, r){
   const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
   const cobOk = x.cobertura !== null && x.cobertura >= x.req.cobertura_pct;
   const calOk = x.calidad   !== null && x.calidad   >= x.req.puntualidad_pct;
+  const visOk = x.pideVisitas && x.efectivas >= x.pideVisitas;
+  const conv = v => v === null ? "" :
+    `<span class="kpi-conv">${pct1(v)}% del escalón anterior</span>`;
 
   return `
-  <div class="kpis">
-    <button class="kpi kpi-link" data-verlista="gestionado" data-vercuantos="${x.gestionados}">
-      <div class="lbl">Cobertura del periodo</div>
+  <div class="kpis kpis-embudo">
+    <button class="kpi kpi-link kpi-paso" style="--paso:var(--emb-gestion)"
+            data-verlista="gestionado" data-vercuantos="${x.gestionados}">
+      <div class="lbl">Gestión</div>
       ${/* Sin cartera asignada no hay porcentaje que dar, y poner «—%» al lado de
            una barra vacía se lee como cero. Se muestra lo que sí se sabe —los
            comercios gestionados— y se dice qué falta para poder medirlo. */
         x.asignada
-          ? `<div class="val num">${pct1(x.cobertura)}<span class="pc">%</span></div>
-             <div class="sub">${x.gestionados} de ${x.asignada} gestionados · mínimo ${x.req.cobertura_pct}%</div>
+          ? `<div class="val num">${x.gestionados}</div>
+             <div class="sub">de ${x.asignada} del portafolio · <b>${pct1(x.cobertura)}%</b> de cobertura,
+               mínimo ${x.req.cobertura_pct}%</div>
              ${medidor(x.cobertura, cobOk ? "" : tonoContra(x.cobertura, x.req.cobertura_pct))}`
           : `<div class="val num">${x.gestionados}</div>
              <div class="sub">comercios gestionados${esBBVA() ? "" : " · falta cargar la cartera asignada en Ajustes"}</div>
              ${medidor(0, "ojo")}`}
     </button>
 
-    <div class="kpi">
-      <div class="lbl">Visitas efectivas</div>
+    <div class="kpi kpi-paso" style="--paso:var(--emb-efectividad)">
+      <div class="lbl">Efectividad</div>
+      <div class="val num">${x.efectivos}</div>
+      <div class="sub">comercios que respondieron ${conv(x.convEfectividad)}</div>
+      ${/* Sin mínimo no hay veredicto que dar: barra neutra. */ ""}
+      ${medidor(x.convEfectividad, "neutro")}
+    </div>
+
+    <div class="kpi kpi-paso" style="--paso:var(--emb-visita)">
+      <div class="lbl">Visitas</div>
       <div class="val num">${x.efectivas}</div>
       <div class="sub">${x.pideVisitas
         ? `de ${x.pideVisitas} que pide el tramo · ${esc(x.rv.corto)} y ejecutivo`
-        : `se piden ${esc(x.rv.corto)} y ejecutivo`}</div>
-      ${medidor(x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0,
-                x.pideVisitas && x.efectivas >= x.pideVisitas ? "" : "alerta")}
+        : `se piden ${esc(x.rv.corto)} y ejecutivo`} ${conv(x.convVisita)}</div>
+      ${medidor(x.pideVisitas ? x.efectivas / x.pideVisitas * 100 : 0, visOk ? "" : "alerta")}
     </div>
 
-    <button class="kpi kpi-link" data-vercierre="cumplido_cartera">
-      <div class="lbl">Objetivo cumplido</div>
+    <button class="kpi kpi-link kpi-paso" style="--paso:var(--emb-objetivo)"
+            data-vercierre="cumplido_cartera">
+      <div class="lbl">Objetivo</div>
       <div class="val num">${x.cumplidos}</div>
       <div class="sub">${x.cumplidos === 1 ? "comercio retenido o recuperado" : "comercios retenidos o recuperados"}${
-        x.ventas ? ` · ${x.ventas} venta${x.ventas === 1 ? "" : "s"} nueva${x.ventas === 1 ? "" : "s"}` : ""}</div>
-      ${medidor(x.asignada ? x.cumplidos / x.asignada * 100 : 0, "ojo")}
+        x.ventas ? ` · ${x.ventas} venta${x.ventas === 1 ? "" : "s"} nueva${x.ventas === 1 ? "" : "s"}` : ""}
+        ${conv(x.convObjetivo)}</div>
+      ${medidor(x.asignada ? x.cumplidos / x.asignada * 100 : 0, "neutro")}
     </button>
 
-    <div class="kpi">
+    <div class="kpi kpi-calidad">
       <div class="lbl">Calidad del registro</div>
       <div class="val num">${pct1(x.calidad)}<span class="pc">%</span></div>
       <div class="sub">${x.gestiones
@@ -8399,24 +8605,43 @@ function kpisTablero(x, r){
         : "sin gestiones en el periodo"}</div>
       ${medidor(x.calidad, calOk ? "" : "ojo")}
     </div>
-  </div>`;
+  </div>
+
+  <p class="nota kpi-nota">Los cuatro escalones son <b>comercios</b>, no gestiones: un comercio
+    visitado tres veces es uno. Cada uno sale del anterior —la efectividad se cuenta sobre lo
+    gestionado y las visitas sobre lo efectivo—, así que el embudo no se puede ensanchar hacia
+    abajo. Son la misma regla y los mismos conjuntos del <b>Reporte de avance</b> y del embudo
+    por ejecutivo de <b>Registros</b>; lo único distinto es el tramo: acá
+    <b>${esc(r.detalle || "")}</b>, allá la campaña completa.</p>`;
 }
 
 /* ---- Avance por ejecutivo ------------------------------------------------
-   La misma tabla de siempre, con dos cambios: la cobertura se lee como barra
-   —comparar cuatro porcentajes en texto obliga a hacer la resta a mano— y las
-   columnas de detalle siguen a un clic, sin ocupar la primera lectura. */
+   La misma tabla de siempre, con la cobertura leída como barra —comparar
+   cuatro porcentajes en texto obliga a hacer la resta a mano— y, desde el
+   01/09, las columnas en el ORDEN DEL EMBUDO: Gestionados → Efectivos →
+   Visitas → Cumplido. Son las mismas cuatro cifras de las tarjetas de arriba
+   y del embudo de abajo, repartidas por persona; salen del mismo conjunto, así
+   que no pueden discrepar. */
 function tablaTablero(x){
   const b = (pct) => `<div class="barra-fila">
     <div class="pista"><i style="width:${Math.max(0, Math.min(100, pct || 0)).toFixed(1)}%"></i></div>
     <span class="cifra num">${pct === null ? "—" : Math.round(pct) + "%"}</span></div>`;
 
   const suma = k => x.filas.reduce((n,f) => n + (f[k] || 0), 0);
+  /* El total del equipo NO es la suma de las filas: un comercio sin ejecutivo
+     asignado cuenta en la campaña y no se le cuelga a nadie. Se muestra el
+     total real y, si difiere de la suma, se dice cuántos quedaron sin dueño en
+     vez de cuadrarlo por la fuerza. */
   const equipo = {
-    asignada: x.asignada, registrados: suma("registrados"), trabajados: suma("trabajados"),
-    efectivas: suma("efectivas"), logrado: suma("logrado"),
+    asignada: x.asignada, registrados: suma("registrados"),
+    trabajados: x.gestionados, efectivos: x.efectivos,
+    efectivas: x.efectivas, logrado: x.cumplidos,
     cobertura: x.cobertura
   };
+  const huerfanos = [["gestionados", x.gestionados - suma("trabajados")],
+                     ["efectivos",   x.efectivos   - suma("efectivos")],
+                     ["visitas",     x.efectivas   - suma("efectivas")],
+                     ["cumplidos",   x.cumplidos   - suma("logrado")]].filter(z => z[1] !== 0);
 
   const fila = (f, esEquipo) => `<tr${esEquipo ? ' class="total"' : ""}>
     <td>${esc(f.nombre || "Equipo")}</td>
@@ -8427,6 +8652,7 @@ function tablaTablero(x){
     <td>${f.trabajados
       ? `<button class="cifra-link" data-verlista="gestionado" ${esEquipo ? "" : `data-verejec="${esc(f.nombre)}"`}
                  data-vercuantos="${f.trabajados}">${f.trabajados}</button>` : "—"}</td>
+    <td>${f.efectivos || "—"}</td>
     <td>${f.efectivas || "—"}</td>
     <td>${f.logrado || "—"}</td>
     <td>${b(esEquipo ? f.cobertura : (f.asignada ? f.trabajados / f.asignada * 100 : null))}</td>
@@ -8434,12 +8660,12 @@ function tablaTablero(x){
 
   return `
   <div class="panel">
-    <h3>Avance por ejecutivo <span>cobertura = gestionados sobre su cartera asignada</span></h3>
+    <h3>Avance por ejecutivo <span>las mismas cuatro cifras del embudo, por persona</span></h3>
     <div class="tabla-cont">
       <table class="tbl-tab">
         <thead><tr>
           <th>Ejecutivo</th><th>Asignados</th><th>Registrados</th><th>Gestionados</th>
-          <th>Visitas</th><th>Cumplido</th><th>Cobertura</th>
+          <th>Efectivos</th><th>Visitas</th><th>Cumplido</th><th>Cobertura</th>
         </tr></thead>
         <tbody>
           ${x.filas.map(f => fila(f, false)).join("")}
@@ -8447,11 +8673,18 @@ function tablaTablero(x){
         </tbody>
       </table>
     </div>
+    ${huerfanos.length ? `<div class="note warn" style="margin:10px 0 0">
+      La fila del equipo no es la suma de las de arriba: hay
+      ${huerfanos.map(z => `<b>${z[1]}</b> ${z[0]}`).join(", ")} en comercios sin ejecutivo
+      asignado. Se muestran en el total porque son trabajo de la campaña, y se declaran acá
+      porque a alguien hay que asignárselos.</div>` : ""}
     <p class="nota"><b>Asignados</b> los pone BBVA. <b>Registrados</b> son las fichas cargadas en el
-      CRM, se hayan trabajado o no. <b>Gestionados</b> son los que tienen al menos un hecho
-      con resultado en el periodo: un correo al banco o al comercio, un contacto efectivo,
-      una reunión o visita realizada, o un cierre registrado. El intento sin respuesta se
-      registra igual, pero no cuenta acá. Los números subrayados abren su lista.</p>
+      CRM, se hayan trabajado o no. <b>Gestionados</b> son los comercios cuya última actividad
+      DENTRO DEL TRAMO fue un hecho con resultado: un correo al banco o al comercio, un contacto
+      efectivo, una reunión o visita realizada, o un cierre registrado. El intento sin respuesta
+      se registra igual, pero no cuenta acá. <b>Efectivos</b> son los que respondieron y
+      <b>Visitas</b> los que además tuvieron visita concretada —comercios, no visitas hechas—.
+      Los números subrayados abren su lista.</p>
   </div>`;
 }
 
@@ -8730,6 +8963,22 @@ function viewTablero(){
   <div class="cols-tab">
     <div>
       ${tablaTablero(x)}
+      ${/* El MISMO componente del embudo por ejecutivo de Registros —no una
+           copia—, con la ventana del tramo que está elegido arriba en vez del
+           acumulado de la campaña. Es lo que pidió José el 01/09: el tablero
+           alineado a la lámina del Reporte y al embudo de Registros, «solo que
+           de manera global y detallada». Global son las cinco tarjetas de
+           arriba; detallado es esto. */
+        embudoEquipo(x.filas, {
+          cadena: { gestion:[...x.cadena.gestion], efectividad:[...x.cadena.efectividad],
+                    visita:[...x.cadena.visita],   objetivo:[...x.cadena.objetivo] },
+          portafolio: x.portafolio,
+          titulo: "Del portafolio al objetivo cumplido, por ejecutivo",
+          sub: `${esc(r.detalle || "")} · el mismo embudo de la lámina del directorio y de Registros,
+                acotado a este tramo · la altura de cada barra es sobre el portafolio, el
+                porcentaje de abajo es la conversión del escalón anterior`,
+          pie: "Acá van acotados al tramo elegido arriba; en el Reporte van acumulados de toda la campaña."
+        })}
       ${lineaDiaria(r, regs)}
       ${flujoBbva() ? cardPipeline() : ""}
     </div>
@@ -9728,7 +9977,7 @@ function hojaAvance(){
       ef, rs.length - ef,
       rs.length ? Math.round(ef/rs.length*10000)/10000 : 0,
       cs.length ? Math.round(rs.length/cs.length*10)/10 : 0,
-      rs.filter(r => r.Cumple_Visita === "SI").length,
+      comerciosConVisita(rs),
       ret, ven, per, pen, cumplido,
       cs.length ? Math.round(cumplido/cs.length*10000)/10000 : 0,
       decididos ? Math.round(cumplido/decididos*10000)/10000 : "",
@@ -10403,7 +10652,7 @@ function hojaReporte(admin){
       return dec ? Math.round(cum/dec*100) + "%" : "—";
     })()],
     ["Intentos por comercio", base.length ? Math.round(regs.length/base.length*10)/10 : 0],
-    ["Visitas efectivas", regs.filter(r => r.Cumple_Visita === "SI").length],
+    ["Visitas efectivas", comerciosConVisita(regs)],
     [],
     ["Nota", "Cada registro cuenta como un intento de comunicación, aunque sea el cuarto con el mismo comercio."],
     ["", "Solo el resultado \u201cHabló con el contacto\u201d cuenta como comunicación lograda."],
@@ -11097,7 +11346,13 @@ function asignadaDe(correo, r){
 /* Todo lo que el Panel muestra de un ejecutivo, medido contra un solo reloj.
    Antes esto vivía repartido en tres tablas con tres ventanas distintas y por
    eso «Trabajados» y «Comercios» nunca coincidían. */
-function filaEjecutivo(u, r){
+/* `opts.sinCadena` lo pone quien va a reemplazar «gestionados» por el conjunto
+   compartido —hoy solo `cifrasTablero`—: recorrer las 639 gestiones y las
+   coordinaciones con el banco una vez por ejecutivo para después descartar el
+   resultado son 130 ms regalados en cada dibujado del Tablero. Lo que se
+   ahorra es trabajo duplicado, no una comprobación: el número sigue saliendo,
+   y sale de la misma cadena que las tarjetas y el embudo. */
+function filaEjecutivo(u, r, opts){
   const suyos = CLIENTES.filter(c => c.asignado_correo === u.correo && !esClienteNuevo(c));
   const gest  = DB.todos().filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r));
 
@@ -11117,16 +11372,18 @@ function filaEjecutivo(u, r){
      día de trabajo. Antes acá bastaba con que hubiera UNA fila válida en el
      rango; eso contestaba «¿alguna vez?» donde la regla pregunta «¿en qué
      quedó?», y era la misma brecha que tenía la Cartera. */
-  const porComercio = new Map();
-  [...DB.todos(), ...DB.bbva()]
-    .filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r))
-    .forEach(x => {
-      const cid = String(x.Customer_id);
-      if (!porComercio.has(cid)) porComercio.set(cid, []);
-      porComercio.get(cid).push(x);
-    });
   const gestionados = new Set();
-  porComercio.forEach((filas, cid) => { if (ultimoDiaCalifica(filas)) gestionados.add(cid); });
+  if (!(opts && opts.sinCadena)){
+    const porComercio = new Map();
+    [...DB.todos(), ...DB.bbva()]
+      .filter(x => x.Correo_Stratis === u.correo && enRango(x.Fecha_Contacto, r))
+      .forEach(x => {
+        const cid = String(x.Customer_id);
+        if (!porComercio.has(cid)) porComercio.set(cid, []);
+        porComercio.get(cid).push(x);
+      });
+    porComercio.forEach((filas, cid) => { if (ultimoDiaCalifica(filas)) gestionados.add(cid); });
+  }
 
   const asignada    = asignadaDe(u.correo, r);
   /* El cierre no es una interacción: vive en la ficha. Un comercio cerrado en
@@ -11138,7 +11395,7 @@ function filaEjecutivo(u, r){
   const ventasNuevas = CLIENTES.filter(c => c.asignado_correo === u.correo && esVentaNueva(c)
                           && enRango(c.cerrado_en || c.creado_en, r)).length;
   const respuestas  = gest.filter(x => esEfectivo(x.Resultado)).length;
-  const efectivas   = gest.filter(x => x.Cumple_Visita === "SI").length;
+  const efectivas   = comerciosConVisita(gest);
   const puntuales   = gest.filter(aTiempo).length;
   const ultima      = gest.length
     ? gest.map(x => String(x.Fecha_Contacto).slice(0,10)).sort().pop() : "";
@@ -12346,7 +12603,7 @@ function llaveDe(correo, p){
 
   /* Una visita a la agencia del banco no es una visita al comercio. El
      requisito mide terreno con el cliente, así que se pide las dos cosas. */
-  const efectivas = gest.filter(r => esAlCliente(r) && r.Cumple_Visita === "SI").length;
+  const efectivas = comerciosConVisita(gest.filter(esAlCliente));
   const semanas   = semanasPeriodo(p);
   /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
      de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
@@ -13256,8 +13513,11 @@ function viewBono(){
         solo los que tienen Customer ID. Las ventas nuevas por RUC cuentan aparte, en su propio objetivo.</dd></div>
       <div class="kv"><dt>Facturación</dt><dd>El CRM no la ve. Se carga el monto inicial y el final del periodo
         y el crecimiento se calcula solo.</dd></div>
-      <div class="kv"><dt>Visitas efectivas</dt><dd>Las que el CRM marca como <b>cumple visita</b>: presencial o virtual
-        <b>y</b> con el cliente respondiendo. El mínimo del periodo es de <b>${esc(reglaVisitas(B.requisitos, p).largo)}</b>.</dd></div>
+      <div class="kv"><dt>Visitas efectivas</dt><dd>Se cuentan <b>comercios</b>, no visitas hechas: un comercio
+        al que se volvió tres veces es uno (José, 01/09). Cuenta el que el CRM marca como <b>cumple visita</b>:
+        presencial o virtual <b>y</b> con el cliente respondiendo. El mínimo del periodo es de
+        <b>${esc(reglaVisitas(B.requisitos, p).largo)}</b>, así que volver sobre un comercio ya visitado no
+        acerca al mínimo: lo acerca visitar uno nuevo.</dd></div>
       <div class="kv"><dt>La bolsa retenida</dt><dd>Cada periodo se paga el ${B.pago_mensual}% y se retiene el ${
         100 - B.pago_mensual}%. Las retenciones forman una sola bolsa que se evalúa <b>una sola vez, al cierre
         del proyecto</b>, contra el cumplimiento acumulado y no mes a mes: un periodo flojo no deja a nadie
@@ -13843,6 +14103,10 @@ const repNota = k => (REPORTE.notas || {})[k] || "";
    semana. Escribir la definición más de una vez ya provocó que el corte del
    jueves superara al acumulado (71 contra 52); ahora hay una sola. */
 function repLineaGestion(f){
+  return memoRender('linea|' + (f && f.ini || '') + '|' + (f && f.hoy || ''),
+                    () => repLineaGestionCalc(f));
+}
+function repLineaGestionCalc(f){
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const enCartera = new Set(cart.map(c => String(c.customer_id)));
   const m = new Map();
@@ -13948,6 +14212,98 @@ function repTrabajadosEntre(linea, desde, hasta){
   return n;
 }
 
+/* ---- LA CADENA, en una sola función y con ventana -----------------------
+ *
+ * Gestión → Efectividad → Visitas → Objetivo, sobre la cartera de retención y
+ * contando COMERCIOS en los cuatro escalones. Es exactamente el embudo de la
+ * lámina del directorio y el de Registros por ejecutivo; lo único que cambia
+ * de una pantalla a otra es la ventana:
+ *
+ *   `cadenaEntre(null, hoy)`        → el acumulado de la campaña  (Reporte)
+ *   `cadenaEntre(w.ini, w.fin)`     → el periodo del bono, 19→18  (Tablero)
+ *
+ * Que exista una sola función es el punto. El 01/09 el Tablero decía 282
+ * gestionados y 40 visitas, el Reporte decía 653 y 38, y los dos tenían razón
+ * según su propia definición: distinta ventana Y distinta unidad. Tres
+ * pantallas, tres números, la misma palabra. Ahora la definición es una y la
+ * ventana se declara arriba de cada pantalla, escrita, para que la diferencia
+ * entre 282 y 653 se lea como lo que es —dos preguntas distintas— y no como
+ * un error.
+ */
+function cadenaEntre(desde, hasta){
+  return memoRender('cadena|' + (desde || '') + '|' + (hasta || ''),
+                    () => cadenaEntreCalc(desde, hasta));
+}
+function cadenaEntreCalc(desde, hasta){
+  const P = repProyecto();
+  const ini = P.inicio || PROYECTO.inicio;
+  const hoy0 = hoyISO();
+  const hoy = (hasta && hasta < hoy0) ? hasta : hoy0;   // nunca se mide el futuro
+  const dsd = desde || null;
+
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+
+  const dentro = d => {
+    const x = String(d || "").slice(0,10);
+    return !!x && x <= hoy && (!dsd || x >= dsd);
+  };
+
+  /* Gestión: la ÚLTIMA actividad dentro de la ventana tiene que calificar.
+     `repLineaGestion` ya trae cada hecho con su fecha y su veredicto —las
+     interacciones al comercio, las coordinaciones con BBVA y el cierre de la
+     ficha—, así que acá solo se le pregunta por la ventana. */
+  const linea = repLineaGestion({ ini, hoy });
+  let gestionSet;
+  if (dsd){
+    gestionSet = new Set();
+    linea.forEach((hist, cid) => {
+      if (idsCart.has(cid) && repUltimaCalifica(hist, dsd, hoy)) gestionSet.add(cid);
+    });
+  } else {
+    gestionSet = new Set([...repIdsGestionados(linea, hoy)].filter(id => idsCart.has(id)));
+  }
+
+  /* Las filas reconstruidas NO se filtran acá a propósito: `conAlguna` es
+     «fichas con algún intento registrado» y esa cifra viaja a la lámina del
+     directorio desde antes. Quitarlas la movería en silencio, y de todos
+     modos no pueden colarse en la cadena: `gestionSet` ya las excluye —vía
+     `esGestionValida`— y los tres escalones de abajo se intersectan contra
+     él. Si algún día hay que sacarlas de `contacto`, se saca a propósito. */
+  const ges = DB.todos().filter(g => dentro(g.Fecha_Contacto));
+  const conAlguna    = new Set(ges.map(g => String(g.Customer_id)));
+  const conRespuesta = new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
+  const conVisita    = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
+
+  /* Cada escalón sale del de arriba, así el embudo no se puede ensanchar
+     hacia abajo. Una reunión realizada ES una respuesta concreta, más fuerte
+     que una llamada atendida, así que entra a Efectividad por la unión. */
+  const y = (a, b) => new Set([...a].filter(x => b.has(x)));
+  const respondio   = new Set([...conRespuesta, ...conVisita]);
+  const efectivoSet = y(respondio, gestionSet);
+  const visitaSet   = y(conVisita, efectivoSet);
+  /* El objetivo se fecha por el cierre. En el acumulado no se le pide fecha
+     —un retenido sin `cerrado_en` es un resultado igual de cierto—; dentro de
+     una ventana sí, porque sin fecha no se puede afirmar que ocurrió ahí. */
+  const objetivoSet = new Set(cart
+    .filter(c => (esRetencion(c) || esRecuperado(c)) && (dsd ? dentro(c.cerrado_en) : true))
+    .map(c => String(c.customer_id)));
+
+  return {
+    desde: dsd, hasta: hoy, cart, idsCart, linea,
+    conAlguna, conRespuesta, conVisita, respondio,
+    gestion: gestionSet, efectividad: efectivoSet, visita: visitaSet, objetivo: objetivoSet,
+    /* Lo que queda FUERA de la cadena. No se recorta en silencio: un comercio
+       retenido sin visita registrada es un resultado real —o una visita que
+       nadie anotó—, y en los dos casos hay que verlo. */
+    sinRespaldo: {
+      efectivos:   y(respondio, idsCart).size - efectivoSet.size,
+      visitas:     y(conVisita, idsCart).size - visitaSet.size,
+      retenciones: objetivoSet.size - y(objetivoSet, visitaSet).size
+    }
+  };
+}
+
 function fotoReporte(){
   const P = repProyecto();
   const hoy = hoyISO();
@@ -13974,13 +14330,15 @@ function fotoReporte(){
   /* Cada escalón cuenta comercios, no gestiones: un comercio visitado tres
      veces es un comercio, no tres. Confundirlos era el error que hacía ver
      el embudo más ancho de lo que estaba. */
-  const conAlguna   = new Set(ges.map(g => String(g.Customer_id)));
-  const conRespuesta= new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
-  const conVisita   = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
-  /* Los gestionados salen de una sola función compartida con las láminas
-     semanales, para que las tres digan el mismo número. */
-  const linea      = repLineaGestion({ ini, hoy });
-  const conGestion = repIdsGestionados(linea);
+  /* Los cuatro conjuntos salen de `cadenaEntre`, que es la MISMA función que
+     usan el Tablero y el embudo por ejecutivo. Acá se la llama sin `desde`:
+     el Reporte mide la campaña completa. */
+  const C = cadenaEntre(null, hoy);
+  const conAlguna    = C.conAlguna;
+  const conRespuesta = C.conRespuesta;
+  const conVisita    = C.conVisita;
+  const linea      = C.linea;
+  const conGestion = C.gestion;
 
   const enCartera = s => cart.filter(c => s.has(String(c.customer_id))).length;
   /* Cada escalón sigue siendo parte del anterior, y con la regla ancha del
@@ -14012,12 +14370,11 @@ function fotoReporte(){
      mismo que «no se puede romper»: bastaba una visita sin respuesta
      registrada para que el embudo se ensanchara hacia abajo. Ahora cada
      conjunto es subconjunto del anterior por construcción. */
-  const respondio    = new Set([...conRespuesta, ...conVisita]);
-  const gestionSet   = y(conGestion, new Set(cart.map(c => String(c.customer_id))));
-  const efectivoSet  = y(respondio, gestionSet);
-  const visitaSet    = y(conVisita, efectivoSet);
-  const objetivoSet  = new Set(cart.filter(c => esRetencion(c) || esRecuperado(c))
-                                   .map(c => String(c.customer_id)));
+  const respondio    = C.respondio;
+  const gestionSet   = C.gestion;
+  const efectivoSet  = C.efectividad;
+  const visitaSet    = C.visita;
+  const objetivoSet  = C.objetivo;
 
   const efectividad = enCartera(efectivoSet);
   const visita      = enCartera(visitaSet);
@@ -14030,11 +14387,7 @@ function fotoReporte(){
      nadie anotó—, y en los dos casos hay que verlo. Hoy los tres son cero;
      se calculan igual, porque una cifra que se borra es una cifra que nadie
      vuelve a mirar el día que deja de ser cero. */
-  const sinRespaldo = {
-    efectivos:   enCartera(respondio)  - efectividad,
-    visitas:     enCartera(conVisita)  - visita,
-    retenciones: objetivoSet.size - y(objetivoSet, visitaSet).size
-  };
+  const sinRespaldo = C.sinRespaldo;
 
   const retenidos   = cart.filter(esRetencion).length;
   const recuperados = cart.filter(esRecuperado).length;
@@ -14470,14 +14823,14 @@ function repEvolutivo(f){
         n: i + 1, desde: de, hasta: aTope,
         gestiones: gs.length,
         respaldadas: gs.filter(repRespaldada).length,
-        visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+        visitas: comerciosConVisita(gs),
         parcial: aTope < a
       });
     }
     return { ...p, hasta, largo, semanas,
       gestiones: dentro.length,
       respaldadas: dentro.filter(repRespaldada).length,
-      visitas: dentro.filter(g => g.Cumple_Visita === "SI").length };
+      visitas: comerciosConVisita(dentro) };
   };
 
   const p1 = serie(REP_PERIODOS[0]);
@@ -14492,7 +14845,7 @@ function repEvolutivo(f){
     return { hasta: tope,
       gestiones: gs.length,
       respaldadas: gs.filter(repRespaldada).length,
-      visitas: gs.filter(g => g.Cumple_Visita === "SI").length,
+      visitas: comerciosConVisita(gs),
       comercios: new Set(gs.map(g => String(g.Customer_id))).size };
   };
 
@@ -14703,7 +15056,7 @@ function repSemanaDia(f){
 
   const enDia = (d, k) => {
     if (k === "visitas")
-      return ges.filter(g => g.Cumple_Visita === "SI" && repDia(g.Fecha_Contacto) === d).length;
+      return comerciosConVisita(ges.filter(g => repDia(g.Fecha_Contacto) === d));
     return cart.filter(c => (esRetencion(c) || esRecuperado(c))
       && c.cerrado_en && String(c.cerrado_en).slice(0,10) === d).length;
   };
@@ -14784,9 +15137,11 @@ function repSemanal(f){
     return {
       desde, hasta: fin, completa: true,
       contactos: repTrabajadosEntre(act, desde, fin),
-      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
-      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
-        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
+      /* Comercios con visita concretada, no visitas hechas (José, 01/09).
+         `visitasComercios` queda como alias del mismo número para no romper
+         a quien ya lo leía por ese nombre. */
+      visitas: comerciosConVisita(ges.filter(g => enRango(repDia(g.Fecha_Contacto)))),
+      visitasComercios: comerciosConVisita(ges.filter(g => enRango(repDia(g.Fecha_Contacto)))),
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
     };
@@ -14801,9 +15156,11 @@ function repSemanal(f){
       desde: desdeC, hasta: f.hoy, completa: false,
       dias: dias(desdeC, f.hoy) + 1,
       contactos: repTrabajadosEntre(act, desdeC, f.hoy),
-      visitas: ges.filter(g => g.Cumple_Visita === "SI" && enRango(repDia(g.Fecha_Contacto))).length,
-      visitasComercios: new Set(ges.filter(g => g.Cumple_Visita === "SI"
-        && enRango(repDia(g.Fecha_Contacto))).map(g => String(g.Customer_id))).size,
+      /* Comercios con visita concretada, no visitas hechas (José, 01/09).
+         `visitasComercios` queda como alias del mismo número para no romper
+         a quien ya lo leía por ese nombre. */
+      visitas: comerciosConVisita(ges.filter(g => enRango(repDia(g.Fecha_Contacto)))),
+      visitasComercios: comerciosConVisita(ges.filter(g => enRango(repDia(g.Fecha_Contacto)))),
       retenciones: cart.filter(c => (esRetencion(c) || esRecuperado(c))
         && c.cerrado_en && enRango(String(c.cerrado_en).slice(0,10))).length
     });
@@ -14856,10 +15213,12 @@ function repSemanal(f){
     pico: { contactos: picoDe("contactos"), retenciones: picoDe("retenciones"),
             visitas: picoDe("visitas") },
     series: [
-      /* La unidad va en el nombre. «Visitas efectivas» a secas se confundía con
-         el escalón «Visitas» del embudo, que cuenta COMERCIOS visitados: 14
-         visitas pueden caer sobre 6 comercios nuevos y otros ya visitados, y
-         las dos cifras juntas parecían un error de cuenta. */
+      /* La unidad va en el nombre, y desde el 01/09 la unidad es UNA SOLA:
+         COMERCIOS con visita concretada, acá y en el escalón «Visitas» del
+         embudo. Hasta ese día esta serie contaba visitas hechas y el embudo
+         comercios visitados —14 contra 6 sobre el mismo trabajo—, y las dos
+         cifras juntas parecían un error de cuenta. José lo cerró: «las visitas
+         solo van a contar por comercio con visita efectiva concretada». */
       /* Orden y color del embudo: trabajados, visitas, retenciones — azul,
          naranja, verde. Hasta el 27/08 esta lámina iba trabajados, retenciones,
          visitas, y encima pintaba las visitas de verde y las retenciones de
@@ -14867,7 +15226,7 @@ function repSemanal(f){
          concepto con dos colores en dos láminas seguidas hace que la leyenda
          no sirva de nada. */
       { k:"contactos",   nombre:"Comercios trabajados", color:"azul2" },
-      { k:"visitas",     nombre:"Visitas realizadas", color:"naranja" },
+      { k:"visitas",     nombre:"Comercios visitados", color:"naranja" },
       { k:"retenciones", nombre:"Retenciones concretadas", color:"verde" }
     ],
     variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
@@ -15772,9 +16131,10 @@ function armarDirectorio(pptx, fondos){
       const v2 = (dd.previa || []).filter(x => x !== null && x !== undefined);
       return v2.length ? v2[v2.length - 1] : null;
     })();
-    /* Y sobre cuántos comercios cayeron. «16 visitas» y «+9 comercios visitados»
-       en la lámina anterior solo cierran si se dice que 16 visitas pueden caer
-       sobre 10 comercios, y que de esos 10 hay 9 que nunca se habían visitado. */
+    /* La aclaración «sobre N comercios» existía para reconciliar dos unidades
+       —16 visitas contra 10 comercios— que desde el 01/09 son la misma. Se deja
+       escrita la condición en vez de borrarla: si algún día las dos cifras se
+       vuelven a separar, la lámina lo dice sola en lugar de callarlo. */
     const sobre = serie.k === "visitas" && SEM.curso
       && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
       ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
