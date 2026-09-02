@@ -14438,10 +14438,31 @@ function fotoReporte(){
   const perdidos    = cart.filter(c => c.resultado_gestion === "PERDIDO").length;
   const ventasNuevas= nuevos.filter(esVentaNueva).length;
 
-  /* El ritmo de campo se mide sobre los días en que efectivamente hubo
-     actividad, no sobre los días corridos del proyecto. Dividir entre los
-     corridos castiga las dos primeras semanas, que fueron de coordinación
-     con los ejecutivos de BBVA y no de calle. */
+  /* ---- DOS RITMOS, CADA UNO CON SU NOMBRE (José, 02/09) -------------------
+     Hasta hoy había una sola cifra de «ritmo» y su denominador no era el que
+     decía el rótulo: la lámina mostraba «26 días con actividad en campo» al
+     lado de «18,7 gestiones por día», y 653/26 son 25,1, no 18,7. El 18,7
+     salía de dividir entre los 35 días CORRIDOS desde la primera gestión. Dos
+     denominadores en la misma tarjeta, y ninguno de los dos se podía verificar
+     con el otro número que tenía al lado.
+
+     Los dos son ciertos y miden cosas distintas, así que ahora van los dos,
+     separados y nombrados:
+
+       · ritmo de trabajo  = gestión / días CON ACTIVIDAD (26)
+         Cuánto rinde el equipo el día que sale a trabajar. Es el que sirve
+         para juzgar al equipo y para dimensionar una semana.
+
+       · ritmo de calendario = gestión / días CORRIDOS desde la primera
+         gestión (35). Incluye sábados, domingos y feriados, en los que no se
+         trabaja pero el calendario avanza igual. Es el único honesto para
+         PROYECTAR una fecha, porque la fecha de cierre está en el calendario
+         y no en los días hábiles. Por eso `fechaCobertura` sale de este.
+
+     Los días corridos se cuentan desde la primera gestión y no desde el
+     arranque declarado del proyecto: las dos primeras semanas fueron de
+     coordinación con los ejecutivos de BBVA y no de calle, y meterlas en el
+     denominador castiga un trabajo que sí se hizo. */
   /* Las fechas de campo se recortan al periodo del proyecto. Una sola gestión
      con la fecha mal tecleada —el 26/08 había una del 13 de febrero, cinco
      meses antes del arranque— estiraba «días de campo» de 38 a 195 y dividía
@@ -14461,7 +14482,8 @@ function fotoReporte(){
     const d = String(g.Fecha_Contacto).slice(0,10);
     return d && (d < ini || d > hoy);
   }).length;
-  const porDia = diasDeCampo ? contacto / diasDeCampo : 0;
+  const porDia = diasDeCampo ? contacto / diasDeCampo : 0;              // calendario
+  const porDiaActivo = diasActivos ? contacto / diasActivos : 0;        // trabajo
   const faltanContactar = Math.max(0, portafolio - contacto);
   /* ---- La cobertura se proyecta sobre GESTIÓN, no sobre contacto ---------
      Desde que el segundo escalón del embudo es la gestión, medir la cobertura
@@ -14471,7 +14493,8 @@ function fotoReporte(){
      misma definición y el deck habla de una sola cosa. El contacto sigue
      calculándose —se declara como fichas con algún intento— pero no proyecta
      nada. */
-  const porDiaGestion = diasDeCampo ? gestion / diasDeCampo : 0;
+  const porDiaGestion = diasDeCampo ? gestion / diasDeCampo : 0;              // calendario
+  const porDiaGestionActivo = diasActivos ? gestion / diasActivos : 0;        // trabajo
   const faltanGestionar = Math.max(0, portafolio - gestion);
   const diasParaCubrir = porDiaGestion > 0 ? Math.ceil(faltanGestionar / porDiaGestion) : null;
   const fechaCobertura = diasParaCubrir === null ? "" :
@@ -14667,8 +14690,8 @@ function fotoReporte(){
     cadena: { gestion:[...gestionSet], efectividad:[...efectivoSet],
               visita:[...visitaSet],   objetivo:[...objetivoSet] },
     embudo, kpis, gestiones:ges.length, distritos, diasActivos, primera,
-    diasDeCampo, porDia, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
-    porDiaGestion, faltanGestionar,
+    diasDeCampo, porDia, porDiaActivo, faltanContactar, fechaCobertura, fueraDePeriodo, linea,
+    porDiaGestion, porDiaGestionActivo, faltanGestionar,
     baseFact, factActual, metaFact, ultimoP, hayFact, crecimiento, factEsDeclarada,
     hastaFact, diaFact, diasDelMes, proyectaFact, factProyectada, crecProyectado,
     faltaFactDe: ejec.filter(u => baseFactDe(u.correo) === null).length };
@@ -15371,10 +15394,14 @@ function repDatos(f){
     gestiones:f.gestiones, distritos:f.distritos,
     diasCampo:f.diasDeCampo, diasActivos:f.diasActivos,
     porDia:repNum(f.porDia, f.porDia < 10 ? 1 : 0),
+    porDiaActivo:repNum(f.porDiaActivo, f.porDiaActivo < 10 ? 1 : 0),
     /* El ritmo medido en gestiones con resultado, no en fichas tocadas. Son
        dos cosas distintas y hasta el 27/08 solo existía la segunda, así que
        cualquier lectura sobre «el ritmo» hablaba del intento y no del avance. */
     porDiaGestion: repNum(f.porDiaGestion, f.porDiaGestion < 10 ? 1 : 0),
+    /* El de trabajo, para poder escribirlo en las notas del reporte sin
+       tener que hacer la división a mano. */
+    porDiaGestionActivo: repNum(f.porDiaGestionActivo, f.porDiaGestionActivo < 10 ? 1 : 0),
     faltanGestionar:f.faltanGestionar,
     porSemana:repNum(f.porDia * 7, f.porDia * 7 < 10 ? 1 : 0),
     mesCobertura:mesDe(f.fechaCobertura), fechaCobertura:repFecha(f.fechaCobertura),
@@ -15535,11 +15562,25 @@ function viewReporte(){
   <div class="card">
     <h3>De dónde sale cada número</h3>
     <div class="rep-fuente">
+      <!-- LOS DOS RITMOS, cada uno sobre su denominador y dicho cuál es. Antes
+           acá había una sola cifra dividida por el denominador equivocado:
+           «26 días con actividad» junto a un ritmo calculado sobre 35 días
+           corridos. Quien intentara comprobar la cuenta con los dos números de
+           la misma tarjeta no llegaba. (José, 02/09.) -->
       <div><b>${f.gestiones}</b><span>gestiones registradas</span></div>
       <div><b>${f.diasActivos}</b><span>días con actividad en campo</span></div>
+      <div><b>${f.diasDeCampo}</b><span>días corridos desde la primera gestión</span></div>
       <div><b>${f.distritos}</b><span>distritos con presencia</span></div>
-      <div><b>${repNum(f.porDia, 1)}</b><span>comercios contactados por día</span></div>
+      <div><b>${repNum(f.porDiaGestionActivo, 1)}</b><span>comercios gestionados por
+        <b>día trabajado</b> · sobre los ${f.diasActivos} con actividad</span></div>
+      <div><b>${repNum(f.porDiaGestion, 1)}</b><span>comercios gestionados por
+        <b>día corrido</b> · sobre los ${f.diasDeCampo} del calendario</span></div>
     </div>
+    <p class="pie" style="margin:10px 2px 0">Los dos ritmos son ciertos y miden cosas
+      distintas. El de <b>día trabajado</b> dice cuánto rinde el equipo cuando sale a la
+      calle. El de <b>día corrido</b> incluye sábados, domingos y feriados, y es el único
+      con el que se puede proyectar una fecha, porque el cierre del proyecto está en el
+      calendario y no en los días hábiles: la proyección de cobertura sale de ese.</p>
     <details class="aj-mas">
       <summary>Cómo se cuenta cada escalón del embudo</summary>
       <div class="cuerpo">
@@ -15553,8 +15594,12 @@ function viewReporte(){
         <p>Cada escalón cuenta <b>comercios y no gestiones</b>: un comercio visitado tres veces es
         uno, no tres. Las afiliaciones nuevas van aparte porque nunca estuvieron en el portafolio.</p>
         <p>La primera gestión del proyecto es del ${repFecha(f.primera)}; el ritmo se mide desde
-        ahí y no desde el arranque, porque las primeras semanas fueron de coordinación con los
-        ejecutivos de BBVA y no de calle.</p>
+        ahí y no desde el arranque declarado (${repFecha(f.ini)}), porque las primeras semanas
+        fueron de coordinación con los ejecutivos de BBVA y no de calle.</p>
+        <p>Hay <b>dos ritmos</b> y cada uno lleva su denominador escrito: por <b>día trabajado</b>
+        se divide entre los ${f.diasActivos} días en que hubo actividad registrada; por <b>día
+        corrido</b>, entre los ${f.diasDeCampo} días de calendario transcurridos desde la primera
+        gestión. La proyección de cuándo queda cubierto el portafolio usa el segundo.</p>
       </div>
     </details>
     <details class="aj-mas">
