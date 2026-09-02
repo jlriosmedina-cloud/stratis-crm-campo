@@ -14244,21 +14244,48 @@ function cadenaEntreCalc(desde, hasta){
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const idsCart = new Set(cart.map(c => String(c.customer_id)));
 
+  /* Una ventana que empieza donde empieza el proyecto no recorta nada. */
+  const dsdReal = dsd && dsd > ini ? dsd : null;
+
   const dentro = d => {
     const x = String(d || "").slice(0,10);
-    return !!x && x <= hoy && (!dsd || x >= dsd);
+    return !!x && x <= hoy && (!dsdReal || x >= dsdReal);
   };
 
   /* Gestión: la ÚLTIMA actividad dentro de la ventana tiene que calificar.
      `repLineaGestion` ya trae cada hecho con su fecha y su veredicto —las
      interacciones al comercio, las coordinaciones con BBVA y el cierre de la
-     ficha—, así que acá solo se le pregunta por la ventana. */
+     ficha—, así que acá solo se le pregunta por la ventana.
+
+     PREGUNTAR POR LA VENTANA COMPLETA ES PREGUNTAR POR EL ACUMULADO. Si la
+     ventana arranca en el primer día del proyecto —el selector «Todo el
+     proyecto»— no hay nada antes que recortar, así que las dos preguntas son
+     la misma y tienen que dar el mismo número. El 01/09 no lo daban: el
+     Tablero decía 648 y el Reporte 653 sobre el mismo tramo, y esos 5 son la
+     razón por la que José preguntó. */
   const linea = repLineaGestion({ ini, hoy });
+  const ventanaReal = dsdReal;
   let gestionSet;
-  if (dsd){
+  if (ventanaReal){
     gestionSet = new Set();
     linea.forEach((hist, cid) => {
-      if (idsCart.has(cid) && repUltimaCalifica(hist, dsd, hoy)) gestionSet.add(cid);
+      if (idsCart.has(cid) && repUltimaCalifica(hist, ventanaReal, hoy)) gestionSet.add(cid);
+    });
+    /* LA NEGOCIACIÓN VIGENTE TAMBIÉN VIVE DENTRO DE LA VENTANA. Es la segunda
+       mitad de la regla del 27/08 —«una negociación abierta no la enfría un
+       teléfono que no suena»— y el 01/09 se quedó fuera de la rama de ventana
+       por olvido, no por decisión. El resultado fue justo lo que José vio: 3
+       comercios CON VISITA CONCRETADA se caían de Gestión porque su último
+       toque había sido un intento muerto, y al caerse de Gestión arrastraban
+       la visita con ellos. Un embudo no puede perder por arriba lo que ya
+       ocurrió abajo.
+
+       Acotada, eso sí: cuenta la negociación que NACIÓ dentro de la ventana.
+       Un cliente que contestó el 12/08 y a quien nadie tocó después sigue
+       pendiente en el periodo que arranca el 19 —que es la regla que pidió
+       José ese mismo día—, y aparece en el acumulado, donde sí pertenece. */
+    (linea.negociaDesde || new Map()).forEach((nace, cid) => {
+      if (idsCart.has(cid) && nace >= ventanaReal && nace <= hoy) gestionSet.add(cid);
     });
   } else {
     gestionSet = new Set([...repIdsGestionados(linea, hoy)].filter(id => idsCart.has(id)));
@@ -14275,6 +14302,28 @@ function cadenaEntreCalc(desde, hasta){
   const conRespuesta = new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
   const conVisita    = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
 
+  /* El objetivo se fecha por el cierre. En el acumulado no se le pide fecha
+     —un retenido sin `cerrado_en` es un resultado igual de cierto—; dentro de
+     una ventana sí, porque sin fecha no se puede afirmar que ocurrió ahí. */
+  const objetivoSet = new Set(cart
+    .filter(c => (esRetencion(c) || esRecuperado(c)) && (dsdReal ? dentro(c.cerrado_en) : true))
+    .map(c => String(c.customer_id)));
+
+  /* EL EMBUDO ANIDA POR CONSTRUCCIÓN, y esto lo garantiza en vez de confiarlo.
+     Un cierre registrado es el cuarto hecho que califica de la regla del
+     27/08, así que un comercio retenido o recuperado dentro de la ventana ES
+     un comercio gestionado en esa ventana: entra por la línea de tiempo en su
+     fecha de cierre y ya debería estar, pero una fila posterior mal fechada
+     bastaría para empujarlo fuera de su propio embudo. Se afirma acá, que es
+     donde se puede afirmar, y así «Objetivo» nunca puede quedar fuera de
+     «Gestión». (José, 02/09: «sí debería contar porque es un embudo».)
+
+     Va ANTES de armar los escalones de en medio, no después: si el comercio
+     retenido además respondió dentro de la ventana, tiene que entrar también
+     a Efectividad. Afirmarlo al final lo metía en Gestión y lo dejaba fuera
+     de Efectividad, que es un embudo roto por otro lado. */
+  objetivoSet.forEach(cid => gestionSet.add(cid));
+
   /* Cada escalón sale del de arriba, así el embudo no se puede ensanchar
      hacia abajo. Una reunión realizada ES una respuesta concreta, más fuerte
      que una llamada atendida, así que entra a Efectividad por la unión. */
@@ -14282,12 +14331,6 @@ function cadenaEntreCalc(desde, hasta){
   const respondio   = new Set([...conRespuesta, ...conVisita]);
   const efectivoSet = y(respondio, gestionSet);
   const visitaSet   = y(conVisita, efectivoSet);
-  /* El objetivo se fecha por el cierre. En el acumulado no se le pide fecha
-     —un retenido sin `cerrado_en` es un resultado igual de cierto—; dentro de
-     una ventana sí, porque sin fecha no se puede afirmar que ocurrió ahí. */
-  const objetivoSet = new Set(cart
-    .filter(c => (esRetencion(c) || esRecuperado(c)) && (dsd ? dentro(c.cerrado_en) : true))
-    .map(c => String(c.customer_id)));
 
   return {
     desde: dsd, hasta: hoy, cart, idsCart, linea,
