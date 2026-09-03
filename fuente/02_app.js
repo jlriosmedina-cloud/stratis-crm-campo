@@ -3963,10 +3963,20 @@ function viewRutas(){
   </div>
 
   <div class="note" style="margin:0 0 12px">
-    <b>Cómo salen estas rutas.</b> El CRM agrupa por <b>distrito</b> y ordena por <b>vía y altura</b>,
-    que es como se recorre una avenida sin ir y volver. El recorrido fino, la distancia y
-    <b>el tráfico en vivo</b> los pone Google Maps al abrir el enlace: el CRM no lee el tráfico y no
-    tiene las coordenadas de los locales, solo su dirección escrita.
+    <b>Cómo salen estas rutas.</b> El CRM agrupa por <b>distrito</b> y ordena por <b>vía y altura</b>:
+    dentro de una misma avenida el orden es el del recorrido, sin ir y volver. El recorrido fino, la
+    distancia y <b>el tráfico en vivo</b> los pone Google Maps al abrir el enlace.
+    ${/* Decirlo antes de que lo descubra en la calle. El CRM no tiene las
+         coordenadas de los locales —la base trae dirección escrita, no
+         lat/lng—, así que entre DOS VÍAS DISTINTAS el orden es alfabético y no
+         por cercanía. En un distrito con pocas avenidas eso casi coincide; en
+         Miraflores, con 76 comercios repartidos en 54 vías, no. Prometer un
+         orden óptimo que no se puede calcular sería vender el dato que
+         justamente falta. */""}
+    <br><b>Lo que todavía no hace:</b> entre <em>vías distintas</em> el orden es alfabético, no por
+    cercanía —el CRM no tiene las coordenadas de los locales, solo su dirección escrita—. En un
+    distrito con muchas calles conviene <b>reordenar las paradas arrastrándolas dentro de Google
+    Maps</b> antes de salir.
   </div>
 
   <div class="rt-lista">
