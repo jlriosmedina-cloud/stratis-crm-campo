@@ -15267,15 +15267,25 @@ function fotoReporte(){
   const factCruda = hayFact && factEsDeclarada && diaFact > 0 && diaFact < diasDelMes
     ? factActual * diasDelMes / diaFact : null;
   const topeProy = (Number(P.facturacion_meta_mes) || metaFact || 0) * 2;
+  /* El motivo va CORTO. La banda del pie de la tarjeta mide 3,53 × 0,46
+     pulgadas y admite dos líneas: una explicación de cuatro renglones se sale
+     del recuadro y tapa la fila de la meta que tiene encima. Se comprobó
+     convirtiendo la lámina a imagen —en el texto extraído del XML el desborde
+     no se ve—. La versión larga vive en `frenoDetalle` para la pantalla, que
+     sí tiene sitio. */
   const frenoProy = !factCruda ? ""
     : diaFact < MIN_DIAS_PROY
-      ? `el acumulado va sobre ${diaFact} día${diaFact === 1 ? "" : "s"} del mes y una `
-        + `proyección lineal sobre menos de una semana no dice nada`
+      ? `el acumulado va sobre ${diaFact} de ${diasDelMes} días del mes`
       : (topeProy > 0 && factCruda > topeProy)
-        ? `la proyección daría ${repSoles(factCruda)} sobre un acumulado de `
-          + `${repSoles(factActual)} en ${diaFact} de ${diasDelMes} días: revisar en Ajustes `
-          + `que la fecha del acumulado sea del mismo mes que el monto`
+        ? `daría ${repSoles(factCruda)} contra una meta de ${repSoles(topeProy / 2)}`
         : "";
+  const frenoDetalle = !frenoProy ? ""
+    : diaFact < MIN_DIAS_PROY
+      ? `Una proyección lineal sobre menos de una semana amplifica el ruido en vez de `
+        + `estimar el mes.`
+      : `Revisar en Ajustes que la fecha del acumulado sea del mismo mes que el monto: `
+        + `${repSoles(factActual)} en ${diaFact} de ${diasDelMes} días no puede ser el `
+        + `acumulado de ese mes.`;
   const proyectaFact = !!factCruda && !frenoProy;
   const factProyectada = proyectaFact ? factCruda : null;
   const crecProyectado = proyectaFact ? (factProyectada - baseFact) / baseFact * 100 : null;
@@ -15304,6 +15314,9 @@ function fotoReporte(){
       sub: !hayFact ? "falta cargar la facturación del periodo"
         : proyectaFact ? "proyectado al cierre de " + repMesLargo(hastaFact)
                        : "acumulado del periodo",
+      /* Para la pantalla, donde cabe el porqué entero. La lámina se queda con
+         la versión corta: el pie de la tarjeta son dos líneas. */
+      detalle: frenoDetalle,
       filas: [
         ["Base del proyecto", baseFact ? repSoles(baseFact) : "pendiente"],
         [proyectaFact ? "Acumulado al " + repFecha(hastaFact)
@@ -15315,7 +15328,7 @@ function fotoReporte(){
           : [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
       ],
       pie: !hayFact ? "Se carga en Ajustes › Facturación del periodo"
-        : frenoProy ? `Sin proyección al cierre del mes: ${frenoProy}.`
+        : frenoProy ? `Sin proyección al cierre: ${frenoProy}`
         : proyectaFact
           ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días` +
             (metaMes > 0
