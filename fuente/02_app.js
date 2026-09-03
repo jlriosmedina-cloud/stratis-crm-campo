@@ -13361,9 +13361,22 @@ function cumplimientoDe(correo, p){
               : crec / M.facturacion_pct * 100;
 
   /* La venta sí es mensual, y así está en el documento: 7 por periodo. No se
-     acumula ni se prorratea. */
-  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
-                                   && enVentana(c.creado_en, p)).length;
+     acumula ni se prorratea.
+
+     Y es la venta CONCRETADA, no el prospecto cargado. Hasta el 03/09 esto
+     contaba `esClienteNuevo` por `creado_en`: todo RUC que alguien registrara,
+     estuviera en PENDIENTE o no. En agosto no se notó porque los pocos
+     registros nuevos del periodo se cerraron todos como venta —1, 2, 0 y 3, los
+     6 del equipo que dice la lámina 8 del documento de incentivos—. En
+     septiembre se cargaron 64 prospectos y solo 6 se cerraron: el indicador
+     marcaba 229%, 329% y 271% de cumplimiento y empujaba el ponderado por
+     encima de 100 sin que nadie hubiera vendido nada.
+
+     El resto del CRM ya contaba bien —`esVentaNueva` por `cerrado_en`, en el
+     panel, en el reporte y en el deck—. Era el bono el que tenía la otra
+     definición, que es de donde salían dos números para la misma palabra. */
+  const ventas = CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
+                                   && enVentana(c.cerrado_en || c.creado_en, p)).length;
   const cVenta = M.ventas_mes ? ventas / M.ventas_mes * 100 : 0;
 
   const mes = M.i >= 1 ? `mes ${M.i} de ${M.total}` : "fuera del proyecto";
@@ -13381,8 +13394,16 @@ function cumplimientoDe(correo, p){
       metaPie: M.facturacion_pct ? `acumulado al ${mes}`
              : `el dato del banco llega un periodo desfasado · la medición arranca en el ${mesArranqueFact(B)}`,
       logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
-      detalle: !M.facturacion_pct ? "sin meta este mes: no entra al promedio"
-             : crec === null ? textoFaltaFact(correo, p) : montoFact(correo, p),
+      /* El monto se muestra SIEMPRE que esté cargado, tenga meta o no. Antes,
+         un mes sin meta tapaba las cifras con «sin meta este mes» y el dato que
+         acababa de subirse no se veía por ningún lado: quedaba la sensación de
+         que no había llegado. Que no puntúe y que no esté son dos cosas
+         distintas y ahora la fila dice cuál de las dos es. */
+      detalle: crec === null
+             ? (M.facturacion_pct ? textoFaltaFact(correo, p)
+                : `${textoFaltaFact(correo, p)} · todavía no puntúa: la medición arranca en el ${mesArranqueFact(B)}`)
+             : (M.facturacion_pct ? montoFact(correo, p)
+                : `${montoFact(correo, p)} · a la vista, fuera del promedio hasta el ${mesArranqueFact(B)}`),
       cumpl:cFact },
     { id:"venta", nombre:"Venta (afiliación)", peso:B.pesos.venta,
       meta:`${M.ventas_mes} ${M.ventas_mes === 1 ? "venta" : "ventas"}`, metaPie:"por periodo, no se acumula",
@@ -13401,11 +13422,21 @@ function cumplimientoDe(correo, p){
            pesoMedido:peso, ventas, logrados, enElMes, pp, meta:M };
 }
 
+/* De qué mes es el monto que se cargó en un periodo.
+
+   El dato del banco llega un periodo tarde: lo que se carga en el periodo que
+   corre del 19/08 al 18/09 es el CIERRE DE AGOSTO. Eso está en la lámina 5 del
+   documento de incentivos —«desfase del dato: un periodo»— y hasta el 03/09 no
+   estaba escrito en ninguna parte de la pantalla, así que había que saberlo de
+   memoria para leer la fila. Se deriva del periodo y no de un texto fijo: en
+   octubre dirá «cierre de septiembre» sin que nadie lo toque. */
+const mesDelDatoFact = p => nombreMes(mesAnterior(p));
+
 function montoFact(correo, p){
   const f = factDe(correo, p), ini = inicioFact(correo, p);
   if (!f) return "";
-  return `${soles(ini.monto)} → ${soles(f.monto_final)}${
-    ini.fuente === "base" ? " · sobre la base del proyecto" : ""}`;
+  return `${soles(ini.monto)} → ${soles(f.monto_final)} · cierre de ${mesDelDatoFact(p)}${
+    ini.fuente === "base" ? ", sobre la base congelada del proyecto" : ""}`;
 }
 /* Decir qué falta exactamente: no es lo mismo que nadie fijó la base del
    proyecto a que falta el monto de cierre de este periodo. */
@@ -13581,8 +13612,8 @@ function cumplimientoProyecto(correo){
      por el segundo de cinco. La alternativa —dividir por los periodos
      corridos— convierte cada mes en un veredicto parcial, que es exactamente
      lo que se decidió no hacer. El veredicto es uno solo y es en diciembre. */
-  const ventas = CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo
-                                   && ps.some(p => enVentana(c.creado_en, p))).length;
+  const ventas = CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
+                                   && ps.some(p => enVentana(c.cerrado_en || c.creado_en, p))).length;
   const pideVentas = B.metas.ventas_mes * ps.length;
   const cVenta = pideVentas ? ventas / pideVentas * 100 : null;
 
@@ -13764,7 +13795,7 @@ function tarjetaEjecutivo(u, p){
         <td><b>${esc(o.nombre)}</b><div class="bn-det">${esc(o.detalle)}</div></td>
         <td style="text-align:right">${esc(o.meta)}${
           o.metaPie ? `<div class="bn-det">${esc(o.metaPie)}</div>` : ""}</td>
-        <td style="text-align:right"><b>${esc(o.logro)}</b></td>
+        <td style="text-align:right;white-space:nowrap"><b>${esc(o.logro)}</b></td>
         <td style="text-align:right">${o.peso}%</td>
         <td style="text-align:right">${o.cumpl === null ? "—" : pct1(o.cumpl)}</td>
       </tr>`).join("")}</tbody>
@@ -13774,8 +13805,15 @@ function tarjetaEjecutivo(u, p){
       <div class="bn-num">
         <span class="k">Cumplimiento ponderado</span>
         <b>${pct1(cu.total)}</b>
+        ${/* «Falta la facturación» era la única explicación posible y en el mes 2
+              es falsa: el dato está cargado y lo que pasa es que todavía no
+              puntúa. Decirle a alguien que falta un dato que él mismo subió
+              hace media hora es la forma más rápida de que deje de creerle a la
+              pantalla. */ ""}
         <span class="s">${cu.completo ? nombreTramo(cu.total, B)
-          : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
+          : !cu.meta.facturacion_pct
+            ? `sobre el ${cu.pesoMedido}% del peso — la facturación todavía no puntúa`
+            : `sobre el ${cu.pesoMedido}% del peso — falta la facturación`}</span>
       </div>
       <div class="bn-num">
         <span class="k">${esc(CONCEPTO_PAGO[x.concepto] || "Incentivo del periodo")}</span>
@@ -19003,7 +19041,14 @@ function actaIncentivo(doc, u, p, x){
     y += 7;
   });
   if (cu.objetivos.some(o => o.cumpl === null)){
-    txt("La facturación todavía no está cargada: su peso sale del reparto y el ponderado está incompleto.",
+    /* El acta la firma la persona a la que se le paga. Decirle que falta un
+       dato que sí está cargado —solo que todavía no puntúa— es un error que se
+       discute en la reunión y cuesta la confianza en el resto del documento.
+       Un periodo sellado viejo puede no traer `meta`: ahí se dice lo de antes. */
+    const noPuntua = cu.meta && !cu.meta.facturacion_pct;
+    txt(noPuntua
+        ? "La facturación está a la vista pero todavía no puntúa: el dato del banco llega un periodo tarde, así que su peso sale del reparto y el ponderado es sobre el resto."
+        : "La facturación todavía no está cargada: su peso sale del reparto y el ponderado está incompleto.",
         m, y, { size:7.5, italic:true, color:PX.warn });
     y += 6;
   }
