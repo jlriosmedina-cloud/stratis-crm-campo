@@ -1934,6 +1934,13 @@ const REPORTE_DEF = {
   },
   hitos: [],
   relato: { hitos:"" },
+  /* La lámina 2 del deck: lo que se cambió esta semana. El valor por defecto
+     está más abajo, junto a la función que la dibuja (`REP_CAMBIOS_DEF`), para
+     que el texto y su dibujo se lean juntos. Acá va vacío a propósito: si la
+     base no tiene nada guardado, la lámina cae al defecto en vez de salir en
+     blanco, y si alguien guarda `bloques: []` la lámina se omite entera —que
+     es la forma de apagarla sin borrar el texto—. */
+  cambios: { bloques: [] },
   /* Los acuerdos vigentes, en una sola lámina. Viven acá y no en el código
      porque son texto que cambia cada vez que hay una reunión, y porque quien
      los acordó tiene que poder corregirlos sin pedirle a nadie que toque un
@@ -15236,8 +15243,41 @@ function fotoReporte(){
   const diasDelMes = mesFact
     ? new Date(Date.UTC(Number(mesFact.slice(0,4)), Number(mesFact.slice(5,7)), 0)).getUTCDate() : 0;
   const diaFact = hastaFact ? Number(hastaFact.slice(8,10)) : 0;
-  const proyectaFact = hayFact && factEsDeclarada && diaFact > 0 && diaFact < diasDelMes;
-  const factProyectada = proyectaFact ? factActual * diasDelMes / diaFact : null;
+  /* ---- CUÁNDO NO SE PROYECTA, y decirlo ---------------------------------
+     El 03/09 este bloque puso «S/ 350,00 MM proyectado al cierre de
+     septiembre» en una lámina que va a un directorio, contra una meta del mes
+     de S/ 38,00 MM. La cuenta estaba bien: 35,00 MM × 30 / 3. Lo que estaba
+     mal era la entrada —el acumulado cargado era el de AGOSTO y la fecha del
+     acumulado decía 03/09—, así que el mes se proyectó como si esos 35 MM se
+     hubieran facturado en tres días.
+
+     La aritmética no puede protegerse de un dato mal fechado, pero SÍ puede
+     negarse a publicar un resultado imposible en vez de imprimirlo con dos
+     decimales. Dos frenos, y los dos dicen por qué frenaron:
+
+       · menos de 7 días de acumulado: multiplicar por diez lo que se sabe de
+         tres días no es proyectar, es amplificar ruido;
+       · una proyección que pasa del doble de la meta del mes: el acumulado no
+         puede ser del mes que dice su fecha.
+
+     En los dos casos la tarjeta muestra el ACUMULADO CRUDO, que es un hecho, y
+     escribe el motivo. Preferimos una lámina que dice «no proyecto y por esto»
+     a una que afirma un número que nadie puede sostener en una reunión. */
+  const MIN_DIAS_PROY = 7;
+  const factCruda = hayFact && factEsDeclarada && diaFact > 0 && diaFact < diasDelMes
+    ? factActual * diasDelMes / diaFact : null;
+  const topeProy = (Number(P.facturacion_meta_mes) || metaFact || 0) * 2;
+  const frenoProy = !factCruda ? ""
+    : diaFact < MIN_DIAS_PROY
+      ? `el acumulado va sobre ${diaFact} día${diaFact === 1 ? "" : "s"} del mes y una `
+        + `proyección lineal sobre menos de una semana no dice nada`
+      : (topeProy > 0 && factCruda > topeProy)
+        ? `la proyección daría ${repSoles(factCruda)} sobre un acumulado de `
+          + `${repSoles(factActual)} en ${diaFact} de ${diasDelMes} días: revisar en Ajustes `
+          + `que la fecha del acumulado sea del mismo mes que el monto`
+        : "";
+  const proyectaFact = !!factCruda && !frenoProy;
+  const factProyectada = proyectaFact ? factCruda : null;
   const crecProyectado = proyectaFact ? (factProyectada - baseFact) / baseFact * 100 : null;
 
   const oR = repObjetivo("reactivacion");
@@ -15275,6 +15315,7 @@ function fotoReporte(){
           : [oF.etiqueta_meta || "Meta al cierre", baseFact ? repSoles(metaFact) : "pendiente"]
       ],
       pie: !hayFact ? "Se carga en Ajustes › Facturación del periodo"
+        : frenoProy ? `Sin proyección al cierre del mes: ${frenoProy}.`
         : proyectaFact
           ? `Proyección lineal sobre ${diaFact} de ${diasDelMes} días` +
             (metaMes > 0
@@ -16464,6 +16505,136 @@ function repLaminaEmbudo(X, f){
 
    No lleva nombres de nadie: en esta sala lo que importa es cuánto está
    comprometido y para cuándo, no quién lo tiene. */
+/* ---- La lámina de los cambios de la semana -------------------------------
+ *
+ * Pedido de Gabriel para la reunión de Mastercard del 03/09: una lámina justo
+ * después de la carátula con lo que se cambió esta semana para escalar. La
+ * presenta él; los números vienen después.
+ *
+ * Es la única lámina del deck que NO sale de los datos: es una decisión que se
+ * tomó con BBVA y hay que escribirla. Por eso vive en `reporte_config` —bloque
+ * `cambios`, editable en Ajustes— y no en el código: la semana que viene los
+ * cambios son otros, y una lámina que hay que recompilar para actualizar es
+ * una lámina que se va a presentar vencida.
+ *
+ * Lo único que sí sale de los datos es la banda de abajo: el primer resultado
+ * del cambio, leído del mismo sitio que el resto del deck. Escribir a mano «9
+ * retenciones» en una lámina mientras el embudo de la lámina 4 dice 14 es
+ * exactamente la contradicción que este documento existe para no tener.
+ *
+ * TRES COSAS NO ENTRAN ACÁ, y no por olvido:
+ *   · el nombre de la herramienta de campo —material de Mastercard;
+ *   · el esquema de incentivos del equipo, que es retribución de Stratis y no
+ *     se discute con el cliente. «Las metas no cambian» sí se dice, porque eso
+ *     es compromiso de proyecto;
+ *   · nombres propios de las contrapartes. Se habla del equipo comercial de
+ *     BBVA. Quien quiera nombrarlos lo hace en la voz, no en el papel.
+ */
+const REP_CAMBIOS_DEF = {
+  titulo: "Lo que cambiamos esta semana para escalar",
+  sub: "Acordado con el equipo comercial de BBVA",
+  bloques: [
+    { color:"azul2", t:"El diagnóstico quedó alineado",
+      p:["Revisamos los números y el embudo con el equipo comercial de BBVA.",
+         "El cuello no está en la cobertura de la cartera: está en el número de visitas."] },
+    { color:"azul", t:"BBVA flexibilizó la aproximación",
+      p:["Pidió intensificar las visitas al comercio.",
+         "Habilitó la visita en frío: ya no hace falta esperar la confirmación previa del comercio."] },
+    { color:"naranja", t:"Cómo baja a la operación",
+      p:["Mix de reuniones agendadas y visitas en frío.",
+         "Cada ejecutivo sale con una ruta diaria de comercios de su cartera, aun sin la agenda confirmada.",
+         "Check-in diario sobre ruta y compromisos.",
+         "Las metas del proyecto no cambian.",
+         "La meta de visitas pasa a medirse sobre comercios distintos visitados, visitas en frío incluidas."] },
+    { color:"verde", t:"Producto y equipo",
+      p:["Desde hoy la campaña opera con POS agregador: un solo equipo en el comercio en lugar de dos.",
+         "Dos capacitaciones esta semana: el martes, presentación de marca y entrega del material de identificación; hoy, producto agregador y la migración de dos equipos a uno."] }
+  ]
+};
+
+function repLaminaCambios(X, f){
+  const C = (REPORTE.cambios && REPORTE.cambios.bloques && REPORTE.cambios.bloques.length)
+    ? REPORTE.cambios : REP_CAMBIOS_DEF;
+  const bloques = (C.bloques || []).slice(0, 4);
+  if (!bloques.length) return;
+
+  const s = X.lamina(X.fondos.contenido);
+  X.T(s, C.titulo || REP_CAMBIOS_DEF.titulo,
+    { x:0.57, y:0.62, w:11.9, h:0.5, fontSize:20, bold:true, fontFace:X.NEG, color:X.H("navy") });
+  /* La semana en curso arranca el día siguiente al corte del domingo. Se
+     deriva del corte y no se teclea: el corte ya está en `X` porque lo usan
+     las otras láminas, y una fecha escrita a mano es una fecha que se queda
+     vieja el lunes. */
+  const desdeSem = X.corteFecha
+    ? new Date(Date.parse(X.corteFecha + "T12:00:00Z") + 86400000).toISOString().slice(0,10)
+    : f.hoy;
+  X.T(s, (C.sub || REP_CAMBIOS_DEF.sub) + ` · semana del ${repFecha(desdeSem)} al ${repFecha(f.hoy)}`,
+    { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
+
+  /* Dos por fila. Cuatro en una fila deja columnas de 3 cm en las que un
+     párrafo de dos líneas se convierte en seis, y esta lámina se lee, no se
+     mira: es la única del deck con frases y no con cifras. */
+  /* El alto sale del bloque MÁS LARGO, no del promedio: con 1,98 la cuarta
+     viñeta de «Cómo baja a la operación» tocaba el borde de su recuadro. Se
+     revisó sobre la lámina convertida a imagen, no sobre el XML —una viñeta
+     que se sale no aparece en el texto extraído—. */
+  const W = 6.04, HB = 2.06, GX = 0.30, GY = 0.22, X0 = 0.57, Y0 = 1.78;
+  bloques.forEach((b, i) => {
+    const px = X0 + (i % 2) * (W + GX);
+    const py = Y0 + Math.floor(i / 2) * (HB + GY);
+    X.caja(s, px, py, W, HB, "FFFFFF", REP_LINEA);
+    /* La cinta de color a la izquierda y no arriba: con cuatro recuadros en
+       rejilla, una cinta superior se lee como el borde de la tarjeta y deja de
+       distinguir un bloque de otro. */
+    s.addShape(X.pptx.ShapeType.rect, { x:px, y:py, w:0.09, h:HB,
+      fill:{ color:X.H(b.color || "azul") }, line:{ type:"none" } });
+    X.T(s, b.t, { x:px + 0.30, y:py + 0.19, w:W - 0.58, h:0.30,
+      fontSize:13, bold:true, fontFace:X.NEG, color:X.H("navy") });
+    /* Viñetas de verdad —no un guion tecleado— para que el sangrado de la
+       segunda línea quede debajo del texto y no debajo del punto. */
+    s.addText((b.p || []).map(t => ({ text: repTexto(t, repDatos(f)), options:{ bullet:{ indent:14 }, breakLine:true } })),
+      { x:px + 0.30, y:py + 0.54, w:W - 0.58, h:HB - 0.70,
+        fontFace:X.FUENTE, fontSize:10.5, color:X.H("gris"), lineSpacingMultiple:1.14, valign:"top" });
+  });
+
+  /* ---- El primer resultado, leído de los datos ---------------------------
+     La banda de cierre es lo único de esta lámina que no se escribe a mano, y
+     tiene que serlo: es la cifra que la lámina 4 vuelve a mostrar veinte
+     segundos después. Si una se teclea y la otra se calcula, tarde o temprano
+     no coinciden, y la primera contradicción del documento pasa delante del
+     cliente. */
+  const YB = Y0 + 2 * HB + GY + 0.32;
+  const HBanda = 0.80;
+  const gan = (X.corte && X.corte.objetivo !== undefined) ? f.objetivo - X.corte.objetivo : null;
+
+  /* La comparación de visitas se CALCULA. La primera versión de esta lámina
+     decía «las visitas de la semana en curso ya superan el total de la semana
+     anterior completa» como frase fija, porque el 03/09 era cierto —21 contra
+     16—. Una afirmación factual escrita a mano en un deck que se regenera cada
+     semana es una afirmación que un lunes va a ser falsa delante del cliente.
+     Si esta semana no supera a la anterior, la lámina dice el número y no la
+     conclusión. */
+  const SEMc = repSemanal(f);
+  const vAct = (SEMc.curso || {}).visitas, vPrev = (SEMc.ultima || {}).visitas;
+  const frase = (typeof vAct === "number" && typeof vPrev === "number")
+    ? (vAct > vPrev
+        ? `Las visitas de la semana en curso (${vAct}) ya superan el total de la semana anterior completa (${vPrev}).`
+        : `Visitas: ${vAct} en la semana en curso contra ${vPrev} de la semana anterior completa.`)
+    : "";
+
+  X.caja(s, 0.57, YB, 12.38, HBanda, REP_BANDA);
+  s.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB, w:0.09, h:HBanda,
+    fill:{ color:X.H("verde") }, line:{ type:"none" } });
+  X.T(s, "El primer resultado del cambio",
+    { x:0.87, y:YB + 0.13, w:11.8, h:0.26, fontSize:11, bold:true, color:X.H("navy") });
+  /* El acumulado va SIEMPRE en la misma forma —«N acumuladas»— con o sin
+     ganancia desde el corte. Dos redacciones para la misma cifra obligan a
+     dos lecturas y hacen imposible comprobarla contra el embudo. */
+  X.T(s, (gan !== null && gan > 0 ? `+${gan} desde el corte del ${repFecha(X.corteFecha)}: ` : "")
+      + `${f.objetivo} retenciones acumuladas. ` + frase,
+    { x:0.87, y:YB + 0.40, w:11.8, h:0.32, fontSize:11, color:X.H("gris") });
+}
+
 function repLaminaAgenda(X, f){
   const A = repAgenda(f);
   const s = X.lamina(X.fondos.contenido);
@@ -16658,7 +16829,15 @@ function armarDirectorio(pptx, fondos){
   T(c, "Corte al " + repFechaLarga(f.hoy),
     { x:0.82, y:6.32, w:8.6, h:0.34, fontSize:13, color:H("naranja") });
 
-  /* ---- 2 · Los indicadores acumulados al día de hoy ---------------------
+  /* ---- 2 · Lo que cambiamos esta semana ---------------------------------
+     Pedido de Gabriel el 03/09: va justo después de la carátula porque la
+     presenta él, y porque el orden importa —primero qué cambiamos y por qué,
+     después los números que ese cambio tiene que mover—. Al revés, los
+     números se leen como un balance y no como la consecuencia de una
+     decisión. */
+  repLaminaCambios(X, f);
+
+  /* ---- 3 · Los indicadores acumulados al día de hoy ---------------------
      Cuatro cifras y una frase. Es la lámina que alguien tiene que poder mirar
      ocho segundos y salir sabiendo si el proyecto va bien. */
   const a = lamina(fondos.contenido);
@@ -17013,6 +17192,10 @@ function armarDirectorio(pptx, fondos){
    guardados en la base; lo que se quitó es la puerta para editarlos. */
 const REP_BLOQUES = [
   { k:"proyecto",  t:"Marco del proyecto",  d:"Nombre de la campaña, fechas, la base congelada de comercios y la facturación del periodo" },
+  /* La lámina 2 del deck. Se edita acá y no en el código porque los cambios de
+     la semana son, por definición, de esta semana: una lámina que hay que
+     recompilar para actualizar es una lámina que se presenta vencida. */
+  { k:"cambios",   t:"Cambios de la semana", d:"La lámina que va después de la carátula — hasta cuatro bloques con sus viñetas" },
   { k:"lecturas",  t:"Lecturas del embudo", d:"Las frases que acompañan el embudo — hasta tres" },
   { k:"notas",     t:"Notas al pie",        d:"La letra chica de cada lámina — es donde se definen los escalones" },
   { k:"objetivos", t:"Objetivos y pesos",   d:"Metas, pesos y etiquetas de los tres KPIs del proyecto" }
