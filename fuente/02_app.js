@@ -14977,10 +14977,33 @@ function cadenaEntreCalc(desde, hasta){
   const efectivoSet = y(respondio, gestionSet);
   const visitaSet   = y(conVisita, efectivoSet);
 
+  /* ---- DE QUÉ ESTÁ HECHO EL ESCALÓN DE GESTIÓN --------------------------
+     `conAlguna` y `gestion` NO son padre e hijo, y ponerlos uno al lado del
+     otro hacía que se leyeran así. Medido el 03/09 sobre los 841:
+
+       510  tienen trabajo directo al comercio Y cuentan como gestión
+       176  tienen trabajo directo al comercio y NO cuentan: su último día fue
+            una llamada o un WhatsApp sin respuesta
+       148  cuentan como gestión SIN ninguna fila al comercio: su trabajo es el
+            correo al ejecutivo de BBVA
+
+     Así que 658 = 510 + 148 y 686 = 510 + 176. Ninguno contiene al otro. Un
+     lector que ve «658» con «686 fichas con algún intento» debajo concluye
+     «686 intentados, 658 logrados, 28 fallaron», y las tres cosas son falsas.
+     Se expone la composición para poder decirla en vez de insinuarla. */
+  const y2 = (a2, b2) => new Set([...a2].filter(x => b2.has(x)));
+  const conAlgunaCart = y2(conAlguna, idsCart);
+  const gestionDirecta = y2(gestionSet, conAlgunaCart).size;
+
   return {
     desde: dsd, hasta: hoy, cart, idsCart, linea,
     conAlguna, conRespuesta, conVisita, respondio,
     gestion: gestionSet, efectividad: efectivoSet, visita: visitaSet, objetivo: objetivoSet,
+    /* Trabajo directo al comercio que cuenta, gestión que vive solo de la
+       coordinación con el banco, e intentos que todavía no dieron resultado. */
+    gestionDirecta,
+    gestionBanco: gestionSet.size - gestionDirecta,
+    soloIntento: conAlgunaCart.size - gestionDirecta,
     /* Lo que queda FUERA de la cadena. No se recorta en silencio: un comercio
        retenido sin visita registrada es un resultado real —o una visita que
        nadie anotó—, y en los dos casos hay que verlo. */
@@ -15023,6 +15046,9 @@ function fotoReporte(){
      el Reporte mide la campaña completa. */
   const C = cadenaEntre(null, hoy);
   const conAlguna    = C.conAlguna;
+  const gestionDirecta = C.gestionDirecta;
+  const gestionBanco   = C.gestionBanco;
+  const soloIntento    = C.soloIntento;
   const conRespuesta = C.conRespuesta;
   const conVisita    = C.conVisita;
   const linea      = C.linea;
@@ -15374,6 +15400,7 @@ function fotoReporte(){
     metaR, metaV, metaPct,
     portafolio, asignadaMetas, registrados:cart.length,
     contacto, gestion, efectividad, visita, objetivo, sinRespaldo, retenidos, recuperados, perdidos, ventasNuevas,
+    gestionDirecta, gestionBanco, soloIntento,
     /* Los conjuntos, no solo sus tamaños. Las láminas usan los números; esto
        existe para que una prueba pueda comprobar el ANIDAMIENTO comercio por
        comercio y no solo que las cuentas vayan de mayor a menor —dos escalones
@@ -16900,11 +16927,24 @@ function armarDirectorio(pptx, fondos){
        otras dos tarjetas sí lo declaran, porque no tienen barra propia. */
     { k:"gestion", n: String(f.gestion), et:"comercios con gestión",
       sub:"impactados por los ejecutivos", sinMovimiento:true,
-      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio · ${f.contacto} fichas con algún intento registrado`,
+      /* Se dice DE QUÉ ESTÁ HECHO el 658, no se pone al lado el 686. Los dos
+         números miden universos distintos —658 = 510 con trabajo directo al
+         comercio + 148 que viven de la coordinación con el banco; 686 = 510 +
+         176 con intento que todavía no dio resultado— y ninguno contiene al
+         otro. Juntos y sin explicar, quien los lee resta 28 y concluye algo
+         que no pasó. José lo preguntó el 03/09 mirando la lámina, que es la
+         mejor señal de que la lámina no lo estaba diciendo. */
+      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`
+        + ` · ${f.gestionDirecta} con trabajo directo al comercio y ${f.gestionBanco} en coordinación con el ejecutivo de BBVA`,
       mas: null },
     { k:"visita", n: String(f.visita), et:"comercios visitados",
       sub:"presenciales o virtuales",
-      pie: `${repPct(f.contacto ? f.visita / f.contacto * 100 : 0)} de los contactados`,
+      /* Sobre los GESTIONADOS y no sobre «los contactados». Una visita es, por
+         construcción, un subconjunto de la gestión: dividirla entre 686 —un
+         conjunto que ni la contiene ni está contenido— daba 7,4% mientras la
+         lectura de la misma lámina, que divide entre 658, decía 7,8%. Dos
+         porcentajes para la misma relación, a diez centímetros uno del otro. */
+      pie: `${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} de los gestionados`,
       mas: mov("visita") },
     { k:"objetivo", n: String(f.objetivo), et:"comercios recuperados",
       sub:"con el objetivo de retención cumplido",
