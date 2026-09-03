@@ -16934,8 +16934,13 @@ function armarDirectorio(pptx, fondos){
          otro. Juntos y sin explicar, quien los lee resta 28 y concluye algo
          que no pasó. José lo preguntó el 03/09 mirando la lámina, que es la
          mejor señal de que la lámina no lo estaba diciendo. */
-      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`
-        + ` · ${f.gestionDirecta} con trabajo directo al comercio y ${f.gestionBanco} en coordinación con el ejecutivo de BBVA`,
+      /* Corto. La caja del pie mide 2,51 × 0,44 pulgadas —dos líneas— y la
+         composición entera se salía por abajo y se montaba sobre el
+         sub-rótulo. Va en «La lectura», que tiene el ancho de la lámina.
+         Lo que NO vuelve es el «686 fichas con algún intento» que estaba acá:
+         658 y 686 miden universos distintos y ninguno contiene al otro, así
+         que uno debajo del otro se leían como padre e hijo. */
+      pie: `${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} de los ${f.portafolio} del portafolio`,
       mas: null },
     { k:"visita", n: String(f.visita), et:"comercios visitados",
       sub:"presenciales o virtuales",
@@ -17029,7 +17034,13 @@ function armarDirectorio(pptx, fondos){
   T(a, "La lectura", { x:0.86, y:5.72, w:4.0, h:0.28, fontSize:11, bold:true, color:H("navy") });
   T(a, `Con ${repPct(f.corrido / f.total * 100)} del calendario corrido, ${repPct(f.portafolio ? f.gestion / f.portafolio * 100 : 0)} del portafolio tiene una gestión con resultado detrás. `
      + `El tramo que define el resultado es lo que viene después: de esas gestiones, ${repPct(f.gestion ? f.efectividad / f.gestion * 100 : 0)} obtuvo respuesta, ${repPct(f.gestion ? f.visita / f.gestion * 100 : 0)} llegó a visita y ${repPct(f.gestion ? f.objetivo / f.gestion * 100 : 0)} cerró con el objetivo cumplido. `
-     + `Ahí es donde se decide el número de diciembre.`,
+     + `Ahí es donde se decide el número de diciembre. `
+     /* De qué está hecha la gestión. Va acá y no en la tarjeta porque acá hay
+        sitio para decirlo entero, y decirlo entero es el punto: el trabajo con
+        el banco es la mitad de la cobertura y sin esta línea no se ve. */
+     + `De los ${f.gestion} con gestión, ${f.gestionDirecta} tienen trabajo directo con el comercio `
+     + `y ${f.gestionBanco} avanzan por la coordinación con el ejecutivo de BBVA`
+     + (f.soloIntento ? `; otros ${f.soloIntento} recibieron un intento que todavía no obtuvo respuesta.` : "."),
     { x:0.86, y:6.02, w:11.8, h:0.80, fontSize:12, color:H("gris") });
 
   /* El hueco donde debería estar «+N desde el corte» necesita explicación: un
