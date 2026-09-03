@@ -844,6 +844,13 @@ table.tbl tr:last-child td{border-bottom:0}
 .pnl-per .seg button{flex:1}
 .pnl-per-txt{font-size:12.5px;color:var(--muted)}
 .pnl-per-txt b{color:var(--ink-2);font-weight:640}
+/* La variante del tablero del ejecutivo: en fila, sin el texto del tramo —que
+   ya está bajo el título— y sin el margen de abajo, porque no separa bloques
+   sino que convive con el botón de detalle. */
+.pnl-per-min{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:0}
+.pnl-per-min .seg{width:auto}
+.pnl-per-min .seg button{flex:none}
+.pnl-per-min .fsel{margin:0}
 .pnl-h{display:flex;align-items:flex-start;gap:10px;margin:22px 2px 11px}
 .pnl-h:first-child{margin-top:4px}
 .pnl-n{flex:none;width:22px;height:22px;border-radius:7px;background:var(--brand-2);color:#fff;
@@ -1384,6 +1391,173 @@ button.kpi:hover{border-color:var(--brand-2)}
    Sin tamaño propio heredaba el del cuerpo y se leía como el contenido
    principal de la pantalla, que es justo lo que no es. */
 .kpi-nota{margin:-4px 2px 14px;font-size:12.5px;line-height:1.5;color:var(--muted)}
+
+/* El detalle del periodo, encima del tablero. Ancho de verdad —las tablas de
+   adentro no entran en 520 px— y con su propio desplazamiento, para que el
+   tablero de atrás siga quieto. */
+.modal.modal-xl{max-width:min(980px, 96vw);max-height:90dvh;padding:0;
+  border-radius:16px;display:flex;flex-direction:column}
+.pe-det-h{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:14px 18px;border-bottom:1px solid var(--grid);flex:none}
+.pe-det-h b{font-size:15px;letter-spacing:-.2px}
+.pe-det-h .x{border:0;background:none;font:inherit;font-size:17px;line-height:1;
+  color:var(--muted);cursor:pointer;padding:4px 6px;border-radius:8px}
+.pe-det-h .x:hover{background:var(--plane);color:var(--ink)}
+.pe-det-c{overflow-y:auto;overscroll-behavior:contain;padding:16px 18px 22px;flex:1;
+  min-height:0;-webkit-overflow-scrolling:touch}
+.pe-acc{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+
+/* ---- Rutas recomendadas (José, 03/09) -----------------------------------
+   Una tarjeta por distrito, con sus tramos dentro. Se lee de pie y con una
+   mano: el nombre grande, la dirección debajo en gris, y el enlace a Maps
+   arriba del tramo para no tener que recorrer la lista hasta el final. */
+/* `minmax(0,1fr)` y `min-width:0` en cascada: sin eso, un hijo ancho —una
+   dirección larga, el rótulo del botón— ensancha la pista de la rejilla y la
+   tarjeta se sale del teléfono. Y no se ve venir, porque `main` lleva
+   `overflow-x:clip`: el desborde queda RECORTADO en vez de aparecer como
+   barra, así que `scrollWidth` no lo delata y la única forma de encontrarlo
+   es mirar la pantalla o medir el borde derecho contra el ancho de la
+   ventana. Pasó acá el 03/09 y se veía el texto cortado a media palabra. */
+.rt-lista{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
+.rt-g{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  padding:14px 15px 15px;min-width:0}
+.rt-g-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.rt-g-h b{font-size:15px;letter-spacing:-.3px}
+.rt-g-h span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.rt-n{flex:none;font-size:20px;font-weight:780;color:var(--brand-2);
+  font-variant-numeric:tabular-nums;line-height:1}
+.rt-hora{margin-top:10px;padding:9px 11px;border-radius:10px;background:var(--plane);
+  font-size:12px;color:var(--ink-2);line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.rt-hora em{font-style:normal;color:var(--muted)}
+.rt-t{margin-top:12px;border:1px solid var(--grid);border-radius:11px;overflow:hidden;min-width:0}
+.rt-t-h{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:10px 12px;
+  background:var(--surface-2);border-bottom:1px solid var(--grid)}
+.rt-t-h b{font-size:12.5px}
+.rt-t-h span{font-size:11.5px;color:var(--muted)}
+/* En el teléfono el botón baja a su propia línea y ocupa el ancho: es el
+   gesto principal de la tarjeta y a media línea queda con el rótulo cortado. */
+.rt-t-h .btn{text-decoration:none;flex:1 1 100%;text-align:center}
+@media(min-width:560px){ .rt-t-h .btn{flex:none;margin-left:auto} }
+.rt-p{list-style:none;margin:0;padding:0;counter-reset:parada}
+.rt-p{min-width:0}
+.rt-p li{display:flex;align-items:center;gap:10px;padding:9px 12px 9px 10px;
+  border-bottom:1px solid var(--grid);min-width:0;flex-wrap:wrap}
+.rt-p li:last-child{border-bottom:0}
+.rt-p li::before{counter-increment:parada;content:counter(parada);flex:none;
+  width:21px;height:21px;border-radius:50%;background:var(--brand-2);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:750}
+.rt-x{flex:1;min-width:0;text-align:left;border:0;background:none;font:inherit;
+  color:inherit;cursor:pointer;padding:0}
+.rt-x-n{display:block;font-size:12.5px;font-weight:650;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.rt-x-d{display:block;font-size:11px;color:var(--muted);margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-p .chip{flex:none}
+
+/* ---- Los filtros del periodo, en la cartera (José, 03/09) ----------------
+   Van arriba de los de siempre y con su propio encabezado, porque responden
+   otra pregunta: los de abajo miran toda la campaña, estos el periodo en
+   curso. Cada uno lleva su cuenta, y el que está en cero se apaga en vez de
+   desaparecer —una opción que se esconde cuando no tiene datos hace dudar de
+   si existe—. */
+.cf-per{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  padding:11px 12px 12px;margin-bottom:10px}
+.cf-per-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+.cf-per-h b{font-size:12.5px;letter-spacing:-.2px}
+.cf-per-h span{font-size:11.5px;color:var(--muted)}
+.cf-per-x{display:flex;flex-wrap:wrap;gap:6px}
+.cf-p{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;
+  border:1px solid var(--grid);border-radius:999px;background:var(--card);
+  font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;
+  transition:border-color .12s,background .12s}
+.cf-p:hover{border-color:var(--brand-2)}
+.cf-p .n{font-size:11.5px;font-weight:750;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.cf-p.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
+.cf-p.on .n{color:#fff}
+.cf-p.cero{opacity:.5}
+.cf-p.cero.on{opacity:1}
+
+/* =========================================================================
+   EL PANEL DEL EJECUTIVO (José, 03/09)
+   =========================================================================
+   Un tablero se mira; si hay que bajar la página para verlo entero ya es un
+   informe. En ESCRITORIO la altura la fija la ventana —`100dvh` menos el alto
+   de la cabecera— y lo que se desborda vive dentro de su caja, con su propia
+   barra. En CELULAR se comporta como una página normal: forzar seis cifras,
+   una curva y dos listas dentro de 430 px deja la letra demasiado pequeña
+   para leerla en la calle, que es donde se usa. Decisión de José.
+
+   `dvh` y no `vh`: en el navegador del celular la barra de direcciones entra
+   y sale, y con `vh` el pie de la pantalla queda debajo de ella. */
+.pe{display:flex;flex-direction:column;gap:11px}
+.pe-top{display:flex;flex-direction:column;gap:9px}
+.pe-tit h2{margin:0;font-size:20px;letter-spacing:-.4px}
+.pe-tit span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+
+/* Dos columnas en el teléfono, no una: seis tarjetas apiladas son seis
+   pantallas de pulgar antes de llegar al gráfico. */
+.pe-kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pe-k{padding:10px 11px 11px}
+.pe-k .lbl{font-size:9.5px;letter-spacing:.05em}
+.pe-k .val{font-size:22px;margin-top:3px}
+.pe-k .sub{font-size:11px;margin-top:4px;min-height:0;line-height:1.35}
+
+.pe-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:11px;min-height:0}
+.pe-cols > *{min-width:0}
+.pe-graf{min-width:0}
+.pe-lado{display:flex;flex-direction:column;gap:11px;min-height:0}
+
+/* La caja NO crece con los datos. Ese es el punto: el ejecutivo con 40
+   retenciones tiene que ver la misma pantalla que el que tiene 2. */
+.pe-caja{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.pe-caja-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+  padding:11px 13px 9px;border-bottom:1px solid var(--grid);flex:none}
+.pe-caja-h b{font-size:13px;letter-spacing:-.2px}
+.pe-caja-h .num{font-size:15px;font-weight:750;color:var(--ink);
+  font-variant-numeric:tabular-nums}
+.pe-caja-c{overflow-y:auto;overscroll-behavior:contain;max-height:212px;
+  -webkit-overflow-scrolling:touch}
+.pe-f{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px;
+  align-items:baseline;width:100%;text-align:left;padding:8px 13px;
+  border:0;border-bottom:1px solid var(--grid);background:none;font:inherit;
+  color:inherit;cursor:pointer}
+.pe-f:last-child{border-bottom:0}
+.pe-f:hover{background:var(--plane)}
+.pe-f-n{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.pe-f-d{font-size:11px;color:var(--muted);white-space:nowrap}
+.pe-f-x{font-size:11.5px;color:var(--ink-2);font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+.pe-vacio{padding:18px 13px;font-size:12.5px;color:var(--muted);text-align:center}
+
+@media(min-width:760px){
+  .pe-top{flex-direction:row;align-items:flex-end;justify-content:space-between}
+  .pe-kpis{grid-template-columns:repeat(6,1fr)}
+  .pe-k .val{font-size:24px}
+  .pe-cols{grid-template-columns:minmax(0,1fr) 300px}
+}
+
+/* A partir de acá la pantalla NO se desplaza. En vez de restarle a `100dvh`
+   un número mágico —que se rompe en cuanto aparece el banner de «ver como»—,
+   se fija el alto del armazón y el `main` reparte lo que sobra. Así el
+   tablero mide lo que mide la ventana, tenga banner o no. */
+@media(min-width:1100px) and (min-height:640px){
+  body.pe-fijo{overflow:hidden}
+  body.pe-fijo #app{height:100dvh;min-height:0}
+  body.pe-fijo #app > main{min-height:0;overflow:hidden;display:flex;flex-direction:column}
+  body.pe-fijo #app.con-rail{height:100dvh}
+  body.pe-fijo .pe{flex:1;min-height:0}
+  body.pe-fijo .pe-cols{flex:1;min-height:0}
+  body.pe-fijo .pe-graf{min-height:0;display:flex;flex-direction:column}
+  body.pe-fijo .pe-graf .panel{flex:1;min-height:0;display:flex;flex-direction:column}
+  body.pe-fijo .pe-graf .grafico{flex:1;min-height:0;display:flex;align-items:center}
+  body.pe-fijo .pe-graf .grafico svg{width:100%;height:100%;max-height:100%}
+  /* Las dos cajas se reparten el alto y cada una scrollea por dentro. */
+  body.pe-fijo .pe-caja{flex:1 1 0;min-height:0}
+  body.pe-fijo .pe-caja-c{max-height:none;flex:1;min-height:0}
+}
 .kpi-nota b{color:var(--ink-2)}
 
 /* `minmax(0,1fr)` en la pista ancha: sin eso, una tabla con encabezados que no

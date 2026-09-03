@@ -2504,7 +2504,10 @@ const soloLectura = () => esBBVA();
    guarda `soloMando` no alcanzaba —solo aparta al Ejecutivo—, así que sin
    esta línea el perfil de BBVA la habría tenido desde el primer despliegue.
    Lo agarró la prueba que cuenta las pestañas de ese perfil. */
-const VEDADAS_BBVA = ["actividad", "bono", "reporte", "ayuda"];
+/* «rutas» entra acá desde el 03/09: es la planificación de calle del equipo
+   de Stratis —a quién visita cada uno y en qué orden— y eso no es material
+   del banco, igual que Incentivos o el Reporte. */
+const VEDADAS_BBVA = ["actividad", "bono", "reporte", "ayuda", "rutas"];
 const puedeVerTab = tab =>
   !(esBBVA() && (VEDADAS_BBVA.includes(tab) || /^form_/.test(String(tab))));
 
@@ -3129,6 +3132,10 @@ const NAV = [
      su propio desempeño. */
   { id:"registros",ic:"≡", label:"Registros", soloMando:true },
   { id:"panel",    ic:"◕", label:"Panel" },
+  /* Rutas es una herramienta de calle: la ve el ejecutivo y la ve supervisión
+     cuando mira «como» uno de ellos, que es donde tiene sentido preguntarse
+     por dónde sale mañana. A BBVA no se le ofrece. */
+  { id:"rutas",    ic:"⇢", label:"Rutas" },
   { id:"actividad",ic:"◎", label:"Actividad", soloMando:true },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
   { id:"reporte",  ic:"▤", label:"Reporte", soloMando:true },
@@ -3182,7 +3189,7 @@ function renderNav(){
  * 1100 px. Debajo de ese ancho manda la fila de abajo, que está a un pulgar.
  * El ejecutivo no la recibe nunca: su navegación no cambia en este tramo. */
 const RAIL = [
-  { g:"Campaña", items:["panel","cartera","agenda"] },
+  { g:"Campaña", items:["panel","cartera","agenda","rutas"] },
   { g:"Solo supervisión", items:["registros","actividad","bono","reporte","ayuda"] }
 ];
 const ETIQUETA_RAIL = { panel:"Tablero", agenda:"Calendario de visitas" };
@@ -3350,6 +3357,14 @@ function toast(msg){
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2900);
 }
+/* El mismo modal, pero ancho: el detalle del periodo es una pantalla entera,
+   no un aviso de dos líneas, y a 520 px las tablas de adentro se estrangulan. */
+function modalAncho(html){
+  $("#overlay").innerHTML = `<div class="modal-bg"><div class="modal modal-xl">${html}</div></div>`;
+  $("#overlay").querySelector(".modal-bg").onclick = e => {
+    if (e.target.classList.contains("modal-bg")) cerrarModal(); };
+}
+
 function modal(html){
   $("#overlay").innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
   $("#overlay").querySelector(".modal-bg").onclick = e => { if (e.target.classList.contains("modal-bg")) cerrarModal(); };
@@ -3417,6 +3432,12 @@ function renderInterno(){
   /* Ajustes ya no fluye en columnas automáticas: cada bloque decide su ancho.
      El masonry dejaba huecos largos y hacía zigzaguear la lectura. */
   v.className = /^form_/.test(S.tab) ? "view-form" : (S.tab === "ayuda" ? "view-ajustes" : "");
+  /* El panel del ejecutivo es la única pantalla que no se desplaza, y solo en
+     escritorio: la clase la pone acá y el CSS decide a partir de qué ancho y
+     de qué alto la respeta. Se quita SIEMPRE al salir —una pantalla que deja
+     `overflow:hidden` puesto convierte la siguiente en una trampa donde no se
+     puede bajar—. */
+  document.body.classList.toggle("pe-fijo", S.tab === "panel" && vistaDeCampo() && !S.cid);
   if (S.tab === "form_cliente")           return renderFormCliente();
   if (S.tab === "form_bbva")              return renderFormBBVA();
   if (S.tab === "form_bbva_lote")         return renderLoteBBVA();
@@ -3428,6 +3449,7 @@ function renderInterno(){
   else if (S.tab === "registros")         v.innerHTML = viewRegistros();
   else if (S.tab === "actividad")         v.innerHTML = viewActividad();
   else if (S.tab === "panel")             v.innerHTML = viewPanel();
+  else if (S.tab === "rutas")             v.innerHTML = viewRutas();
   else if (S.tab === "reporte")           v.innerHTML = viewReporte();
   else if (S.tab === "ayuda")             v.innerHTML = viewAyuda();
   bindComunes();
@@ -3490,6 +3512,45 @@ function bindComunes(){
     S.q = ""; S.limite = 40;
     const q = correoObservado();
     S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    go("cartera");
+  });
+  /* Las seis cifras del tablero del ejecutivo. Cada una abre EXACTAMENTE su
+     lista: un número sin salida obliga a buscar a mano lo que el CRM acaba de
+     contar, y en la calle eso es tiempo perdido. */
+  document.querySelectorAll("[data-pe]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const k = el.dataset.pe;
+    S.q = ""; S.limite = 40; S.fRubro = S.fEstadoCli = S.fDistrito = S.fCierre = "todos";
+    const q = correoObservado();
+    S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
+    S.fContacto = k === "gestionados" ? "gestionado"
+                : k === "visitas"     ? "cumple"
+                : k === "rucs"        ? "solo_nuevos"
+                : "registrado";
+    go("cartera");
+  });
+  /* «Ver el detalle»: el panel largo de siempre, encima del tablero y con su
+     propio desplazamiento. Nada de lo que explicaba se perdió al convertir el
+     panel en tablero; dejó de ser lo primero que se ve, que es distinto. */
+  document.querySelectorAll("[data-pedetalle]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    modalAncho(`
+      <div class="pe-det-h">
+        <b>El detalle de tu periodo</b>
+        <button class="x" data-cerrar="1" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="pe-det-c">${viewPanelLargo()}</div>`);
+    document.querySelectorAll("[data-cerrar]").forEach(b2 => b2.onclick = cerrarModal);
+    /* El detalle trae dentro sus propios botones —«ver cuáles», los estados,
+       las listas—; hay que volver a colgarles el clic o serían adorno. */
+    bindComunes();
+  });
+  /* Y cada fila de las dos cajas abre su ficha. */
+  document.querySelectorAll("[data-verficha]").forEach(el => el.onclick = e => {
+    e.stopPropagation();
+    const id = el.dataset.verficha;
+    if (!id) return;
+    S.cid = id; S.q = "";
     go("cartera");
   });
   /* Y los estados derivados, igual: cada cifra del panel abre su lista. */
@@ -3593,6 +3654,375 @@ function avisoVentana(){
   </div>`;
 }
 
+/* ---- Los ocho filtros del PERIODO EN CURSO (José, 03/09) -----------------
+ *
+ * La cartera no tiene selector de tramo: muestra el estado de hoy. Estos ocho
+ * responden «¿qué me queda por hacer en ESTE periodo?», que es la pregunta con
+ * la que un ejecutivo abre la pantalla por la mañana, y por eso todos se miden
+ * contra la ventana del bono —del 19 al 18—.
+ *
+ * Ninguno define nada nuevo. Cada uno le pregunta a la regla que ya existe:
+ *
+ *   pendientes  → `_gestionado`, que desde el 01/09 es «¿lo trabajé en este
+ *                 periodo?». Un comercio trabajado el 18/08 vuelve a esta
+ *                 lista el 19/08, que es exactamente lo que se pidió.
+ *   intentados  → hubo intento y ninguna respuesta. Se ven trabajados y no lo
+ *                 están: son los que hay que retomar, no los que hay que
+ *                 empezar.
+ *   negociando  → `estadoDerivado`, la misma que pinta el chip de la ficha.
+ *   retenidos   → cerrados como retención o recuperación DENTRO del periodo.
+ *   perdidos    → ídem, con el cierre en perdido.
+ *   sin visita  → tiene gestión en el periodo pero ninguna visita concretada.
+ *                 No es «no lo toqué»: es «lo toqué y no llegué a la calle».
+ *   agendados   → tiene cita abierta en la agenda.
+ *   sin agendar → le falta gestión en el periodo y tampoco tiene cita puesta.
+ *                 Es la lista más accionable de las ocho: nada hecho y nada
+ *                 programado.
+ */
+const FILTROS_PERIODO = [
+  { k:"pendientes", lbl:"Pendientes de gestionar",
+    ttl:"Comercios que en ESTE periodo todavía no tienen un hecho con resultado. Lo trabajado el 18 no cubre el periodo que arranca el 19" },
+  { k:"intentados",  lbl:"Intentados sin respuesta",
+    ttl:"Se les intentó en el periodo y nadie contestó. Se ven trabajados y no lo están" },
+  { k:"negociando",  lbl:"En negociación",
+    ttl:"El titular respondió y el caso sigue abierto" },
+  { k:"retenidos",   lbl:"Retenidos",
+    ttl:"Cerrados como retención o recuperación dentro del periodo" },
+  { k:"perdidos",    lbl:"Perdidos",
+    ttl:"Cerrados como perdidos dentro del periodo" },
+  { k:"sin_visita",  lbl:"Sin visitas efectivas",
+    ttl:"Tienen gestión en el periodo pero ninguna visita concretada: falta llegar a la calle" },
+  { k:"agendados",   lbl:"Agendados",
+    ttl:"Tienen una cita abierta en el calendario" },
+  { k:"sin_agendar", lbl:"Sin agendar",
+    ttl:"Les falta gestión en el periodo y tampoco tienen cita puesta. La lista más accionable" }
+];
+
+/* La ventana contra la que se miden los ocho. Se calcula una vez por dibujado
+   —no una vez por comercio— porque si no son 841 llamadas a `ventanaPeriodo`
+   por cada tecla que se escribe en el buscador. */
+const ventanaCartera = () => memoRender("ventanaCartera",
+  () => { const w = ventanaPeriodo(periodoHoy()); return { ini:w.ini, fin:w.fin }; });
+
+function pasaFiltroPeriodo(c, k, b){
+  const r = ventanaCartera();
+  const base = b || c._base || RULES.recomputarBase(c.customer_id) || {};
+  const cid = String(c.customer_id);
+  const enP = f => { const d = String(f || "").slice(0,10);
+    return !!d && d >= r.ini && d <= r.fin; };
+  /* Las gestiones AL COMERCIO de este periodo. Las coordinaciones con el banco
+     entran en «gestionado» —son trabajo— pero no en «llegué a la calle». */
+  const suyas = () => DB.delCliente(cid).filter(x => !esReconstruida(x) && enP(x.Fecha_Contacto));
+
+  switch (k){
+    case "pendientes":  return !esClienteNuevo(c) && !base._gestionado;
+    case "intentados":  { const g = suyas();
+                          return g.length > 0 && !g.some(x => esEfectivo(x.Resultado)); }
+    case "negociando":  return estadoDerivado(c) === "EN_NEGOCIACION";
+    case "retenidos":   return (esRetencion(c) || esRecuperado(c)) && enP(c.cerrado_en);
+    case "perdidos":    return c.resultado_gestion === "PERDIDO" && enP(c.cerrado_en);
+    case "sin_visita":  return !!base._gestionado
+                            && !suyas().some(x => x.Cumple_Visita === "SI");
+    case "agendados":   return !!citaDe(cid);
+    case "sin_agendar": return !esClienteNuevo(c) && !base._gestionado && !citaDe(cid);
+    default: return true;
+  }
+}
+
+/* La fila de filtros. Cada uno lleva su cuenta al lado: un filtro sin número
+   obliga a tocarlo para saber si tiene algo detrás, y el que está en cero no
+   se toca. */
+function filtrosPeriodo(base){
+  const r = ventanaCartera();
+  const activo = k => S.fContacto === "per:" + k;
+  const cuenta = k => base.filter(c => pasaFiltroPeriodo(c, k)).length;
+  return `
+  <div class="cf-per">
+    <div class="cf-per-h">
+      <b>Este periodo</b>
+      <span>${esc(fmtFecha(r.ini))} al ${esc(fmtFecha(r.fin))} · el periodo del bono corta el 18</span>
+    </div>
+    <div class="cf-per-x">
+      ${FILTROS_PERIODO.map(f => { const n = cuenta(f.k);
+        return `<button class="cf-p ${activo(f.k) ? "on" : ""} ${n ? "" : "cero"}"
+          data-f="contacto" data-v="per:${f.k}" title="${esc(f.ttl)}">
+          <span class="l">${esc(f.lbl)}</span><span class="n num">${n}</span>
+        </button>`; }).join("")}
+    </div>
+  </div>`;
+}
+
+/* =========================================================================
+   RUTAS RECOMENDADAS — salir una vez y ver a varios
+   =========================================================================
+
+   Pedido de José el 03/09: «en base a la dirección que han registrado,
+   distrito y dirección, sugerir rutas para que en una sola salida puedan
+   captar más de 1 cliente», con tráfico y horarios de salida.
+
+   LO QUE HAY Y LO QUE NO. Medido sobre los datos reales antes de diseñar
+   nada: los 841 comercios tienen distrito y dirección al 100%, y CERO
+   coordenadas. Los 64 GPS que existen son del ejecutivo en el momento de la
+   visita —y `fijar_ubicacion` los marca sin verificar a propósito—, no del
+   local. Sin lat/lng no se puede agrupar por cercanía real ni dibujar un mapa
+   propio, y fabricar coordenadas para que la pantalla quede bonita sería
+   inventar el dato que la pantalla dice estar mostrando.
+
+   ASÍ QUE EL REPARTO ES ESTE, y está elegido, no heredado:
+
+     · El CRM AGRUPA y ORDENA. Agrupa por distrito —la única clave geográfica
+       confiable que hay— y dentro del distrito ordena por vía y por número,
+       que es como se recorre una avenida sin ir y volver.
+     · GOOGLE MAPS RUTEA. La ruta se entrega como enlace con las direcciones
+       como paradas: Maps las geocodifica, calcula el orden fino, y muestra el
+       tráfico EN VIVO. Eso pasa en el celular del ejecutivo, que es donde
+       hace falta, y no exige ninguna API key —una key en un archivo que se
+       sirve por GitHub Pages es una key pública—.
+
+   Lo que esto NO hace, dicho para que nadie lo suponga: el CRM no lee el
+   tráfico. La franja de salida que sugiere sale de dos cosas distintas y las
+   dos van etiquetadas en pantalla: las horas punta de Lima, que son una regla
+   general y no un cálculo, y el horario en que las visitas de ESE distrito
+   sí se concretaron según el propio historial del equipo.
+   ========================================================================= */
+
+/* ---- Leer una dirección peruana -----------------------------------------
+   «AV. LA MAR NRO. 2232 DPTO. 301» → vía «AV LA MAR», número 2232.
+   No se pretende un parser completo: alcanza con separar la VÍA del resto
+   para poder ordenar, porque dos comercios de la misma avenida se visitan
+   seguidos y dos de avenidas distintas no. Lo que no se entiende se deja
+   entero y se ordena alfabéticamente, que es peor que el orden bueno pero
+   mejor que un orden inventado. */
+const VIA_TIPOS = ["AV","AVE","AVENIDA","JR","JIRON","CAL","CA","CALLE","PSJE","PJE","PASAJE",
+                   "PROLG","PROL","PROLONGACION","ALAM","ALAMEDA","OVA","OVALO","MZA","MZ","CARRETERA","CTRA"];
+const CORTE_DIR = /\b(?:NRO|N°|NO|NUM|MZA|MZ|LOTE|LT|INT|DPTO|DEPT|PISO|URB|ETAPA|AA\.?HH|COO|SEC|BLOCK|TDA|STAND|LOCAL)\b/;
+
+function leerDireccion(txt){
+  const s = String(txt || "").toUpperCase().replace(/[.,;]/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return { via:"", num:0, crudo:"" };
+  const p = s.split(" ");
+  let i = 0, tipo = "";
+  if (VIA_TIPOS.includes(p[0])){ tipo = p[0]; i = 1; }
+  /* La vía va hasta la primera palabra que anuncia el número o el interior. */
+  const nombre = [];
+  for (; i < p.length; i++){
+    if (CORTE_DIR.test(p[i])) break;
+    /* Un número suelto detrás del nombre también corta: «AV LA MAR 2232». */
+    if (nombre.length && /^\d{1,5}$/.test(p[i])) break;
+    nombre.push(p[i]);
+  }
+  /* El primer número que aparezca después es la altura de la cuadra. */
+  const resto = p.slice(i).join(" ");
+  const m = resto.match(/\b(\d{1,5})\b/);
+  return { via: (tipo ? tipo + " " : "") + nombre.join(" "), num: m ? Number(m[1]) : 0, crudo: s };
+}
+
+/* La dirección tal como se le pasa a Google Maps. Sin «Lima, Perú» al final,
+   Maps geocodifica «AV LA MAR 2232» en cualquier país que se le ocurra. */
+const dirParaMapa = c => [String(c.direccion || "").replace(/\s+/g, " ").trim(),
+                          String(c.distrito || "").trim(), "Lima", "Perú"]
+  .filter(Boolean).join(", ");
+
+/* ---- Cuántas paradas por ruta -------------------------------------------
+   El enlace de Maps admite origen + destino + 9 paradas intermedias sin API
+   de pago. Se corta en 8 comercios por ruta: deja margen y, sobre todo, ocho
+   visitas ya son una jornada. Una ruta de veinte paradas no la hace nadie y
+   solo sirve para que el número se vea grande. */
+const RUTA_TOPE = 8;
+
+/* ---- Las horas punta de Lima --------------------------------------------
+   ESTO NO ES UN CÁLCULO y la pantalla lo dice: son las franjas de congestión
+   conocidas de Lima, puestas para que el ejecutivo elija cuándo salir. El
+   tráfico real lo ve en Google Maps al abrir la ruta. */
+const PUNTA_LIMA = [
+  { de:"07:00", a:"09:30", que:"hora punta de la mañana" },
+  { de:"17:30", a:"20:30", que:"hora punta de la tarde" }
+];
+const FRANJAS_LIBRES = [
+  { de:"09:30", a:"12:30", que:"media mañana" },
+  { de:"14:00", a:"17:00", que:"media tarde" }
+];
+
+/* ---- Cuándo respondió ESTE distrito, según el propio historial -----------
+   Esto SÍ sale de los datos: la hora de las visitas que se concretaron en ese
+   distrito. Se declara sobre cuántas se calcula, porque una franja deducida
+   de dos visitas no es un patrón y el que la lee tiene derecho a saberlo. */
+function franjaDistrito(distrito){
+  const d = String(distrito || "").trim().toUpperCase();
+  const hs = DB.todos()
+    .filter(x => !esReconstruida(x) && x.Cumple_Visita === "SI"
+              && String(x.Distrito || "").trim().toUpperCase() === d)
+    .map(x => Number(String(x.Hora_Contacto || "").slice(0,2)))
+    .filter(h => h >= 6 && h <= 21);
+  if (hs.length < 3) return { n: hs.length, texto: "" };
+  hs.sort((a,b) => a - b);
+  const q = f => hs[Math.min(hs.length - 1, Math.floor(hs.length * f))];
+  const de = q(0.25), a = q(0.75);
+  return { n: hs.length,
+    texto: `${String(de).padStart(2,"0")}:00–${String(Math.min(21, a + 1)).padStart(2,"0")}:00` };
+}
+
+/* ---- Armar las rutas ----------------------------------------------------- */
+function rutasRecomendadas(){
+  const mios = universoPanel().filter(c => !esClienteNuevo(c));
+  const r = ventanaCartera();
+
+  /* Quién entra: el que necesita que alguien vaya. Un comercio ya cerrado no
+     entra —el caso terminó— y uno ya visitado en el periodo tampoco: la ruta
+     es para conseguir la visita que falta, no para repetir la que ya se
+     hizo. Esa es la misma regla de «visitas por comercio» del 01/09, aplicada
+     a la salida en vez de al contador. */
+  const enP = f => { const d = String(f || "").slice(0,10); return !!d && d >= r.ini && d <= r.fin; };
+  const yaVisitado = cid => DB.delCliente(cid)
+    .some(x => !esReconstruida(x) && x.Cumple_Visita === "SI" && enP(x.Fecha_Contacto));
+
+  const candidatos = mios.filter(c => !casoCerrado(c) && !yaVisitado(String(c.customer_id)));
+
+  /* La prioridad decide el orden DENTRO del distrito cuando hay que cortar en
+     ocho, y el color del punto. No decide a quién se visita: eso lo decide el
+     ejecutivo, que para eso ve la lista entera. */
+  const prio = c => {
+    if (citaDe(String(c.customer_id))) return { n:0, k:"cita",  lbl:"Tiene cita" };
+    if (estadoDerivado(c) === "EN_NEGOCIACION") return { n:1, k:"nego", lbl:"En negociación" };
+    const b = c._base || RULES.recomputarBase(c.customer_id) || {};
+    if (!b._gestionado) return { n:2, k:"pend", lbl:"Falta gestionar" };
+    return { n:3, k:"otro", lbl:"Seguimiento" };
+  };
+
+  /* Agrupar por distrito. Es la única clave geográfica que hay al 100%. */
+  const porDist = new Map();
+  candidatos.forEach(c => {
+    const d = String(c.distrito || "SIN DISTRITO").trim().toUpperCase();
+    if (!porDist.has(d)) porDist.set(d, []);
+    porDist.get(d).push(c);
+  });
+
+  const grupos = [...porDist.entries()].map(([distrito, cs]) => {
+    /* Dentro del distrito: por vía y por altura. Dos comercios de la misma
+       avenida se visitan seguidos; ir saltando de avenida en avenida es lo
+       que convierte seis visitas en una jornada perdida. */
+    const conDir = cs.map(c => ({ c, d: leerDireccion(c.direccion), p: prio(c) }));
+    conDir.sort((a, b) =>
+      a.d.via.localeCompare(b.d.via) || a.d.num - b.d.num ||
+      String(a.c.nombre_comercio || "").localeCompare(String(b.c.nombre_comercio || "")));
+
+    /* Y se parte en tramos de ocho, respetando el orden: el tramo 1 sale de
+       las primeras ocho paradas del recorrido, no de las ocho más urgentes
+       repartidas por todo el distrito. */
+    const tramos = [];
+    for (let i = 0; i < conDir.length; i += RUTA_TOPE) tramos.push(conDir.slice(i, i + RUTA_TOPE));
+
+    const vias = [...new Set(conDir.map(x => x.d.via).filter(Boolean))];
+    return { distrito, n: conDir.length, vias, tramos, franja: franjaDistrito(distrito),
+             conCita: conDir.filter(x => x.p.k === "cita").length };
+  }).filter(g => g.n > 1)          // una sola parada no es una ruta
+    .sort((a, b) => b.conCita - a.conCita || b.n - a.n);
+
+  return { grupos, total: candidatos.length,
+           sueltos: candidatos.length - grupos.reduce((n, g) => n + g.n, 0) };
+}
+
+/* El enlace de Google Maps. `api=1` es la URL pública y documentada: no lleva
+   key, funciona en el navegador y en la app, y abre la ruta con el tráfico
+   en vivo del momento en que se toque. */
+function enlaceMaps(paradas){
+  if (!paradas.length) return "";
+  const dirs = paradas.map(dirParaMapa);
+  const origen = encodeURIComponent(dirs[0]);
+  const destino = encodeURIComponent(dirs[dirs.length - 1]);
+  const medio = dirs.slice(1, -1).map(encodeURIComponent).join("|");
+  return "https://www.google.com/maps/dir/?api=1&travelmode=driving"
+       + `&origin=${origen}&destination=${destino}`
+       + (medio ? `&waypoints=${medio}` : "");
+}
+
+function viewRutas(){
+  const R = rutasRecomendadas();
+
+  if (!R.grupos.length) return `
+    ${bannerComoEjec()}
+    <div class="page-head"><div><h2>Rutas recomendadas</h2>
+      <div class="sub">Agrupadas por distrito, para salir una vez y ver a varios</div></div></div>
+    <div class="card"><div class="vacio">
+      ${R.total
+        ? `Tus ${R.total} comercios pendientes están repartidos de a uno por distrito: no hay dos que
+           convenga visitar en la misma salida.`
+        : "No te queda ningún comercio pendiente de visita en este periodo."}
+    </div></div>`;
+
+  const chip = k => k === "cita" ? "ok" : k === "nego" ? "neg" : k === "pend" ? "warn" : "";
+
+  return `
+  ${bannerComoEjec()}
+  <div class="page-head">
+    <div>
+      <h2>Rutas recomendadas</h2>
+      <div class="sub">${R.grupos.length} distrito${R.grupos.length===1?"":"s"} con más de un comercio
+        por visitar · ${R.total} pendientes en total</div>
+    </div>
+  </div>
+
+  <div class="note" style="margin:0 0 12px">
+    <b>Cómo salen estas rutas.</b> El CRM agrupa por <b>distrito</b> y ordena por <b>vía y altura</b>,
+    que es como se recorre una avenida sin ir y volver. El recorrido fino, la distancia y
+    <b>el tráfico en vivo</b> los pone Google Maps al abrir el enlace: el CRM no lee el tráfico y no
+    tiene las coordenadas de los locales, solo su dirección escrita.
+  </div>
+
+  <div class="rt-lista">
+    ${R.grupos.map((g, gi) => `
+      <div class="rt-g">
+        <div class="rt-g-h">
+          <div>
+            <b>${esc(g.distrito)}</b>
+            <span>${g.n} por visitar${g.conCita ? ` · ${g.conCita} con cita puesta` : ""} ·
+              ${g.vias.length} vía${g.vias.length===1?"":"s"}</span>
+          </div>
+          <span class="rt-n num">${g.n}</span>
+        </div>
+
+        <div class="rt-hora">
+          <b>Cuándo salir.</b>
+          ${g.franja.texto
+            ? `Las visitas que se concretaron en ${esc(g.distrito)} fueron entre
+               <b>${esc(g.franja.texto)}</b> <em>(sobre ${g.franja.n} visitas del equipo)</em>.`
+            : `Todavía no hay suficientes visitas concretadas en ${esc(g.distrito)}
+               <em>(${g.franja.n})</em> para decir a qué hora conviene.`}
+          Evita ${PUNTA_LIMA.map(x => `<b>${x.de}–${x.a}</b>`).join(" y ")}
+          <em>(horas punta de Lima, no es un cálculo del CRM)</em>; las franjas más libres son
+          ${FRANJAS_LIBRES.map(x => `${x.de}–${x.a}`).join(" y ")}.
+        </div>
+
+        ${g.tramos.map((t, ti) => `
+          <div class="rt-t">
+            <div class="rt-t-h">
+              <b>${g.tramos.length > 1 ? `Tramo ${ti+1} de ${g.tramos.length}` : "La ruta"}</b>
+              <span>${t.length} parada${t.length===1?"":"s"}</span>
+              <a class="btn sm" target="_blank" rel="noopener"
+                 href="${esc(enlaceMaps(t.map(x => x.c)))}">Abrir en Google Maps ↗</a>
+            </div>
+            <ol class="rt-p">
+              ${t.map(x => `<li>
+                <button class="rt-x" data-verficha="${esc(x.c.customer_id)}">
+                  <span class="rt-x-n">${esc(x.c.nombre_comercio || x.c.customer_id)}</span>
+                  <span class="rt-x-d">${esc(x.c.direccion || "")}</span>
+                </button>
+                <span class="chip ${chip(x.p.k)}">${esc(x.p.lbl)}</span>
+              </li>`).join("")}
+            </ol>
+          </div>`).join("")}
+      </div>`).join("")}
+  </div>
+
+  ${R.sueltos ? `<div class="note" style="margin:12px 0 0">
+    Quedan <b>${R.sueltos}</b> comercio${R.sueltos===1?"":"s"} pendiente${R.sueltos===1?"":"s"} en
+    distritos donde no hay otro que visitar: no forman ruta y hay que ir por ellos aparte.</div>` : ""}
+
+  <p class="pie" style="margin:12px 2px 0">Entran los comercios que <b>siguen abiertos y todavía no
+    tienen visita concretada en este periodo</b>. El que ya se visitó sale de la lista —volver no suma
+    al mínimo, según la regla del 01/09— y el que ya se cerró tampoco.</p>`;
+}
+
 function viewCartera(){
   let lista = cartera();
   const q = S.q.trim().toLowerCase();
@@ -3654,6 +4084,13 @@ function viewCartera(){
     /* Los estados calculados también filtran, que es para lo que sirven: cada
        uno responde «qué hago hoy con este comercio». */
     if (S.fContacto.startsWith("est:")) return estadoDerivado(c) === S.fContacto.slice(4);
+    /* Los del PERIODO EN CURSO (José, 03/09). Van con el prefijo `per:` para
+       que se lea en el propio nombre del filtro que la respuesta depende del
+       tramo y no de toda la campaña: la misma palabra sin ventana ya nos costó
+       una semana en agosto. Todos preguntan a las definiciones que ya están
+       fijadas —`_gestionado` es la del periodo desde el 01/09—; ninguno
+       inventa una regla nueva. */
+    if (S.fContacto.startsWith("per:")) return pasaFiltroPeriodo(c, S.fContacto.slice(4), b);
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -3721,6 +4158,11 @@ function viewCartera(){
   <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
       <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
+
+    ${/* Arriba de todo, y arriba a propósito: es con lo que se abre la pantalla
+         por la mañana. Los de abajo miran toda la campaña; estos, el periodo
+         en curso, y lo dicen en su encabezado. */
+      filtrosPeriodo(base)}
 
     <!-- «Gestionados» faltaba y era la pregunta más obvia: cuáles ya recibieron
          trabajo, sin importar si contestaron. Se podía preguntar por los que no
@@ -7475,7 +7917,7 @@ const ejecutivosPanel = () => {
 /* `conTitulo` en falso lo deja como lo que es: un control. El tablero de
    supervisión ya trae su propia cabecera con el periodo escrito, y dos títulos
    seguidos diciendo casi lo mismo hacen dudar de cuál manda. */
-function selectorPanel(r, conTitulo){
+function selectorPanel(r, conTitulo, compacto){
   const opciones = r.id === "proyecto" ? []
     : r.id === "mes" ? mesesProyecto().map(m => [m, nombreMes(m)])
     : periodosProyecto().slice().reverse().map(p => [p, `${nombrePeriodo(p)} · ${textoPeriodo(p)}`]);
@@ -7489,7 +7931,10 @@ function selectorPanel(r, conTitulo){
     </div>
   </div>`}
 
-  <div class="pnl-per">
+  ${/* `compacto` lo pide el tablero del ejecutivo: allá el tramo ya está
+       escrito debajo del título, y repetirlo en un tercer sitio de la misma
+       fila roba el ancho que necesita el selector. */""}
+  <div class="pnl-per${compacto ? " pnl-per-min" : ""}">
     <div class="seg" role="group" aria-label="Periodo">
       ${VENTANAS_PANEL.map(v => `<button class="${(S.vPanel||"bono")===v.id?"on":""}" data-vpanel="${v.id}">${v.label}</button>`).join("")}
     </div>
@@ -7497,8 +7942,8 @@ function selectorPanel(r, conTitulo){
       <select id="pPanel">${opciones.map(([v,l]) =>
         `<option value="${esc(v)}"${v === r.periodo ? " selected" : ""}>${esc(l)}</option>`).join("")}
       </select></label>` : ""}
-    <div class="pnl-per-txt">Del <b>${esc(r.detalle)}</b>${
-      r.id === "bono" ? (esBBVA() ? " · el periodo corta el 18" : " · el mes del bono corta el 18") : ""}</div>
+    ${compacto ? "" : `<div class="pnl-per-txt">Del <b>${esc(r.detalle)}</b>${
+      r.id === "bono" ? (esBBVA() ? " · el periodo corta el 18" : " · el mes del bono corta el 18") : ""}</div>`}
   </div>`;
 }
 
@@ -8381,12 +8826,188 @@ function bloqueMiRegistro(){
   </div>`;
 }
 
+/* =========================================================================
+   EL PANEL DEL EJECUTIVO — un tablero, no un informe
+   =========================================================================
+
+   Pedido de José el 03/09. Hasta hoy el ejecutivo tenía la misma pantalla que
+   supervisión: siete bloques apilados que se leían de arriba abajo y obligaban
+   a bajar tres pantallas para saber cómo va el periodo. Un tablero se MIRA; si
+   hay que scrollear para verlo entero, ya no es un tablero.
+
+   Lo que cambia:
+
+     · Seis cifras del periodo, arriba, en una sola fila.
+     · La curva de registros por día del periodo elegido.
+     · A la derecha, dos cajas: los retenidos y las ventas. Cada una con su
+       propio scroll y con alto acotado —no crecen con los datos—, así el
+       ejecutivo con 40 retenciones ve la misma pantalla que el que tiene 2.
+     · En escritorio la página NO se desplaza: la altura la fija la ventana y
+       lo que se desborda vive dentro de su caja. En celular sí se desplaza,
+       porque forzar todo a 430 px deja las cifras ilegibles y este panel se
+       mira en la calle. (Decisión de José, 03/09.)
+
+   Todas las cifras salen de las definiciones que ya están fijadas —la gestión
+   por periodo del 01/09, las visitas por comercio, la cadena del embudo—. Acá
+   no se calcula ninguna regla nueva: se eligen cuáles se muestran y en qué
+   orden. Que este panel y el Tablero de supervisión digan lo mismo del mismo
+   ejecutivo no es una coincidencia que haya que vigilar, es que preguntan a la
+   misma función.
+   ========================================================================= */
+
+/* Las seis cifras y las dos listas, en un solo lugar. */
+function datosPanelEjec(r){
+  const correo = correoObservado() || (S.user || {}).correo || "";
+  const mios   = universoPanel();
+  const cartera = mios.filter(c => !esClienteNuevo(c));
+  const nuevos  = mios.filter(esClienteNuevo);
+
+  /* La cadena del embudo, acotada al tramo y recortada a lo que esta persona
+     tiene a su nombre. Es la MISMA función del Tablero y del Reporte. */
+  const vistos = new Set(mios.map(c => String(c.customer_id)));
+  const C = cadenaEntre(r.ini, r.fin);
+  const mio = s => [...(s || [])].filter(id => vistos.has(id));
+
+  const gestionados = mio(C.gestion).length;
+
+  /* Las visitas, por COMERCIO y del periodo (José, 01/09). */
+  const regs = DB.todos().filter(x => vistos.has(String(x.Customer_id))
+                                   && enRango(x.Fecha_Contacto, r));
+  const visitas = comerciosConVisita(regs);
+
+  /* Cerrados dentro del tramo. El cierre vive en la ficha, no en una gestión,
+     así que se fecha por `cerrado_en`. */
+  const enTramo   = c => enRango(c.cerrado_en, r);
+  const retenidos = cartera.filter(c => (esRetencion(c) || esRecuperado(c)) && enTramo(c));
+  const ventas    = nuevos.filter(c => esVentaNueva(c) && enRango(c.cerrado_en || c.creado_en, r));
+
+  const asignada = asignadaDe(correo, r);
+
+  return {
+    correo, r, cartera, nuevos, regs,
+    asignada,
+    registrados: cartera.length,       // fichas con Customer ID
+    rucs: nuevos.length,               // leads de venta, que van por RUC
+    gestionados,
+    visitas,
+    retenidos: retenidos.sort((a,b) => String(b.cerrado_en||"").localeCompare(String(a.cerrado_en||""))),
+    ventas:    ventas.sort((a,b) => String(b.cerrado_en||b.creado_en||"")
+                            .localeCompare(String(a.cerrado_en||a.creado_en||""))),
+    faltan: Math.max(0, cartera.length - gestionados),
+    cobertura: asignada ? gestionados / asignada * 100 : null
+  };
+}
+
+/* Una tarjeta. El color de la cinta es el del escalón del embudo cuando la
+   cifra ES un escalón, y neutro cuando no lo es: un tono de veredicto sobre
+   una cifra que no tiene mínimo afirma un aprobado que nadie definió. */
+function kpiEjec(x){
+  const sub = x.sub ? `<div class="sub">${x.sub}</div>` : "";
+  const cuerpo = `
+    <div class="lbl">${esc(x.lbl)}</div>
+    <div class="val num">${x.val}</div>
+    ${sub}`;
+  const est = x.color ? ` style="--paso:${x.color}"` : "";
+  return x.ir
+    ? `<button class="kpi kpi-paso pe-k" ${x.ir}${est}>${cuerpo}</button>`
+    : `<div class="kpi kpi-paso pe-k"${est}>${cuerpo}</div>`;
+}
+
+/* Una caja con lista adentro. El alto lo fija el CSS y no el contenido: es la
+   diferencia entre un tablero y una página que crece hasta que alguien se
+   cansa de bajar. */
+function cajaLista(titulo, cuenta, vacio, filas){
+  return `
+  <div class="pe-caja">
+    <div class="pe-caja-h"><b>${esc(titulo)}</b><span class="num">${cuenta}</span></div>
+    <div class="pe-caja-c">
+      ${filas.length ? filas.join("") : `<div class="pe-vacio">${esc(vacio)}</div>`}
+    </div>
+  </div>`;
+}
+
+function viewPanelEjec(){
+  const r = rangoPanel();
+  universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
+  const d = datosPanelEjec(r);
+
+  const pct1 = v => v === null ? "—" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+  const nom = c => esc(c.nombre_comercio || c.customer_id || c.ruc || "—");
+  /* dd/mm: el año no aporta dentro de un periodo de un mes y roba ancho a
+     la columna del nombre, que es lo que identifica la fila. */
+  const dia = v => { if (!v) return "—"; const [ , m, d ] = String(v).slice(0,10).split("-"); return `${d}/${m}`; };
+
+  const fila = c => `
+    <button class="pe-f" data-verficha="${esc(c.customer_id || c.ruc || "")}">
+      <div class="pe-f-n">${nom(c)}</div>
+      <div class="pe-f-d">${esc(c.distrito || "")}</div>
+      <div class="pe-f-x">${dia(c.cerrado_en || c.creado_en)}</div>
+    </button>`;
+
+  return `
+  ${bannerComoEjec()}
+  <div class="pe">
+    <div class="pe-top">
+      <div class="pe-tit">
+        <h2>Mi panel</h2>
+        <span>${esc(r.detalle)}</span>
+      </div>
+      <div class="pe-acc">
+        ${selectorPanel(r, false, true)}
+        ${/* La lectura larga no desapareció: se corrió un clic. Acá viven la
+             puntualidad, el margen a tiempo, lo que vence hoy y el detalle del
+             registro —cosas que José fijó el 01/09 y que siguen siendo suyas—.
+             Se abre encima, con su propio scroll, para que el tablero de atrás
+             siga sin desplazarse. */""}
+        <button class="btn ghost sm" data-pedetalle="1">Ver el detalle ›</button>
+      </div>
+    </div>
+
+    <div class="pe-kpis">
+      ${kpiEjec({ lbl:"Cartera asignada", val: d.asignada || "—",
+        sub: d.asignada ? "comercios que puso BBVA" : "falta cargarla en Ajustes" })}
+      ${kpiEjec({ lbl:"Registrados", val: d.registrados,
+        sub:"fichas con Customer ID", ir:'data-pe="registrados"' })}
+      ${kpiEjec({ lbl:"RUC de venta", val: d.rucs,
+        sub:"leads nuevos, sin Customer ID", ir:'data-pe="rucs"' })}
+      ${kpiEjec({ lbl:"Gestionados", val: d.gestionados, color:"var(--emb-gestion)",
+        sub: d.asignada ? `${pct1(d.cobertura)}% de tu cartera · te faltan ${d.faltan}`
+                        : `te faltan ${d.faltan}`,
+        ir:'data-pe="gestionados"' })}
+      ${kpiEjec({ lbl:"Visitas efectivas", val: d.visitas, color:"var(--emb-visita)",
+        sub:"comercios visitados, no visitas", ir:'data-pe="visitas"' })}
+      ${kpiEjec({ lbl:"Retenciones", val: d.retenidos.length, color:"var(--emb-objetivo)",
+        sub:"retenidos y recuperados" })}
+    </div>
+
+    <div class="pe-cols">
+      <div class="pe-graf">${lineaDiaria(r, d.regs, 330)}</div>
+      <div class="pe-lado">
+        ${cajaLista("Retenidos", d.retenidos.length,
+          "Todavía ninguno en este periodo.", d.retenidos.map(fila))}
+        ${cajaLista("Ventas realizadas", d.ventas.length,
+          "Todavía ninguna en este periodo.", d.ventas.map(fila))}
+      </div>
+    </div>
+  </div>`;
+}
+
 function viewPanel(){
   /* Supervisión tiene su propio tablero: mismas cuentas, otro orden de lectura.
      El ejecutivo conserva esta pantalla tal cual hasta que le toque la suya —no
      se le cambia la herramienta de trabajo en medio de una campaña sin que sea
      su turno—. */
   if (!vistaDeCampo()) return viewTablero();
+  /* Desde el 03/09 el ejecutivo tiene su tablero: seis cifras, una curva y dos
+     listas, sin bajar la página. Lo que era esta pantalla —los bloques
+     apilados— sigue existiendo y vive ahora en «Ver el detalle», debajo, para
+     quien quiera la lectura larga. */
+  return viewPanelEjec();
+}
+
+/* El panel largo de siempre. Se conserva entero: nada de lo que explicaba se
+   perdió, solo dejó de ser lo primero que se ve. */
+function viewPanelLargo(){
   const r = rangoPanel();
   universoPanel().forEach(c => RULES.recomputarBase(c.customer_id));
 
@@ -8692,7 +9313,13 @@ function tablaTablero(x){
    La cifra del periodo dice dónde se está; esta línea dice si se está yendo
    hacia allá. Sin ella un 9,5% de cobertura se lee igual el día que sube que
    el día que se detiene. */
-function lineaDiaria(r, regs){
+/* `alto` existe porque el mismo gráfico vive en dos sitios con dos alturas: en
+   el Tablero de supervisión va en una fila y su alto natural sobra; en el
+   tablero del ejecutivo ocupa toda una columna y con 156 px de viewBox quedaba
+   un hueco enorme debajo. Estirar el SVG con `preserveAspectRatio="none"`
+   habría deformado los números y los rótulos, así que lo que crece es el
+   propio dibujo: más alto de viewBox, misma tipografía. */
+function lineaDiaria(r, regs, alto){
   const dias = [];
   const fin  = r.fin > hoyISO() ? hoyISO() : r.fin;
   if (r.ini && fin >= r.ini){
@@ -8730,7 +9357,8 @@ function lineaDiaria(r, regs){
 
   /* Más aire arriba (T) que antes: cada punto lleva su cifra encima y sin ese
      margen la del día más alto se salía del marco. */
-  const W = 620, H = 156, L = 34, R = 611, T = 24, B = 118;
+  const H = Math.max(156, Math.min(420, Number(alto) || 156));
+  const W = 620, L = 34, R = 611, T = 24, B = H - 38;
   const tope = Math.max(10, Math.ceil(Math.max(...vals, ritmo || 0) / 10) * 10);
   const px = i => vistos.length === 1 ? (L + R) / 2 : L + 28 + (R - L - 28) * i / (vistos.length - 1);
   const py = v => B - (B - T) * (v / tope);
@@ -8778,7 +9406,7 @@ function lineaDiaria(r, regs){
               (arriba ? y - 8 : y + 14).toFixed(1)}" text-anchor="middle">${v}</text>`;
           }).join("")}
         ${vistos.map((iso,i) => (i % paso === 0 || i === vistos.length - 1)
-          ? `<text class="eje" x="${px(i).toFixed(1)}" y="144" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
+          ? `<text class="eje" x="${px(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
       </svg>
     </div>
     <p class="nota">${hechos} comercios distintos tocados en el periodo${
