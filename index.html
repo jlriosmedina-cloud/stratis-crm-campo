@@ -1923,7 +1923,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"04/09/2026 17:44", huella:"bd0261" };
+const BUILD = { sello:"04/09/2026 18:05", huella:"007a3d" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3363,13 +3363,34 @@ let FACTURACION = [];
 let FACT_BASE = [];              // la base del proyecto, congelada por acuerdo
 let CIERRES_PERIODO = [];        // sellos de periodos ya liquidados
 
+/* Los parámetros que rigieron un periodo: los del código, con encima la
+   versión guardada que le corresponde.
+
+   La mezcla es de DOS niveles, y eso importa. `Object.assign` a secas
+   reemplaza cada clave entera, así que una versión guardada que trae su
+   propio `metas` borra las metas que el código agregó DESPUÉS de guardarla.
+   Pasó el 04/09 con `facturacion_pct_mensual`: la versión de septiembre trae
+   `metas: {ventas_mes, facturacion_pct, reactivacion_pp}` y la meta mensual
+   desaparecía. El campo salía vacío en Ajustes y guardar devolvía «hay un
+   valor que no es un número», sin decir cuál era el problema real.
+
+   Con la mezcla de dos niveles, una versión vieja hereda los valores por
+   defecto de lo que no conocía —que es lo que ya pasaba con las claves de
+   primer nivel— y sigue mandando en todo lo que sí escribió. Las listas se
+   reemplazan enteras a propósito: media curva vieja y media nueva no es una
+   curva de nadie. */
 function paramsDe(p){
   const base = JSON.parse(JSON.stringify(BONO_DEF));
   if (!p || !PARAMS.length) return base;
   const v = PARAMS.filter(x => String(x.vigente_desde) <= String(p))
                   .sort((a,b) => String(a.vigente_desde).localeCompare(String(b.vigente_desde)))
                   .pop();
-  return v ? Object.assign(base, v.valor) : base;
+  if (!v) return base;
+  const esObj = x => x && typeof x === "object" && !Array.isArray(x);
+  Object.entries(v.valor || {}).forEach(([k, val]) => {
+    base[k] = (esObj(val) && esObj(base[k])) ? Object.assign(base[k], val) : val;
+  });
+  return base;
 }
 /* Qué versión rigió un periodo, para poder decirlo en pantalla */
 const versionDe = p => PARAMS.filter(x => String(x.vigente_desde) <= String(p))
