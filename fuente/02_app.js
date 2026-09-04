@@ -16447,6 +16447,7 @@ function viewReporte(){
       ${/* La hoja de avance del proyecto. Va a la izquierda del deck porque es
              lo que se manda entre comité y comité: una página, sin relato que
              editar. */ ""}
+      <button class="btn ghost" id="repEquipo">Fichas del equipo</button>
       <button class="btn ghost" id="repFicha">Avance de la campaña</button>
       <button class="btn" id="repDir">Deck de directorio</button>
       <button class="btn ghost sm" id="repAjustes">Editar el relato</button>
@@ -17526,6 +17527,7 @@ function cardReporte(){
 }
 
 function bindReporte(){
+  if ($("#repEquipo"))  $("#repEquipo").onclick = () => modalFichasEquipo();
   if ($("#repFicha"))   $("#repFicha").onclick = e => pdfFichaProyecto(e.currentTarget);
   if ($("#repDir"))     $("#repDir").onclick  = e => modalFacturacion(e.currentTarget);
   if ($("#repAjustes")) $("#repAjustes").onclick = () => { S.repEdit = ""; go("ayuda"); };
@@ -19500,7 +19502,14 @@ const LOGO_STRATIS = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAaQAAABnCAIA
 /* ---- El dibujo ----------------------------------------------------------
    Todo con formas que jsPDF sabe hacer: rectángulos, polígonos, líneas, texto
    y una imagen. Nada que dependa del navegador ni de una hoja de estilos. */
-function fichaProyecto(doc, D){
+/* ---- El lenguaje visual de las dos hojas, en un solo lugar ---------------
+   La ficha del ejecutivo y la de proyecto tienen que parecer la misma familia,
+   y la única forma de que sigan pareciéndolo dentro de seis meses es que el
+   dibujo salga de acá y no de dos copias que se van separando.
+
+   `doc` entra por parámetro y todo lo que sale son funciones que ya lo tienen
+   dentro: quien dibuja no vuelve a tocar jsPDF directamente. */
+function dibujoFicha(doc){
   const W = 210, m = 12;
   const CORAL = [248,111,53], VERDE = [11,188,150], GRIS = [160,168,188],
         AZUL2 = [1,17,162], HUESO = [247,248,251];
@@ -19534,96 +19543,155 @@ function fichaProyecto(doc, D){
     doc.setDrawColor(...PX.linea); doc.setLineWidth(0.2);
     doc.line(x0 + ancho(T, 7.2, true) + 3, yy - 1, x0 + an0, yy - 1); };
 
-  /* ---- Cabecera ------------------------------------------------------- */
-  caja(0, 0, W, 40, PX.navy);
-  try { doc.addImage(LOGO_STRATIS, "PNG", m, 9, 28, 6.9); }
-  catch (e){ txt("STRATIS", m, 15.5, { size:15, bold:true, color:PX.blanco }); }
-  txt("AVANCE DE LA CAMPAÑA", m, 22.5, { size:7.4, bold:true, color:CORAL });
-  txt(repProyecto().cliente || "BBVA Adquirencia", m, 30.5, { size:17, bold:true, color:PX.blanco });
-  txt(`Retención y reactivación de portafolio · ${D.equipo} ejecutivos comerciales en campo`,
-      m, 35.8, { size:8, color:[201,208,228] });
-  const cin = (r, v, yy) => {
-    txt(r, W - m, yy, { size:6.4, color:[142,154,184], align:"right" });
-    txt(v, W - m, yy + 4.4, { size:9.2, bold:true, color:PX.blanco, align:"right" }); };
-  cin(`PERIODO ${D.mes} DE ${D.total}`, `${repFecha(D.ventana.ini)} - ${repFecha(D.ventana.fin)}`, 11);
-  cin("SEMANA EN CURSO", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`, 21.5);
-  cin("PORTAFOLIO ASIGNADO", `${miles(D.portafolio)} comercios`, 32);
-  caja(0, 40, W, 1.6, CORAL);
+  /* ---- La cabecera, igual en las dos hojas ----------------------------- */
+  const cabecera = (eyebrow, titular, bajada, cintas) => {
+    caja(0, 0, W, 40, PX.navy);
+    try { doc.addImage(LOGO_STRATIS, "PNG", m, 9, 28, 6.9); }
+    catch (e){ txt("STRATIS", m, 15.5, { size:15, bold:true, color:PX.blanco }); }
+    txt(eyebrow.toUpperCase(), m, 22.5, { size:7.4, bold:true, color:CORAL });
+    txt(titular, m, 30.5, { size:17, bold:true, color:PX.blanco });
+    bajada.forEach((l, i) => txt(l, m, 35.4 + i*3.9, { size:7.8, color:[201,208,228] }));
+    cintas.forEach((c, i) => {
+      const yy = 11 + i*10.5;
+      txt(c[0].toUpperCase(), W - m, yy, { size:6.4, color:[142,154,184], align:"right" });
+      txt(c[1], W - m, yy + 4.4, { size:9.2, bold:true, color:PX.blanco, align:"right" });
+    });
+    caja(0, 40, W, 1.6, CORAL);
+  };
 
-  /* ---- Las cinco tarjetas --------------------------------------------- */
+  /* ---- Las cinco tarjetas: en grande lo que lleva, al lado la meta ------
+     Gabriel, 04/09. El número que la persona busca primero es el suyo, no el
+     techo. */
+  const tarjetas = (y, filas) => {
+    const anT = (W - 2*m - (filas.length-1)*2.4) / filas.length, alT = 24;
+    filas.forEach((t, i) => {
+      const x = m + i * (anT + 2.4);
+      borde(x, y, anT, alT, 1.6);
+      caja(x + 0.9, y - 0.3, anT - 1.8, 1.1, t.neutro ? GRIS : (t.ok ? VERDE : CORAL));
+      fuente(6.1, false); doc.setTextColor(...PX.gris);
+      doc.splitTextToSize(sanear(String(t.rot).toUpperCase()), anT - 4).slice(0,2)
+         .forEach((l, j) => doc.text(l, x + 2, y + 4.6 + j*2.6));
+      txt(t.val, x + 2, y + 13.4, { size:12.5, bold:true, color:PX.navy });
+      txt(t.meta, x + 2 + ancho(t.val, 12.5, true) + 1.3, y + 13.4, { size:6, color:GRIS });
+      fuente(5.9, false); doc.setTextColor(...PX.gris);
+      doc.splitTextToSize(sanear(t.pie), anT - 4).slice(0,2)
+         .forEach((l, j) => doc.text(l, x + 2, y + 17.4 + j*2.5));
+      txt(t.falta, x + 2, y + alT - 1.9,
+          { size:6.2, bold:true, color: t.neutro ? GRIS : (t.ok ? VERDE : CORAL) });
+    });
+    return y + alT;
+  };
+
+  /* ---- El pentágono. Cada eje contra SU meta: es lo único que pone 841
+     comercios y 7 ventas en la misma escala. El valor va escrito en el
+     vértice, así la forma da el vistazo y el número da el dato. */
+  const pentagono = (cx, cy, r, ejes) => {
+    const n = ejes.length;
+    const ang = i => -Math.PI/2 + 2*Math.PI*i/n;
+    const pt = (i, f) => [cx + Math.cos(ang(i))*r*f, cy + Math.sin(ang(i))*r*f];
+    const poli = (f, col, gr, relleno) => {
+      const P2 = []; for (let i = 0; i < n; i++) P2.push(pt(i, typeof f === "function" ? f(i) : f));
+      doc.setDrawColor(...col); doc.setLineWidth(gr);
+      doc.lines(P2.slice(1).concat([P2[0]]).map((p2, i2) =>
+        [p2[0] - (i2 ? P2[i2][0] : P2[0][0]), p2[1] - (i2 ? P2[i2][1] : P2[0][1])]),
+        P2[0][0], P2[0][1], [1,1], relleno ? "FD" : "S", true);
+    };
+    [0.25, 0.5, 0.75].forEach(f => poli(f, [221,226,236], 0.15, false));
+    poli(1, PX.navy, 0.4, false);
+    for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, 1);
+      doc.setDrawColor(221,226,236); doc.setLineWidth(0.15); doc.line(cx, cy, x2, y2); }
+    const logro = ejes.map(o => Math.min(1, o.meta ? o.n/o.meta : 0));
+    doc.setFillColor(250, 214, 196);
+    poli(i => Math.max(0.012, logro[i]), CORAL, 0.7, true);
+    for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, Math.max(0.012, logro[i]));
+      doc.setFillColor(...CORAL); doc.circle(x2, y2, 0.9, "F"); }
+    ejes.forEach((o, i) => {
+      const c = Math.cos(ang(i)), sn = Math.sin(ang(i));
+      const [x2, y2] = pt(i, 1.52);
+      const al = c > 0.35 ? "left" : c < -0.35 ? "right" : "center";
+      const dx = c > 0.35 ? 1.4 : c < -0.35 ? -1.4 : 0;
+      const dy = sn < -0.5 ? -2.6 : (sn > 0.5 ? 3.4 : 0);
+      txt(o.rot, x2 + dx, y2 + dy, { size:6, bold:true, color:PX.navy, align:al });
+      txt(o.txt, x2 + dx, y2 + dy + 3.5, { size:7.2, bold:true, color:CORAL, align:al });
+      /* Sin dato cargado no se dibuja un 0%: decir «0% de la meta» donde lo
+         que pasa es que el dato no llegó es afirmar un incumplimiento que
+         nadie midió. */
+      txt(o.txt === "sin dato" ? "aun no se mide"
+          : `${o.meta ? Math.round(o.n/o.meta*100) : 0}% de la meta`, x2 + dx, y2 + dy + 6.6,
+          { size:5.5, color:PX.gris, align:al });
+    });
+    return cy + r*1.52 + 12;
+  };
+
+  /* ---- Los cuatro paneles del desarrollo semanal ----------------------- */
+  const semanas = (y, serie, paneles) => {
+    const anS = (W - 2*m - 3*3.4) / 4, alS = 20;
+    paneles.forEach((pa, i) => {
+      const x = m + i * (anS + 3.4);
+      borde(x, y, anS, alS, 1.6);
+      txt(pa[0].toUpperCase(), x + 2.2, y + 3.6, { size:5.8, bold:true, color:PX.gris });
+      const vals = serie.map(s2 => s2[pa[1]]), mx = Math.max(1, ...vals);
+      const bw = Math.min(6, (anS - 4.4 - (vals.length-1)*2.4) / vals.length);
+      vals.forEach((v, j) => {
+        const bx = x + 2.2 + j*(bw + 2.4);
+        const h = Math.max(0.5, v/mx * 8.4), by = y + 15.2 - h;
+        /* La semana en curso va en un tono más claro: todavía no cerró y no
+           puede leerse como una caída. */
+        doc.setFillColor(...(serie[j].cerrada ? pa[2] : pa[2].map(c2 => Math.round(c2 + (255-c2)*0.45))));
+        doc.roundedRect(bx, by, bw, h, 0.5, 0.5, "F");
+        txt(String(v), bx + bw/2, by - 1, { size:5.6, bold:true, color:PX.navy, align:"center" });
+        txt(serie[j].desde.slice(8) + "/" + serie[j].desde.slice(5,7), bx + bw/2, y + 18.4,
+            { size:4.8, color:GRIS, align:"center" });
+      });
+    });
+    return y + alS;
+  };
+
+  const pie = (izq, der) => {
+    doc.setDrawColor(...PX.linea); doc.setLineWidth(0.2); doc.line(m, 283, W - m, 283);
+    txt(izq, m, 287, { size:6.2, color:GRIS });
+    txt(der, W - m, 287, { size:6.2, color:GRIS, align:"right" });
+  };
+
+  return { W, m, CORAL, VERDE, GRIS, AZUL2, HUESO, sanear, fuente, txt, ancho,
+           caja, borde, pctT, mm2, miles, titulo, cabecera, tarjetas, pentagono,
+           semanas, pie };
+}
+
+function fichaProyecto(doc, D){
+  const X = dibujoFicha(doc);
+  const { W, m, CORAL, VERDE, GRIS, AZUL2, HUESO, sanear, fuente, txt, ancho,
+          caja, borde, pctT, mm2, miles, titulo } = X;
+  const F = D.fact;
+
+  X.cabecera("Avance de la campaña", repProyecto().cliente || "Campaña BBVA Adquirencia",
+    [`Retención y reactivación de portafolio · ${D.equipo} ejecutivos comerciales en campo`],
+    [[`Periodo ${D.mes} de ${D.total}`, `${repFecha(D.ventana.ini)} - ${repFecha(D.ventana.fin)}`],
+     ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`],
+     ["Portafolio asignado", `${miles(D.portafolio)} comercios`]]);
+
   let y = 50;
   titulo("Avances del proyecto", y); y += 3.4;
-  const anT = (W - 2*m - 4*2.4) / 5, alT = 24;
-  const F = D.fact;
-  const tarjetas = [
-    ["Comercios gestionados", miles(D.embudo[1].n), "de " + miles(D.portafolio),
-     "del portafolio asignado", `faltan ${miles(D.portafolio - D.embudo[1].n)}`, false],
-    ["Visitas del periodo", miles(D.objetivos[1].n), "de " + miles(D.metaVis),
-     "comercios distintos visitados", `faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}`, false],
-    ["Retenciones", miles(D.embudo[4].n), "de " + miles(D.metaRet),
-     "la meta son 20 p.p. del portafolio", `faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}`, false],
-    ["Afiliaciones nuevas", miles(D.objetivos[2].n), "de " + miles(D.metaVen),
-     "7 por ejecutivo al mes", `faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}`, false],
-    ["Facturación", F.crec === null ? "-" : pctT(F.crec, 2), `de +${F.metaPct}%`,
-     `${mm2(F.base)} a ${mm2(F.cierre)}`, `cierre de ${F.mesDelDato}`, true]
-  ];
-  tarjetas.forEach((t, i) => {
-    const x = m + i * (anT + 2.4);
-    borde(x, y, anT, alT, 1.6);
-    caja(x + 0.9, y - 0.3, anT - 1.8, 1.1, t[5] ? GRIS : CORAL);
-    fuente(6.1, false); doc.setTextColor(...PX.gris);
-    doc.splitTextToSize(sanear(t[0].toUpperCase()), anT - 4).slice(0,2)
-       .forEach((l, j) => doc.text(l, x + 2, y + 4.6 + j*2.6));
-    txt(t[1], x + 2, y + 13.4, { size:12.5, bold:true, color:PX.navy });
-    txt(t[2], x + 2 + ancho(t[1], 12.5, true) + 1.3, y + 13.4, { size:6, color:GRIS });
-    fuente(5.9, false); doc.setTextColor(...PX.gris);
-    doc.splitTextToSize(sanear(t[3]), anT - 4).slice(0,2)
-       .forEach((l, j) => doc.text(l, x + 2, y + 17.4 + j*2.5));
-    txt(t[4], x + 2, y + alT - 1.9, { size:6.2, bold:true, color: t[5] ? GRIS : CORAL });
-  });
-  y += alT + 7;
+  y = X.tarjetas(y, [
+    { rot:"Comercios gestionados", val:miles(D.embudo[1].n), meta:"de " + miles(D.portafolio),
+      pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}` },
+    { rot:"Visitas del periodo", val:miles(D.objetivos[1].n), meta:"de " + miles(D.metaVis),
+      pie:"comercios distintos visitados",
+      falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}` },
+    { rot:"Retenciones", val:miles(D.embudo[4].n), meta:"de " + miles(D.metaRet),
+      pie:"la meta son 20 p.p. del portafolio",
+      falta:`faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}` },
+    { rot:"Afiliaciones nuevas", val:miles(D.objetivos[2].n), meta:"de " + miles(D.metaVen),
+      pie:"7 por ejecutivo al mes",
+      falta:`faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}` },
+    { rot:"Facturación", val: F.crec === null ? "-" : pctT(F.crec, 2), meta:`de +${F.metaPct}%`,
+      pie: F.crec === null ? "sin monto cargado" : `${mm2(F.base)} a ${mm2(F.cierre)}`,
+      falta:`cierre de ${F.mesDelDato}`, neutro:true }
+  ]) + 7;
 
-  /* ---- Pentágono y embudo, lado a lado -------------------------------- */
   const yBloque = y;
   titulo("Dónde está el proyecto", y, m, 82);
-  const cx = m + 41, cy = y + 36, r = 16;
-  const n = D.objetivos.length;
-  const ang = i => -Math.PI/2 + 2*Math.PI*i/n;
-  const pt = (i, f) => [cx + Math.cos(ang(i))*r*f, cy + Math.sin(ang(i))*r*f];
-  const poli = (f, col, gr, relleno) => {
-    const P2 = []; for (let i = 0; i < n; i++) P2.push(pt(i, typeof f === "function" ? f(i) : f));
-    doc.setDrawColor(...col); doc.setLineWidth(gr);
-    if (relleno){ doc.setFillColor(...col); }
-    doc.lines(P2.slice(1).concat([P2[0]]).map((p2, i2) =>
-      [p2[0] - (i2 ? P2[i2][0] : P2[0][0]), p2[1] - (i2 ? P2[i2][1] : P2[0][1])]),
-      P2[0][0], P2[0][1], [1,1], relleno ? "FD" : "S", true);
-  };
-  [[0.25,0.15],[0.5,0.15],[0.75,0.15]].forEach(([f, g]) => poli(f, [221,226,236], g, false));
-  poli(1, PX.navy, 0.4, false);
-  for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, 1);
-    doc.setDrawColor(221,226,236); doc.setLineWidth(0.15); doc.line(cx, cy, x2, y2); }
-  const logro = D.objetivos.map(o => Math.min(1, o.meta ? o.n/o.meta : 0));
-  doc.setFillColor(250, 214, 196);
-  poli(i => Math.max(0.012, logro[i]), CORAL, 0.7, true);
-  for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, Math.max(0.012, logro[i]));
-    doc.setFillColor(...CORAL); doc.circle(x2, y2, 0.9, "F"); }
-  D.objetivos.forEach((o, i) => {
-    const c = Math.cos(ang(i)), s = Math.sin(ang(i));
-    const [x2, y2] = pt(i, 1.52);
-    const al = c > 0.35 ? "left" : c < -0.35 ? "right" : "center";
-    /* El rótulo de la izquierda se alinea a la derecha, así que crece hacia
-       el margen: se corre lo justo para que no lo pise. */
-    const dx = c > 0.35 ? 1.4 : c < -0.35 ? -1.4 : 0;
-    const dy = s < -0.5 ? -2.6 : (s > 0.5 ? 3.4 : 0);
-    txt(o.rot, x2 + dx, y2 + dy, { size:6, bold:true, color:PX.navy, align:al });
-    txt(o.txt, x2 + dx, y2 + dy + 3.5, { size:7.2, bold:true, color:CORAL, align:al });
-    /* Sin dato cargado no se dibuja un 0%: decir «0% de la meta» donde lo que
-       pasa es que el dato no llegó es afirmar un incumplimiento que nadie
-       midió. */
-    txt(o.txt === "sin dato" ? "aun no se mide"
-        : `${o.meta ? Math.round(o.n/o.meta*100) : 0}% de la meta`, x2 + dx, y2 + dy + 6.6,
-        { size:5.5, color:PX.gris, align:al });
-  });
+  const yPent = X.pentagono(m + 41, y + 36, 16, D.objetivos);
 
   /* El embudo, a la derecha. Cada escalón contra el portafolio, que es el
      único denominador que no se mueve. */
@@ -19642,31 +19710,12 @@ function fichaProyecto(doc, D){
     txt(e.pie, xE, yE + 8.4, { size:5.8, color:PX.gris });
     yE += 12.4;
   });
-  y = Math.max(cy + r*1.52 + 12, yE) + 2;
+  y = Math.max(yPent, yE) + 2;
 
-  /* ---- El desarrollo, semana a semana --------------------------------- */
   titulo("El desarrollo, semana a semana · el corte es el domingo", y); y += 3.4;
-  const anS = (W - 2*m - 3*3.4) / 4, alS = 20;
-  const paneles = [["Comercios trabajados","trabajados",AZUL2], ["Comercios visitados","visitas",CORAL],
-                   ["Retenciones","ret",VERDE], ["Afiliaciones nuevas","ven",[59,67,251]]];
-  paneles.forEach((pa, i) => {
-    const x = m + i * (anS + 3.4);
-    borde(x, y, anS, alS, 1.6);
-    txt(pa[0].toUpperCase(), x + 2.2, y + 3.6, { size:5.8, bold:true, color:PX.gris });
-    const vals = D.serie.map(s => s[pa[1]]), mx = Math.max(1, ...vals);
-    const bw = Math.min(6, (anS - 4.4 - (vals.length-1)*2.4) / vals.length);
-    vals.forEach((v, j) => {
-      const bx = x + 2.2 + j*(bw + 2.4);
-      const h = Math.max(0.5, v/mx * 8.4);
-      const by = y + 15.2 - h;
-      doc.setFillColor(...(D.serie[j].cerrada ? pa[2] : pa[2].map(c2 => Math.round(c2 + (255-c2)*0.45))));
-      doc.roundedRect(bx, by, bw, h, 0.5, 0.5, "F");
-      txt(String(v), bx + bw/2, by - 1, { size:5.6, bold:true, color:PX.navy, align:"center" });
-      txt(D.serie[j].desde.slice(8) + "/" + D.serie[j].desde.slice(5,7), bx + bw/2, y + 18.4,
-          { size:4.8, color:GRIS, align:"center" });
-    });
-  });
-  y += alS + 6;
+  y = X.semanas(y, D.serie, [["Comercios trabajados","trabajados",AZUL2],
+    ["Comercios visitados","visitas",CORAL], ["Retenciones","ret",VERDE],
+    ["Afiliaciones nuevas","ven",[59,67,251]]]) + 6;
 
   /* ---- La lectura y el mapa del portafolio ---------------------------- */
   titulo("Cómo viene la campaña", y); y += 3.4;
@@ -19732,12 +19781,8 @@ function fichaProyecto(doc, D){
     + `en total. Negoc. son los comercios con conversación abierta y sin cierre todavía.`), 84)
     .forEach(l => { doc.text(l, xD, yD); yD += 2.6; });
 
-  /* ---- Pie ------------------------------------------------------------ */
-  doc.setDrawColor(...PX.linea); doc.setLineWidth(0.2); doc.line(m, 283, W - m, 283);
-  txt(`Stratis LATAM · ${repProyecto().cliente || "Campaña BBVA Adquirencia"}`, m, 287,
-      { size:6.2, color:GRIS });
-  txt(`Corte al ${repFechaLarga ? repFechaLarga(D.hoy) : repFecha(D.hoy)}`, W - m, 287,
-      { size:6.2, color:GRIS, align:"right" });
+  X.pie(`Stratis LATAM · ${repProyecto().cliente || "Campaña BBVA Adquirencia"}`,
+        `Corte al ${repFecha(D.hoy)}`);
 }
 
 async function pdfFichaProyecto(btn){
@@ -19755,6 +19800,333 @@ async function pdfFichaProyecto(btn){
   } finally {
     if (btn){ btn.disabled = false; btn.textContent = orig; }
   }
+}
+
+/* =========================================================================
+   Ficha semanal del ejecutivo
+
+   La misma hoja que la de proyecto, para una persona. Es interna: acá SÍ van
+   el nombre, el correo y los mínimos del acuerdo —cobertura, visitas y
+   puntualidad del registro—, porque es lo que esa persona necesita saber de su
+   propio trabajo. Lo que no va, y por eso no aparece, es cuánto cobra: el
+   cálculo del incentivo vive en su acta y no en un resumen semanal.
+
+   Los números salen de `llaveDe`, `gestionesDe` y `comerciosConVisita`, que son
+   las mismas funciones que arman la pestaña de Incentivos. Si la ficha y esa
+   pestaña dijeran cosas distintas de la misma persona, el problema no sería
+   estético.
+   ========================================================================= */
+function datosFichaEjecutivo(correo){
+  const hoy = hoyISO(), p = periodoHoy(), v = ventanaPeriodo(p);
+  const B = paramsDe(p), M = metaPeriodo(p, B), R = B.requisitos || {};
+  const u = (USUARIOS || []).find(x => x.correo === correo) || { correo };
+  const ll = llaveDe(correo, p);
+  const gest = gestionesDe(correo, p);
+  const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+  const idsCart = new Set(mios.map(c => String(c.customer_id)));
+
+  const enW = (r, a, b) => { const d = repDia(r.Fecha_Contacto); return d >= a && d <= b; };
+  const visEn = (a, b) => { const f = gest.filter(r => esAlCliente(r) && enW(r, a, b));
+    const total = comerciosConVisita(f);
+    return { total, cartera: comerciosConVisita(f.filter(r => idsCart.has(String(r.Customer_id)))) }; };
+  const retEn = (a, b) => mios.filter(c => (esRetencion(c) || esRecuperado(c)) && c.cerrado_en
+    && String(c.cerrado_en).slice(0,10) >= a && String(c.cerrado_en).slice(0,10) <= b).length;
+  const venEn = (a, b) => CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
+    && String(c.cerrado_en || c.creado_en || "").slice(0,10) >= a
+    && String(c.cerrado_en || c.creado_en || "").slice(0,10) <= b).length;
+
+  const mas = (d, n) => new Date(new Date(d + "T00:00:00Z").getTime() + n*86400000)
+    .toISOString().slice(0,10);
+  const semanas = []; let a = v.ini;
+  while (a <= hoy && semanas.length < 8){
+    let d = new Date(a + "T00:00:00Z");
+    while (d.getUTCDay() !== 0) d = new Date(d.getTime() + 86400000);
+    let fin = d.toISOString().slice(0,10);
+    if (fin > v.fin) fin = v.fin;
+    semanas.push({ desde:a, hasta: fin > hoy ? hoy : fin, cerrada: fin < hoy });
+    a = mas(fin, 1);
+  }
+  const serie = semanas.map(s => ({
+    desde:s.desde, hasta:s.hasta, cerrada:s.cerrada,
+    gestiones: gest.filter(r => esAlCliente(r) && !esReconstruida(r) && enW(r, s.desde, s.hasta)).length,
+    visitas: visEn(s.desde, s.hasta).total,
+    ret: retEn(s.desde, s.hasta),
+    ven: venEn(s.desde, s.hasta)
+  }));
+  const vis = visEn(v.ini, hoy);
+
+  /* Los días hábiles que faltan del periodo. Sale de la misma tabla de feriados
+     que usa la puntualidad del registro, así que no hay dos calendarios. */
+  let habiles = 0;
+  for (let d = mas(hoy, 1); d <= v.fin; d = mas(d, 1))
+    if (!diaNoTrabajado(d)) habiles++;
+  const diasSem = (() => { const s = serie[serie.length-1]; let n = 0;
+    for (let d = s.desde; d <= s.hasta; d = mas(d, 1)) if (!diaNoTrabajado(d)) n++;
+    return Math.max(1, n); })();
+
+  /* El mapa de su cartera. Lo que decide el orden es lo que le falta por
+     visitar, que es el cuello del periodo. */
+  const porD = {};
+  mios.forEach(c => {
+    const cid = String(c.customer_id);
+    const d = String(c.distrito || "SIN DISTRITO").trim().toUpperCase();
+    const b = c._base || RULES.recomputarBase(cid) || {};
+    const visitado = DB.delCliente(cid).some(x => !esReconstruida(x) && x.Cumple_Visita === "SI"
+      && repDia(x.Fecha_Contacto) >= v.ini) || visitadoPorVinculo(cid);
+    porD[d] = porD[d] || { d, total:0, sinGestion:0, sinVisita:0, nego:0 };
+    const g = porD[d]; g.total++;
+    if (casoCerrado(c)) return;
+    if (!b._gestionado) g.sinGestion++;
+    if (!visitado) g.sinVisita++;
+    if (estadoDerivado(c) === "EN_NEGOCIACION") g.nego++;
+  });
+  const distritos = Object.values(porD).sort((x, y) => y.sinVisita - x.sinVisita || y.total - x.total);
+
+  const metaCob = Math.ceil(ll.cartera.n * (R.cobertura_pct || 90) / 100);
+  const metaVis = R.visitas_periodo || 40;
+  const metaRet = Math.ceil(ll.cartera.n * (M.reactivacion_pp || 5) / 100);
+  const metaVen = M.ventas_mes || 7;
+
+  return {
+    hoy, periodo:p, ventana:v, mes:M.i, total:M.total,
+    nombre: u.nombreCompleto || u.nombre || correo, correo,
+    puesto: "Ejecutivo Comercial Adquirencia MASTERCARD BBVA",
+    cartera: ll.cartera.n,
+    cobertura: { n: ll.cobertura.cubiertos, meta: metaCob, pct: ll.cobertura.valor,
+                 metaPct: R.cobertura_pct || 90 },
+    visitas: { n: vis.total, cartera: vis.cartera, venta: vis.total - vis.cartera, meta: metaVis },
+    retenciones: { n: retEn(v.ini, hoy), meta: metaRet },
+    ventas: { n: venEn(v.ini, hoy), meta: metaVen },
+    puntualidad: { pct: ll.puntualidad.valor, meta: R.puntualidad_pct || 95, de: gest.length },
+    gestionesAlComercio: gest.filter(r => esAlCliente(r) && !esReconstruida(r)).length,
+    porContactoEfectivo: (() => {
+      const s = new Set(gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
+        .map(r => String(r.Customer_id)).filter(id => idsCart.has(id)));
+      return s.size; })(),
+    serie, distritos, habiles, diasSem,
+    sinVisitaTotal: distritos.reduce((n, x) => n + x.sinVisita, 0),
+    enNegociacion: distritos.reduce((n, x) => n + x.nego, 0),
+    objetivos: [
+      { rot:"COBERTURA", n:ll.cobertura.cubiertos, meta:metaCob,
+        txt:`${ll.cobertura.cubiertos} de ${metaCob}` },
+      { rot:"VISITAS",   n:vis.total, meta:metaVis, txt:`${vis.total} de ${metaVis}` },
+      { rot:"VENTAS",    n:venEn(v.ini, hoy), meta:metaVen, txt:`${venEn(v.ini, hoy)} de ${metaVen}` },
+      { rot:"RETENCIÓN", n:retEn(v.ini, hoy), meta:metaRet, txt:`${retEn(v.ini, hoy)} de ${metaRet}` },
+      { rot:"REGISTRO",  n:ll.puntualidad.valor, meta:R.puntualidad_pct || 95,
+        txt:(Math.round(ll.puntualidad.valor*10)/10).toString().replace(".", ",") + "%" }
+    ]
+  };
+}
+
+function fichaEjecutivo(doc, D){
+  const X = dibujoFicha(doc);
+  const { W, m, CORAL, VERDE, GRIS, AZUL2, HUESO, sanear, fuente, txt, ancho,
+          caja, borde, miles, titulo } = X;
+  const pct1 = v => (Math.round(v*10)/10).toString().replace(".", ",") + "%";
+
+  X.cabecera("Ficha semanal del ejecutivo", D.nombre,
+    [D.puesto, D.correo],
+    [[`Periodo ${D.mes} de ${D.total}`, `${repFecha(D.ventana.ini)} - ${repFecha(D.ventana.fin)}`],
+     ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`],
+     ["Cartera asignada", `${miles(D.cartera)} comercios`]]);
+
+  let y = 50;
+  titulo("Avances del periodo", y); y += 3.4;
+  const puntOk = D.puntualidad.pct >= D.puntualidad.meta;
+  y = X.tarjetas(y, [
+    { rot:"Comercios gestionados", val:miles(D.cobertura.n), meta:"de " + miles(D.cobertura.meta),
+      pie:`la meta es el ${D.cobertura.metaPct}% de los ${miles(D.cartera)} de su cartera`,
+      falta:`faltan ${miles(Math.max(0, D.cobertura.meta - D.cobertura.n))}` },
+    { rot:"Visitas efectivas", val:miles(D.visitas.n), meta:"de " + miles(D.visitas.meta),
+      pie:`${D.visitas.cartera} de cartera + ${D.visitas.venta} de venta nueva`,
+      falta:`faltan ${miles(Math.max(0, D.visitas.meta - D.visitas.n))}` },
+    { rot:"Retenciones", val:miles(D.retenciones.n), meta:"de " + miles(D.retenciones.meta),
+      pie:"la meta del periodo sobre su cartera",
+      falta:`faltan ${miles(Math.max(0, D.retenciones.meta - D.retenciones.n))}` },
+    { rot:"Ventas nuevas", val:miles(D.ventas.n), meta:"de " + miles(D.ventas.meta),
+      pie:"por periodo, no se acumula",
+      falta:`faltan ${miles(Math.max(0, D.ventas.meta - D.ventas.n))}` },
+    { rot:"Puntualidad del registro", val:pct1(D.puntualidad.pct), meta:`mín. ${D.puntualidad.meta}%`,
+      pie:`sobre ${miles(D.puntualidad.de)} gestiones registradas`,
+      falta: puntOk ? "cumplida" : "por debajo del mínimo", ok: puntOk }
+  ]) + 7;
+
+  /* Pentágono a la izquierda, barras de distancia a la meta a la derecha. */
+  const yBloque = y;
+  titulo("Dónde está parado", y, m, 82);
+  const yPent = X.pentagono(m + 41, y + 36, 16, D.objetivos);
+
+  const xB = m + 88, anB = W - m - xB;
+  let yB = yBloque;
+  titulo("Cuánto falta para cada meta", yB, xB, anB);
+  yB += 5;
+  [["Comercios gestionados", D.cobertura.n, D.cobertura.meta, AZUL2, "comercios con contacto logrado"],
+   ["Visitas efectivas", D.visitas.n, D.visitas.meta, CORAL,
+    `${D.visitas.cartera} de cartera + ${D.visitas.venta} de venta nueva`],
+   ["Retenciones", D.retenciones.n, D.retenciones.meta, VERDE, "cerradas en el periodo"],
+   ["Ventas", D.ventas.n, D.ventas.meta, [59,67,251], "afiliaciones nuevas cerradas"]
+  ].forEach(b => {
+    const [rot, v, meta, col, pie] = b;
+    txt(rot, xB, yB, { size:7.6, bold:true, color:PX.navy });
+    const sm = ` / ${miles(meta)}`;
+    txt(sm, W - m, yB, { size:6.6, color:PX.gris, align:"right" });
+    txt(miles(v), W - m - ancho(sm, 6.6, false), yB, { size:8.6, bold:true, color:PX.navy, align:"right" });
+    caja(xB, yB + 1.6, anB, 3.2, [233,236,243], 1.6);
+    if (v > 0) caja(xB, yB + 1.6, Math.max(3.2, anB * Math.min(1, v/meta)), 3.2, col, 1.6);
+    const falta = Math.max(0, meta - v);
+    txt(pie + (falta ? ` · faltan ${miles(falta)}` : " · meta cumplida"), xB, yB + 8.4,
+        { size:5.8, color:PX.gris });
+    yB += 15.5;
+  });
+  y = Math.max(yPent, yB) + 2;
+
+  titulo("El desarrollo, semana a semana · el corte es el domingo", y); y += 3.4;
+  y = X.semanas(y, D.serie, [["Gestiones al comercio","gestiones",AZUL2],
+    ["Visitas efectivas","visitas",CORAL], ["Retenciones","ret",VERDE],
+    ["Ventas","ven",[59,67,251]]]) + 6;
+
+  /* ---- Cómo viene la semana -------------------------------------------
+     Sin órdenes. Los mismos datos, contados como observación: quien lee esto
+     es la persona sobre la que se está hablando. */
+  titulo("Cómo viene la semana", y); y += 3.4;
+  const anI = W - 2*m - 74 - 5, xD = m + anI + 5;
+  const S = D.serie, ult = S[S.length - 1];
+  const ritmo = ult.visitas / D.diasSem;
+  const proy = D.visitas.n + ritmo * D.habiles;
+  const pide = D.habiles ? Math.max(0, D.visitas.meta - D.visitas.n) / D.habiles : 0;
+  const un = v => (Math.round(v*10)/10).toString().replace(".", ",");
+
+  caja(m, y, anI, 27, HUESO, 1.2);
+  caja(m, y, 1.1, 27, CORAL);
+  const parr = [
+    `De los ${miles(D.cobertura.n)} comercios que hoy cuentan como gestionados, `
+    + `${miles(D.cobertura.n - D.porContactoEfectivo)} entraron por el correo al ejecutivo del banco y `
+    + `${miles(D.porContactoEfectivo)} por contacto directo con el comercio. Para la cobertura las dos `
+    + `vías valen igual. La visita, el cierre y la retención salen de la segunda.`,
+    `Van ${ult.visitas} visitas en los ${D.diasSem} días de esta semana. A ese paso el periodo cerraría `
+    + `en ${Math.round(proy)} de ${D.visitas.meta}. Quedan ${D.habiles} días hábiles, así que serían `
+    + `unas ${un(pide)} al día para alcanzar el mínimo.`
+  ];
+  let yT = y + 4.6;
+  parr.forEach(p2 => { fuente(7.1, false); doc.setTextColor(...PX.gris);
+    doc.splitTextToSize(sanear(p2), anI - 7).forEach(l => { doc.text(l, m + 3.4, yT); yT += 3.05; });
+    yT += 1.5; });
+
+  const CAP = 3 * 5;   // tres visitas por día hábil, una semana
+  const top2 = D.distritos.slice(0, 2);
+  /* Cuántos distritos se nombran depende de cuántos HAY. Decir «cuatro
+     distritos pegados» en una cartera que tiene dos es una afirmación falsa
+     escrita a mano, y nadie se enteraría: es el mismo error de la banda del
+     deck y del «más de diez veces» de la hoja de proyecto. */
+  const nTop = Math.min(4, D.distritos.length);
+  const enTop = D.distritos.slice(0, nTop).reduce((n, x) => n + x.sinVisita, 0);
+  const semTop = enTop / CAP;
+  const PAL = ["", "un", "dos", "tres", "cuatro"];
+  let yA = y + 30;
+  const acc = [
+    `Sin visita quedan ${miles(D.sinVisitaTotal)} comercios`
+    + (nTop > 1 && enTop < D.sinVisitaTotal
+        ? `, y ${miles(enTop)} de ellos caen en ${PAL[nTop]} distritos pegados`
+        : nTop === 1 ? `, casi todos en ${tituloDistrito(D.distritos[0].d)}` : "")
+    + `. A ${CAP} por semana son ${un(semTop)} semanas de ruta ahí mismo.`,
+    top2.length > 1
+      ? `${top2.map(x => tituloDistrito(x.d)).join(" y ")} juntan `
+        + `${miles(top2.reduce((n,x) => n + x.sinVisita, 0))} sin visita. Es donde menos tiempo se va `
+        + `en traslado.`
+      : `${top2.length ? tituloDistrito(top2[0].d) : "Su distrito principal"} concentra lo que falta por visitar.`,
+    `Hay ${miles(D.enNegociacion)} comercios en negociación: gente que ya contestó. De todo lo que `
+    + `falta, son los que menos trabajo piden para acercarse a las `
+    + `${miles(Math.max(0, D.retenciones.meta - D.retenciones.n))} retenciones.`
+  ];
+  acc.forEach(a => {
+    txt(">>", m, yA, { size:7, bold:true, color:CORAL });
+    fuente(7, false); doc.setTextColor(...PX.gris);
+    doc.splitTextToSize(sanear(a), anI - 6).forEach(l => { doc.text(l, m + 4.6, yA); yA += 3; });
+    yA += 1.4;
+  });
+
+  /* La tabla de su cartera por distrito. */
+  let yD = y;
+  const cols = [0, 30, 46, 62, 74];
+  ["DISTRITO","CART.","SIN GEST.","SIN VIS.","NEGOC."].forEach((h, i) =>
+    txt(h, xD + cols[i] + (i ? 10 : 0), yD, { size:5.4, bold:true, color:PX.gris,
+        align: i ? "right" : "left" }));
+  yD += 1.6;
+  D.distritos.slice(0, 7).forEach(x2 => {
+    doc.setDrawColor(...PX.linea); doc.setLineWidth(0.15); doc.line(xD, yD, xD + 84, yD);
+    yD += 3.9;
+    const nom = tituloDistrito(x2.d);
+    txt(nom.length > 19 ? nom.slice(0,18) + "." : nom, xD, yD, { size:6.6, bold:true, color:PX.navy });
+    [[x2.total, PX.gris, false], [x2.sinGestion, PX.gris, false],
+     [x2.sinVisita, CORAL, true], [x2.nego, PX.gris, false]].forEach((c2, i) =>
+      txt(String(c2[0]), xD + cols[i+1] + 10, yD, { size:6.6, bold:c2[2], color:c2[1], align:"right" }));
+    yD += 1.2;
+  });
+  doc.setDrawColor(...PX.linea); doc.line(xD, yD, xD + 84, yD);
+  yD += 4;
+  fuente(5.6, false); doc.setTextColor(...PX.gris);
+  doc.splitTextToSize(sanear(`Los distritos con más comercios pendientes de visita, sobre `
+    + `${D.distritos.length} en su cartera. Negoc. son los que ya contestaron y siguen abiertos.`), 84)
+    .forEach(l => { doc.text(l, xD, yD); yD += 2.6; });
+
+  X.pie("Stratis LATAM · Campaña BBVA Adquirencia · documento interno",
+        `Generado el ${repFecha(D.hoy)}`);
+}
+
+/* «Santiago de Surco», no «Santiago De Surco». */
+function tituloDistrito(t){
+  const chicas = { de:1, del:1, la:1, las:1, los:1, y:1, el:1 };
+  return String(t).toLowerCase().split(/\s+/)
+    .map((w, i) => i && chicas[w] ? w : w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+async function pdfFichaEjecutivo(correo, btn){
+  const orig = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Generando…"; }
+  try {
+    await cargarJsPDF();
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    const D = datosFichaEjecutivo(correo);
+    fichaEjecutivo(doc, D);
+    const limpio = String(D.nombre).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_");
+    doc.save(`Avance_${limpio}_${hoyISO()}.pdf`);
+    toast(`Ficha de ${D.nombre.split(" ")[0]} generada`);
+  } catch (e){
+    toast("No se pudo generar el PDF: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+/* Un archivo por persona, no los cuatro juntos: José los va a mandar uno a uno
+   y un PDF de cuatro páginas obligaría a partirlo a mano. */
+function modalFichasEquipo(){
+  const ej = ejecutivosDelBono();
+  if (!ej.length) return toast("No hay ejecutivos activos en la campaña");
+  const p = periodoHoy();
+  modal(`
+    <h3 style="margin:0 0 4px">Fichas del equipo</h3>
+    <div class="bn-sub" style="margin-bottom:12px">Periodo ${esc(textoPeriodo(p))} ·
+      la semana cierra el domingo. Un archivo por persona.</div>
+    <div class="fq-lista">
+      ${ej.map(u => {
+        const D = datosFichaEjecutivo(u.correo);
+        return `<div class="fq-fila">
+          <div>
+            <b>${esc(u.nombreCompleto || u.nombre)}</b>
+            <div class="fq-det">${D.cobertura.n} de ${D.cobertura.meta} gestionados ·
+              ${D.visitas.n} de ${D.visitas.meta} visitas ·
+              ${D.retenciones.n} ${D.retenciones.n === 1 ? "retención" : "retenciones"}</div>
+          </div>
+          <button class="btn sm" data-ficha="${esc(u.correo)}">Descargar</button>
+        </div>`;
+      }).join("")}
+    </div>
+    <div class="fq-pie">Se descargan uno por uno para poder mandarlos por separado.</div>`);
+  document.querySelectorAll("[data-ficha]").forEach(b =>
+    b.onclick = e => pdfFichaEjecutivo(e.currentTarget.dataset.ficha, e.currentTarget));
 }
 
 async function pdfIncentivo(u, p, btn){
