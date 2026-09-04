@@ -1923,7 +1923,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"04/09/2026 17:35", huella:"649e2c" };
+const BUILD = { sello:"04/09/2026 17:44", huella:"bd0261" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -16919,7 +16919,13 @@ async function anularCargaFact(id){
    ========================================================================= */
 const CAMPOS_BONO = [
   ["metas.reactivacion_pp",      "Meta de reactivación",        "p.p."],
-  ["metas.facturacion_pct",      "Meta de facturación",         "%"],
+  ["metas.facturacion_pct",      "Meta de facturación acumulada", "%"],
+  /* Solo se usa cuando la lectura es mensual. Va aparte de la acumulada
+     porque son dos magnitudes distintas: ese 15% es contra abril y a lo largo
+     de todo el proyecto; esto es contra el mes anterior, todos los meses.
+     Meterlas en el mismo campo es exactamente el error que ya costó tres
+     números para «la base». */
+  ["metas.facturacion_pct_mensual", "Meta de facturación mensual", "%"],
   ["metas.ventas_mes",           "Ventas por periodo",          ""],
   ["pesos.reactivacion",         "Peso de reactivación",        "%"],
   ["pesos.facturacion",          "Peso de facturación",         "%"],
@@ -17019,6 +17025,43 @@ function cardCoberturaBase(val){
       ${op("registro", "El registro del Customer ID en el CRM",
            "Cuenta la ficha cargada, se haya trabajado o no, sobre la cartera asignada. Es la regla del primer mes, cuando el cuello estaba en la respuesta de BBVA")}
     </div>
+  </div>`;
+}
+
+/* ---- Contra qué se mide la facturación ----------------------------------
+   El otro parámetro cuya definición cambia entre periodos, y el de más peso:
+   la facturación vale 50 del ponderado. José, 04/09: «el éxito del proyecto
+   lo mediremos en base a la facturación inicial de abril, pero el crecimiento
+   individual se medirá mensualmente».
+
+   Va acá y no como un número más porque las dos lecturas dan cifras muy
+   distintas del mismo mes —una cartera marcó +22,04% contra abril y +2,37%
+   contra julio, y las dos son ciertas— y quien mueva esto tiene que ver cuál
+   está eligiendo. Se guarda con la versión: cambiarlo no reescribe los meses
+   ya liquidados. */
+function cardModoFact(val){
+  const actual = val.facturacion_modo === "mensual" ? "mensual" : "acumulado";
+  const op = (id, tit, txt) => `
+    <div class="opt ${actual === id ? "on" : ""}" data-modofact="${id}">
+      <span class="rd"></span><span><b>${tit}</b><span>${txt}</span></span>
+    </div>`;
+  return `
+  <div class="bn-curva">
+    <div class="bn-sec" style="margin-top:0">Contra qué se mide la facturación</div>
+    <div class="pie" style="margin:-4px 0 10px">
+      El libro es el mismo; lo que cambia es contra qué se compara el mes. La lectura
+      del proyecto —la que va a BBVA y a Mastercard— es siempre contra el origen,
+      pase lo que pase acá: esto decide solo lo que puntúa para el incentivo.
+    </div>
+    <div class="opts">
+      ${op("acumulado", "Contra el origen del proyecto",
+           "El cierre del mes contra abril, el primer mes del libro. Usa la ruta mensual de arriba, que es una escalera acumulada: al último mes se le pide la meta completa del proyecto")}
+      ${op("mensual", "Contra el cierre del mes anterior",
+           "El cierre del mes contra el mes anterior con dato. La ruta acumulada no aplica: la meta es la misma todos los meses y se escribe abajo, en «Meta de facturación mensual»")}
+    </div>
+    ${actual === "mensual" && !Number(val.metas.facturacion_pct_mensual) ? `
+      <div class="err" style="margin-top:10px">La lectura es mensual y la meta mensual está en cero:
+        así la facturación no puntúa para nadie. Escribila abajo antes de guardar.</div>` : ""}
   </div>`;
 }
 
@@ -17159,6 +17202,7 @@ function cardParametrosBono(){
     ${suma !== 100 ? `<div class="err" style="margin-bottom:10px">Los tres pesos suman ${suma}%, no 100%.</div>` : ""}
 
     ${cardCurva(val)}
+    ${cardModoFact(val)}
     ${cardCoberturaBase(val)}
     ${cardFeriados(val)}
 
@@ -17208,6 +17252,14 @@ async function guardarParametros(){
      campos numéricos: se lee del botón marcado. */
   const opBase = document.querySelector("[data-cobbase].on");
   if (opBase) nuevo.requisitos.cobertura_base = opBase.dataset.cobbase;
+
+  const opFact = document.querySelector("[data-modofact].on");
+  if (opFact) nuevo.facturacion_modo = opFact.dataset.modofact;
+  /* Guardar «mensual» con la meta mensual en cero apaga la facturación para
+     los cuatro sin que nadie lo note hasta la liquidación. Es el indicador de
+     más peso: se frena acá. */
+  if (nuevo.facturacion_modo === "mensual" && !Number(nuevo.metas.facturacion_pct_mensual))
+    return toast("La lectura es mensual pero la meta mensual está en cero: así la facturación no puntúa para nadie.");
 
   const campoFer = $("#feriadosParam");
   if (campoFer){
@@ -17267,6 +17319,10 @@ function bindBono(){
   };
   document.querySelectorAll("[data-cobbase]").forEach(el => el.onclick = () => {
     document.querySelectorAll("[data-cobbase]").forEach(x =>
+      x.classList.toggle("on", x === el));
+  });
+  document.querySelectorAll("[data-modofact]").forEach(el => el.onclick = () => {
+    document.querySelectorAll("[data-modofact]").forEach(x =>
       x.classList.toggle("on", x === el));
   });
   if ($("#bonoReset")) $("#bonoReset").onclick = () => {
