@@ -31,6 +31,21 @@
 --     directo al bono. La restricción está abajo y el CRM la respeta también.
 -- =========================================================================
 
+-- Todo el archivo se puede volver a correr sin romper nada: si una pasada
+-- anterior dejó la tabla a medias, esta la termina en vez de fallar.
+--
+-- Antes de nada, que estén los dos cimientos que esto da por sentados. Si
+-- faltara alguno el error saldría treinta líneas más abajo y no diría por qué.
+do $$
+begin
+  if to_regprocedure('public.correo_actual()') is null then
+    raise exception 'Falta public.correo_actual(): esta migración la usa para saber quién escribe.';
+  end if;
+  if to_regclass('public.usuarios') is null then
+    raise exception 'Falta public.usuarios: de ahí sale el rol de quien escribe.';
+  end if;
+end $$;
+
 create table if not exists public.comercios_vinculados (
   id            uuid primary key default gen_random_uuid(),
   -- Se guarda ordenado (a < b) para que el par sea único en un solo sentido:
@@ -61,6 +76,7 @@ alter table public.comercios_vinculados enable row level security;
 -- ---- Quién puede leerlo -------------------------------------------------
 -- Todos los autenticados. El ejecutivo necesita ver el aviso en su ficha: si
 -- el vínculo le cambia la cobertura, tiene derecho a saber por qué.
+drop policy if exists comercios_vinculados_lectura on public.comercios_vinculados;
 create policy comercios_vinculados_lectura
   on public.comercios_vinculados for select
   to authenticated
@@ -70,6 +86,14 @@ create policy comercios_vinculados_lectura
 -- Solo supervisión. Un vínculo mueve cobertura, visitas y bono; no es una
 -- anotación de campo. La comprobación va envuelta en `select` para que corra
 -- una vez por consulta y no una vez por fila.
+--
+-- La función vive en un esquema aparte y no en `public` a propósito: `public`
+-- lo publica PostgREST, y una función que contesta «¿es supervisión?» no tiene
+-- por qué ser un endpoint. El esquema se crea acá porque este proyecto todavía
+-- no lo tenía.
+create schema if not exists private;
+grant usage on schema private to authenticated;
+
 create or replace function private.es_supervision()
 returns boolean
 language sql
@@ -85,8 +109,15 @@ as $$
   );
 $$;
 
+-- El permiso de ejecución hay que devolverlo explícitamente. Una política de
+-- RLS se evalúa con los privilegios de QUIEN CONSULTA, no con los del dueño de
+-- la tabla: si `authenticated` se queda sin `execute`, la política no falla al
+-- crearse — falla después, en cada escritura, y con un error de permisos que
+-- no se parece en nada a su causa.
 revoke execute on function private.es_supervision() from public, anon;
+grant  execute on function private.es_supervision() to authenticated;
 
+drop policy if exists comercios_vinculados_escritura on public.comercios_vinculados;
 create policy comercios_vinculados_escritura
   on public.comercios_vinculados for all
   to authenticated
