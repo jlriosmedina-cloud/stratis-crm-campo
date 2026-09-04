@@ -1877,6 +1877,10 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 .lf-var{font-size:10.5px;color:var(--muted);margin-top:2px;font-weight:500}
 .lf-var.pos{color:var(--ok-ink)} .lf-var.neg{color:var(--serious-ink)}
 .lf-var.org{font-style:italic} .lf-var.cur{color:var(--warn-tx)}
+/* El tamaño de la cartera, cuando el banco lo manda. Va bajo la variación y
+   más apagado: no es otro resultado, es la advertencia de que el de arriba
+   puede no ser lo que parece. */
+.lf-cart{font-size:10px;color:var(--muted);margin-top:1px;font-weight:500;cursor:help}
 .lf-corr{color:var(--serious);font-size:15px;margin-left:3px;vertical-align:top;line-height:1}
 .lf-ac{font-weight:700;border-left:1px solid var(--line)}
 .lf-ac.pos{color:var(--ok-ink)} .lf-ac.neg{color:var(--serious-ink)}
@@ -1919,7 +1923,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"04/09/2026 17:12", huella:"80a072" };
+const BUILD = { sello:"04/09/2026 17:35", huella:"649e2c" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3264,7 +3268,18 @@ const FERIADOS_DEF = [
 ];
 
 const BONO_DEF = {
-  metas:      { reactivacion_pp:20, facturacion_pct:15, ventas_mes:7 },
+  metas:      { reactivacion_pp:20, facturacion_pct:15, ventas_mes:7,
+  /* La meta de facturación cuando la lectura es MENSUAL. Va aparte de
+     `facturacion_pct` a propósito: ese 15 es acumulado contra abril y esto es
+     un porcentaje mes contra mes. Son dos magnitudes distintas y meterlas en
+     el mismo campo es exactamente el error que ya nos costó tres números para
+     «la base».
+
+     Ojo con la equivalencia, porque no la hay: la escalera acumulada pide
+     +15% entre abril y noviembre —siete meses, cerca de +2% mensual
+     compuesto—. Un +5% todos los meses es otra exigencia, no la misma escrita
+     de otra forma. Se edita en Ajustes como cualquier otra meta. */
+                facturacion_pct_mensual:5 },
   /* La ruta mensual hacia la meta. No es la meta del proyecto dividida entre
      cinco: es una curva. Los valores son ACUMULADOS —al mes 3 se esperan 10
      p.p. en total, no 10 adicionales— y el último punto tiene que coincidir
@@ -3436,10 +3451,23 @@ function metaPeriodo(p, params){
     return Number(c[Math.min(i, c.length) - 1] !== undefined ? c[Math.min(i, c.length) - 1] : fin);
   };
   const cur = B.curva || {};
+  /* La escalera SOLO aplica a la lectura acumulada. Leída contra el mes
+     anterior, «+10% al mes 4» no significa nada: la escalera va sumando desde
+     abril y la lectura mensual arranca de cero cada mes. En modo mensual la
+     meta es plana y sale de su propio campo.
+
+     Los ceros de los primeros meses sí se respetan en los dos modos: son los
+     meses en los que el dato del banco todavía no permitía medir, y eso no
+     cambia porque cambie la forma de compararlo. */
+  const mensual = modoFact(p, B) === "mensual";
+  const escalon = punto(cur.facturacion_pct, B.metas.facturacion_pct);
   return {
     i, total,
+    modoFact: mensual ? "mensual" : "acumulado",
     reactivacion_pp: punto(cur.reactivacion_pp, B.metas.reactivacion_pp),
-    facturacion_pct: punto(cur.facturacion_pct, B.metas.facturacion_pct),
+    facturacion_pct: mensual
+      ? (escalon > 0 ? Number(B.metas.facturacion_pct_mensual || 0) : 0)
+      : escalon,
     ventas_mes: B.metas.ventas_mes,
     esUltimo: i === total
   };
@@ -4009,7 +4037,19 @@ function inicioFact(correo, p){
    Mientras nadie lo cambie rige `acumulado`, que es lo que dice el documento de
    incentivos y con lo que se calculó hasta hoy. Cambiarlo en silencio sería
    moverle el sueldo a cuatro personas sin que quede escrito cuándo ni por qué. */
-const modoFact = p => (paramsDe(p).facturacion_modo === "mensual") ? "mensual" : "acumulado";
+/* Acumulado contra el origen, o mensual contra el mes anterior. Se resuelve
+   por periodo porque `paramsDe` está versionado: José, 04/09, «el éxito del
+   proyecto lo mediremos en base a la facturación inicial de abril, pero el
+   crecimiento individual se medirá mensualmente». Son dos lecturas del mismo
+   libro y cuál puntúa lo decide el parámetro, no el código.
+
+   Sin versión cargada devuelve «acumulado», que es lo que rige hoy: cambiar
+   de lectura cambia lo que cobran cuatro personas y no puede pasar por
+   omisión. */
+function modoFact(p, params){
+  const B = params || paramsDe(p);
+  return B.facturacion_modo === "mensual" ? "mensual" : "acumulado";
+}
 
 /* Contra el origen del proyecto. */
 function crecimientoFactAcumulado(correo, p){
@@ -4038,8 +4078,8 @@ function crecimientoFactMensual(correo, p){
 }
 
 /* El que puntúa. */
-function crecimientoFact(correo, p){
-  return modoFact(p) === "mensual"
+function crecimientoFact(correo, p, params){
+  return modoFact(p, params) === "mensual"
     ? crecimientoFactMensual(correo, p)
     : crecimientoFactAcumulado(correo, p);
 }
@@ -4067,7 +4107,20 @@ function libroVariacion(correo, mes){
   if (!ant) return null;
   const a = montoCerrado(correo, ant);
   if (a === null || !a) return null;
-  return { pct: (Number(v.monto) - a) / a * 100, contra: ant };
+  /* Si los dos meses traen el tamaño de la cartera, la variación deja de ser
+     un número solo. José, 04/09: BBVA sí manda los comercios por ejecutivo en
+     el corte. Una cartera que cambió de tamaño mueve el monto sin que nadie
+     haya vendido más —es lo que hay detrás del +22,04%—, y el CRM puede
+     decirlo en vez de dejar que se lea como venta.
+
+     Lo que NO hace es repartir la variación entre las dos causas: para eso
+     haría falta el detalle por comercio, no el conteo. Dice cuánto cambió la
+     cartera y deja la lectura a quien mira. */
+  const vAnt = libroVigente(correo, ant);
+  const cN = v.comercios, cA = vAnt && vAnt.comercios;
+  const cartera = (Number.isFinite(cN) && Number.isFinite(cA) && cA > 0 && cN !== cA)
+    ? { de:cA, a:cN, pct:(cN - cA) / cA * 100 } : null;
+  return { pct: (Number(v.monto) - a) / a * 100, contra: ant, cartera };
 }
 
 /* Y los mismos dos números para el proyecto entero. El total es inmune a que
@@ -15627,12 +15680,25 @@ function cumplimientoDe(correo, p){
   const logrados = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && hastaPeriodo(c.cerrado_en, p)).length;
   const enElMes  = mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enVentana(c.cerrado_en, p)).length;
   const pp       = cart.n ? logrados / cart.n * 100 : 0;
-  const cReact   = M.reactivacion_pp ? pp / M.reactivacion_pp * 100 : 0;
+  /* No llegar a la meta vale CERO, no menos que cero.
+   *
+   * José, 04/09. Con la lectura mensual y meta de +5%, tres de los cuatro dan
+   * cumplimiento negativo en facturación —Alfredo −83%, Juan −14%— y ese
+   * número entraba al promedio con peso 50: hundía los otros dos indicadores.
+   * Alfredo quedaba en +8,3% de ponderado sacando 100% en reactivación y en
+   * venta. Un «cumplimiento» bajo cero además no quiere decir nada: se cumple
+   * una meta o no se la cumple, no se la incumple con signo.
+   *
+   * Es el mismo criterio que el CRM ya aplicaba a lo que no se puede medir.
+   * No toca el techo: el sobrecumplimiento sigue subiendo sin tope acá, que
+   * para eso está el tramo de la escala. */
+  const piso0 = v => v === null ? null : Math.max(0, v);
+  const cReact   = piso0(M.reactivacion_pp ? pp / M.reactivacion_pp * 100 : 0);
 
   /* La facturación ya venía acumulada: crece contra la base congelada del
      proyecto, no contra el cierre del mes anterior. Lo que cambia es contra
      qué meta se compara. */
-  const crec  = crecimientoFact(correo, p);
+  const crec  = crecimientoFact(correo, p, B);
   /* Una meta de facturación en cero no es una meta fácil: es un mes en el que
      todavía no se mide. La ruta reajustada arranca la facturación en el mes 3
      porque el dato del banco llega un periodo desfasado, y los meses 1 y 2
@@ -15640,8 +15706,8 @@ function cumplimientoDe(correo, p){
      hundir el ponderado de todos con el peso más grande —50— por un dato que
      nadie podía tener. Se trata como no medible, igual que si faltara el
      monto: sale del promedio y se dice en pantalla. */
-  const cFact = crec === null || !M.facturacion_pct ? null
-              : crec / M.facturacion_pct * 100;
+  const cFact = piso0(crec === null || !M.facturacion_pct ? null
+              : crec / M.facturacion_pct * 100);
 
   /* La venta sí es mensual, y así está en el documento: 7 por periodo. No se
      acumula ni se prorratea.
@@ -15674,8 +15740,16 @@ function cumplimientoDe(correo, p){
        el banco todavía no entregó. */
     { id:"fact", nombre:"Facturación", peso:B.pesos.facturacion,
       meta: M.facturacion_pct ? `+${M.facturacion_pct}%` : "no se mide todavía",
-      metaPie: M.facturacion_pct ? `acumulado al ${mes}`
-             : `el dato del banco llega un periodo desfasado · la medición arranca en el ${mesArranqueFact(B)}`,
+      /* Contra QUÉ se compara, escrito en la fila. Mientras hubo una sola
+         lectura alcanzaba con «acumulado al mes N»; desde que son dos, un
+         porcentaje sin su punto de comparación es la misma trampa de siempre:
+         el mismo ejecutivo sale +22,04% contra abril y +2,37% contra julio, y
+         las dos cifras son ciertas. */
+      metaPie: !M.facturacion_pct
+             ? `el dato del banco llega un periodo desfasado · la medición arranca en el ${mesArranqueFact(B)}`
+             : M.modoFact === "mensual"
+             ? `mes contra mes · ${mesDelDatoFact(p)} sobre el cierre anterior`
+             : `acumulado al ${mes} · contra el origen del proyecto`,
       logro: crec === null ? "—" : `${crec >= 0 ? "+" : ""}${crec.toFixed(1)}%`,
       /* El monto se muestra SIEMPRE que esté cargado, tenga meta o no. Antes,
          un mes sin meta tapaba las cifras con «sin meta este mes» y el dato que
@@ -16541,7 +16615,10 @@ function cardFacturacion(){
     if (parcial) pie = `<div class="lf-var cur">va en ${diaDelMes} de ${diasMes} días</div>`;
     else if (mes === org) pie = `<div class="lf-var org">origen</div>`;
     else { const va = libroVariacion(correo, mes);
-      pie = va ? `<div class="lf-var ${va.pct < 0 ? "neg" : "pos"}">${pc(va.pct)}</div>` : ""; }
+      pie = va ? `<div class="lf-var ${va.pct < 0 ? "neg" : "pos"}">${pc(va.pct)}</div>${
+        va.cartera ? `<div class="lf-cart" title="La cartera pasó de ${va.cartera.de} a ${
+          va.cartera.a} comercios: parte de la variación es eso, no venta">cartera ${
+          va.cartera.pct >= 0 ? "+" : "−"}${Math.abs(va.cartera.a - va.cartera.de)} com.</div>` : ""}` : ""; }
     return `<td class="${parcial ? "lf-parc" : ""}" data-cel="${esc(correo)}|${esc(mes)}">
       <b>${mm(Number(v.monto))}</b>${n > 1 ? `<span class="lf-corr" title="${n} cargas">•</span>` : ""}${pie}</td>`;
   };
