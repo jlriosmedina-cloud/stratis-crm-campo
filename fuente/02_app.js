@@ -475,9 +475,118 @@ const ultimoDiaCalifica = filas => {
    Ahora hay una sola función y la usan los dos, más la llave del bono. La
    consecuencia hay que decirla: volver a visitar un comercio ya visitado NO
    suma para el mínimo. Suma cerrar uno nuevo. */
-const comerciosConVisita = filas => new Set((filas || [])
+const comerciosConVisita = filas => conVinculados(new Set((filas || [])
   .filter(r => r && r.Cumple_Visita === "SI" && !esReconstruida(r))
-  .map(r => String(r.Customer_id))).size;
+  .map(r => String(r.Customer_id)))).size;
+
+/* =========================================================================
+   Dos customer_id, un solo comercio
+
+   José, 04/09/2026. BBVA entregó BERYPEZ S.A.C. (25694914) y BERYPEZ II
+   S.A.C. (27016546) como dos comercios de la cartera; José validó en campo que
+   son el mismo comercio en el mismo local. El costo era que Vanessa registraba
+   todo dos veces: el 26/08 hay dos visitas presenciales, 11:00 y 11:13, que
+   son la misma visita.
+
+   Se resuelve VINCULANDO, no fusionando. Los dos siguen contando por separado
+   —BBVA los asignó por separado y mide 841—, pero una gestión en cualquiera de
+   los dos alcanza a los dos.
+
+   Y se resuelve DERIVANDO, no copiando. José pidió «duplicar los registros de
+   manera automática» y el efecto que quiere es exactamente este, pero copiar
+   filas tendría tres consecuencias que no quiere:
+
+     · el conteo de GESTIONES —no de comercios— se inflaría: el denominador de
+       la puntualidad del registro, los «911» del acta, la actividad del equipo;
+     · quedaría en `interacciones` una visita presencial con una ubicación que
+       nadie verificó, y este CRM no fabrica registros de auditoría;
+     · y al desvincular habría que salir a buscar las copias para borrarlas.
+
+   Derivado, el vínculo se pone y se quita y los números se acomodan solos.
+
+   Dos guardas. La primera: solo arrastra entre comercios del MISMO ejecutivo,
+   porque si no le acreditaría a uno el trabajo de otro y eso entra al bono. La
+   segunda: no se une nada por parecido de nombre. En la cartera hay cuatro
+   grupos de nombre repetido y solo uno es este —«El Turco Stockroom Barber»
+   está en cuatro distritos y «Chifa Yue Hao» en dos, y son locales distintos
+   con contrato propio—. El vínculo lo valida una persona y queda firmado.
+   ========================================================================= */
+let VINCULOS = [];
+
+let _VIN_GRUPOS = null, _VIN_HUELLA = "";
+/* El grafo, por conjuntos disjuntos: soporta más de dos por grupo sin que
+   nadie tenga que pensarlo, y se rearma solo cuando cambian los datos. */
+function vinculoGrupos(){
+  const huella = VINCULOS.length + ":" + CLIENTES.length;
+  if (_VIN_GRUPOS && _VIN_HUELLA === huella) return _VIN_GRUPOS;
+  const padre = new Map();
+  const raiz = x => { while (padre.get(x) !== x){ padre.set(x, padre.get(padre.get(x))); x = padre.get(x); } return x; };
+  const une = (a, b) => {
+    if (!padre.has(a)) padre.set(a, a);
+    if (!padre.has(b)) padre.set(b, b);
+    const ra = raiz(a), rb = raiz(b);
+    if (ra !== rb) padre.set(ra, rb);
+  };
+  (VINCULOS || []).forEach(v => {
+    if (!v || v.anulado_en) return;
+    const a = String(v.customer_id_a), b = String(v.customer_id_b);
+    const ca = byId[a], cb = byId[b];
+    /* La misma guarda que el trigger de la base, repetida acá a propósito: si
+       una reasignación los separa, el arrastre se apaga solo en vez de seguir
+       acreditando trabajo ajeno hasta que alguien lo note. */
+    if (!ca || !cb) return;
+    if (String(ca.asignado_correo || "") !== String(cb.asignado_correo || "")) return;
+    une(a, b);
+  });
+  const porRaiz = new Map();
+  [...padre.keys()].forEach(k => {
+    const r = raiz(k);
+    if (!porRaiz.has(r)) porRaiz.set(r, new Set());
+    porRaiz.get(r).add(k);
+  });
+  const porId = new Map();
+  porRaiz.forEach(set => set.forEach(k => porId.set(k, set)));
+  _VIN_GRUPOS = porId; _VIN_HUELLA = huella;
+  return porId;
+}
+const hayVinculos    = () => vinculoGrupos().size > 0;
+const grupoVinculo   = cid => vinculoGrupos().get(String(cid)) || null;
+const hermanosDe     = cid => { const g = grupoVinculo(cid);
+  return g ? [...g].filter(x => x !== String(cid)) : []; };
+/* El motivo, para poder decirlo en pantalla en vez de que el número aparezca
+   sin explicación. */
+const vinculoDe = cid => (VINCULOS || []).find(v => v && !v.anulado_en
+  && (String(v.customer_id_a) === String(cid) || String(v.customer_id_b) === String(cid))) || null;
+
+/* Un comercio alcanzado alcanza a sus vinculados. Es el único punto por el que
+   el arrastre entra a los números de conjunto: si mañana hay que apagarlo, se
+   apaga acá. */
+function conVinculados(ids){
+  if (!hayVinculos()) return ids;
+  const out = new Set(ids);
+  ids.forEach(id => hermanosDe(id).forEach(h => out.add(h)));
+  return out;
+}
+
+/* Y la misma pregunta para UN comercio, que es la que necesita la ficha y el
+   filtro de pendientes de la Cartera. Se corta antes de mirar nada si no hay
+   vínculos, que es el caso de 839 de los 841. */
+function gestionadoPorVinculo(c, hasta, desde){
+  if (!c || !hayVinculos()) return false;
+  const otros = hermanosDe(c.customer_id);
+  if (!otros.length) return false;
+  return otros.some(id => {
+    const h = byId[id];
+    return !!h && comercioGestionado(h, DB.historiaDe(id), hasta, desde);
+  });
+}
+
+/* Lo mismo para la visita, que es el otro indicador que el vínculo arrastra. */
+function visitadoPorVinculo(cid){
+  if (!hayVinculos()) return false;
+  return hermanosDe(cid).some(id => DB.historiaDe(id)
+    .some(r => r && r.Cumple_Visita === "SI" && !esReconstruida(r)));
+}
 /* Coordinación con el banco, registrada por alguien. */
 const esGestionBanco   = r => !esReconstruida(r) && esAlBanco(r);
 const nomMedioBBVA = id => (MEDIOS_BBVA.find(x => x.id === id) || {}).label || "";
@@ -2299,6 +2408,11 @@ const RULES = {
        reconstruidas y las coordinaciones con el banco viajan aparte: siguen
        disponibles, pero no engordan el contador de gestiones ni la cobertura. */
     const gest = regs.filter(esGestionCliente);
+    /* La gestión del periodo, y de dónde salió. Se calcula una sola vez: es la
+       cuenta más cara de esta función y se pregunta tres veces más abajo. */
+    const iniPer = ventanaPeriodo(periodoHoy()).ini;
+    const gesPropia  = comercioGestionado(c, regs, hoyISO(), iniPer);
+    const gesHermano = gesPropia ? false : gestionadoPorVinculo(c, hoyISO(), iniPer);
     const b = {
       Contactado:"No", Visita_Presencial:"No", Visita_Virtual:"No", Cumple_Visita:"No",
       Fecha_Visita_Actualizada:"",
@@ -2321,7 +2435,15 @@ const RULES = {
          filtro de la Cartera, la alerta del panel y lo que el ejecutivo tiene
          que hacer hoy. `_gestionadoHist` es «¿alguna vez?», que es lo que
          necesita el historial de la ficha y nunca una lista de pendientes. */
-      _gestionado: comercioGestionado(c, regs, hoyISO(), ventanaPeriodo(periodoHoy()).ini),
+      /* Y si el comercio está vinculado a otro —dos customer_id, un solo
+         comercio—, la gestión hecha en el hermano cuenta acá. Se pregunta solo
+         cuando hay vínculo, así que las 841 fichas no pagan nada por esto. */
+      _gestionado: gesPropia || gesHermano,
+      /* Para poder decir en pantalla POR QUÉ figura gestionado. Sin esto,
+         alguien abre la ficha, no ve ninguna gestión y el CRM le afirma que
+         está gestionado: exactamente el problema que tuvo la columna de
+         «última gestión» en agosto. */
+      _porVinculo: gesHermano,
       /* Los otros dos montones, para poder mostrarlos sin mezclarlos */
       _banco: regs.filter(esGestionBanco).length,
       _bancoOk: regs.filter(r => esGestionBanco(r) && r.Resultado === "bbva_respondio").length,
@@ -2338,7 +2460,8 @@ const RULES = {
     let histCache;
     Object.defineProperty(b, "_gestionadoHist", { configurable:true, enumerable:false,
       get(){
-        if (histCache === undefined) histCache = comercioGestionado(c, regs, hoyISO());
+        if (histCache === undefined) histCache = comercioGestionado(c, regs, hoyISO())
+          || gestionadoPorVinculo(c, hoyISO(), null);
         return histCache;
       } });
 
@@ -2919,14 +3042,20 @@ async function cargarDatos(){
   /* `traerTodo` ya trae su propio límite y su reintento. Las cuatro consultas
      sueltas van envueltas acá por lo mismo: una sola que no vuelva bastaba
      para dejar el `Promise.all` colgado y la pantalla girando. */
-  const [cli, inter, usr, cfg, rub, acc, seg] = await Promise.all([
+  const [cli, inter, usr, cfg, rub, acc, seg, vin] = await Promise.all([
     traerTodo("clientes", "customer_id"),
     traerTodo("interacciones", "id"),
     conLimite(sb.from("usuarios").select("*").order("rol"), "usuarios"),
     conLimite(sb.from("config").select("*"), "configuración"),
     conLimite(sb.from("rubros").select("*").order("orden"), "rubros"),
     conLimite(sb.from("acciones_seguimiento").select("*").order("orden"), "acciones"),
-    traerTodo("seguimientos", "id")
+    traerTodo("seguimientos", "id"),
+    /* Los vínculos entre comercios. Van con `catch` propio y fuera de la lista
+       de imprescindibles: si la tabla todavía no existe —el CRM se despliega
+       antes que la migración— el error no puede tumbar la carga entera. Sin
+       vínculos el CRM cuenta como contaba, que es exactamente lo correcto. */
+    sb.from("comercios_vinculados").select("*").is("anulado_en", null)
+      .then(r => r, () => ({ data:[], error:null }))
   ]);
   /* Los rubros entran a la lista de imprescindibles: si no llegan, la
      comprobación de sesión de más abajo leería «vacío» y cerraría la sesión de
@@ -2962,6 +3091,10 @@ async function cargarDatos(){
   });
 
   DB.cargar(inter.data || []);
+  /* Los vínculos ANTES de recomputar: `_gestionado` los mira, así que cargarlos
+     después dejaría la primera pasada con el veredicto viejo. */
+  VINCULOS = (vin && vin.data) || [];
+  _VIN_GRUPOS = null;
   CLIENTES.forEach(c => RULES.recomputarBase(c.customer_id));
   await cargarAuditoria();
   await cargarMetas();
@@ -3880,8 +4013,13 @@ function rutasRecomendadas(){
      hizo. Esa es la misma regla de «visitas por comercio» del 01/09, aplicada
      a la salida en vez de al contador. */
   const enP = f => { const d = String(f || "").slice(0,10); return !!d && d >= r.ini && d <= r.fin; };
-  const yaVisitado = cid => DB.delCliente(cid)
+  /* Visitado él, o visitado el comercio con el que comparte local: si son dos
+     customer_id de un solo comercio, mandar a la ejecutiva a los dos es el
+     viaje repetido que este vínculo existe para evitar. Es el mismo criterio
+     que ya aplica el contador de visitas; acá se aplica a la salida. */
+  const visitadaEnP = cid => DB.delCliente(cid)
     .some(x => !esReconstruida(x) && x.Cumple_Visita === "SI" && enP(x.Fecha_Contacto));
+  const yaVisitado = cid => visitadaEnP(cid) || hermanosDe(cid).some(visitadaEnP);
 
   const candidatos = mios.filter(c => !casoCerrado(c) && !yaVisitado(String(c.customer_id)));
 
@@ -4367,6 +4505,31 @@ function viewFicha(c){
              ${!esClienteNuevo(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Para BBVA · Gestión = ${gestionCumplida(c)?"SI":"NO"}</div>` : ""}
              ${(c.resultado_gestion||"PENDIENTE") === "PENDIENTE" ? (soloLectura() ? "" : `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">Se marca al registrar la gestión en la que cierres, o desde <b>Editar comercio</b>.</div>`) : ""}
              ${esVentaNueva(c) ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px">La afiliación la confirma BBVA; la verás en la cartera del siguiente corte.</div>` : ""}</dd></div>
+      ${(() => {
+        /* DOS CUSTOMER_ID, UN SOLO COMERCIO. El aviso va en la ficha y no
+           solo en un contador, porque el que lo necesita es quien abre esta
+           pantalla, ve poco historial y tiene que entender por qué el CRM ya
+           lo da por gestionado — y para que no salga a visitarlo de nuevo. */
+        const otros = hermanosDe(c.customer_id);
+        if (!otros.length) return "";
+        const v = vinculoDe(c.customer_id);
+        const base = (c._base || RULES.recomputarBase(c.customer_id) || {});
+        return `<div class="kv"><dt>Mismo comercio</dt><dd>
+          ${otros.map(id => { const h = byId[id] || {};
+            return `<div><b>${esc(h.nombre_comercio || id)}</b>
+              <span class="chip no" style="margin-left:6px">${esc(id)}</span>
+              <button class="btn ghost sm" data-verficha="${esc(id)}" style="margin-left:6px">Abrir</button>
+              ${h.direccion ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${esc(h.distrito || "")} · ${esc(h.direccion)}</div>` : ""}</div>`;
+          }).join("")}
+          <div style="font-size:12px;color:var(--muted);margin-top:5px">
+            ${base._porVinculo
+              ? "Figura gestionado por el trabajo hecho en el comercio vinculado, no por gestiones propias. "
+              : ""}Una gestión en cualquiera de los dos alcanza a los dos, y los dos siguen contando por separado en la cartera.
+            ${v && v.validado_por ? `Vínculo validado por ${esc(v.validado_por)}${
+              v.validado_en ? " el " + esc(fmtFecha(String(v.validado_en).slice(0,10))) : ""}.` : ""}
+          </div>
+        </dd></div>`;
+      })()}
       ${(() => {
         const sg = seguimientoDe(c.customer_id);
         if (!sg) return "";
@@ -11155,6 +11318,20 @@ function filaComercio(c, soloEntrega){
     det.Ultima_Gestion_Fecha  = ug.dia;
     det.Ultima_Gestion_Medio  = ug.medio ? nomTipo(ug.medio) : "";
     det.Cuenta_Como_Gestion   = ug.cuenta;
+    /* DOS CUSTOMER_ID, UN SOLO COMERCIO. Si el CRM cuenta el comercio por el
+       trabajo hecho en su vinculado, el archivo del banco tiene que contarlo
+       igual: si no, el COUNTIF de BBVA y nuestro embudo dan números distintos
+       para el mismo hecho, que es el error que estas columnas vinieron a
+       cerrar. Y se dice de dónde salió, porque un «SI» junto a una última
+       gestión vacía parece un dato inventado — y lo parecería con razón. */
+    if (det.Cuenta_Como_Gestion !== "SI" && gestionadoPorVinculo(c, hoyISO(), null)){
+      const otro = hermanosDe(c.customer_id)[0];
+      const ugOtro = otro ? ultimaGestionDe(byId[otro], DB.historiaDe(otro)) : null;
+      det.Cuenta_Como_Gestion  = "SI";
+      det.Ultima_Gestion       = "Gestionado en el comercio vinculado " + (otro || "");
+      det.Ultima_Gestion_Fecha = ugOtro ? ugOtro.dia : "";
+      det.Ultima_Gestion_Medio = ugOtro && ugOtro.medio ? nomTipo(ugOtro.medio) : "";
+    }
     Object.assign(det, coordBBVA(c));
     return entrega.concat(COLS_DETALLE.map(k => det[k] === undefined ? "" : det[k]));
 }
@@ -14982,8 +15159,13 @@ function cadenaEntreCalc(desde, hasta){
      él. Si algún día hay que sacarlas de `contacto`, se saca a propósito. */
   const ges = DB.todos().filter(g => dentro(g.Fecha_Contacto));
   const conAlguna    = new Set(ges.map(g => String(g.Customer_id)));
-  const conRespuesta = new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id)));
-  const conVisita    = new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id)));
+  /* DOS CUSTOMER_ID, UN SOLO COMERCIO (José, 04/09). Los escalones que miden
+     COMERCIOS ALCANZADOS arrastran al comercio vinculado; `conAlguna`, que
+     mide fichas con algún intento REGISTRADO, no —ahí el hermano de verdad no
+     tiene ninguna fila y decir que sí sería mentir sobre el registro—.
+     Es la misma distinción de siempre: alcance no es lo mismo que registro. */
+  const conRespuesta = conVinculados(new Set(ges.filter(g => esEfectivo(g.Resultado)).map(g => String(g.Customer_id))));
+  const conVisita    = conVinculados(new Set(ges.filter(g => g.Cumple_Visita === "SI").map(g => String(g.Customer_id))));
 
   /* El objetivo se fecha por el cierre. En el acumulado no se le pide fecha
      —un retenido sin `cerrado_en` es un resultado igual de cierto—; dentro de
@@ -15006,6 +15188,11 @@ function cadenaEntreCalc(desde, hasta){
      a Efectividad. Afirmarlo al final lo metía en Gestión y lo dejaba fuera
      de Efectividad, que es un embudo roto por otro lado. */
   objetivoSet.forEach(cid => gestionSet.add(cid));
+
+  /* Y el arrastre del vínculo, en el mismo lugar y por la misma razón: si el
+     hermano entra a Efectividad o a Visitas y no a Gestión, el embudo se
+     ensancha hacia abajo. Va después del objetivo y antes de los escalones. */
+  gestionSet = new Set([...conVinculados(gestionSet)].filter(id => idsCart.has(id)));
 
   /* Cada escalón sale del de arriba, así el embudo no se puede ensanchar
      hacia abajo. Una reunión realizada ES una respuesta concreta, más fuerte
