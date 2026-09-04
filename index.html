@@ -1854,10 +1854,51 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
    páginas obligaría a partirlo a mano. */
 .fq-lista{display:flex;flex-direction:column;gap:8px}
 .fq-fila{display:flex;align-items:center;justify-content:space-between;gap:12px;
-  border:1px solid var(--linea);border-radius:9px;padding:10px 12px}
+  border:1px solid var(--line);border-radius:9px;padding:10px 12px}
 .fq-fila b{font-size:14px}
 .fq-det{font-size:12px;color:var(--muted);margin-top:3px}
 .fq-pie{font-size:11.5px;color:var(--muted);margin-top:12px}
+
+/* ---- El libro de facturación -------------------------------------------
+   Una grilla de ejecutivos por meses. El ámbar marca el mes en curso: lo que
+   todavía se puede mover no se lee igual que lo cerrado. */
+.lf-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:13px;flex-wrap:wrap}
+.lf-tab th{vertical-align:bottom}
+.lf-tab th.hoy{color:var(--serious)}
+.lf-est{font-size:9.5px;font-weight:600;letter-spacing:.03em;margin-top:3px;text-transform:none}
+.lf-est.ec{color:var(--ok-ink)} .lf-est.ep{color:var(--warn-tx)} .lf-est.en{color:var(--muted);font-weight:500}
+.lf-tab td{text-align:right;font-variant-numeric:tabular-nums;vertical-align:top;cursor:default}
+.lf-tab td[data-cel]{cursor:pointer}
+.lf-tab td[data-cel]:hover{background:var(--surface-2)}
+.lf-nom{text-align:left!important;font-weight:600;cursor:default!important}
+.lf-vac{color:var(--muted)}
+.lf-parc{background:var(--warn-bg)}
+.lf-parc b{color:var(--warn-tx)}
+.lf-var{font-size:10.5px;color:var(--muted);margin-top:2px;font-weight:500}
+.lf-var.pos{color:var(--ok-ink)} .lf-var.neg{color:var(--serious-ink)}
+.lf-var.org{font-style:italic} .lf-var.cur{color:var(--warn-tx)}
+.lf-corr{color:var(--serious);font-size:15px;margin-left:3px;vertical-align:top;line-height:1}
+.lf-ac{font-weight:700;border-left:1px solid var(--line)}
+.lf-ac.pos{color:var(--ok-ink)} .lf-ac.neg{color:var(--serious-ink)}
+tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
+.lf-dos{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.lf-lec{background:var(--surface-2);border-radius:9px;padding:12px 14px}
+.lf-lec .t{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;margin-bottom:5px}
+.lf-lec > b{font-size:21px;display:block}
+.lf-lec .q{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+.lf-previo{margin-top:12px}
+.lf-pv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;border-top:1px solid var(--line)}
+.lf-pv b{font-variant-numeric:tabular-nums}
+.lf-pv.falta b{color:var(--serious-ink)}
+.lf-cambia{background:var(--warn-bg);border-radius:8px;padding:9px 11px;margin-top:9px;font-size:11.5px;line-height:1.5}
+.lf-cambia span{color:var(--muted)}
+.lf-hist{display:flex;flex-direction:column}
+.lf-hl{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;padding:8px 0;border-top:1px solid var(--line)}
+.lf-hl:first-child{border-top:0}
+.lf-hl .m{font-weight:600;font-variant-numeric:tabular-nums}
+.lf-hl .q{color:var(--muted);font-size:11.5px}
+.lf-hl.vig .m{color:var(--ok-ink)}
+.lf-hl.anu .m{color:var(--muted);text-decoration:line-through}
 </style>
 </head>
 <body>
@@ -1878,7 +1919,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"04/09/2026 16:04", huella:"e2f39f" };
+const BUILD = { sello:"04/09/2026 17:12", huella:"80a072" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3852,18 +3893,195 @@ const baseFactDe = correo => {
   const b = FACT_BASE.find(x => x.correo === correo);
   return b && Number(b.monto) > 0 ? Number(b.monto) : null;
 };
+/* =========================================================================
+   El libro de facturación
+
+   José, 04/09/2026. Un hecho por fila: «la facturación de X en el mes M fue
+   S/ N». El mes es CALENDARIO —2026-04, 2026-08—, no el periodo del bono, que
+   es lo que hacía que el monto de agosto viviera bajo la etiqueta 2026-09 y
+   nadie pudiera saberlo sin conocer la regla del desfase.
+
+   Nada se sobreescribe: cada carga es una fila y la vigente es la más reciente
+   sin anular. Y cada fila dice si es una actualización a media máquina o el
+   cierre que BBVA confirmó — solo lo cerrado puntúa.
+
+   Lo que NO se guarda: el monto inicial de un mes. El inicio de setiembre ES
+   el cierre de agosto. Guardarlo dos veces es garantizar que algún día no
+   coincidan sin que nadie se entere.
+   ========================================================================= */
+let FACT_LIBRO = [];
+
+/* La vigente de cada celda. La consulta ya viene ordenada por `cargado_en`
+   descendente, pero se ordena de nuevo acá: una lectura no puede depender de
+   que el servidor devuelva las filas en el orden que uno espera. */
+function libroVigente(correo, mes){
+  const filas = (FACT_LIBRO || []).filter(f => f && !f.anulado_en
+    && f.correo === correo && String(f.mes) === String(mes));
+  if (!filas.length) return null;
+  return filas.slice().sort((a, b) =>
+    String(b.cargado_en || "").localeCompare(String(a.cargado_en || "")))[0];
+}
+/* Todas las cargas de una celda, de la más nueva a la más vieja. Es lo que se
+   muestra al abrir el historial: incluye las anuladas, que para eso quedan. */
+const libroHistoria = (correo, mes) => (FACT_LIBRO || [])
+  .filter(f => f && f.correo === correo && String(f.mes) === String(mes))
+  .sort((a, b) => String(b.cargado_en || "").localeCompare(String(a.cargado_en || "")));
+
+/* Los meses que el libro conoce, del más viejo al más nuevo. */
+const libroMeses = () => [...new Set((FACT_LIBRO || [])
+  .filter(f => f && !f.anulado_en).map(f => String(f.mes)))].sort();
+
+/* El origen del proyecto es el mes más antiguo del libro. No es un campo
+   especial ni una marca: es una consecuencia de que abril sea la fila más
+   vieja. Si mañana llegara marzo, el origen se corre solo. */
+const libroOrigen = () => libroMeses()[0] || null;
+
+/* El mes ANTERIOR CON DATO, que no siempre es el mes anterior. Mayo y junio no
+   tienen corte cargado, así que el inicio de julio es el cierre de abril. Sin
+   esta regla, un mes que no llegó dejaría al siguiente sin punto de partida. */
+function libroMesAnterior(correo, mes, soloCerrado){
+  const previos = (FACT_LIBRO || [])
+    .filter(f => f && !f.anulado_en && f.correo === correo && String(f.mes) < String(mes))
+    .map(f => String(f.mes));
+  const meses = [...new Set(previos)].sort().reverse();
+  for (const m of meses){
+    const v = libroVigente(correo, m);
+    if (v && (!soloCerrado || v.estado === "cerrado")) return m;
+  }
+  return null;
+}
+
+/* De qué mes es el monto que le toca a un periodo del bono. El dato del banco
+   llega un periodo tarde: lo que se mide en el periodo que termina el 18/09 es
+   el cierre de agosto. Ya existía `mesDelDatoFact` para decirlo en pantalla;
+   esto es la misma regla devolviendo la llave del libro. */
+const mesDelPeriodo = p => mesAnterior(p);
+
+/* El monto de una celda, solo si está CERRADO. Un parcial no puntúa: pagar
+   sobre un monto que todavía se puede mover es exactamente lo que la marcha
+   blanca de agosto trató de evitar. */
+function montoCerrado(correo, mes){
+  const v = libroVigente(correo, mes);
+  return v && v.estado === "cerrado" ? Number(v.monto) : null;
+}
+
+/* ---- Lo que el resto del CRM le pregunta a la facturación ----------------
+
+   Estas dos funciones ya existían y las llama todo lo que importa: el
+   ponderado del bono, el acta, la hoja de proyecto. Ahora leen el libro.
+
+   El `if` de abajo es lo único que hay de transición: mientras el libro esté
+   vacío —la app se publica antes de correr la migración— se contesta con las
+   tablas viejas. En cuanto el libro tiene una fila, manda el libro y las viejas
+   dejan de leerse. No se mezclan: o una fuente o la otra, nunca las dos para el
+   mismo número. */
+const hayLibro = () => (FACT_LIBRO || []).some(f => f && !f.anulado_en);
+
 function inicioFact(correo, p){
+  if (hayLibro()){
+    const org = libroOrigen();
+    const m = org ? montoCerrado(correo, org) : null;
+    return m === null ? { monto:null, fuente:"falta" }
+                      : { monto:m, fuente:"base", mes:org };
+  }
   const b = baseFactDe(correo);
   if (b !== null) return { monto:b, fuente:"base" };
   const f = factDe(correo, p);
   return f && Number(f.monto_inicial) > 0
     ? { monto:Number(f.monto_inicial), fuente:"periodo" } : { monto:null, fuente:"falta" };
 }
-function crecimientoFact(correo, p){
+
+/* ---- Los dos crecimientos, y cuál puntúa --------------------------------
+
+   José, 04/09: «el éxito del proyecto lo mediremos en base a la facturación
+   inicial de abril, pero el crecimiento individual se medirá mensualmente de
+   cara a los ejecutivos».
+
+   Son dos números distintos y los dos salen del libro:
+
+     · ACUMULADO — contra el origen del proyecto. Es el del objetivo del +15%,
+       el que va a la hoja de avance y a BBVA.
+     · MENSUAL — contra el mes anterior con dato. Es el que ve el ejecutivo.
+
+   Cuál de los dos entra al ponderado del incentivo lo decide un parámetro de
+   versión, no esta función: mueve plata, así que vive en `bono_parametros`
+   junto al resto de las reglas que se versionan y queda con fecha de vigencia.
+   Mientras nadie lo cambie rige `acumulado`, que es lo que dice el documento de
+   incentivos y con lo que se calculó hasta hoy. Cambiarlo en silencio sería
+   moverle el sueldo a cuatro personas sin que quede escrito cuándo ni por qué. */
+const modoFact = p => (paramsDe(p).facturacion_modo === "mensual") ? "mensual" : "acumulado";
+
+/* Contra el origen del proyecto. */
+function crecimientoFactAcumulado(correo, p){
+  if (hayLibro()){
+    const ini = inicioFact(correo, p);
+    const m = montoCerrado(correo, mesDelPeriodo(p));
+    if (ini.monto === null || !ini.monto || m === null) return null;
+    return (m - ini.monto) / ini.monto * 100;
+  }
   const ini = inicioFact(correo, p);
   const f = factDe(correo, p);
   if (ini.monto === null || !f || f.monto_final === null || f.monto_final === undefined) return null;
   return (Number(f.monto_final) - ini.monto) / ini.monto * 100;
+}
+
+/* Contra el mes anterior CON DATO. Sin libro no existe: las tablas viejas
+   guardaban un solo monto por periodo y no hay contra qué compararlo. */
+function crecimientoFactMensual(correo, p){
+  if (!hayLibro()) return null;
+  const mes = mesDelPeriodo(p);
+  const v = montoCerrado(correo, mes);
+  const ant = libroMesAnterior(correo, mes, true);
+  const a = ant ? montoCerrado(correo, ant) : null;
+  if (v === null || a === null || !a) return null;
+  return (v - a) / a * 100;
+}
+
+/* El que puntúa. */
+function crecimientoFact(correo, p){
+  return modoFact(p) === "mensual"
+    ? crecimientoFactMensual(correo, p)
+    : crecimientoFactAcumulado(correo, p);
+}
+
+/* El monto del periodo, para poder escribirlo en pantalla junto al porcentaje.
+   Devuelve también el mes, que es lo que evita que alguien vuelva a preguntar
+   «¿de cuándo es este número?». */
+function factDelPeriodo(correo, p){
+  if (hayLibro()){
+    const mes = mesDelPeriodo(p), v = libroVigente(correo, mes);
+    return v ? { monto:Number(v.monto), mes, estado:v.estado, corte:v.corte_bbva } : null;
+  }
+  const f = factDe(correo, p);
+  return f && f.monto_final !== null && f.monto_final !== undefined
+    ? { monto:Number(f.monto_final), mes:mesDelPeriodo(p), estado:"cerrado" } : null;
+}
+
+/* La variación de un mes contra el anterior CON DATO. Solo para la pantalla
+   del libro: un mes parcial no la muestra —medio mes contra un mes entero da
+   cerca de -50% y se lee como una caída que no existe—. */
+function libroVariacion(correo, mes){
+  const v = libroVigente(correo, mes);
+  if (!v || v.estado !== "cerrado") return null;
+  const ant = libroMesAnterior(correo, mes, true);
+  if (!ant) return null;
+  const a = montoCerrado(correo, ant);
+  if (a === null || !a) return null;
+  return { pct: (Number(v.monto) - a) / a * 100, contra: ant };
+}
+
+/* Y los mismos dos números para el proyecto entero. El total es inmune a que
+   los comercios cambien de cartera; el individual no, y por eso son dos. */
+function libroTotal(mes){
+  const ej = ejecutivosDelBono();
+  let suma = 0, faltan = 0, parciales = 0;
+  ej.forEach(u => {
+    const v = libroVigente(u.correo, mes);
+    if (!v){ faltan++; return; }
+    suma += Number(v.monto);
+    if (v.estado !== "cerrado") parciales++;
+  });
+  return { mes, suma, faltan, parciales, completo: faltan === 0, ejecutivos: ej.length };
 }
 
 /* Tramos: bajo el piso no hay incentivo; del piso a la meta sube parejo, y de
@@ -5010,15 +5228,22 @@ async function cargarSeguimientos(){
 async function cargarFacturacion(){
   if (!S.user || S.demo) return;
   try {
-    const [fac, base, par, cie] = await Promise.all([
+    const [fac, base, par, cie, lib] = await Promise.all([
       sb.from("facturacion").select("*"),
       sb.from("facturacion_base").select("*"),
       sb.from("bono_parametros").select("*").order("vigente_desde"),
-      sb.from("periodos_cerrados").select("*").order("cerrado_en")
+      sb.from("periodos_cerrados").select("*").order("cerrado_en"),
+      /* El libro de facturación. Fuera de la lista de imprescindibles y con su
+         propio catch: la app se publica antes de correr la migración 41, y un
+         404 de una tabla que todavía no existe no puede dejar sin incentivos a
+         la pantalla entera. */
+      sb.from("facturacion_mes").select("*").order("cargado_en")
+        .then(r => r, () => ({ data:[], error:null }))
     ]);
     if (!fac.error)  FACTURACION = fac.data || [];
     if (!base.error) FACT_BASE = base.data || [];
     if (!cie.error)  CIERRES_PERIODO = cie.data || [];
+    FACT_LIBRO = (lib && lib.data) || [];
     if (!par.error && (par.data || []).length){
       PARAMS = par.data.map(x => ({ vigente_desde: String(x.vigente_desde),
         valor: typeof x.valor === "string" ? JSON.parse(x.valor) : (x.valor || {}),
@@ -13716,7 +13941,7 @@ function viewAyuda(){
      las reglas. */
   const izq = [
     admin ? ajSeccion("Descargas", "Los archivos salen con los datos del momento en que los generas", descargas) : "",
-    admin ? ajSeccion("Facturación del periodo", "El único dato del incentivo que el CRM no puede ver solo", cardFacturacion()) : "",
+
     admin ? ajSeccion("Próximas acciones", "La lista de «qué sigue» que ven los ejecutivos al registrar una gestión", cardAcciones()) : ""
   ].filter(Boolean);
 
@@ -13735,6 +13960,7 @@ function viewAyuda(){
 
   return `
   ${columnas}
+  ${admin ? ajSeccion("Facturación del portafolio", "El único dato que el CRM no puede ver solo — se carga a mano y nada se sobreescribe", cardFacturacion(), "aj-ancho") : ""}
   ${admin ? ajSeccion("Cartera asignada", "Cuántos casos le tocan a cada ejecutivo en el mes — es el denominador del alcance", cardMetas(), "aj-ancho") : ""}
   ${admin ? ajSeccion("Equipo", `${USUARIOS.length} persona${USUARIOS.length===1?"":"s"} con acceso`, cardEquipo(), "aj-ancho") : ""}
   ${admin ? ajSeccion("Bitácora de cambios", "Todo lo que se editó o se eliminó, y quién lo hizo", bitacora, "aj-ancho") : ""}
@@ -16270,121 +16496,343 @@ function viewBono(){
 }
 
 /* =========================================================================
-   Carga de la facturación, en Ajustes
+   El libro de facturación, en Ajustes
+
+   Reemplaza a las dos tarjetas anteriores —la base congelada y el cierre por
+   periodo—. Las dos guardaban con `upsert` y pisaban el valor anterior; acá no
+   hay ningún camino que sobreescriba nada.
+
+   Dos botones, como los pidió José el 04/09: actualizar el mes que va
+   corriendo, y marcar el cierre cuando BBVA lo confirma. El primero deja la
+   celda en ámbar y NO puntúa; el segundo es el que cuenta.
    ========================================================================= */
+const MES_NOMBRE = m => { const [a, n] = String(m).split("-");
+  return MESES_ES[Number(n) - 1] + " " + a; };
+const MES_CORTO  = m => { const [, n] = String(m).split("-"); return MESES_ES[Number(n) - 1]; };
+
+/* Los meses que la pantalla muestra: los del libro más el mes en curso, para
+   que siempre haya una columna donde cargar lo que está pasando. */
+function libroColumnas(){
+  const ms = libroMeses();
+  const hoyMes = hoyISO().slice(0, 7);
+  if (!ms.includes(hoyMes)) ms.push(hoyMes);
+  return ms.sort();
+}
+
 function cardFacturacion(){
   if (S.user.rol === "Ejecutivo") return "";
-  const p = periodoBono();
-  const B = paramsDe(p);
   const ejec = ejecutivosDelBono();
-  const sello = selloDe(p);
-  const totalBase = ejec.reduce((n,u) => n + (baseFactDe(u.correo) || 0), 0);
-  const faltaBase = ejec.filter(u => baseFactDe(u.correo) === null).length;
+  const cols = libroColumnas();
+  const org  = libroOrigen();
+  const B    = paramsDe(periodoHoy());
+  const hoyMes = hoyISO().slice(0, 7);
+  const diaDelMes = Number(hoyISO().slice(8, 10));
+  const diasMes = new Date(Date.UTC(Number(hoyMes.slice(0,4)), Number(hoyMes.slice(5,7)), 0)).getUTCDate();
+
+  const mm = v => (v / 1e6).toFixed(2).replace(".", ",");
+  const pc = v => (v >= 0 ? "+" : "") + v.toFixed(2).replace(".", ",") + "%";
+
+  const celda = (correo, mes) => {
+    const v = libroVigente(correo, mes);
+    if (!v) return `<td class="lf-vac">—</td>`;
+    const n = libroHistoria(correo, mes).length;
+    const parcial = v.estado !== "cerrado";
+    let pie = "";
+    if (parcial) pie = `<div class="lf-var cur">va en ${diaDelMes} de ${diasMes} días</div>`;
+    else if (mes === org) pie = `<div class="lf-var org">origen</div>`;
+    else { const va = libroVariacion(correo, mes);
+      pie = va ? `<div class="lf-var ${va.pct < 0 ? "neg" : "pos"}">${pc(va.pct)}</div>` : ""; }
+    return `<td class="${parcial ? "lf-parc" : ""}" data-cel="${esc(correo)}|${esc(mes)}">
+      <b>${mm(Number(v.monto))}</b>${n > 1 ? `<span class="lf-corr" title="${n} cargas">•</span>` : ""}${pie}</td>`;
+  };
+
+  const acum = correo => {
+    const ini = org ? montoCerrado(correo, org) : null;
+    const ms = libroMeses().filter(m => montoCerrado(correo, m) !== null);
+    const ult = ms.length ? ms[ms.length - 1] : null;
+    if (ini === null || !ini || !ult || ult === org) return { txt:"—", cls:"" };
+    const v = (montoCerrado(correo, ult) - ini) / ini * 100;
+    return { txt: pc(v), cls: v < 0 ? "neg" : "pos" };
+  };
+
+  const filas = ejec.map(u => {
+    const a = acum(u.correo);
+    return `<tr><td class="lf-nom">${esc(u.nombre)}</td>
+      ${cols.map(m => celda(u.correo, m)).join("")}
+      <td class="lf-ac ${a.cls}">${a.txt}</td></tr>`;
+  }).join("");
+
+  const tot = cols.map(m => {
+    const t = libroTotal(m);
+    if (t.faltan === t.ejecutivos) return `<td class="lf-vac">—</td>`;
+    const parcial = t.parciales > 0;
+    let pie = "";
+    if (parcial) pie = `<div class="lf-var cur">va en ${diaDelMes} de ${diasMes} días</div>`;
+    else if (m === org) pie = `<div class="lf-var org">origen</div>`;
+    else { const ant = libroMeses().filter(x => x < m && libroTotal(x).completo).pop();
+      const a = ant ? libroTotal(ant).suma : null;
+      pie = a ? `<div class="lf-var ${t.suma < a ? "neg" : "pos"}">${pc((t.suma-a)/a*100)}</div>` : ""; }
+    return `<td class="${parcial ? "lf-parc" : ""}"><b>${mm(t.suma)}</b>${
+      t.faltan ? `<div class="lf-var neg">faltan ${t.faltan}</div>` : pie}</td>`;
+  }).join("");
+
+  const tIni = org ? libroTotal(org) : null;
+  const msCerr = libroMeses().filter(m => libroTotal(m).completo && !libroTotal(m).parciales);
+  const tUlt = msCerr.length ? libroTotal(msCerr[msCerr.length - 1]) : null;
+  const crecProy = tIni && tUlt && tIni.suma && tUlt.mes !== org
+    ? (tUlt.suma - tIni.suma) / tIni.suma * 100 : null;
 
   return `
+  ${!hayLibro() ? `<div class="note crit" style="margin-bottom:12px">
+    <b>El libro todavía no tiene filas.</b> Falta correr la migración 41 en Supabase.
+    Mientras tanto el CRM sigue calculando el incentivo con las tablas anteriores, y lo que
+    cargues acá no se va a poder guardar.</div>` : ""}
+
   <div class="card">
-    <div class="pie" style="margin:0 0 13px">
-      <b>La base del proyecto se carga una sola vez.</b> El acuerdo del 12 de agosto la congeló, así
-      que ya no se pide periodo a periodo: todos los periodos crecen contra ella. Se guarda con tu
-      nombre y la fecha, y cualquier cambio queda en la bitácora.
+    <div class="lf-top">
+      <div>
+        <h3 style="margin:0 0 3px">Facturación del portafolio</h3>
+        <div class="bn-sub">Millones de soles${org ? ` · el origen del proyecto es ${MES_NOMBRE(org)}` : ""}
+          · nada se sobreescribe: cada carga queda registrada</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost sm" id="lfParcial">Actualizar el mes en curso</button>
+        <button class="btn sm" id="lfCerrar">Marcar el cierre del mes</button>
+      </div>
     </div>
-    <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Facturación de la base inicial</th></tr></thead>
-      <tbody>${ejec.map(u => {
-        const b = FACT_BASE.find(x => x.correo === u.correo) || {};
-        return `<tr>
-          <td><b>${esc(u.nombre)}</b>${b.actualizado_por
-            ? `<div class="bn-det">fijada por ${esc(b.actualizado_por)}</div>` : ""}</td>
-          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
-            data-base="${esc(u.correo)}" value="${b.monto == null ? "" : esc(b.monto)}" placeholder="S/"></td>
-        </tr>`;
-      }).join("")}</tbody>
+
+    <div class="tbl-wrap"><table class="tbl lf-tab">
+      <thead><tr><th>Ejecutivo</th>
+        ${cols.map(m => { const t = libroTotal(m);
+          const est = t.faltan === t.ejecutivos ? `<div class="lf-est en">sin dato</div>`
+            : t.parciales ? `<div class="lf-est ep">en curso</div>`
+            : `<div class="lf-est ec">cerrado</div>`;
+          return `<th class="${t.parciales ? "hoy" : ""}">${MES_CORTO(m)}${est}</th>`; }).join("")}
+        <th>Acumulado<div class="lf-est en">${org ? "desde " + MES_CORTO(org) : ""}</div></th></tr></thead>
+      <tbody>${filas}
+        <tr class="lf-tot"><td class="lf-nom">Total del proyecto</td>${tot}
+          <td class="lf-ac ${crecProy === null ? "" : crecProy < 0 ? "neg" : "pos"}">${
+            crecProy === null ? "—" : pc(crecProy)}</td></tr>
+      </tbody>
     </table></div>
-    <div class="pie" style="margin-top:9px">${totalBase
-      ? `Suman <b>${soles(totalBase)}</b>. El acuerdo con BBVA fija la base del proyecto en S/ 35,3 millones: si el total no cuadra, falta repartir alguno.`
-      : "Todavía no se fijó la base de ningún ejecutivo. Sin ella el objetivo de facturación no se puede calcular."}</div>
-    <button class="btn block" id="baseGuardar" style="margin-top:12px">Guardar la base del proyecto</button>
+
+    <div class="pie" style="margin-top:10px">
+      <b>Actualizar</b> carga el monto que va corriendo; queda en ámbar y no puntúa para el incentivo.
+      <b>Marcar el cierre</b> es cuando BBVA lo confirma: recién ahí el mes cuenta.
+      El inicio de un mes es el cierre del mes anterior <b>con dato</b>, así que un mes que no
+      llegó no deja al siguiente sin punto de partida. Un mes en curso no muestra variación: media
+      máquina contra un mes entero daría cerca de −50% y se leería como una caída que no existe.
+      Toca una celda para ver todas sus cargas.
+    </div>
   </div>
 
   <div class="card">
-    <div class="pie" style="margin:0 0 13px">
-      Es el ${B.pesos.facturacion}% del peso del incentivo y el CRM no puede verlo: sale de la
-      plataforma de BBVA. De cada periodo solo hace falta <b>el monto de cierre</b>; el crecimiento
-      se calcula contra la base de arriba.
+    <h3 style="margin:0 0 3px">Las dos lecturas</h3>
+    <div class="bn-sub" style="margin-bottom:12px">Salen del mismo libro y no son lo mismo</div>
+    <div class="lf-dos">
+      <div class="lf-lec"><div class="t">Contra el origen${org ? " · " + MES_NOMBRE(org) : ""}</div>
+        <b class="${crecProy !== null && crecProy >= (B.metas.facturacion_pct || 15) ? "si" : ""}">${
+          crecProy === null ? "—" : pc(crecProy)}</b>
+        <div class="q">${tIni && tUlt ? `${soles(tIni.suma)} a ${soles(tUlt.suma)}. ` : ""}Es contra
+          lo que se mide la meta de <b>+${B.metas.facturacion_pct || 15}%</b> del proyecto, y es el
+          número que sale en la hoja de avance.</div></div>
+      <div class="lf-lec"><div class="t">Punto de partida de este mes${
+        tUlt ? " · cierre de " + MES_NOMBRE(tUlt.mes) : ""}</div>
+        <b>${tUlt ? soles(tUlt.suma) : "—"}</b>
+        <div class="q">${MES_NOMBRE(hoyMes)} se compara contra esto. El acumulado del proyecto no:
+          ese va siempre contra el origen.</div></div>
     </div>
-    <label class="fsel" style="margin-bottom:10px"><span>Periodo</span>
-      <select id="selPeriodoFact">${periodosProyecto().map(x =>
-        `<option value="${x}"${x === p ? " selected" : ""}>${esc(nombrePeriodo(x))} · ${esc(textoPeriodo(x))}</option>`).join("")}
-      </select></label>
-
-    ${sello ? `<div class="note" style="margin:0 0 11px">Este periodo está <b>sellado</b>. Puedes
-      corregir el monto, pero el incentivo liquidado no cambia hasta que se anule el cierre.</div>` : ""}
-    ${faltaBase ? `<div class="note crit" style="margin:0 0 11px">Faltan <b>${faltaBase}</b>
-      ${faltaBase === 1 ? "ejecutivo" : "ejecutivos"} sin base fijada arriba: para ${
-      faltaBase === 1 ? "ese" : "esos"} el crecimiento no se puede calcular.</div>` : ""}
-
-    <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Base</th>
-        <th style="text-align:right">Cierre del periodo</th><th style="text-align:right">Crecimiento</th></tr></thead>
-      <tbody>${ejec.map(u => {
-        const f = factDe(u.correo, p) || {};
-        const ini = inicioFact(u.correo, p);
-        const cr = crecimientoFact(u.correo, p);
-        return `<tr>
-          <td><b>${esc(u.nombre)}</b>${f.actualizado_por
-            ? `<div class="bn-det">último cambio: ${esc(f.actualizado_por)}</div>` : ""}</td>
-          <td style="text-align:right" class="mono">${ini.monto === null
-            ? `<span style="color:var(--muted)">sin base</span>` : esc(soles(ini.monto))}</td>
-          <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
-            data-fact="fin|${esc(u.correo)}" value="${f.monto_final == null ? "" : esc(f.monto_final)}" placeholder="S/"></td>
-          <td style="text-align:right">${cr === null ? "—"
-            : `<b class="${cr >= B.metas.facturacion_pct ? "si" : ""}">${cr >= 0 ? "+" : ""}${cr.toFixed(1)}%</b>`}</td>
-        </tr>`;
-      }).join("")}</tbody>
-    </table></div>
-    <button class="btn block" id="factGuardar" style="margin-top:12px">Guardar el cierre del periodo</button>
   </div>`;
 }
 
-async function guardarBaseFact(){
-  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
-  const lista = [];
-  document.querySelectorAll("[data-base]").forEach(el => {
-    const m = num(el.value);
-    if (m !== null) lista.push({ correo: el.dataset.base, monto: m });
-  });
-  if (!lista.length) return toast("No hay montos que guardar");
-  if (lista.some(x => !(x.monto >= 0))) return toast("Hay un monto que no es un número válido");
+/* ---- Cargar un mes -----------------------------------------------------
+   El mismo formulario para las dos cosas; lo único que cambia es el estado que
+   se guarda y lo que se le advierte a quien lo llena. */
+function modalCargarMes(estado){
+  const ejec = ejecutivosDelBono();
+  if (!ejec.length) return toast("No hay ejecutivos activos en la campaña");
+  const cerrar = estado === "cerrado";
+  const hoyMes = hoyISO().slice(0, 7);
+  /* Los meses ofrecidos: los del libro y los doce anteriores a hoy. Cargar un
+     mes viejo es normal —el banco manda cortes atrasados—, inventar uno futuro
+     no lo es. */
+  const ms = new Set(libroMeses());
+  for (let i = 0; i < 12; i++){
+    const d = new Date(Date.UTC(Number(hoyMes.slice(0,4)), Number(hoyMes.slice(5,7)) - 1 - i, 1));
+    ms.add(d.toISOString().slice(0, 7));
+  }
+  const meses = [...ms].sort().reverse();
+  const porDefecto = cerrar ? (meses.find(m => m < hoyMes) || hoyMes) : hoyMes;
 
-  const b = $("#baseGuardar"); b.disabled = true; b.textContent = "Guardando…";
-  const { error } = await sb.from("facturacion_base").upsert(lista, { onConflict:"correo" });
-  b.disabled = false; b.textContent = "Guardar la base del proyecto";
-  if (error) return toast("No se pudo guardar: " + error.message);
-  await cargarFacturacion(); render();
-  toast("Base del proyecto guardada");
+  modal(`
+    <h3 style="margin:0 0 4px">${cerrar ? "Marcar el cierre del mes" : "Actualizar el mes en curso"}</h3>
+    <div class="bn-sub" style="margin-bottom:14px">${cerrar
+      ? "El monto que BBVA confirmó como definitivo. A partir de acá el mes puntúa para el objetivo y para el incentivo."
+      : "El monto que va corriendo. Queda marcado como parcial y no puntúa: solo sirve para ver cómo viene el mes."}</div>
+
+    <label class="fsel" style="margin-bottom:10px"><span>Mes que se está cargando</span>
+      <select id="lfMes">${meses.map(m =>
+        `<option value="${m}"${m === porDefecto ? " selected" : ""}>${esc(MES_NOMBRE(m))}</option>`).join("")}
+      </select></label>
+
+    <label class="fsel" style="margin-bottom:10px"><span>Fecha del corte de BBVA</span>
+      <input id="lfCorte" type="date" max="${esc(hoyISO())}" value="${esc(hoyISO())}"></label>
+
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Ejecutivo</th><th style="text-align:right">Monto del mes</th>
+        <th style="text-align:right">Comercios</th></tr></thead>
+      <tbody>${ejec.map(u => `<tr>
+        <td><b>${esc(u.nombre)}</b></td>
+        <td style="text-align:right"><input class="in-num" type="text" inputmode="decimal"
+          data-lfm="${esc(u.correo)}" placeholder="S/"></td>
+        <td style="text-align:right"><input class="in-num" type="text" inputmode="numeric"
+          data-lfc="${esc(u.correo)}" placeholder="opcional" style="max-width:96px"></td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+    <div class="pie" style="margin-top:8px">La columna de comercios es opcional y sirve para
+      distinguir crecimiento de reasignación de cartera: si un mes la cartera cambió de tamaño,
+      el monto se mueve sin que nadie haya vendido más. Si el banco no la manda, se deja vacía.</div>
+
+    <label class="fsel" style="margin-top:10px"><span>Nota</span>
+      <input id="lfNota" type="text" maxlength="180"
+        placeholder="${cerrar ? "por ejemplo: cierre confirmado por correo del banco" : "por ejemplo: corte parcial al día 20"}"></label>
+
+    <div id="lfPrevio" class="lf-previo"></div>
+    <button class="btn block" id="lfGuardar" style="margin-top:12px">${
+      cerrar ? "Guardar el cierre" : "Guardar la actualización"}</button>`);
+
+  const repintar = () => {
+    const mes = $("#lfMes").value;
+    const ejec2 = ejecutivosDelBono();
+    let suma = 0, n = 0;
+    const cambios = [];
+    ejec2.forEach(u => {
+      const el = document.querySelector(`[data-lfm="${u.correo}"]`);
+      const v = numFact(el && el.value);
+      if (v === null) return;
+      suma += v; n++;
+      const ya = libroVigente(u.correo, mes);
+      if (ya && Number(ya.monto) !== v)
+        cambios.push(`${u.nombre.split(" ")[0]}: ${soles(Number(ya.monto))} a ${soles(v)}`);
+    });
+    const ant = libroMesAnterior(ejec2[0] && ejec2[0].correo, mes, true);
+    const tAnt = ant ? libroTotal(ant) : null;
+    $("#lfPrevio").innerHTML = !n ? "" : `
+      <div class="lf-pv"><span>Total que se va a guardar</span><b>${esc(soles(suma))}</b></div>
+      ${n < ejec2.length ? `<div class="lf-pv falta"><span>Sin monto</span>
+        <b>${ejec2.length - n} de ${ejec2.length}</b></div>` : ""}
+      ${tAnt && tAnt.completo && suma ? `<div class="lf-pv"><span>Contra ${esc(MES_NOMBRE(ant))}</span>
+        <b>${(suma >= tAnt.suma ? "+" : "") + ((suma - tAnt.suma)/tAnt.suma*100).toFixed(2).replace(".", ",")}%</b></div>` : ""}
+      ${cambios.length ? `<div class="lf-cambia"><b>Cambia lo que ya estaba cargado:</b><br>${
+        cambios.map(esc).join("<br>")}<br><span>La carga anterior no se borra: queda en el historial.</span></div>` : ""}`;
+  };
+  document.querySelectorAll("[data-lfm]").forEach(el => el.oninput = repintar);
+  if ($("#lfMes")) $("#lfMes").onchange = repintar;
+  if ($("#lfGuardar")) $("#lfGuardar").onclick = () => guardarLibroMes(estado);
+  repintar();
 }
 
-async function guardarFacturacion(){
-  const p = ($("#selPeriodoFact") && $("#selPeriodoFact").value) || periodoBono();
-  const num = v => { const s = String(v || "").replace(/[^\d.]/g, ""); return s === "" ? null : Number(s); };
-  /* Solo se manda el monto de cierre. El inicial ya no se pide acá: vive en la
-     base del proyecto, y no mandarlo evita pisarlo con un nulo sin querer. */
-  const lista = [];
-  document.querySelectorAll("[data-fact]").forEach(el => {
-    const correo = el.dataset.fact.split("|")[1];
-    const m = num(el.value);
-    if (m !== null) lista.push({ periodo:p, correo, monto_final:m });
-  });
-  if (lista.some(f => !(f.monto_final >= 0))) return toast("Hay montos que no son números válidos");
-  if (!lista.length) return toast("No hay montos que guardar");
-
-  const b = $("#factGuardar"); b.disabled = true; b.textContent = "Guardando…";
-  const { error } = await sb.from("facturacion").upsert(lista, { onConflict:"periodo,correo" });
-  b.disabled = false; b.textContent = "Guardar el cierre del periodo";
-  if (error) return toast("No se pudo guardar: " + error.message);
-  await cargarFacturacion(); render();
-  toast(`Facturación de ${nombrePeriodo(p)} guardada`);
+/* Un monto escrito a mano puede venir con puntos, comas o espacios. Lo que no
+   puede es adivinarse: si queda ambiguo, no se guarda. */
+function numFact(v){
+  const s = String(v == null ? "" : v).replace(/[^\d.,]/g, "").replace(/\s/g, "");
+  if (!s) return null;
+  /* Se toma el último separador como decimal solo si le siguen uno o dos
+     dígitos; si le siguen tres, era de miles. */
+  const m = s.match(/[.,](\d{1,2})$/);
+  const limpio = m ? s.slice(0, m.index).replace(/[.,]/g, "") + "." + m[1]
+                   : s.replace(/[.,]/g, "");
+  const n = Number(limpio);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
+
+async function guardarLibroMes(estado){
+  const mes = $("#lfMes").value;
+  const corte = $("#lfCorte").value || null;
+  const nota = ($("#lfNota").value || "").trim() || null;
+  const filas = [];
+  let malos = 0;
+  ejecutivosDelBono().forEach(u => {
+    const el = document.querySelector(`[data-lfm="${u.correo}"]`);
+    const bruto = (el && el.value || "").trim();
+    if (!bruto) return;
+    const v = numFact(bruto);
+    if (v === null){ malos++; return; }
+    const ce = document.querySelector(`[data-lfc="${u.correo}"]`);
+    const c = ce && ce.value.trim() ? Math.round(Number(ce.value.replace(/\D/g, ""))) : null;
+    filas.push({ correo:u.correo, mes, monto:v, estado, comercios: Number.isFinite(c) ? c : null,
+                 corte_bbva: corte, fuente:"BBVA", nota,
+                 cargado_por: (S.user && S.user.correo) || "sistema" });
+  });
+  if (malos) return toast(`Hay ${malos} ${malos === 1 ? "monto" : "montos"} que no se entienden`);
+  if (!filas.length) return toast("No hay montos que guardar");
+
+  const b = $("#lfGuardar"); const t = b.textContent;
+  b.disabled = true; b.textContent = "Guardando…";
+  /* INSERT, nunca upsert: cada carga es una fila nueva. Es lo que hace que el
+     historial exista. */
+  const { error } = await sb.from("facturacion_mes").insert(filas);
+  b.disabled = false; b.textContent = t;
+  if (error) return toast("No se pudo guardar: " + error.message);
+  await cargarFacturacion(); cerrarModal(); render();
+  toast(`${MES_NOMBRE(mes)} ${estado === "cerrado" ? "cerrado" : "actualizado"} · ${filas.length} montos`);
+}
+
+/* ---- El historial de una celda ----------------------------------------- */
+function modalHistoriaCelda(correo, mes){
+  const u = (USUARIOS || []).find(x => x.correo === correo) || { nombre:correo };
+  const h = libroHistoria(correo, mes);
+  if (!h.length) return;
+  const vig = libroVigente(correo, mes);
+  modal(`
+    <h3 style="margin:0 0 4px">${esc(u.nombreCompleto || u.nombre)} · ${esc(MES_NOMBRE(mes))}</h3>
+    <div class="bn-sub" style="margin-bottom:13px">${h.length} ${h.length === 1 ? "carga" : "cargas"}
+      · la vigente es la más reciente sin anular</div>
+    <div class="lf-hist">${h.map(f => {
+      const esVig = vig && vig.id === f.id;
+      return `<div class="lf-hl ${f.anulado_en ? "anu" : esVig ? "vig" : ""}">
+        <div>
+          <span class="m">${esc(soles(Number(f.monto)))}</span>
+          <span class="q"> · ${f.estado === "cerrado" ? "cierre confirmado" : "actualización parcial"}${
+            f.corte_bbva ? " · corte del " + esc(fmtFecha(String(f.corte_bbva).slice(0,10))) : ""}${
+            f.comercios != null ? " · " + f.comercios + " comercios" : ""}</span>
+          ${f.nota ? `<div class="q" style="margin-top:2px">«${esc(f.nota)}»</div>` : ""}
+          ${f.anulado_en ? `<div class="q" style="margin-top:2px">anulada por ${esc(f.anulado_por || "?")}${
+            f.anulado_nota ? ": " + esc(f.anulado_nota) : ""}</div>` : ""}
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <span class="q">${esc(String(f.cargado_por || "").split("@")[0])} · ${
+            esc(fmtFecha(String(f.cargado_en).slice(0,10)))}</span>
+          ${esVig ? `<div class="q"><b>vigente</b></div>` : ""}
+          ${!f.anulado_en && !esVig ? "" : ""}
+          ${!f.anulado_en && esVig && h.length > 1
+            ? `<div><button class="btn ghost sm" data-lfanu="${esc(f.id)}" style="margin-top:4px">Anular</button></div>` : ""}
+        </div>
+      </div>`; }).join("")}</div>
+    <div class="pie" style="margin-top:11px">Corregir no borra: se carga el mes de nuevo y la fila
+      anterior queda con su monto, su estado, su fecha y su autor. Anular retira una carga sin
+      borrarla — la anterior vuelve a ser la vigente.</div>`);
+  document.querySelectorAll("[data-lfanu]").forEach(b =>
+    b.onclick = e => anularCargaFact(e.currentTarget.dataset.lfanu));
+}
+
+async function anularCargaFact(id){
+  const nota = prompt("¿Por qué se anula esta carga?");
+  if (nota === null) return;
+  const { error } = await sb.from("facturacion_mes")
+    .update({ anulado_en: new Date().toISOString(),
+              anulado_por: (S.user && S.user.correo) || "sistema",
+              anulado_nota: (nota || "").trim() || null })
+    .eq("id", id);
+  if (error) return toast("No se pudo anular: " + error.message);
+  await cargarFacturacion(); cerrarModal(); render();
+  toast("Carga anulada · la anterior vuelve a ser la vigente");
+}
+
+/* `guardarBaseFact` y `guardarFacturacion` vivían acá. Las dos guardaban con
+   `upsert` y pisaban el valor anterior, que es justo lo que el libro vino a
+   eliminar. Se retiran en vez de dejarlas sin llamar: una función que
+   sobreescribe y sigue en el archivo es una que alguien vuelve a conectar. */
 
 /* =========================================================================
    Los parámetros del modelo
@@ -16727,9 +17175,11 @@ function bindBono(){
   if ($("#bonoLibro")) $("#bonoLibro").onclick = e => descargarLibroIncentivos(e.currentTarget);
   if ($("#confirmarParams")) $("#confirmarParams").onclick = () => confirmarParametros();
   if (typeof bindPdfIncentivo === "function") bindPdfIncentivo();
-  if ($("#selPeriodoFact")) $("#selPeriodoFact").onchange = e => { S.pBono = e.target.value; render(); };
-  if ($("#factGuardar"))    $("#factGuardar").onclick     = () => guardarFacturacion();
-  if ($("#baseGuardar"))    $("#baseGuardar").onclick     = () => guardarBaseFact();
+  if ($("#lfParcial")) $("#lfParcial").onclick = () => modalCargarMes("parcial");
+  if ($("#lfCerrar"))  $("#lfCerrar").onclick  = () => modalCargarMes("cerrado");
+  document.querySelectorAll("[data-cel]").forEach(td => td.onclick = e => {
+    const [c, m] = e.currentTarget.dataset.cel.split("|");
+    modalHistoriaCelda(c, m); });
   if ($("#bonoGuardar"))    $("#bonoGuardar").onclick     = () => guardarParametros();
   if ($("#cerrarPeriodo"))  $("#cerrarPeriodo").onclick   = () => cerrarPeriodo();
   if ($("#anularCierre"))   $("#anularCierre").onclick    = () => anularCierre();
