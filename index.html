@@ -2035,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 17:13", huella:"78c8f1" };
+const BUILD = { sello:"07/09/2026 17:21", huella:"772616" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22376,8 +22376,12 @@ function datosFichaProyecto(){
         pie:"objetivo de retención cumplido" }
     ],
     objetivos: [
+      /* El texto se arma con la MISMA `meta` que la barra. Se le pasó el
+         `cart.length` cuando la meta ya era PORT y la tarjeta salió diciendo
+         «757 de 842» debajo de un embudo que arrancaba en 841: dos
+         denominadores en la misma hoja, que es justo lo que se vino a cerrar. */
       { rot:"COBERTURA",   n:A.gestion.size, meta:PORT,
-        txt:`${A.gestion.size} de ${cart.length}` },
+        txt:`${A.gestion.size} de ${PORT}` },
       { rot:"VISITAS",     n:comerciosConVisita(ges.filter(enR(v.ini, hoy))), meta:metaVis,
         txt:`${comerciosConVisita(ges.filter(enR(v.ini, hoy)))} de ${metaVis}` },
       { rot:"VENTAS",      n:CLIENTES.filter(esVentaNueva).length, meta:metaVen,
