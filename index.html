@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 10:48", huella:"4b472f" };
+const BUILD = { sello:"07/09/2026 11:09", huella:"d6095f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18621,13 +18621,38 @@ function repSemanaDia(f){
      eso su acumulado se recalcula sobre la ventana [desde, día] en vez de ir
      sumando. Los otros dos sí son hechos que no se repiten sobre el mismo
      comercio dentro de la semana y se pueden acumular. */
+  /* Las visitas cuentan quién ENTRA al escalón, no cuántas veces se salió a
+   * la calle.
+   *
+   * José, 07/09: «la imagen 1 y la imagen 2 no conversan con el número de
+   * visitas». La lámina del proyecto decía «+36 comercios desde el corte del
+   * 30/08» y esta decía 42 en la misma semana. Las dos eran ciertas y medían
+   * cosas distintas: 42 es la actividad de la semana y 36 son los comercios
+   * que llegaron por PRIMERA VEZ a visitado. La diferencia son 6 revisitas a
+   * comercios que ya estaban contados.
+   *
+   * Este deck mide retención, y el embudo es su columna vertebral: volver a
+   * un comercio ya visitado no mueve el embudo. Así que la serie cuenta lo
+   * mismo que la lámina 3 y las dos cuadran.
+   *
+   * De paso se va un error que estaba latente: las visitas se acumulaban
+   * SUMANDO días, así que un comercio visitado el lunes y otra vez el jueves
+   * contaba dos veces dentro de la misma semana. Es el mismo motivo por el
+   * que «contactos» ya se recalculaba sobre la ventana en vez de sumarse. */
+  const visitadosHasta = d =>
+    comerciosConVisita(ges.filter(g => repDia(g.Fecha_Contacto) <= d));
+  const visitadosAntes = desde =>
+    comerciosConVisita(ges.filter(g => repDia(g.Fecha_Contacto) < desde));
+
   const serie = (desde, k, tope) => {
     const out = [];
     let acum = 0;
+    const base = k === "visitas" ? visitadosAntes(desde) : 0;
     for (let i2 = 0; i2 < 7; i2++){
       const d = mas(desde, i2);
       if (tope && d > tope){ out.push(null); continue; }
-      if (k === "contactos") out.push(repTrabajadosEntre(act, desde, d));
+      if (k === "contactos")      out.push(repTrabajadosEntre(act, desde, d));
+      else if (k === "visitas")   out.push(visitadosHasta(d) - base);
       else { acum += enDia(d, k); out.push(acum); }
     }
     return out;
@@ -19983,11 +20008,19 @@ function armarDirectorio(pptx, fondos){
          de los dos cabe arriba y los dos bajan al mismo sitio.
          Acá el segundo rótulo se aparta del primero: primero probando el otro
          lado del nodo, y si tampoco, corriéndose en horizontal. */
-      if (puesto && Math.abs(lx - puesto.x) < 0.44 && Math.abs(ly - puesto.y) < 0.22){
+      /* El paso era de 0,22" con rótulos de 0,20" de alto: 0,02" de aire, medio
+         milímetro. Técnicamente no se solapaban y en pantalla se leían pegados
+         —José, 07/09: «los números no se deben interponer»—. Ahora el paso es
+         de 0,30" y quedan 0,10" de separación real. La detección sube con él:
+         si se dispara a 0,22 y se aparta 0,30, dos rótulos a 0,25 se quedaban
+         donde estaban. */
+      const ALTO = 0.20, PASO = 0.30;
+      if (puesto && Math.abs(lx - puesto.x) < 0.50
+                 && Math.abs(ly - puesto.y) < ALTO + 0.08){
         /* Se apila SOBRE el anterior, no debajo: abajo está el eje con las
            fechas, y una cifra encima de «27/08» es el mismo problema con otro
            vecino. Solo baja si arriba se saldría de la tarjeta. */
-        ly = (puesto.y - 0.22 >= GY - 0.30) ? puesto.y - 0.22 : puesto.y + 0.22;
+        ly = (puesto.y - PASO >= GY - 0.30) ? puesto.y - PASO : puesto.y + PASO;
       }
       T(g, String(vals[ult]), {
         x: lx, y: ly, w:0.46, h:0.20,
