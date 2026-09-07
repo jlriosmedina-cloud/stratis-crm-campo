@@ -37,6 +37,17 @@
   --good-ink:#0c6144; --crit-ink:#98211f; --warn-ink:#8a6100; --serious-ink:#9c4a25;
   --ok-ink:#0c6144; --warn-tx:#8a6100;
   --good-bg:#e4f4ed; --warn-bg:#fdf2d8; --serious-bg:#fdeade; --crit-bg:#fbe8e8; --info-bg:#e8f0fc;
+  /* Pares de relleno + texto. Existen porque un color de acento y el texto que
+     va ENCIMA de ese color son dos decisiones distintas, y tratarlas como una
+     sola es lo que rompió el tema oscuro: `--brand-2` se aclara en oscuro para
+     destacar sobre la tarjeta, y el blanco que se leía bien en claro pasaba a
+     3,22:1 sobre ese azul claro. El botón principal del CRM.
+     Medido, no estimado: blanco sobre #2f6fd0 da 4,88:1; #08111f sobre
+     #5a8fe8 da 5,88:1. Los dos pasan AA. */
+  --on-brand:#ffffff;
+  --crit-fill:#bd2b2b; --on-crit:#ffffff;
+  --toast-bg:#0d1b2a; --toast-fg:#ffffff; --toast-line:transparent;
+  --neg-bg:#eef0ff; --neg-ink:#3b43fb; --neg-line:#d8dcff;
   --r:12px; --r-sm:8px;
   --sh:0 1px 2px rgba(13,27,42,.06), 0 6px 16px rgba(13,27,42,.05);
   --nav-h:62px;
@@ -56,6 +67,16 @@
   --good-ink:#4cc79a; --crit-ink:#e88178; --warn-ink:#e0b552; --serious-ink:#eda07a;
   --ok-ink:#4cc79a; --warn-tx:#e0b552;
   --good-bg:#10281f; --warn-bg:#2b2311; --serious-bg:#2b1d11; --crit-bg:#2c1615; --info-bg:#16243a;
+  /* El texto sobre el acento se invierte: el acento se aclaró, así que lo que
+     va encima se oscurece. El rojo de relleno se oscurece un punto para que el
+     blanco vuelva a pasar (4,87:1) sin perder de vista el contador (3,49:1
+     contra la tarjeta). Y el toast deja de ser negro sobre negro: en oscuro
+     daba 1,07:1 contra el fondo de la página, o sea que la confirmación de
+     cada registro era casi invisible. */
+  --on-brand:#08111f;
+  --crit-fill:#c94236; --on-crit:#ffffff;
+  --toast-bg:#2b3646; --toast-fg:#eef3f9; --toast-line:rgba(255,255,255,.14);
+  --neg-bg:#191d4d; --neg-ink:#9aa1fe; --neg-line:#2f3676;
   --sh:0 1px 2px rgba(0,0,0,.5), 0 6px 16px rgba(0,0,0,.35);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -105,20 +126,20 @@ input[type=text],input[type=email],input[type=password],input[type=date],input[t
 }
 textarea{resize:vertical;min-height:78px;line-height:1.45}
 input:focus,select:focus,textarea:focus{border-color:var(--brand-2);box-shadow:0 0 0 3px rgba(42,120,214,.16)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:var(--brand-2);color:#fff;font-weight:650;cursor:pointer;font-size:14.5px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:var(--brand-2);color:var(--on-brand);font-weight:650;cursor:pointer;font-size:14.5px}
 @media (hover:hover) and (pointer:fine){.btn:hover{filter:brightness(1.06)}}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn.block{width:100%}
 .btn.ghost{background:transparent;border-color:var(--line);color:var(--ink)}
 @media (hover:hover) and (pointer:fine){.btn.ghost:hover{background:var(--plane)}}
-.btn.danger{background:var(--crit)}
+.btn.danger{background:var(--crit-fill);color:var(--on-crit)}
 .btn.sm{padding:8px 12px;font-size:13px;border-radius:8px}
 .err{background:var(--crit-bg);color:var(--crit-ink);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .demo-users{margin-top:14px;border-top:1px solid var(--grid);padding-top:13px}
 .demo-users p{margin:0 0 8px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
 .du{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 9px;border:1px solid transparent;border-radius:9px;background:transparent;cursor:pointer;margin-bottom:2px}
 @media (hover:hover) and (pointer:fine){.du:hover{background:var(--plane);border-color:var(--grid)}}
-.av{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:#fff;flex:none;background:var(--s1)}
+.av{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:var(--on-brand);flex:none;background:var(--s1)}
 .du b{display:block;font-size:13.5px;font-weight:600}
 .du span{display:block;font-size:11.5px;color:var(--muted)}
 
@@ -154,7 +175,7 @@ nav.bottom button{
 }
 nav.bottom button .ic{font-size:18px;line-height:1}
 nav.bottom button.on{color:var(--brand-2)}
-nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-width:16px;height:16px;border-radius:8px;background:var(--crit);color:#fff;font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700}
+nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-width:16px;height:16px;border-radius:8px;background:var(--crit-fill);color:var(--on-crit);font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700}
 
 /* ---------- Que se note que la pantalla escuchó -------------------------
    Auditoría del 07/09: 32 estados `:hover` y UN solo `:active` en toda la
@@ -321,19 +342,15 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   table.tbl-equipo td:last-child .btn + .btn{margin-top:5px}
 }
 .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:650;line-height:1.6;white-space:nowrap}
-.chip.p1{background:#fbe6e6;color:#a32626} .chip.p2{background:#fdeade;color:#9c4a25}
-.chip.p3{background:#fef3d9;color:#8a6100} .chip.p4{background:#eceae4;color:#52514e}
-:root[data-theme=dark] .chip.p1{background:#331414;color:#e66767}
-:root[data-theme=dark] .chip.p2{background:#33200f;color:#ec835a}
-:root[data-theme=dark] .chip.p3{background:#33280a;color:#fab219}
-:root[data-theme=dark] .chip.p4{background:#2c2c2a;color:#c3c2b7}
+.chip.p1{background:var(--crit-bg);color:var(--crit-ink)} .chip.p2{background:var(--serious-bg);color:var(--serious-ink)}
+.chip.p3{background:var(--warn-bg);color:var(--warn-ink)} .chip.p4{background:var(--surface-2);color:var(--ink-2)}
 .chip.ok{background:var(--good-bg);color:var(--good-ink)}
 .chip.no{background:var(--plane);color:var(--muted);border:1px solid var(--grid)}
 .chip.warn{background:var(--warn-bg);color:var(--warn-ink)}
 .chip.crit{background:var(--crit-bg);color:var(--crit-ink)}
 /* El comercio en negociación no es bueno ni malo: es un caso vivo, y necesita
    un color propio para no confundirse con un cierre ni con una alerta. */
-.chip.neg{background:#EEF0FF;color:#3B43FB;border:1px solid #D8DCFF}
+.chip.neg{background:var(--neg-bg);color:var(--neg-ink);border:1px solid var(--neg-line)}
 /* La coordinación con el banco, en la misma línea de tiempo pero distinguible
    de un vistazo: mismo hilo, otro interlocutor. */
 .rl-build{display:block;width:100%;margin:8px 0 0;padding:6px 8px;border:0;border-radius:7px;
@@ -343,7 +360,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .tl-bbva>.card{border-left:3px solid var(--brand-2)}
 /* El cierre cierra la línea: barra al costado y fondo tenue, para que se
    distinga de un contacto más sin gritar. */
-.tl-cierre>.card{border-left:3px solid var(--ok-ink,#0A7D5E);background:var(--surface-2)}
+.tl-cierre>.card{border-left:3px solid var(--ok-ink);background:var(--surface-2)}
 .lote-lista{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:11px}
 .lote-item{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;cursor:pointer;
   border-bottom:1px solid var(--line)}
@@ -362,7 +379,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .pills{display:flex;gap:6px;overflow-x:auto;padding:1px 1px 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .pills::-webkit-scrollbar{display:none}
 .pill{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;color:var(--ink-2)}
-.pill.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
+.pill.on{background:var(--brand-2);border-color:var(--brand-2);color:var(--on-brand)}
 .cl{display:flex;gap:11px;align-items:flex-start;background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px;margin-bottom:9px;cursor:pointer;box-shadow:var(--sh)}
 .cl:active{transform:scale(.99)}
 .cl .body{flex:1;min-width:0}
@@ -542,7 +559,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cola-ag{flex:none;width:44px;min-height:44px;display:grid;place-items:center;font-size:15px;
   border-radius:var(--r-sm);background:none;border:1px solid transparent;cursor:pointer;
   color:inherit;line-height:1}
-@media (hover:hover) and (pointer:fine){.cola-ag:hover{background:var(--brand-bg,var(--plane));border-color:var(--grid)}}
+@media (hover:hover) and (pointer:fine){.cola-ag:hover{background:var(--brand-bg);border-color:var(--grid)}}
 .cola-ag:focus-visible{outline:2px solid var(--brand-2);outline-offset:1px}
 .dia-cab{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
 .dia-cab .btn{text-transform:none;letter-spacing:0}
@@ -611,7 +628,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
    no se cumple, no en un resumen aparte: el número sirve mientras haya días
    para hacer algo con él. */
 .bn-req-aviso{font-size:11.5px;line-height:1.4;margin:6px 0 12px;padding:7px 10px;
-  border-radius:8px;background:var(--warn-bg,#FFF7E6);color:var(--warn-tx,#8A5A00);
+  border-radius:8px;background:var(--warn-bg);color:var(--warn-tx);
   border:1px solid rgba(248,111,53,.25)}
 .bn-req-aviso b{color:inherit}
 .bn-obj .falta{opacity:.62}
@@ -773,7 +790,7 @@ table.tbl tr:last-child td{border-bottom:0}
 .modal{background:var(--card);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:88dvh;overflow:auto;padding:20px 17px calc(20px + env(safe-area-inset-bottom))}
 .modal h3{margin:0 0 6px;font-size:17px;text-transform:none;letter-spacing:-.2px}
 .modal p{margin:0 0 15px;font-size:13.5px;color:var(--ink-2)}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 22px);background:#0b0b0b;color:#fff;padding:11px 17px;border-radius:11px;font-size:13.5px;font-weight:600;z-index:90;box-shadow:0 8px 26px rgba(0,0,0,.34);max-width:90vw;text-align:center}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 22px);background:var(--toast-bg);color:var(--toast-fg);border:1px solid var(--toast-line);padding:11px 17px;border-radius:11px;font-size:13.5px;font-weight:600;z-index:90;box-shadow:0 8px 26px rgba(0,0,0,.34);max-width:90vw;text-align:center}
 .back{display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--brand-2);font-weight:650;font-size:13.5px;cursor:pointer;padding:2px 0;margin-bottom:9px}
 .req{color:var(--crit)}
 .mono{font-variant-numeric:tabular-nums}
@@ -891,7 +908,7 @@ table.tbl tr:last-child td{border-bottom:0}
 .pnl-per-min .fsel{margin:0}
 .pnl-h{display:flex;align-items:flex-start;gap:10px;margin:22px 2px 11px}
 .pnl-h:first-child{margin-top:4px}
-.pnl-n{flex:none;width:22px;height:22px;border-radius:7px;background:var(--brand-2);color:#fff;
+.pnl-n{flex:none;width:22px;height:22px;border-radius:7px;background:var(--brand-2);color:var(--on-brand);
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;margin-top:1px}
 .pnl-h b{display:block;font-size:15px;font-weight:730;letter-spacing:-.25px;line-height:1.25}
 /* Ojo con el selector: el número del bloque también es un span dentro de
@@ -1025,7 +1042,8 @@ table.tbl tr:last-child td{border-bottom:0}
 .rep-kpi.falta{border-style:dashed}
 .rep-kpi .k-top{display:flex;align-items:flex-start;gap:10px}
 .rep-kpi .k-top b{font-size:13.5px;font-weight:700;letter-spacing:-.2px;line-height:1.3}
-.rep-kpi .k-peso{margin-left:auto;flex:none;color:#fff;font-size:11px;font-weight:750;
+.rep-kpi .k-peso{margin-left:auto;flex:none;background:var(--surface-2)!important;
+  color:var(--ink-2);font-size:11px;font-weight:750;
   border-radius:999px;padding:2px 9px}
 .rep-kpi .k-cifra{font-size:34px;font-weight:780;letter-spacing:-1.2px;line-height:1.1;margin-top:10px}
 .rep-kpi .k-sub{font-size:12px;color:var(--muted);margin-top:2px}
@@ -1131,7 +1149,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 .g-pasos{display:grid;gap:12px}
 .g-paso{display:flex;gap:13px;align-items:flex-start;padding:13px;border:1px solid var(--line);
   border-radius:13px;background:var(--surface-2)}
-.g-num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--brand-2);color:#fff;
+.g-num{flex:none;width:30px;height:30px;border-radius:50%;background:var(--brand-2);color:var(--on-brand);
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14.5px}
 .g-t{font-weight:700;font-size:15px;letter-spacing:-.2px}
 .g-d{font-size:13px;color:var(--muted);margin-top:2px}
@@ -1343,8 +1361,8 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
   .rail button.rl-x .ic{font-size:15px;line-height:1;width:18px;flex:none;opacity:.85;text-align:center}
   .rail button.rl-x.on{background:rgba(255,255,255,.13);color:#fff}
   .rail button.rl-x.on .ic{opacity:1}
-  .rail button.rl-x .cuenta{margin-left:auto;font-size:11px;font-weight:700;background:var(--crit);
-    color:#fff;border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
+  .rail button.rl-x .cuenta{margin-left:auto;font-size:11px;font-weight:700;background:var(--crit-fill);
+    color:var(--on-crit);border-radius:999px;padding:1px 7px;font-variant-numeric:tabular-nums}
   /* El selector de «ver como», al pie de la barra: es un cambio de contexto,
      no una pestaña más, así que no vive entre los enlaces. */
   .rail .rl-como{margin-top:auto;padding:0 6px}
@@ -1482,7 +1500,7 @@ button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inheri
   border-bottom:1px solid var(--grid);min-width:0;flex-wrap:wrap}
 .rt-p li:last-child{border-bottom:0}
 .rt-p li::before{counter-increment:parada;content:counter(parada);flex:none;
-  width:21px;height:21px;border-radius:50%;background:var(--brand-2);color:#fff;
+  width:21px;height:21px;border-radius:50%;background:var(--brand-2);color:var(--on-brand);
   display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:750}
 .rt-x{flex:1;min-width:0;text-align:left;border:0;background:none;font:inherit;
   color:inherit;cursor:pointer;padding:0}
@@ -1511,8 +1529,8 @@ button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inheri
 @media (hover:hover) and (pointer:fine){.cf-p:hover{border-color:var(--brand-2)}}
 .cf-p .n{font-size:11.5px;font-weight:750;color:var(--ink);
   font-variant-numeric:tabular-nums}
-.cf-p.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
-.cf-p.on .n{color:#fff}
+.cf-p.on{background:var(--brand-2);border-color:var(--brand-2);color:var(--on-brand)}
+.cf-p.on .n{color:var(--on-brand)}
 .cf-p.cero{opacity:.5}
 .cf-p.cero.on{opacity:1}
 
@@ -1961,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"06/09/2026 22:24", huella:"796c24" };
+const BUILD = { sello:"06/09/2026 22:40", huella:"85b6d3" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
