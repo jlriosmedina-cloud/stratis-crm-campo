@@ -2035,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 17:00", huella:"52b715" };
+const BUILD = { sello:"07/09/2026 17:13", huella:"78c8f1" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22249,6 +22249,12 @@ function datosFichaProyecto(){
   const P = repProyecto();
   const cart = CLIENTES.filter(c => !esClienteNuevo(c));
   const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  /* El DENOMINADOR es la base congelada del proyecto —la misma que usa el
+     deck—, no la cartera viva. `cart` se sigue usando para FILTRAR comercios;
+     lo que no puede repetirse es que los dos documentos del mismo día
+     publiquen bases distintas: el 07/09 fueron 841 y 842, un comercio de
+     diferencia debajo de todos los porcentajes del reporte. */
+  const PORT = portafolioBase(cart.length);
   const A = cadenaEntre(null, hoy);
 
   const ges = DB.todos().filter(esGestionCliente)
@@ -22323,7 +22329,7 @@ function datosFichaProyecto(){
   const equipo = ejecutivosDelBono().length;
   const metaVis = (R.visitas_periodo || 40) * equipo;
   const metaVen = (M.ventas_mes || 7) * equipo * (M.total || 5);
-  const metaRet = Math.round(cart.length * (B.metas.reactivacion_pp || 20) / 100);
+  const metaRet = Math.round(PORT * (B.metas.reactivacion_pp || 20) / 100);
 
   /* Los dos horizontes de la hoja, y de dónde sale cada uno.
    *
@@ -22356,9 +22362,9 @@ function datosFichaProyecto(){
        Gana la congelada porque es la que BBVA fijó y contra la que se mide el
        proyecto. Si la cartera del CRM se separa de ella, eso es algo que hay
        que reconciliar con el banco, no publicar como si fueran dos verdades. */
-    portafolio: portafolioBase(cart.length),
+    portafolio: PORT,
     embudo: [
-      { rot:"Portafolio asignado", n:cart.length, col:PX.navy,
+      { rot:"Portafolio asignado", n:PORT, col:PX.navy,
         pie:"base congelada por el banco" },
       { rot:"Con gestión", n:A.gestion.size, col:[1,17,162],
         pie:`${A.gestionDirecta} con trabajo directo y ${A.gestionBanco} por coordinación con el banco` },
@@ -22370,7 +22376,7 @@ function datosFichaProyecto(){
         pie:"objetivo de retención cumplido" }
     ],
     objetivos: [
-      { rot:"COBERTURA",   n:A.gestion.size, meta:cart.length,
+      { rot:"COBERTURA",   n:A.gestion.size, meta:PORT,
         txt:`${A.gestion.size} de ${cart.length}` },
       { rot:"VISITAS",     n:comerciosConVisita(ges.filter(enR(v.ini, hoy))), meta:metaVis,
         txt:`${comerciosConVisita(ges.filter(enR(v.ini, hoy)))} de ${metaVis}` },
