@@ -2035,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 15:41", huella:"ff5a07" };
+const BUILD = { sello:"07/09/2026 16:24", huella:"a8e586" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3153,6 +3153,15 @@ const respuestaSinVoz = r =>
   && !String(r.Comentario_Cliente || "").trim();
 
 /* Una respuesta que, leída, no parece del titular o no parece una respuesta. */
+/* «6, 16 y 42», no «6, 16, 42». Existe porque una lista escrita a mano acaba
+   nombrando posiciones —«la primera, la segunda, la tercera»— y eso obliga a
+   que la lista tenga siempre el mismo largo. */
+const listaEs = a => {
+  const v = (a || []).map(String);
+  return v.length <= 1 ? (v[0] || "")
+       : v.slice(0, -1).join(", ") + " y " + v[v.length - 1];
+};
+
 const respuestaDudosa = r =>
   !!r && esGestionCliente(r) && esEfectivo(r.Resultado)
   && (RE_HABLO_UN_TERCERO.test(textoDe(r)) || RE_QUEDO_APLAZADO.test(textoDe(r)));
@@ -19014,7 +19023,13 @@ function repSemanal(f){
          concepto con dos colores en dos láminas seguidas hace que la leyenda
          no sirva de nada. */
       { k:"contactos",   nombre:"Comercios trabajados", color:"azul2" },
-      { k:"visitas",     nombre:"Comercios visitados", color:"naranja" },
+      /* «Por primera vez» no es un adorno: esta serie es el AVANCE DEL EMBUDO
+         —comercios que cruzaron al escalón de visitados—, no los comercios
+         visitados en la semana. Son 36 y 42 sobre el mismo trabajo: seis
+         comercios recibieron visita esa semana y ya estaban visitados antes.
+         Las dos cifras son correctas y salen el mismo día en dos documentos
+         distintos; lo único que estaba mal era llamarlas igual. */
+      { k:"visitas",     nombre:"Comercios visitados por primera vez", color:"naranja" },
       { k:"retenciones", nombre:"Retenciones concretadas", color:"verde" }
     ],
     variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
@@ -19666,12 +19681,24 @@ function repLaminaCambios(X, f){
      semana es una afirmación que un lunes va a ser falsa delante del cliente.
      Si esta semana no supera a la anterior, la lámina dice el número y no la
      conclusión. */
+  /* Y se compara la semana CERRADA contra la anterior cerrada, nunca la que
+     está en curso.
+
+     El 07/09 este deck salió diciendo «Visitas: 0 en la semana en curso contra
+     42 de la semana anterior completa». Era un lunes: la semana en curso tenía
+     un día. La lámina 4, veinte segundos después, avisa en su propio subtítulo
+     que «la semana nueva todavía no tiene días suficientes para leerla» — y la
+     lámina 2 abría el deck del directorio con esa semana y con un cero.
+
+     Es el mismo freno de proyección que ya rige en el deck, en las fichas y en
+     el libro de facturación. Acá faltaba: comparar dos semanas cerradas es la
+     única comparación entre periodos del mismo largo. */
   const SEMc = repSemanal(f);
-  const vAct = (SEMc.curso || {}).visitas, vPrev = (SEMc.ultima || {}).visitas;
-  const frase = (typeof vAct === "number" && typeof vPrev === "number")
-    ? (vAct > vPrev
-        ? `Las visitas de la semana en curso (${vAct}) ya superan el total de la semana anterior completa (${vPrev}).`
-        : `Visitas: ${vAct} en la semana en curso contra ${vPrev} de la semana anterior completa.`)
+  const vUlt = (SEMc.ultima || {}).visitas, vPrev = (SEMc.previa || {}).visitas;
+  const frase = (typeof vUlt === "number" && typeof vPrev === "number")
+    ? (vUlt > vPrev
+        ? `Las visitas de la semana cerrada (${vUlt} comercios) superan a las de la anterior (${vPrev}).`
+        : `Visitas: ${vUlt} comercios en la semana cerrada contra ${vPrev} de la anterior.`)
     : "";
 
   X.caja(s, 0.57, YB, 12.38, HBanda, REP_BANDA);
@@ -22647,13 +22674,26 @@ function fichaProyecto(doc, D){
   /* ---- La lectura y el mapa del portafolio ---------------------------- */
   titulo("Cómo viene la campaña", y); y += 3.4;
   const anI = W - 2*m - 74 - 5, xD = m + anI + 5;
-  const S = D.serie, ult = S[S.length - 1];
+  /* El párrafo lee la MISMA serie que el gráfico de arriba: `serieVisible`, que
+     ya excluye la semana en curso mientras todavía no dice nada —menos de tres
+     días trabajados—. Antes leía `serie`, la completa, y el resultado salió
+     impreso el 07/09 en el reporte que iba al cliente: el gráfico mostraba
+     6, 16 y 42 y el párrafo decía «a 16 en la segunda y 0 en la tercera».
+     Se saltaba la semana de 42 —la mejor de la campaña— y terminaba la frase
+     en cero, dos centímetros debajo de un gráfico que decía lo contrario. */
+  const S = D.serieVisible && D.serieVisible.length ? D.serieVisible : D.serie;
   caja(m, y, anI, 30, HUESO, 1.2);
   caja(m, y, 1.1, 30, CORAL);
   const parr = [
-    `La visita es lo que se movió. De ${S[0].visitas} comercios visitados en la primera semana del `
-    + `periodo a ${S.length > 1 ? S[1].visitas : "-"} en la segunda y ${ult.visitas} en la tercera, `
-    + `que todavía no cierra. Las retenciones siguen el mismo camino: ${S.map(s => s.ret).join(", ")}.`,
+    /* Y la frase se arma con la LISTA, no nombrando posiciones. «Primera,
+       segunda, tercera» obliga a que siempre haya exactamente tres semanas: en
+       cuanto hay dos o cuatro, el texto miente sin que nadie lo toque. Es el
+       mismo error que el «Cuatro de las cinco metas» escrito a mano. */
+    S.length === 1
+      ? `La visita es lo que se movió: ${S[0].visitas} comercios visitados en la única semana `
+        + `cerrada del periodo, con ${S[0].ret} retenciones.`
+      : `La visita es lo que se movió: ${listaEs(S.map(s => s.visitas))} comercios visitados, `
+        + `semana a semana. Las retenciones siguen el mismo camino: ${listaEs(S.map(s => s.ret))}.`,
     F.crec === null ? "La facturación del periodo todavía no está cargada."
     : `La facturación entrega su primer dato medible: ${mm2(F.base)} de base contra ${mm2(F.cierre)} `
       + `al cierre de ${F.mesDelDato}, ${pctT(F.crec, 2)} de variación. Corresponde al mes en que la `
