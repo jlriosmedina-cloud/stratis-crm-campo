@@ -91,7 +91,7 @@ a{color:var(--brand-2)}
 .lg-logo h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.3px}
 .lg-logo p{margin:1px 0 0;font-size:12.5px;color:var(--muted)}
 .ms-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer;font-weight:600;font-size:14.5px;margin-bottom:8px}
-.ms-btn:hover{background:var(--plane)}
+@media (hover:hover) and (pointer:fine){.ms-btn:hover{background:var(--plane)}}
 .ms-tiles{width:19px;height:19px;display:grid;grid-template-columns:1fr 1fr;gap:2px;flex:none}
 .ms-tiles i{display:block;border-radius:1px}
 .divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin:16px 0}
@@ -106,18 +106,18 @@ input[type=text],input[type=email],input[type=password],input[type=date],input[t
 textarea{resize:vertical;min-height:78px;line-height:1.45}
 input:focus,select:focus,textarea:focus{border-color:var(--brand-2);box-shadow:0 0 0 3px rgba(42,120,214,.16)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:var(--brand-2);color:#fff;font-weight:650;cursor:pointer;font-size:14.5px}
-.btn:hover{filter:brightness(1.06)}
+@media (hover:hover) and (pointer:fine){.btn:hover{filter:brightness(1.06)}}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn.block{width:100%}
 .btn.ghost{background:transparent;border-color:var(--line);color:var(--ink)}
-.btn.ghost:hover{background:var(--plane)}
+@media (hover:hover) and (pointer:fine){.btn.ghost:hover{background:var(--plane)}}
 .btn.danger{background:var(--crit)}
 .btn.sm{padding:8px 12px;font-size:13px;border-radius:8px}
 .err{background:var(--crit-bg);color:var(--crit-ink);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:12px}
 .demo-users{margin-top:14px;border-top:1px solid var(--grid);padding-top:13px}
 .demo-users p{margin:0 0 8px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
 .du{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 9px;border:1px solid transparent;border-radius:9px;background:transparent;cursor:pointer;margin-bottom:2px}
-.du:hover{background:var(--plane);border-color:var(--grid)}
+@media (hover:hover) and (pointer:fine){.du:hover{background:var(--plane);border-color:var(--grid)}}
 .av{width:31px;height:31px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;color:#fff;flex:none;background:var(--s1)}
 .du b{display:block;font-size:13.5px;font-weight:600}
 .du span{display:block;font-size:11.5px;color:var(--muted)}
@@ -132,7 +132,7 @@ header.top .mark{width:31px;height:31px;border-radius:8px;background:rgba(255,25
 header.top h1{margin:0;font-size:15px;font-weight:700;letter-spacing:-.2px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header.top h1 small{display:block;font-size:11px;font-weight:500;opacity:.72;letter-spacing:0}
 .icon-btn{background:rgba(255,255,255,.13);border:0;color:#fff;width:33px;height:33px;border-radius:9px;display:grid;place-items:center;cursor:pointer;flex:none;font-size:15px}
-.icon-btn:hover{background:rgba(255,255,255,.24)}
+@media (hover:hover) and (pointer:fine){.icon-btn:hover{background:rgba(255,255,255,.24)}}
 /* El pulso: un punto que dice si el CRM está escuchando cambios en vivo */
 .pulso i{width:9px;height:9px;border-radius:50%;background:#9aa6b2;display:block;transition:background .3s}
 .pulso[data-estado="vivo"] i{background:#39d98a;box-shadow:0 0 0 0 rgba(57,217,138,.65);animation:latido 2.4s ease-out infinite}
@@ -155,6 +155,44 @@ nav.bottom button{
 nav.bottom button .ic{font-size:18px;line-height:1}
 nav.bottom button.on{color:var(--brand-2)}
 nav.bottom button .dot{position:absolute;top:5px;right:calc(50% - 17px);min-width:16px;height:16px;border-radius:8px;background:var(--crit);color:#fff;font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700}
+
+/* ---------- Que se note que la pantalla escuchó -------------------------
+   Auditoría del 07/09: 32 estados `:hover` y UN solo `:active` en toda la
+   hoja. Cuatro de los seis que usan el CRM trabajan desde el celular, donde
+   `:hover` no existe: para ellos, tocar un botón no devolvía nada. En campo,
+   con sol y una mano ocupada, eso se siente como que la app no respondió, y
+   el reflejo es volver a tocar. Un registro duplicado no es un problema
+   estético.
+
+   El gesto es el mismo en todo lo que se puede apretar: se hunde un poco.
+   Escala, no color, porque el color ya lo usa el estado (seleccionado,
+   cumplido, vencido) y agregarle otro significado lo vuelve ilegible.
+
+   160 ms y `ease-out`: la salida arranca rápido, que es lo que hace que se
+   sienta inmediato. Solo se anima `transform`, que no toca layout ni pintura.
+   Es la única animación que se agrega: un CRM que se abre cuarenta veces por
+   día no quiere transiciones, quiere responder. */
+.btn:active:not(:disabled),
+.icon-btn:active,
+button.kpi:active,
+.stat-link:active,
+.pill:active,
+nav.bottom button:active,
+.rail button.rl-x:active{transform:scale(.97)}
+.btn,.icon-btn,button.kpi,.stat-link,.pill,nav.bottom button,.rail button.rl-x,.cl{
+  transition:transform 160ms cubic-bezier(.23,1,.32,1)}
+/* Quien navega con teclado —los dos de escritorio— tiene que ver dónde está
+   parado. Antes esto existía en un solo elemento de toda la app. */
+.btn:focus-visible,.icon-btn:focus-visible,button.kpi:focus-visible,
+.stat-link:focus-visible,.pill:focus-visible,nav.bottom button:focus-visible,
+.cl:focus-visible{outline:2px solid var(--brand-2);outline-offset:2px}
+/* Y si alguien pidió menos movimiento, el hundido se va y queda el foco. */
+@media (prefers-reduced-motion:reduce){
+  .btn,.icon-btn,button.kpi,.stat-link,.pill,nav.bottom button,.rail button.rl-x,.cl{
+    transition:none}
+  .btn:active:not(:disabled),.icon-btn:active,button.kpi:active,.stat-link:active,
+  .pill:active,nav.bottom button:active,.rail button.rl-x:active,.cl:active{transform:none}
+}
 
 /* ---------- COMPONENTS ---------- */
 /* Una tarjeta es un contenedor, no un objeto que compite por atención: borde
@@ -239,7 +277,7 @@ details.aj-mas > summary{cursor:pointer;list-style:none;font-size:12.5px;font-we
 details.aj-mas > summary::-webkit-details-marker{display:none}
 details.aj-mas > summary:before{content:"›";display:inline-block;transition:transform .16s;font-size:15px;line-height:1}
 details.aj-mas[open] > summary:before{transform:rotate(90deg)}
-details.aj-mas > summary:hover{text-decoration:underline}
+@media (hover:hover) and (pointer:fine){details.aj-mas > summary:hover{text-decoration:underline}}
 details.aj-mas .cuerpo{font-size:12.8px;color:var(--ink-2);line-height:1.58;padding:9px 0 2px;max-width:840px}
 details.aj-mas .cuerpo p{margin:0 0 9px}
 /* El editor de parámetros vive dentro de un desplegable, pero no es letra
@@ -301,7 +339,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .rl-build{display:block;width:100%;margin:8px 0 0;padding:6px 8px;border:0;border-radius:7px;
   background:transparent;color:var(--muted);font:inherit;font-size:10.5px;letter-spacing:.02em;
   text-align:left;cursor:pointer;opacity:.75}
-.rl-build:hover{background:rgba(255,255,255,.07);opacity:1}
+@media (hover:hover) and (pointer:fine){.rl-build:hover{background:rgba(255,255,255,.07);opacity:1}}
 .tl-bbva>.card{border-left:3px solid var(--brand-2)}
 /* El cierre cierra la línea: barra al costado y fondo tenue, para que se
    distinga de un contacto más sin gritar. */
@@ -326,7 +364,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .pill{padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;color:var(--ink-2)}
 .pill.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
 .cl{display:flex;gap:11px;align-items:flex-start;background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px;margin-bottom:9px;cursor:pointer;box-shadow:var(--sh)}
-.cl:active{transform:scale(.995)}
+.cl:active{transform:scale(.99)}
 .cl .body{flex:1;min-width:0}
 .cl .name{font-weight:670;font-size:14.5px;letter-spacing:-.15px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2}
 .cl .sub{font-size:12.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -362,7 +400,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .stat-row .stat .sub{display:none}
 /* Un número que lleva a su lista tiene que verse tocable, no adivinarse. */
 .stat-link{text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%;display:block}
-.stat-link:hover{border-color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){.stat-link:hover{border-color:var(--brand-2)}}
 .stat-link .sub b{color:var(--brand-2);font-weight:640}
 .stat{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px 13px;box-shadow:var(--sh)}
 .stat .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
@@ -408,7 +446,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .huerf{display:flex;flex-wrap:wrap;gap:7px}
 .huerf-x{text-align:left;border:1px solid var(--grid);background:var(--surface-1);border-radius:9px;
   padding:7px 10px;cursor:pointer;font:inherit}
-.huerf-x:hover{border-color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){.huerf-x:hover{border-color:var(--brand-2)}}
 .huerf-x b{display:block;font-size:13px;font-weight:640}
 .huerf-x span{display:block;font-size:11.5px;color:var(--muted)}
 .acc-lista{display:flex;flex-direction:column;gap:8px}
@@ -455,7 +493,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cal-x{min-height:78px;border:1px solid var(--grid);border-radius:9px;background:var(--card);
   padding:5px 5px 4px;display:flex;flex-direction:column;gap:3px;cursor:pointer;
   text-align:left;font:inherit;color:inherit;min-width:0;overflow:hidden}
-.cal-x:hover{border-color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){.cal-x:hover{border-color:var(--brand-2)}}
 .cal-x.vacia{background:var(--plane);border-color:transparent;cursor:default;min-height:0}
 .cal-x.finde{background:var(--plane)}
 .cal-x .n{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink-2)}
@@ -490,7 +528,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cola-x{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 9px;padding:8px;
   border-radius:var(--r-sm);background:none;border:1px solid transparent;cursor:pointer;
   font:inherit;color:inherit;text-align:left;width:100%;align-items:baseline}
-.cola-x:hover{background:var(--plane);border-color:var(--grid)}
+@media (hover:hover) and (pointer:fine){.cola-x:hover{background:var(--plane);border-color:var(--grid)}}
 .cola-x b{font-size:12.8px;font-weight:640;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cola-x > span{font-size:11.5px;color:var(--muted);grid-column:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -504,7 +542,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .cola-ag{flex:none;width:44px;min-height:44px;display:grid;place-items:center;font-size:15px;
   border-radius:var(--r-sm);background:none;border:1px solid transparent;cursor:pointer;
   color:inherit;line-height:1}
-.cola-ag:hover{background:var(--brand-bg,var(--plane));border-color:var(--grid)}
+@media (hover:hover) and (pointer:fine){.cola-ag:hover{background:var(--brand-bg,var(--plane));border-color:var(--grid)}}
 .cola-ag:focus-visible{outline:2px solid var(--brand-2);outline-offset:1px}
 .dia-cab{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
 .dia-cab .btn{text-transform:none;letter-spacing:0}
@@ -613,20 +651,20 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .tbl-ctrl td.alerta{color:var(--crit-ink);font-weight:650}
 .tbl-ctrl .tenue{color:var(--muted);font-weight:500}
 .tbl-ctrl tbody tr{cursor:pointer}
-.tbl-ctrl tbody tr:hover{background:var(--surface-2)}
+@media (hover:hover) and (pointer:fine){.tbl-ctrl tbody tr:hover{background:var(--surface-2)}}
 .tbl-ctrl tbody tr.on{background:var(--info-bg)}
 .tbl-ctrl tbody tr.on td.nom{color:var(--brand-2)}
 .tbl-ctrl tbody tr.vacia td{color:var(--muted)}
 /* La fila del equipo cierra la tabla y no se puede tocar: no es de nadie. */
 .tbl-ctrl tbody tr.total-eq{cursor:default;font-weight:700}
 .tbl-ctrl tbody tr.total-eq td{border-top:2px solid var(--line);border-bottom:0}
-.tbl-ctrl tbody tr.total-eq:hover{background:transparent}
-.tbl-ctrl tbody tr.total-eq:hover td.nom{background:var(--card)}
+@media (hover:hover) and (pointer:fine){.tbl-ctrl tbody tr.total-eq:hover{background:transparent}}
+@media (hover:hover) and (pointer:fine){.tbl-ctrl tbody tr.total-eq:hover td.nom{background:var(--card)}}
 /* Una cifra que abre su lista se ve como lo que es: un enlace. */
 .tbl-ctrl .cifra-link{background:none;border:0;padding:0;font:inherit;color:var(--brand-2);
   cursor:pointer;text-decoration:underline;text-underline-offset:2px;
   font-variant-numeric:tabular-nums}
-.tbl-ctrl .cifra-link:hover{text-decoration-thickness:2px}
+@media (hover:hover) and (pointer:fine){.tbl-ctrl .cifra-link:hover{text-decoration-thickness:2px}}
 .ctrl-pie:empty{display:none}
 .ctrl-pie{display:flex;flex-wrap:wrap;gap:6px;padding:11px 0 6px;border-top:1px solid var(--grid);margin-top:4px}
 /* En celular la tabla se desliza, pero el nombre se queda fijo a la izquierda:
@@ -634,7 +672,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .tbl-ctrl th:first-child,.tbl-ctrl td.nom{position:sticky;left:0;z-index:1;white-space:nowrap;
   background:var(--card);box-shadow:1px 0 0 var(--grid)}
 .tbl-ctrl thead th:first-child{background:var(--card)}
-.tbl-ctrl tbody tr:hover td.nom{background:var(--surface-2)}
+@media (hover:hover) and (pointer:fine){.tbl-ctrl tbody tr:hover td.nom{background:var(--surface-2)}}
 .tbl-ctrl tbody tr.on td.nom{background:var(--info-bg)}
 @media (max-width:640px){ .tbl-ctrl th,.tbl-ctrl td{padding:8px 7px} }
 
@@ -703,7 +741,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .sticky-actions{position:sticky;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--plane) 62%,transparent);padding:12px 0 4px;display:flex;gap:9px;margin-top:14px}
 .sticky-actions .btn{flex:1}
 .drop{border:1.5px dashed var(--line);border-radius:11px;padding:20px 14px;text-align:center;cursor:pointer;background:var(--surface-1)}
-.drop:hover{border-color:var(--brand-2);background:var(--info-bg)}
+@media (hover:hover) and (pointer:fine){.drop:hover{border-color:var(--brand-2);background:var(--info-bg)}}
 .drop .big{font-size:26px;opacity:.55}
 .drop p{margin:6px 0 0;font-size:13px;color:var(--muted)}
 .bar-row{display:grid;grid-template-columns:112px 1fr 46px;align-items:center;gap:9px;margin-bottom:9px;font-size:13px}
@@ -727,7 +765,7 @@ table.tbl tr:last-child td{border-bottom:0}
 .caja-scroll table.tbl td{padding:9px 10px}
 .caja-scroll::-webkit-scrollbar{width:10px;height:10px}
 .caja-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;border:3px solid var(--card)}
-.caja-scroll::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+@media (hover:hover) and (pointer:fine){.caja-scroll::-webkit-scrollbar-thumb:hover{background:var(--muted)}}
 #tblBitacora td:nth-child(4){min-width:120px}
 #tblBitacora td:nth-child(5){min-width:260px}
 @media(min-width:1180px){ .caja-scroll{max-height:min(52vh,520px)} }
@@ -741,10 +779,10 @@ table.tbl tr:last-child td{border-bottom:0}
 .mono{font-variant-numeric:tabular-nums}
 .cifra-link{background:none;border:0;padding:0;font:inherit;color:var(--brand-2);cursor:pointer;
   font-weight:640;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
-.cifra-link:hover{text-decoration-style:solid}
+@media (hover:hover) and (pointer:fine){.cifra-link:hover{text-decoration-style:solid}}
 .g-ley-x{background:none;border:0;padding:2px 0;font:inherit;color:inherit;cursor:pointer;
   display:inline-flex;align-items:center;gap:6px}
-.g-ley-x:hover{color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){.g-ley-x:hover{color:var(--brand-2)}}
 .legend{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-top:11px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:-1px}
 /* ---------- CABECERA DE PANTALLA ---------- */
@@ -800,7 +838,7 @@ table.tbl tr:last-child td{border-bottom:0}
 .seg button{border:0;background:none;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:640;
   color:var(--muted);cursor:pointer;white-space:nowrap;flex:none}
 .seg button.on{background:var(--card);color:var(--brand-2);box-shadow:var(--sh)}
-.seg button:hover:not(.on){color:var(--ink-2)}
+@media (hover:hover) and (pointer:fine){.seg button:hover:not(.on){color:var(--ink-2)}}
 .sel-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .fsel{display:block;min-width:0}
 .fsel span{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.45px;
@@ -864,7 +902,7 @@ table.tbl tr:last-child td{border-bottom:0}
 .pnl-fix{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
 .pnl-fix-x{text-align:left;font:inherit;color:inherit;cursor:pointer;background:var(--surface-2);
   border:1px solid var(--line);border-radius:12px;padding:11px 12px;display:block}
-.pnl-fix-x:hover{border-color:var(--brand-2);background:var(--info-bg)}
+@media (hover:hover) and (pointer:fine){.pnl-fix-x:hover{border-color:var(--brand-2);background:var(--info-bg)}}
 .pnl-fix-x .n{display:block;font-size:22px;font-weight:730;letter-spacing:-.6px;line-height:1.1}
 .pnl-fix-x .t{display:block;font-size:13px;font-weight:650;margin-top:2px}
 .pnl-fix-x .d{display:block;font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.4}
@@ -1301,7 +1339,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
     display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;width:100%;
     background:none;border:0;color:inherit;font-size:13.5px;font-weight:500;cursor:pointer;text-align:left;
   }
-  .rail button.rl-x:hover{background:rgba(255,255,255,.07)}
+  @media (hover:hover) and (pointer:fine){.rail button.rl-x:hover{background:rgba(255,255,255,.07)}}
   .rail button.rl-x .ic{font-size:15px;line-height:1;width:18px;flex:none;opacity:.85;text-align:center}
   .rail button.rl-x.on{background:rgba(255,255,255,.13);color:#fff}
   .rail button.rl-x.on .ic{opacity:1}
@@ -1352,7 +1390,7 @@ details.explica.suelta{border-top:0;margin:-3px 3px 13px;padding-top:0}
 .kpi{background:var(--card);border:1px solid var(--grid);border-radius:var(--r);
   padding:13px 14px;text-align:left;display:block;width:100%}
 button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inherit}
-button.kpi:hover{border-color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){button.kpi:hover{border-color:var(--brand-2)}}
 .kpi .lbl{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .kpi .val{font-size:26px;font-weight:700;margin-top:4px;line-height:1;
   font-variant-numeric:tabular-nums;letter-spacing:-.5px}
@@ -1402,7 +1440,7 @@ button.kpi:hover{border-color:var(--brand-2)}
 .pe-det-h b{font-size:15px;letter-spacing:-.2px}
 .pe-det-h .x{border:0;background:none;font:inherit;font-size:17px;line-height:1;
   color:var(--muted);cursor:pointer;padding:4px 6px;border-radius:8px}
-.pe-det-h .x:hover{background:var(--plane);color:var(--ink)}
+@media (hover:hover) and (pointer:fine){.pe-det-h .x:hover{background:var(--plane);color:var(--ink)}}
 .pe-det-c{overflow-y:auto;overscroll-behavior:contain;padding:16px 18px 22px;flex:1;
   min-height:0;-webkit-overflow-scrolling:touch}
 .pe-acc{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -1470,7 +1508,7 @@ button.kpi:hover{border-color:var(--brand-2)}
   border:1px solid var(--grid);border-radius:999px;background:var(--card);
   font:inherit;font-size:12px;color:var(--ink-2);cursor:pointer;
   transition:border-color .12s,background .12s}
-.cf-p:hover{border-color:var(--brand-2)}
+@media (hover:hover) and (pointer:fine){.cf-p:hover{border-color:var(--brand-2)}}
 .cf-p .n{font-size:11.5px;font-weight:750;color:var(--ink);
   font-variant-numeric:tabular-nums}
 .cf-p.on{background:var(--brand-2);border-color:var(--brand-2);color:#fff}
@@ -1524,7 +1562,7 @@ button.kpi:hover{border-color:var(--brand-2)}
   border:0;border-bottom:1px solid var(--grid);background:none;font:inherit;
   color:inherit;cursor:pointer}
 .pe-f:last-child{border-bottom:0}
-.pe-f:hover{background:var(--plane)}
+@media (hover:hover) and (pointer:fine){.pe-f:hover{background:var(--plane)}}
 .pe-f-n{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap}
 .pe-f-d{font-size:11px;color:var(--muted);white-space:nowrap}
@@ -1651,7 +1689,7 @@ table.tbl-rz tr.total td{border-top:2px solid var(--line);font-weight:700;color:
   background:var(--serious-bg);border:1px solid var(--serious);border-radius:var(--r);
   padding:14px 18px;margin:0 0 14px;cursor:pointer;font:inherit;color:var(--ink);
   transition:box-shadow .12s}
-.alerta-gest:hover{box-shadow:var(--sh)}
+@media (hover:hover) and (pointer:fine){.alerta-gest:hover{box-shadow:var(--sh)}}
 .alerta-gest .ag-n{font-size:34px;font-weight:800;line-height:1;color:var(--serious-ink);
   font-variant-numeric:tabular-nums;flex:none}
 .alerta-gest .ag-t{flex:1;min-width:0}
@@ -1683,7 +1721,7 @@ table.tbl-act th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-tran
   color:var(--muted);text-align:left;padding:0 14px 8px 0;white-space:nowrap}
 table.tbl-act td{padding:10px 14px 10px 0;border-top:1px solid var(--grid);vertical-align:top}
 table.tbl-act tr.act-f{cursor:pointer}
-table.tbl-act tr.act-f:hover td{background:var(--surface-2)}
+@media (hover:hover) and (pointer:fine){table.tbl-act tr.act-f:hover td{background:var(--surface-2)}}
 table.tbl-act tr.act-f:focus{outline:none}
 table.tbl-act tr.act-f:focus td{background:var(--brand-bg);box-shadow:inset 0 0 0 1px var(--brand-2)}
 table.tbl-act tr.act-dia td{padding:16px 0 6px;border-top:none}
@@ -1745,7 +1783,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 .aten-x{display:flex;gap:10px;align-items:flex-start;padding:9px 8px;border-radius:var(--r-sm);
   background:none;border:1px solid transparent;cursor:pointer;font:inherit;color:inherit;
   text-align:left;width:100%}
-.aten-x:hover{background:var(--plane);border-color:var(--grid)}
+@media (hover:hover) and (pointer:fine){.aten-x:hover{background:var(--plane);border-color:var(--grid)}}
 .aten-x .pip{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
 .aten-x .pip.crit{background:var(--crit)}
 .aten-x .pip.warn{background:var(--warn)}
@@ -1869,7 +1907,7 @@ table.tbl-tab tr.total td{border-top:2px solid var(--line);font-weight:700}
 .lf-est.ec{color:var(--ok-ink)} .lf-est.ep{color:var(--warn-tx)} .lf-est.en{color:var(--muted);font-weight:500}
 .lf-tab td{text-align:right;font-variant-numeric:tabular-nums;vertical-align:top;cursor:default}
 .lf-tab td[data-cel]{cursor:pointer}
-.lf-tab td[data-cel]:hover{background:var(--surface-2)}
+@media (hover:hover) and (pointer:fine){.lf-tab td[data-cel]:hover{background:var(--surface-2)}}
 .lf-nom{text-align:left!important;font-weight:600;cursor:default!important}
 .lf-vac{color:var(--muted)}
 .lf-parc{background:var(--warn-bg)}
@@ -1923,7 +1961,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"04/09/2026 18:05", huella:"007a3d" };
+const BUILD = { sello:"06/09/2026 22:24", huella:"796c24" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
