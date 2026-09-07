@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 09:30", huella:"9dc405" };
+const BUILD = { sello:"07/09/2026 09:46", huella:"f96f02" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22082,6 +22082,15 @@ function dibujoFicha(doc){
   const W = 210, m = 12;
   const CORAL = [248,111,53], VERDE = [11,188,150], GRIS = [160,168,188],
         AZUL2 = [1,17,162], HUESO = [247,248,251];
+  /* El verde de marca es para BLOQUES, no para letra chica. Medido sobre la
+     tarjeta blanca, #0BBC96 a 6,2 pt da 2,43:1 —peor todavía que el coral que
+     reemplaza, que da 2,87:1— y el mínimo para texto de ese tamaño es 4,5:1.
+     Esta hoja la lee el jefe de Oli y el CEO, muchas veces impresa.
+
+     VERDE_TX es el mismo verde de la familia en su versión legible: 7,48:1.
+     No es un color nuevo: es `--ok-ink`, el que el CRM ya usa en pantalla
+     justo para esto, texto verde que se tiene que leer. */
+  const VERDE_TX = [12, 97, 68];
 
   const sanear = s => String(s)
     .replace(/[→⇒➜]/g, "a").replace(/[—–]/g, "-")
@@ -22140,7 +22149,18 @@ function dibujoFicha(doc){
     filas.forEach((t, i) => {
       const x = m + i * (anT + 2.4);
       borde(x, y, anT, alT, 1.6);
-      caja(x + 0.9, y - 0.3, anT - 1.8, 1.1, t.neutro ? GRIS : (t.ok ? VERDE : CORAL));
+      /* Tres lecturas, tres colores, y cada uno dice UNA cosa:
+           · coral  — falta y el plazo es corto: hay que moverse
+           · verde  — falta pero se está acumulando hacia una fecha lejana,
+                      o ya se cumplió: es avance
+           · gris   — informativo, no puntúa todavía
+         José, 07/09: «que dé la perspectiva no de alerta sino de avance». En
+         la hoja de campaña cuatro de las cinco metas cierran el 18/12; pintar
+         de rojo lo que tiene tres meses por delante es decirle al CEO que
+         vamos mal cuando vamos en camino. */
+      const acento = t.neutro ? GRIS : (t.ok || t.avance ? VERDE : CORAL);
+      const tinta  = t.neutro ? GRIS : (t.ok || t.avance ? VERDE_TX : CORAL);
+      caja(x + 0.9, y - 0.3, anT - 1.8, 1.1, acento);
       fuente(6.1, false); doc.setTextColor(...PX.gris);
       doc.splitTextToSize(sanear(String(t.rot).toUpperCase()), anT - 4).slice(0,2)
          .forEach((l, j) => doc.text(l, x + 2, y + 4.6 + j*2.6));
@@ -22150,8 +22170,7 @@ function dibujoFicha(doc){
       doc.splitTextToSize(sanear(t.pie), anT - 4).slice(0,2)
          .forEach((l, j) => doc.text(l, x + 2, y + 17.4 + j*2.5));
       const yF = t.plazo ? y + alT - 5.4 : y + alT - 1.9;
-      txt(t.falta, x + 2, yF,
-          { size:6.2, bold:true, color: t.neutro ? GRIS : (t.ok ? VERDE : CORAL) });
+      txt(t.falta, x + 2, yF, { size:6.2, bold:true, color: tinta });
       /* El plazo va en gris incluso en la tarjeta urgente: el color ya dice
          si se llegó o no; la fecha solo dice hasta cuándo. Dos significados
          en un mismo color es lo que hacía que las cinco parecieran vencidas. */
@@ -22261,7 +22280,7 @@ function fichaProyecto(doc, D){
   const TARJETAS = [
     { rot:"Comercios gestionados", val:miles(D.embudo[1].n), meta:"de " + miles(D.portafolio),
       pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}`,
-      plazo: alProy },
+      plazo: alProy, avance:true },
     { rot:"Visitas del periodo", val:miles(D.objetivos[1].n), meta:"de " + miles(D.metaVis),
       pie:"comercios distintos visitados",
       falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}`,
@@ -22269,11 +22288,11 @@ function fichaProyecto(doc, D){
     { rot:"Retenciones", val:miles(D.embudo[4].n), meta:"de " + miles(D.metaRet),
       pie:"la meta son 20 p.p. del portafolio",
       falta:`faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}`,
-      plazo: alProy },
+      plazo: alProy, avance:true },
     { rot:"Afiliaciones nuevas", val:miles(D.objetivos[2].n), meta:"de " + miles(D.metaVen),
       pie:"7 por ejecutivo al mes",
       falta:`faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}`,
-      plazo: alProy },
+      plazo: alProy, avance:true },
     { rot:"Facturación", val: F.crec === null ? "-" : pctT(F.crec, 2), meta:`de +${F.metaPct}%`,
       pie: F.crec === null ? "sin monto cargado" : `${mm2(F.base)} a ${mm2(F.cierre)}`,
       falta:`dato de ${F.mesDelDato}`, plazo: alProy, neutro:true }
