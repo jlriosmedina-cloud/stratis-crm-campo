@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 09:46", huella:"f96f02" };
+const BUILD = { sello:"07/09/2026 10:10", huella:"5dedc4" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22182,7 +22182,18 @@ function dibujoFicha(doc){
   /* ---- El pentágono. Cada eje contra SU meta: es lo único que pone 841
      comercios y 7 ventas en la misma escala. El valor va escrito en el
      vértice, así la forma da el vistazo y el número da el dato. */
-  const pentagono = (cx, cy, r, ejes) => {
+  /* El pentágono acepta su tono. Por defecto coral, que es el acento del
+     documento; la hoja de campaña le pasa verde porque repite exactamente los
+     mismos cinco campos de las tarjetas de arriba y dejarlo coral convertía al
+     pentágono en la única alarma de la página. La ficha del ejecutivo lo
+     conserva en coral: ahí las cinco metas SÍ vencen el 18/09 y el aviso es
+     cierto.
+
+     `tinta` va aparte del relleno porque el verde de marca a 7,2 pt no se lee
+     —2,43:1 sobre blanco—; el relleno es un bloque y no tiene ese problema. */
+  const pentagono = (cx, cy, r, ejes, tono, tinta, sombra) => {
+    const TONO = tono || CORAL, TINTA = tinta || tono || CORAL;
+    const SOMBRA = sombra || [250, 214, 196];
     const n = ejes.length;
     const ang = i => -Math.PI/2 + 2*Math.PI*i/n;
     const pt = (i, f) => [cx + Math.cos(ang(i))*r*f, cy + Math.sin(ang(i))*r*f];
@@ -22198,10 +22209,10 @@ function dibujoFicha(doc){
     for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, 1);
       doc.setDrawColor(221,226,236); doc.setLineWidth(0.15); doc.line(cx, cy, x2, y2); }
     const logro = ejes.map(o => Math.min(1, o.meta ? o.n/o.meta : 0));
-    doc.setFillColor(250, 214, 196);
-    poli(i => Math.max(0.012, logro[i]), CORAL, 0.7, true);
+    doc.setFillColor(...SOMBRA);
+    poli(i => Math.max(0.012, logro[i]), TONO, 0.7, true);
     for (let i = 0; i < n; i++){ const [x2,y2] = pt(i, Math.max(0.012, logro[i]));
-      doc.setFillColor(...CORAL); doc.circle(x2, y2, 0.9, "F"); }
+      doc.setFillColor(...TONO); doc.circle(x2, y2, 0.9, "F"); }
     ejes.forEach((o, i) => {
       const c = Math.cos(ang(i)), sn = Math.sin(ang(i));
       const [x2, y2] = pt(i, 1.52);
@@ -22209,7 +22220,7 @@ function dibujoFicha(doc){
       const dx = c > 0.35 ? 1.4 : c < -0.35 ? -1.4 : 0;
       const dy = sn < -0.5 ? -2.6 : (sn > 0.5 ? 3.4 : 0);
       txt(o.rot, x2 + dx, y2 + dy, { size:6, bold:true, color:PX.navy, align:al });
-      txt(o.txt, x2 + dx, y2 + dy + 3.5, { size:7.2, bold:true, color:CORAL, align:al });
+      txt(o.txt, x2 + dx, y2 + dy + 3.5, { size:7.2, bold:true, color:TINTA, align:al });
       /* Sin dato cargado no se dibuja un 0%: decir «0% de la meta» donde lo
          que pasa es que el dato no llegó es afirmar un incumplimiento que
          nadie midió. */
@@ -22250,7 +22261,7 @@ function dibujoFicha(doc){
     txt(der, W - m, 287, { size:6.2, color:GRIS, align:"right" });
   };
 
-  return { W, m, CORAL, VERDE, GRIS, AZUL2, HUESO, sanear, fuente, txt, ancho,
+  return { W, m, CORAL, VERDE, VERDE_TX, GRIS, AZUL2, HUESO, sanear, fuente, txt, ancho,
            caja, borde, pctT, mm2, miles, titulo, cabecera, tarjetas, pentagono,
            semanas, pie };
 }
@@ -22284,7 +22295,12 @@ function fichaProyecto(doc, D){
     { rot:"Visitas del periodo", val:miles(D.objetivos[1].n), meta:"de " + miles(D.metaVis),
       pie:"comercios distintos visitados",
       falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}`,
-      plazo: alPer },
+      /* Verde también, aunque el plazo sea corto. José, 07/09: «esto va para
+         el CEO y no queremos que se alarme porque el proyecto tiene poco
+         tiempo en sí». La distinción de horizontes ya la hace la FECHA que va
+         debajo de cada cifra, que es lo que pedía Gabriel; el color no tiene
+         que decirla otra vez en tono de aviso. */
+      plazo: alPer, avance:true },
     { rot:"Retenciones", val:miles(D.embudo[4].n), meta:"de " + miles(D.metaRet),
       pie:"la meta son 20 p.p. del portafolio",
       falta:`faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}`,
@@ -22321,7 +22337,8 @@ function fichaProyecto(doc, D){
 
   const yBloque = y;
   titulo("Dónde está el proyecto", y, m, 82);
-  const yPent = X.pentagono(m + 41, y + 36, 16, D.objetivos);
+  const yPent = X.pentagono(m + 41, y + 36, 16, D.objetivos,
+    X.VERDE, X.VERDE_TX, [198, 240, 228]);
 
   /* El embudo, a la derecha. Cada escalón contra el portafolio, que es el
      único denominador que no se mueve. */
