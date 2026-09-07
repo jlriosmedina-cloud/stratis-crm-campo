@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 08:36", huella:"ca06ac" };
+const BUILD = { sello:"07/09/2026 09:30", huella:"9dc405" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22004,8 +22004,26 @@ function datosFichaProyecto(){
   const metaVen = (M.ventas_mes || 7) * equipo * (M.total || 5);
   const metaRet = Math.round(cart.length * (B.metas.reactivacion_pp || 20) / 100);
 
+  /* Los dos horizontes de la hoja, y de dónde sale cada uno.
+   *
+   * Gabriel, 07/09, mirando la fila de tarjetas: «el texto anaranjado al final
+   * de cada una de estas cajas mezcla dos horizontes temporales que si no
+   * quedan claros pueden asustarlos». Lo va a leer el jefe de Oli y el CEO,
+   * que no tienen contexto del proyecto. Cinco «faltan» en naranja debajo de
+   * una cabecera que anuncia el periodo se leen todos como vencidos el 18/09,
+   * y tres de ellos tienen hasta el 18 de diciembre.
+   *
+   * Las fechas se DERIVAN. En este proyecto ya hubo tres frases escritas a
+   * mano que se volvieron falsas solas —la banda del deck, «más de diez veces
+   * las retenciones», «cuatro distritos pegados»—: si mañana se mueve el
+   * cierre, esto se mueve con él. */
+  const plazoProyecto = PROYECTO.fin;   // el proyecto entero
+  const plazoPeriodo  = v.fin;          // el periodo que corre
+
   return {
     hoy, periodo:p, ventana:v, mes:M.i, total:M.total, equipo,
+    plazoProyecto, plazoPeriodo,
+    periodosRestantes: Math.max(0, (M.total || 5) - (M.i || 1)),
     portafolio: cart.length,
     embudo: [
       { rot:"Portafolio asignado", n:cart.length, col:PX.navy,
@@ -22114,7 +22132,11 @@ function dibujoFicha(doc){
      Gabriel, 04/09. El número que la persona busca primero es el suyo, no el
      techo. */
   const tarjetas = (y, filas) => {
-    const anT = (W - 2*m - (filas.length-1)*2.4) / filas.length, alT = 24;
+    /* La tarjeta creció 3,5 mm para que el plazo entre en su propia línea.
+       Pegado al «faltan» con un punto medio se leía como parte de la cifra;
+       debajo y en gris se lee como lo que es: hasta cuándo hay. */
+    const anT = (W - 2*m - (filas.length-1)*2.4) / filas.length;
+    const alT = filas.some(t => t.plazo) ? 27.5 : 24;
     filas.forEach((t, i) => {
       const x = m + i * (anT + 2.4);
       borde(x, y, anT, alT, 1.6);
@@ -22127,8 +22149,13 @@ function dibujoFicha(doc){
       fuente(5.9, false); doc.setTextColor(...PX.gris);
       doc.splitTextToSize(sanear(t.pie), anT - 4).slice(0,2)
          .forEach((l, j) => doc.text(l, x + 2, y + 17.4 + j*2.5));
-      txt(t.falta, x + 2, y + alT - 1.9,
+      const yF = t.plazo ? y + alT - 5.4 : y + alT - 1.9;
+      txt(t.falta, x + 2, yF,
           { size:6.2, bold:true, color: t.neutro ? GRIS : (t.ok ? VERDE : CORAL) });
+      /* El plazo va en gris incluso en la tarjeta urgente: el color ya dice
+         si se llegó o no; la fecha solo dice hasta cuándo. Dos significados
+         en un mismo color es lo que hacía que las cinco parecieran vencidas. */
+      if (t.plazo) txt(t.plazo, x + 2, y + alT - 1.9, { size:5.8, color:GRIS });
     });
     return y + alT;
   };
@@ -22225,22 +22252,53 @@ function fichaProyecto(doc, D){
 
   let y = 50;
   titulo("Avances del proyecto", y); y += 3.4;
-  y = X.tarjetas(y, [
+  /* Cada tarjeta dice hasta cuándo tiene para completar lo que le falta. Es
+     lo único que separa «vamos mal» de «vamos en camino», y sin eso las cinco
+     cifras naranjas se leen con la fecha de la cabecera, que es la del
+     periodo. Ver la nota en `datosFichaProyecto`. */
+  const dd = f => fmtFecha(f).slice(0, 5);          // 18/12
+  const alProy = `al ${dd(D.plazoProyecto)}`, alPer = `al ${dd(D.plazoPeriodo)}`;
+  const TARJETAS = [
     { rot:"Comercios gestionados", val:miles(D.embudo[1].n), meta:"de " + miles(D.portafolio),
-      pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}` },
+      pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}`,
+      plazo: alProy },
     { rot:"Visitas del periodo", val:miles(D.objetivos[1].n), meta:"de " + miles(D.metaVis),
       pie:"comercios distintos visitados",
-      falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}` },
+      falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}`,
+      plazo: alPer },
     { rot:"Retenciones", val:miles(D.embudo[4].n), meta:"de " + miles(D.metaRet),
       pie:"la meta son 20 p.p. del portafolio",
-      falta:`faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}` },
+      falta:`faltan ${miles(Math.max(0, D.metaRet - D.embudo[4].n))}`,
+      plazo: alProy },
     { rot:"Afiliaciones nuevas", val:miles(D.objetivos[2].n), meta:"de " + miles(D.metaVen),
       pie:"7 por ejecutivo al mes",
-      falta:`faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}` },
+      falta:`faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}`,
+      plazo: alProy },
     { rot:"Facturación", val: F.crec === null ? "-" : pctT(F.crec, 2), meta:`de +${F.metaPct}%`,
       pie: F.crec === null ? "sin monto cargado" : `${mm2(F.base)} a ${mm2(F.cierre)}`,
-      falta:`cierre de ${F.mesDelDato}`, neutro:true }
-  ]) + 7;
+      falta:`dato de ${F.mesDelDato}`, plazo: alProy, neutro:true }
+  ];
+  y = X.tarjetas(y, TARJETAS) + 4;
+
+  /* Y la frase que lo dice una vez, para quien mira la fila entera.
+     Los conteos y los nombres se CUENTAN de la fila que se acaba de dibujar.
+     Escribir «cuatro de las cinco» a mano es el error que ya se coló tres
+     veces en este proyecto: el día que se agregue o se quite una tarjeta, la
+     frase queda falsa y nadie se entera. */
+  const delPer = TARJETAS.filter(t => t.plazo === alPer);
+  const delProy = TARJETAS.filter(t => t.plazo === alProy);
+  const lista = n => n.map(t => `«${t.rot.toLowerCase()}»`)
+    .reduce((a, s, i, ar) => a + (i === 0 ? "" : i === ar.length - 1 ? " y " : ", ") + s, "");
+  if (delPer.length && delProy.length){
+    txt(sanear(
+      `${delProy.length} de las ${TARJETAS.length} metas son acumuladas del proyecto y cierran el `
+      + `${fmtFecha(D.plazoProyecto)}${D.periodosRestantes
+          ? `, con ${D.periodosRestantes} ${D.periodosRestantes === 1 ? "periodo" : "periodos"} por delante` : ""}. `
+      + `${delPer.length === 1 ? "Solo" : "Las de"} ${lista(delPer)} se `
+      + `${delPer.length === 1 ? "completa" : "completan"} dentro de este periodo, al ${fmtFecha(D.plazoPeriodo)}.`),
+      m, y, { size:6.4, color:GRIS });
+    y += 6;
+  }
 
   const yBloque = y;
   titulo("Dónde está el proyecto", y, m, 82);
