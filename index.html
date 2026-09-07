@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"06/09/2026 22:40", huella:"85b6d3" };
+const BUILD = { sello:"07/09/2026 08:36", huella:"ca06ac" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -21960,6 +21960,17 @@ function datosFichaProyecto(){
     ret: retEn(s.desde, s.hasta),
     ven: venEn(s.desde, s.hasta)
   }));
+  /* La misma regla que en la ficha del ejecutivo: una semana en curso con uno
+     o dos días trabajados no se dibuja. Descargada un lunes, esta hoja ponía
+     una barra en cero al lado de semanas completas, y la lectura era que el
+     proyecto se había caído. Ver la nota larga en `datosFichaEjecutivo`. */
+  const diasSemP = (() => { const x = semanas[semanas.length-1]; let n = 0;
+    for (let d = x.desde; d <= x.hasta; d = mas(d, 1)) if (!diaNoTrabajado(d)) n++;
+    return Math.max(1, n); })();
+  const abiertaP    = serie.length && !serie[serie.length-1].cerrada ? serie[serie.length-1] : null;
+  const semanaUtil  = !abiertaP || diasSemP >= 3;
+  const serieVisible = semanaUtil ? serie : serie.filter(x => x.cerrada);
+  const ultCerrada  = [...serie].reverse().find(x => x.cerrada) || null;
 
   /* La facturación del equipo entero. Se suma la base y se suma el cierre; el
      porcentaje sale de los totales y no del promedio de los porcentajes, que
@@ -22025,7 +22036,7 @@ function datosFichaProyecto(){
             metaPct:B.metas.facturacion_pct || 15,
             metaMonto: fBase * (1 + (B.metas.facturacion_pct || 15)/100),
             mesDelDato: mesDelDatoFact(p), arrancaEn: mesArranqueFact(B) },
-    serie, distritos,
+    serie, serieVisible, semanaUtil, ultCerrada, distritos,
     nDistritos: distritos.length,
     top7: distritos.slice(0,7).reduce((n,x) => n + x.total, 0),
     enNegociacion: distritos.reduce((n,x) => n + x.nego, 0),
@@ -22207,7 +22218,9 @@ function fichaProyecto(doc, D){
   X.cabecera("Avance de la campaña", repProyecto().cliente || "Campaña BBVA Adquirencia",
     [`Retención y reactivación de portafolio · ${D.equipo} ejecutivos comerciales en campo`],
     [[`Periodo ${D.mes} de ${D.total}`, `${repFecha(D.ventana.ini)} - ${repFecha(D.ventana.fin)}`],
-     ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`],
+     (D.semanaUtil || !D.ultCerrada)
+       ? ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`]
+       : ["Semana cerrada", `${repFecha(D.ultCerrada.desde)} - ${repFecha(D.ultCerrada.hasta)}`],
      ["Portafolio asignado", `${miles(D.portafolio)} comercios`]]);
 
   let y = 50;
@@ -22253,7 +22266,7 @@ function fichaProyecto(doc, D){
   y = Math.max(yPent, yE) + 2;
 
   titulo("El desarrollo, semana a semana · el corte es el domingo", y); y += 3.4;
-  y = X.semanas(y, D.serie, [["Comercios trabajados","trabajados",AZUL2],
+  y = X.semanas(y, D.serieVisible, [["Comercios trabajados","trabajados",AZUL2],
     ["Comercios visitados","visitas",CORAL], ["Retenciones","ret",VERDE],
     ["Afiliaciones nuevas","ven",[59,67,251]]]) + 6;
 
@@ -22404,6 +22417,30 @@ function datosFichaEjecutivo(correo){
     for (let d = s.desde; d <= s.hasta; d = mas(d, 1)) if (!diaNoTrabajado(d)) n++;
     return Math.max(1, n); })();
 
+  /* Una semana en curso con uno o dos días trabajados no es una semana: es un
+     momento.
+
+     José descargó las cuatro fichas el lunes 07/09 para mandarlas, que es
+     exactamente cuando la semana nueva tiene UN día. Salieron con una cuarta
+     barra en cero al lado de tres semanas completas —y a los cuatro les había
+     ido mejor en visitas la semana anterior que en ninguna otra del periodo—,
+     y con esta frase debajo: «Van 0 visitas en los 1 días de esta semana. A
+     ese paso el periodo cerraría en 13 de 40». Una proyección hecha un lunes a
+     las ocho de la mañana, dicha a alguien que acababa de tener su mejor
+     semana.
+
+     Es el mismo freno de proyección que ya rige en el deck y en el libro de
+     facturación: medio periodo contra un periodo entero se lee como una caída
+     que no existe. Acá el umbral son tres días trabajados, que es más de la
+     mitad de una semana de campo. Por debajo, la ficha habla de la última
+     semana CERRADA y no proyecta nada. */
+  const MIN_DIAS_SEMANA = 3;
+  const abierta   = serie.length && !serie[serie.length-1].cerrada ? serie[serie.length-1] : null;
+  const semanaUtil = !abierta || diasSem >= MIN_DIAS_SEMANA;
+  /* La que se dibuja: si la abierta no dice nada, no se dibuja. */
+  const serieVisible = semanaUtil ? serie : serie.filter(s => s.cerrada);
+  const ultCerrada = [...serie].reverse().find(s => s.cerrada) || null;
+
   /* El mapa de su cartera. Lo que decide el orden es lo que le falta por
      visitar, que es el cuello del periodo. */
   const porD = {};
@@ -22443,7 +22480,8 @@ function datosFichaEjecutivo(correo){
       const s = new Set(gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
         .map(r => String(r.Customer_id)).filter(id => idsCart.has(id)));
       return s.size; })(),
-    serie, distritos, habiles, diasSem,
+    serie, serieVisible, semanaUtil, ultCerrada, minDiasSemana:MIN_DIAS_SEMANA,
+    distritos, habiles, diasSem,
     sinVisitaTotal: distritos.reduce((n, x) => n + x.sinVisita, 0),
     enNegociacion: distritos.reduce((n, x) => n + x.nego, 0),
     objetivos: [
@@ -22466,8 +22504,14 @@ function fichaEjecutivo(doc, D){
 
   X.cabecera("Ficha semanal del ejecutivo", D.nombre,
     [D.puesto, D.correo],
+    /* Si la semana en curso todavía no dice nada, la cabecera muestra la
+       última CERRADA: es de lo que habla la hoja y es lo que el ejecutivo
+       necesita ver arriba. Poner «semana en curso 07/09 - 07/09» era anunciar
+       un rango de un día. */
     [[`Periodo ${D.mes} de ${D.total}`, `${repFecha(D.ventana.ini)} - ${repFecha(D.ventana.fin)}`],
-     ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`],
+     (D.semanaUtil || !D.ultCerrada)
+       ? ["Semana en curso", `${repFecha(D.serie[D.serie.length-1].desde)} - ${repFecha(D.hoy)}`]
+       : ["Semana cerrada", `${repFecha(D.ultCerrada.desde)} - ${repFecha(D.ultCerrada.hasta)}`],
      ["Cartera asignada", `${miles(D.cartera)} comercios`]]);
 
   let y = 50;
@@ -22521,7 +22565,7 @@ function fichaEjecutivo(doc, D){
   y = Math.max(yPent, yB) + 2;
 
   titulo("El desarrollo, semana a semana · el corte es el domingo", y); y += 3.4;
-  y = X.semanas(y, D.serie, [["Gestiones al comercio","gestiones",AZUL2],
+  y = X.semanas(y, D.serieVisible, [["Gestiones al comercio","gestiones",AZUL2],
     ["Visitas efectivas","visitas",CORAL], ["Retenciones","ret",VERDE],
     ["Ventas","ven",[59,67,251]]]) + 6;
 
@@ -22535,6 +22579,20 @@ function fichaEjecutivo(doc, D){
   const proy = D.visitas.n + ritmo * D.habiles;
   const pide = D.habiles ? Math.max(0, D.visitas.meta - D.visitas.n) / D.habiles : 0;
   const un = v => (Math.round(v*10)/10).toString().replace(".", ",");
+  /* Lo que sí se puede decir con la semana recién empezada: qué hizo la última
+     cerrada y cuánto pide lo que queda. Las dos cifras salen de datos
+     completos. Lo que NO se puede es proyectar el periodo desde un lunes por
+     la mañana. */
+  const frasePaso = (D.semanaUtil || !D.ultCerrada)
+    ? `Van ${ult.visitas} visitas en los ${D.diasSem} días de esta semana. A ese paso el periodo `
+      + `cerraría en ${Math.round(proy)} de ${D.visitas.meta}. Quedan ${D.habiles} días hábiles, `
+      + `así que serían unas ${un(pide)} al día para alcanzar el mínimo.`
+    : `La semana pasada cerraste con ${D.ultCerrada.visitas} `
+      + `${D.ultCerrada.visitas === 1 ? "visita efectiva" : "visitas efectivas"} y `
+      + `${D.ultCerrada.gestiones} ${D.ultCerrada.gestiones === 1 ? "gestión" : "gestiones"}. `
+      + `La semana que arranca todavía no tiene días suficientes para leerla. `
+      + `Quedan ${D.habiles} días hábiles del periodo: para llegar al mínimo de `
+      + `${D.visitas.meta} visitas serían unas ${un(pide)} al día.`;
 
   caja(m, y, anI, 27, HUESO, 1.2);
   caja(m, y, 1.1, 27, CORAL);
@@ -22543,9 +22601,7 @@ function fichaEjecutivo(doc, D){
     + `${miles(D.cobertura.n - D.porContactoEfectivo)} entraron por el correo al ejecutivo del banco y `
     + `${miles(D.porContactoEfectivo)} por contacto directo con el comercio. Para la cobertura las dos `
     + `vías valen igual. La visita, el cierre y la retención salen de la segunda.`,
-    `Van ${ult.visitas} visitas en los ${D.diasSem} días de esta semana. A ese paso el periodo cerraría `
-    + `en ${Math.round(proy)} de ${D.visitas.meta}. Quedan ${D.habiles} días hábiles, así que serían `
-    + `unas ${un(pide)} al día para alcanzar el mínimo.`
+    frasePaso
   ];
   let yT = y + 4.6;
   parr.forEach(p2 => { fuente(7.1, false); doc.setTextColor(...PX.gris);
