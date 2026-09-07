@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 10:10", huella:"5dedc4" };
+const BUILD = { sello:"07/09/2026 10:24", huella:"03ad50" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -22286,8 +22286,14 @@ function fichaProyecto(doc, D){
      lo único que separa «vamos mal» de «vamos en camino», y sin eso las cinco
      cifras naranjas se leen con la fecha de la cabecera, que es la del
      periodo. Ver la nota en `datosFichaProyecto`. */
-  const dd = f => fmtFecha(f).slice(0, 5);          // 18/12
-  const alProy = `al ${dd(D.plazoProyecto)}`, alPer = `al ${dd(D.plazoPeriodo)}`;
+  /* Gabriel, 07/09: «para que no quede ninguna duda, le pondría Plazo de
+     cumplimiento: 18 sep». El rótulo completo, y el mes en letras: «18/09» y
+     «09/18» se escriben igual de fácil, y quien lee esto puede estar
+     acostumbrado al orden americano. El mes sale de MESES_ES, así que no hay
+     una segunda lista de meses que mantener. */
+  const plazoTxt = iso => { const [, m2, d2] = String(iso).split("-");
+    return `Plazo de cumplimiento: ${Number(d2)} ${MESES_ES[Number(m2) - 1].slice(0, 3)}`; };
+  const alProy = plazoTxt(D.plazoProyecto), alPer = plazoTxt(D.plazoPeriodo);
   const TARJETAS = [
     { rot:"Comercios gestionados", val:miles(D.embudo[1].n), meta:"de " + miles(D.portafolio),
       pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}`,
