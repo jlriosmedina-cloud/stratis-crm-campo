@@ -1558,6 +1558,10 @@ button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inheri
 .pe-k .lbl{font-size:9.5px;letter-spacing:.05em}
 .pe-k .val{font-size:22px;margin-top:3px}
 .pe-k .sub{font-size:11px;margin-top:4px;min-height:0;line-height:1.35}
+/* La línea que dice cuál de las dos cifras manda. Va en tinta y en bloque
+   propio para que se lea como una afirmación y no como el tercer inciso de
+   una frase gris —que fue justo la forma en que no se leyó. */
+.pe-k .sub .pe-manda{display:block;color:var(--ink);font-weight:650;margin-bottom:1px}
 
 .pe-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:11px;min-height:0}
 .pe-cols > *{min-width:0}
@@ -1590,9 +1594,16 @@ button.kpi{border:1px solid var(--grid);cursor:pointer;font:inherit;color:inheri
 
 @media(min-width:760px){
   .pe-top{flex-direction:row;align-items:flex-end;justify-content:space-between}
-  .pe-kpis{grid-template-columns:repeat(6,1fr)}
+  /* Siete tarjetas desde el 07/09. En la tableta van 4 + 3: en la primera
+     fila caben las dos de gestión juntas, que es la comparación que importa.
+     A partir de 1080 px entran las siete en una sola fila y el panel sigue
+     sin desplazarse en escritorio. */
+  .pe-kpis{grid-template-columns:repeat(4,1fr)}
   .pe-k .val{font-size:24px}
   .pe-cols{grid-template-columns:minmax(0,1fr) 300px}
+}
+@media(min-width:1080px){
+  .pe-kpis{grid-template-columns:repeat(7,1fr)}
 }
 
 /* A partir de acá la pantalla NO se desplaza. En vez de restarle a `100dvh`
@@ -1979,7 +1990,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 11:09", huella:"d6095f" };
+const BUILD = { sello:"07/09/2026 13:31", huella:"a7868d" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -5889,9 +5900,11 @@ function bindComunes(){
     S.fEjecutivo = q ? (USUARIOS.find(u => u.correo === q) || {}).nombre || "todos" : "todos";
     go("cartera");
   });
-  /* Las seis cifras del tablero del ejecutivo. Cada una abre EXACTAMENTE su
-     lista: un número sin salida obliga a buscar a mano lo que el CRM acaba de
-     contar, y en la calle eso es tiempo perdido. */
+  /* Las cifras del tablero del ejecutivo. Cada una abre EXACTAMENTE su lista:
+     un número sin salida obliga a buscar a mano lo que el CRM acaba de contar,
+     y en la calle eso es tiempo perdido.
+     La excepción hoy es «Con contacto logrado»: la cartera todavía no tiene un
+     filtro por esa regla, así que la tarjeta no lleva salida. Pendiente. */
   document.querySelectorAll("[data-pe]").forEach(el => el.onclick = e => {
     e.stopPropagation();
     const k = el.dataset.pe;
@@ -11285,6 +11298,28 @@ function datosPanelEjec(r){
 
   const gestionados = mio(C.gestion).length;
 
+  /* Y la otra cifra, la que de verdad decide su avance.
+   *
+   * Aníbal, 07/09: «al revisar el correo que has enviado figura que tengo 49 y
+   * en el CRM figura algo diferente». Tenía razón y tenía los dos números
+   * delante: su panel decía «Gestionados: 118» y su ficha semanal decía 49.
+   *
+   * Las dos son correctas y miden cosas distintas. 118 es todo comercio con
+   * actividad, intentos sin respuesta incluidos. 49 son los de CONTACTO
+   * LOGRADO, que es lo que exige la llave del periodo. Lo que estaba mal es
+   * que las dos se llamaban «gestionados» en pantallas que el mismo ejecutivo
+   * abre el mismo día.
+   *
+   * Sale de `llaveDe`, la misma función que alimenta Incentivos y la ficha:
+   * si algún día cambia la regla, cambian las tres a la vez. Solo aplica
+   * cuando el tramo elegido ES un periodo del bono; en «mes calendario» o
+   * «todo el proyecto» no hay llave que mirar. */
+  const pBono = r.periodo || (r.ini === ventanaPeriodo(periodoDe(r.fin)).ini ? periodoDe(r.fin) : null);
+  const llave = pBono ? llaveDe(correo, pBono) : null;
+  const logrado = llave ? llave.cobertura.cubiertos : null;
+  const metaLogrado = llave ? Math.ceil((llave.cobertura.denom || 0)
+    * ((paramsDe(pBono).requisitos || {}).cobertura_pct || 90) / 100) : null;
+
   /* Las visitas, por COMERCIO y del periodo (José, 01/09). */
   const regs = DB.todos().filter(x => vistos.has(String(x.Customer_id))
                                    && enRango(x.Fecha_Contacto, r));
@@ -11309,7 +11344,10 @@ function datosPanelEjec(r){
     ventas:    ventas.sort((a,b) => String(b.cerrado_en||b.creado_en||"")
                             .localeCompare(String(a.cerrado_en||a.creado_en||""))),
     faltan: Math.max(0, cartera.length - gestionados),
-    cobertura: asignada ? gestionados / asignada * 100 : null
+    cobertura: asignada ? gestionados / asignada * 100 : null,
+    logrado, metaLogrado,
+    faltanLogrado: (logrado !== null && metaLogrado !== null)
+      ? Math.max(0, metaLogrado - logrado) : null
   };
 }
 
@@ -11383,16 +11421,32 @@ function viewPanelEjec(){
         sub: d.asignada ? "comercios que puso BBVA" : "falta cargarla en Ajustes" })}
       ${kpiEjec({ lbl:"Registrados", val: d.registrados,
         sub:"fichas con Customer ID", ir:'data-pe="registrados"' })}
-      ${kpiEjec({ lbl:"RUC de venta", val: d.rucs,
-        sub:"leads nuevos, sin Customer ID", ir:'data-pe="rucs"' })}
-      ${kpiEjec({ lbl:"Gestionados", val: d.gestionados, color:"var(--emb-gestion)",
-        sub: d.asignada ? `${pct1(d.cobertura)}% de tu cartera · te faltan ${d.faltan}`
-                        : `te faltan ${d.faltan}`,
+      ${/* Dos tarjetas, dos nombres, y JUNTAS. Van en el 3.º y 4.º lugar a
+             propósito: en el teléfono la rejilla es de dos columnas y en la
+             tableta de cuatro, así que en las dos quedan lado a lado. Si se
+             separan de fila, el ejecutivo vuelve a ver dos cifras sueltas del
+             mismo dato —que es exactamente lo que le pasó a Aníbal— en vez de
+             una comparación.
+             La de actividad primero porque es la que refleja el día: sin ella,
+             una jornada de veinte intentos sin respuesta se ve como una jornada
+             en blanco. Y enseguida la que cuenta, dicho con esas palabras. */""}
+      ${kpiEjec({ lbl:"Con actividad", val: d.gestionados, color:"var(--emb-gestion)",
+        sub: d.asignada ? `${pct1(d.cobertura)}% de tu cartera · incluye intentos sin respuesta`
+                        : "incluye intentos sin respuesta",
         ir:'data-pe="gestionados"' })}
+      ${d.logrado === null ? "" : kpiEjec({ lbl:"Con contacto logrado",
+        val: d.logrado, color:"var(--emb-efectividad)",
+        /* La frase que decide va en tinta, no en gris: es la única línea del
+           panel que responde «¿cuál de los dos me mide?». El resto —cuánto
+           falta para la meta— es aritmética y puede ir apagado. */
+        sub:`<b class="pe-manda">Es el que cuenta para tu avance.</b>`
+          + `de ${d.metaLogrado} · te faltan ${d.faltanLogrado}` })}
       ${kpiEjec({ lbl:"Visitas efectivas", val: d.visitas, color:"var(--emb-visita)",
         sub:"comercios visitados, no visitas", ir:'data-pe="visitas"' })}
       ${kpiEjec({ lbl:"Retenciones", val: d.retenidos.length, color:"var(--emb-objetivo)",
         sub:"retenidos y recuperados" })}
+      ${kpiEjec({ lbl:"RUC de venta", val: d.rucs,
+        sub:"leads nuevos, sin Customer ID", ir:'data-pe="rucs"' })}
     </div>
 
     <div class="pe-cols">
@@ -11824,7 +11878,7 @@ function lineaDiaria(r, regs, alto){
           ? `<text class="eje" x="${px(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${dia(iso)}</text>` : "").join("")}
       </svg>
     </div>
-    <p class="nota">${hechos} comercios distintos tocados en el periodo${
+    <p class="nota">${hechos} comercios distintos con actividad en el periodo${
       asignada ? ` de ${asignada} asignados` : ""}. ${
       ritmo !== null
         ? `Quedan ${quedan} día${quedan === 1 ? "" : "s"} trabajado${quedan === 1 ? "" : "s"}: el ritmo necesario es ${ritmo} al día y el promedio de estos ${vistos.length} es ${prom.toFixed(0)}.`
