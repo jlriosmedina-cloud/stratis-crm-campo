@@ -2035,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 17:21", huella:"772616" };
+const BUILD = { sello:"07/09/2026 18:20", huella:"be3af1" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -7493,7 +7493,25 @@ function itemTimeline(r){
           <div class="who">${esc(t ? t.label : r.Tipo_Contacto || "Contacto")}</div>
           <div class="dt">${fmtDT(r.Fecha_Contacto, r.Hora_Contacto)} · ${esc(r.Ejecutivo)}</div>
         </div>
-        <span class="chip ${r.Cumple_Visita === "SI" ? "ok" : "no"}">${r.Cumple_Visita === "SI" ? "Cumple visita" : "No cumple"}</span>
+        ${/* El sello de visita, con su sujeto y solo donde la pregunta existe.
+             José, 07/09: revisando una gestión de Aníbal leyó «No cumple» y
+             entendió que esa gestión no contaba. Contaba: es una de las 118
+             con actividad. «No cumple» hablaba de la VISITA, no de la gestión.
+
+             Dos cosas estaban mal y son la misma:
+             · La etiqueta afirmativa nombraba su tema —«Cumple visita»— y la
+               negativa lo perdía —«No cumple»—, arriba a la derecha de la
+               tarjeta, que es donde se espera el veredicto de la fila entera.
+             · Se pintaba en TODA fila, también en un correo. Un correo no
+               puede cumplir una visita nunca; el propio catálogo lo dice en su
+               descripción, «No califica como visita». Marcarle «No cumple» es
+               ruido que se lee como rechazo.
+
+             La condición sale de `cumple` del catálogo, que ya distingue los
+             medios que pueden concretar una visita. Si mañana se agrega un
+             medio, el sello lo sigue solo. */""}
+        ${(t && t.cumple) ? `<span class="chip ${r.Cumple_Visita === "SI" ? "ok" : "no"}">${
+          r.Cumple_Visita === "SI" ? "Cumple visita" : "No cumple visita"}</span>` : ""}
       </div>
       <div style="margin-top:7px">
         <span class="chip ${res && res.ok ? "ok" : "serious"}">${esc(res ? res.label : r.Resultado)}</span>
