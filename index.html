@@ -1979,7 +1979,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 10:24", huella:"03ad50" };
+const BUILD = { sello:"07/09/2026 10:48", huella:"4b472f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18633,14 +18633,34 @@ function repSemanaDia(f){
     return out;
   };
 
-  const iniPrev = mas(corte, -6), iniAct = mas(corte, 1);
+  /* Una semana en curso con uno o dos días trabajados no es una semana.
+   *
+   * José, 07/09: descargó el deck un LUNES. La lámina comparaba el día 1 de la
+   * semana nueva contra el día 1 de la anterior, y las tres tarjetas salían en
+   * 3, 0 y 0 —el comité leyendo un derrumbe que era «todavía no empezó»—.
+   * «El reporte debe ser con el avance hasta el domingo, presentando la
+   * evolución de la semana anterior.»
+   *
+   * Por debajo de tres días trabajados la lámina se corre una semana atrás:
+   * muestra la última CERRADA contra la anterior, las dos completas y
+   * comparables. Es el mismo umbral que la ficha del ejecutivo, para que las
+   * dos piezas no digan cosas distintas del mismo lunes. */
+  const enCurso = mas(corte, 1);
+  let habiles = 0;
+  for (let d = enCurso; d <= f.hoy; d = mas(d, 1)) if (!diaNoTrabajado(d)) habiles++;
+  const cerrada = habiles < 3;
+
+  const iniPrev = cerrada ? mas(corte, -13) : mas(corte, -6);
+  const iniAct  = cerrada ? mas(corte,  -6) : enCurso;
+  const finAct  = cerrada ? corte : f.hoy;
   const series = ["contactos", "retenciones", "visitas"].map(k => ({
     k,
     previa: serie(iniPrev, k),
-    actual: serie(iniAct, k, f.hoy)
+    actual: serie(iniAct, k, finAct)
   }));
-  const diasAct = Math.min(7, Math.round((new Date(f.hoy) - new Date(iniAct)) / 86400000) + 1);
-  return { corte, iniPrev, iniAct, diasAct, series,
+  const diasAct = cerrada ? 7
+    : Math.min(7, Math.round((new Date(f.hoy) - new Date(iniAct)) / 86400000) + 1);
+  return { corte, corteAnterior: mas(corte, -7), iniPrev, iniAct, finAct, diasAct, cerrada, series,
     /* El punto justo de comparación: dónde iba la semana pasada al mismo día
        en que va la actual. Comparar contra su total sería comparar siete días
        contra tres. */
@@ -19211,7 +19231,8 @@ function repLaminaEmbudo(X, f){
       fill:{ color:X.H("azul2"), transparency:60 }, line:{ type:"none" } }),
       `al corte del ${repFecha(X.corteFecha)}`);
     muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
-      fill:{ color:X.H("azul2") }, line:{ type:"none" } }), "ganado esta semana");
+      fill:{ color:X.H("azul2") }, line:{ type:"none" } }),
+      X.corteCerrado ? "ganado en la semana cerrada" : "ganado esta semana");
     if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:"FFFFFF" }, line:{ color:X.H("naranja"), width:0.75, dashType:"dash" } }),
       "casos que se enfriaron");
@@ -19375,10 +19396,13 @@ function repLaminaCambios(X, f){
      deriva del corte y no se teclea: el corte ya está en `X` porque lo usan
      las otras láminas, y una fecha escrita a mano es una fecha que se queda
      vieja el lunes. */
-  const desdeSem = X.corteFecha
-    ? new Date(Date.parse(X.corteFecha + "T12:00:00Z") + 86400000).toISOString().slice(0,10)
-    : f.hoy;
-  X.T(s, (C.sub || REP_CAMBIOS_DEF.sub) + ` · semana del ${repFecha(desdeSem)} al ${repFecha(f.hoy)}`,
+  /* La semana de la que habla el deck, que es la misma que muestran las
+     láminas del desarrollo y del embudo. Antes salía del corte + 1 día y
+     contra hoy: descargado un lunes daba «semana del 07/09 al 07/09», y una
+     vez corrida la referencia habría dado ocho días. */
+  const desdeSem = X.semana ? X.semana.iniAct : f.hoy;
+  const hastaSem = X.semana ? X.semana.finAct : f.hoy;
+  X.T(s, (C.sub || REP_CAMBIOS_DEF.sub) + ` · semana del ${repFecha(desdeSem)} al ${repFecha(hastaSem)}`,
     { x:0.57, y:1.20, w:11.9, h:0.32, fontSize:12, color:X.H("gris") });
 
   /* Dos por fila. Cuatro en una fila deja columnas de 3 cm en las que un
@@ -19626,10 +19650,20 @@ function armarDirectorio(pptx, fondos){
      solo enciende la nota. Se apaga sola cuando el corte semanal cae bajo
      la regla nueva. */
   const reglaCambio = repReglaCambio(SEM.corte);
+  /* Se calcula acá porque lo necesitan dos láminas —el embudo y el desarrollo
+     semanal— y las dos tienen que estar mirando la misma semana. */
+  const DIA_SEM = repSemanaDia(f);
   const X = { pptx, fondos, lamina, T, caja, H, FUENTE, NEG, comite:true,
               reglaCambio, reglaDesde: REGLA_GESTION_DESDE,
-              corte: repEmbudoAl(SEM.corte, f),
-              corteFecha: SEM.corte };
+              /* El embudo compara contra un CORTE. Descargado un lunes, ese
+                 corte era el domingo de anteayer y «ganado esta semana» salía
+                 en cero para los cuatro escalones. Se corre al corte anterior,
+                 así el tono pleno es lo que se ganó en la semana que cerró,
+                 que es de lo que habla el deck. Misma regla y mismo umbral que
+                 la lámina del desarrollo semanal. */
+              corte: repEmbudoAl(DIA_SEM.cerrada ? DIA_SEM.corteAnterior : SEM.corte, f),
+              corteFecha: DIA_SEM.cerrada ? DIA_SEM.corteAnterior : SEM.corte,
+              corteCerrado: DIA_SEM.cerrada, semana: DIA_SEM };
 
   /* ---- 1 · Carátula ---------------------------------------------------- */
   const c = lamina(fondos.caratula);
@@ -19827,10 +19861,15 @@ function armarDirectorio(pptx, fondos){
      lámina que el acumulado: el acumulado nunca baja y por eso nunca alarma.
      Esta puede bajar, y esa es exactamente su utilidad. */
   const g = lamina(fondos.contenido);
+  const DIA = DIA_SEM;
+  /* El subtítulo dice QUÉ semana se está mirando. Corrida una semana atrás,
+     decir «última cumplida al 6 de septiembre» era cierto pero describía otra
+     cosa que la que muestran las tarjetas. */
   titulo(g, "El desarrollo, semana a semana",
-    `Actividad de cada semana —no el acumulado— · la semana cierra el domingo a las 23:59 · última cumplida al ${repFechaLarga(SEM.corte)}`);
-
-  const DIA = repSemanaDia(f);
+    DIA.cerrada
+      ? `Actividad de la semana cerrada del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}, `
+        + `comparada con la anterior · la semana nueva todavía no tiene días suficientes para leerla`
+      : `Actividad de cada semana —no el acumulado— · la semana cierra el domingo a las 23:59 · última cumplida al ${repFechaLarga(SEM.corte)}`);
   /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
      pie: sin ella el tercio de abajo de la lámina quedaba vacío y las tres
      curvas apretadas arriba. El alto que liberó el texto se lo lleva el
@@ -19877,8 +19916,11 @@ function armarDirectorio(pptx, fondos){
     const sobre = serie.k === "visitas" && SEM.curso
       && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
       ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
-    T(g, `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
-       + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : ""),
+    T(g, DIA.cerrada
+        ? `en la semana del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}${sobre}`
+          + ` · la anterior cerró en ${cierrePrev !== null ? cierrePrev : comp.previa}`
+        : `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
+          + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : ""),
       /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
          una sola y sin sitio se montaba sobre la curva. */
       { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
@@ -19962,11 +20004,17 @@ function armarDirectorio(pptx, fondos){
     /* Día y mes, sin el año: en una caja de media pulgada «20/08/2026» se parte
        en dos líneas y deja de leerse. El año ya está en el subtítulo. */
     const dm = iso => repFecha(iso).slice(0, 5);
-    T(g, dm(DIA.corte), { x:GX - 0.34, y:GY + GH + 0.06, w:0.68, h:0.20,
+    /* Cada rótulo es el CIERRE de su ventana, no una fecha fija. Corrida la
+       lámina a la semana cerrada, el eje seguía diciendo 06/09 y 07/09
+       mientras las curvas mostraban 24/08-30/08 y 31/08-06/09: dos fechas
+       ciertas describiendo otra cosa. */
+    T(g, dm(DIA.cerrada ? DIA.corteAnterior : DIA.corte),
+      { x:GX - 0.34, y:GY + GH + 0.06, w:0.68, h:0.20,
       fontSize:8, color:H("gris2"), align:"center" });
-    T(g, dm(f.hoy), { x:Math.min(GX + GW - 0.34, ejeX(DIA.diasAct - 1) - 0.34),
+    T(g, dm(DIA.finAct), { x:Math.min(GX + GW - 0.34, ejeX(DIA.diasAct - 1) - 0.34),
       y:GY + GH + 0.06, w:0.68, h:0.20, fontSize:8, bold:true, color:H("navy"), align:"center" });
-    T(g, "Claro: semana pasada · Pleno: esta semana",
+    T(g, DIA.cerrada ? "Claro: la semana anterior · Pleno: la semana cerrada"
+                      : "Claro: semana pasada · Pleno: esta semana",
       { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
   });
 
