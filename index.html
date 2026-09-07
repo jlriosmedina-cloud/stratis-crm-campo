@@ -419,6 +419,51 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .stat-link{text-align:left;font:inherit;color:inherit;cursor:pointer;width:100%;display:block}
 @media (hover:hover) and (pointer:fine){.stat-link:hover{border-color:var(--brand-2)}}
 .stat-link .sub b{color:var(--brand-2);font-weight:640}
+/* El aviso del titular, ahora dentro del formulario. Va en tono de atención y
+   no de error: no es que se haya hecho algo mal, es una pregunta. */
+.aviso-dud{margin-top:11px;border:1px solid var(--warn);background:var(--warn-bg);
+  border-radius:var(--r);padding:11px 12px}
+.aviso-dud b{color:var(--warn-tx)}
+.aviso-dud p{margin:6px 0 0;font-size:12.5px;color:var(--ink-2);line-height:1.45}
+.aviso-dud .cita{margin:8px 0;padding:6px 0 6px 10px;border-left:3px solid var(--warn);
+  font-size:12.5px;color:var(--ink-2)}
+.aviso-dud .btn{margin-top:9px}
+
+/* ---- Las cinco tarjetas de la Cartera (José, 07/09/2026) ------------------
+   A diferencia de la tira de métricas de arriba, estas NO se colapsan en
+   píldoras en el teléfono. Su subtítulo —«de 186 · faltan 137»— es la línea
+   que tiene que coincidir con el correo semanal, palabra por palabra;
+   esconderla en celular deja al ejecutivo con el número grande suelto, que es
+   exactamente lo que causó todo el problema.
+
+   Cada tarjeta es dos botones: la cabecera abre los que ya cuentan, el pie
+   abre los que faltan. El pie dice su propia cuenta y no la del «faltan»
+   —faltan 137 para la meta, pero hay 157 sin contacto logrado— porque llamar
+   igual a dos cifras distintas es el error que estamos corrigiendo. */
+.stat-row-5{display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow:visible;
+  padding-bottom:0}
+.stat-row-5 .stat{flex:initial;padding:0;border-radius:var(--r);box-shadow:var(--sh);
+  overflow:hidden;display:flex;flex-direction:column}
+/* La cabecera se estira para que los pies de las cinco tarjetas queden a la
+   misma altura. Si no, los enlaces bailan y la fila se lee como cinco cosas
+   distintas en vez de una comparación. */
+.stat-row-5 .stat-cab{flex:1 1 auto}
+.stat-row-5 .stat .lbl{font-size:10px;order:0;white-space:normal;line-height:1.25}
+.stat-row-5 .stat .val{font-size:23px;order:0;margin-top:2px}
+.stat-row-5 .stat .sub{display:block;font-size:11px;margin-top:3px;line-height:1.35;
+  font-variant-numeric:tabular-nums}
+.stat-cab{display:block;width:100%;text-align:left;font:inherit;color:inherit;
+  background:none;border:0;cursor:pointer;padding:11px 12px 10px}
+.stat-ir{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;
+  background:none;border:0;border-top:1px solid var(--grid);padding:7px 12px 8px;
+  font-size:11px;font-weight:640;color:var(--brand-2)}
+.stat-t.on{border-color:var(--brand-2);box-shadow:0 0 0 1px var(--brand-2)}
+.stat-ir.on{background:var(--brand);color:var(--on-brand);border-top-color:var(--brand)}
+@media (hover:hover) and (pointer:fine){
+  .stat-cab:hover{background:var(--plane)}
+  .stat-ir:hover:not(.on){background:var(--plane)}
+}
+@media(min-width:760px){ .stat-row-5{grid-template-columns:repeat(5,1fr)} }
 .stat{background:var(--card);border:1px solid var(--ring);border-radius:var(--r);padding:12px 13px;box-shadow:var(--sh)}
 .stat .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
 .stat .val{font-size:25px;font-weight:730;letter-spacing:-.8px;margin-top:3px;line-height:1.1}
@@ -1990,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 13:31", huella:"a7868d" };
+const BUILD = { sello:"07/09/2026 15:41", huella:"ff5a07" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -2467,9 +2512,10 @@ const ultimoDiaCalifica = filas => {
    Ahora hay una sola función y la usan los dos, más la llave del bono. La
    consecuencia hay que decirla: volver a visitar un comercio ya visitado NO
    suma para el mínimo. Suma cerrar uno nuevo. */
-const comerciosConVisita = filas => conVinculados(new Set((filas || [])
+const idsConVisita = filas => conVinculados(new Set((filas || [])
   .filter(r => r && r.Cumple_Visita === "SI" && !esReconstruida(r))
-  .map(r => String(r.Customer_id)))).size;
+  .map(r => String(r.Customer_id))));
+const comerciosConVisita = filas => idsConVisita(filas).size;
 
 /* =========================================================================
    Dos customer_id, un solo comercio
@@ -6494,6 +6540,11 @@ function viewCartera(){
        fijadas —`_gestionado` es la del periodo desde el 01/09—; ninguno
        inventa una regla nueva. */
     if (S.fContacto.startsWith("per:")) return pasaFiltroPeriodo(c, S.fContacto.slice(4), b);
+    /* Los de las TARJETAS (José, 07/09). No preguntan a una regla propia:
+       preguntan al conjunto que produjo la cifra que el ejecutivo acaba de
+       tocar, el mismo que viaja en su correo semanal. Si algún día la regla
+       cambia, la tarjeta y la lista cambian juntas porque son el mismo Set. */
+    if (S.fContacto.startsWith("fic:")) return pasaFiltroFicha(c, S.fContacto.slice(4));
     return true;
   });
   lista.sort((a,b) => String(b.creado_en||"").localeCompare(String(a.creado_en||"")));
@@ -6534,7 +6585,12 @@ function viewCartera(){
   <div class="page-head">
     <div>
       <h2>${vistaDeCampo() ? "Mi cartera" : "Cartera de la campaña"}</h2>
-      <div class="sub">${total} comercio${total===1?"":"s"} · ${conEf} con comunicación lograda · ${intentos} intento${intentos===1?"":"s"}</div>
+      <!-- Antes esta línea decía «N con comunicación lograda · N intentos», las
+           dos sobre toda la historia, encima de unas tarjetas que hablan del
+           periodo. Dos ventanas a tres centímetros. Ahora solo dice de qué
+           comercios estamos hablando; las cifras del periodo son las tarjetas. -->
+      <div class="sub">${total} comercio${total===1?"":"s"} · ${deCartera.length} de la cartera de BBVA${
+        nuevos.length ? ` + ${nuevos.length} venta${nuevos.length===1?"":"s"} nueva${nuevos.length===1?"":"s"}` : ""}</div>
     </div>
     <div class="page-head-acc">
       ${(flujoBbva() && esDeCampo()) ? `<button class="btn ghost sm" id="loteBbva"
@@ -6545,40 +6601,88 @@ function viewCartera(){
 
   ${avisoVentana()}
 
-  <!-- Todo lo de esta fila cuenta COMERCIOS. La bitácora cuenta gestiones, y
-       antes las dos pantallas usaban las mismas palabras para las dos unidades:
-       «Con respuesta 29» acá y «Con respuesta 46» allá, sin decir de qué. -->
-  <div class="stat-row">
-    <div class="stat"><div class="lbl">Customer ID registrados</div><div class="val">${deCartera.length}</div><div class="sub">${nuevos.length ? nuevos.length + " venta" + (nuevos.length===1?"":"s") + " nueva" + (nuevos.length===1?"":"s") + " aparte" : "de la cartera de BBVA"}</div></div>
-    <div class="stat"><div class="lbl">Comercios con respuesta</div><div class="val">${conEf}</div><div class="sub">respondieron al menos una vez · ${total?Math.round(conEf/total*100):0}% de la cartera</div></div>
-    <div class="stat"><div class="lbl">Gestiones</div><div class="val">${intentos}</div><div class="sub">${total?(intentos/total).toFixed(1):0} por comercio</div></div>
-    <div class="stat"><div class="lbl">Con visita efectiva</div><div class="val">${cumplen}</div><div class="sub">comercios con al menos una visita cumplida</div></div>
-    <button class="stat stat-link" data-vercierre="cumplido" title="Ver los comercios con objetivo cumplido">
-      <div class="lbl">Objetivo cumplido</div><div class="val">${cerrados}</div>
-      <div class="sub">${cerrados - nuevosCumplidos} de cartera${nuevosCumplidos ? ` + ${nuevosCumplidos} venta${nuevosCumplidos===1?"":"s"} nueva${nuevosCumplidos===1?"":"s"}` : ""} — <b>ver cuáles</b></div></button>
-  </div>
+  <!-- LAS CINCO TARJETAS (José, 07/09/2026).
+       Reemplazan a las cinco de antes —«Comercios con respuesta», «Gestiones»,
+       «Objetivo cumplido»— que mezclaban ventanas y universos: «con respuesta»
+       se calculaba sobre toda la historia y «gestiones» también, al lado de
+       unos filtros que sí eran del periodo. A Juan la pantalla le decía 44 con
+       respuesta cuando su cobertura del periodo era 199.
+
+       Ahora dicen EXACTAMENTE lo que dice su correo semanal, porque salen de
+       la misma función. Y son botones: el número grande abre los que ya
+       cuentan, y el enlace de abajo abre los que faltan. Los filtros sueltos
+       se fueron con esto; cada lista vive detrás de la cifra que la nombra. -->
+  ${(() => {
+    const CF = conjuntosFichaVista();
+    const miles = v => String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    const act = k => S.fContacto === "fic:" + k ? " on" : "";
+    const sinCob = base.filter(c => pasaFiltroFicha(c, "sin_cobertura")).length;
+    const sinVis = base.filter(c => pasaFiltroFicha(c, "sin_visitas")).length;
+    const nego   = base.filter(c => pasaFiltroFicha(c, "negociando")).length;
+    const faltan = (meta, n) => Math.max(0, meta - n);
+
+    /* La misma línea del correo, palabra por palabra: «49 de 186 — faltan
+       137». Que la tarjeta y el correo se lean igual es el punto de todo
+       esto. */
+    const linea = (n, meta) => `de ${miles(meta)} · faltan ${miles(faltan(meta, n))}`;
+
+    /* El enlace de abajo nombra SU PROPIA cuenta y no la del «faltan». No son
+       lo mismo y decir que sí sería repetir el error: faltan 137 para la meta,
+       pero hay 157 comercios sin contacto logrado. */
+    const puerta = (k, n, txt) => n
+      ? `<button class="stat-ir${act(k)}" data-f="contacto" data-v="fic:${k}">ver ${miles(n)} ${txt} ›</button>`
+      : "";
+
+    const tarjeta = (k, lbl, n, sub, pie) => `
+      <div class="stat stat-t${act(k)}">
+        <button class="stat-cab" data-f="contacto" data-v="fic:${k}"
+          title="Ver los comercios que componen esta cifra">
+          <div class="lbl">${lbl}</div><div class="val">${miles(n)}</div>
+          <div class="sub">${sub}</div>
+        </button>${pie || ""}</div>`;
+
+    return `<div class="stat-row stat-row-5">
+      ${/* Abre SU conjunto —los Customer ID de BBVA— y no «todos»: si
+             reseteara el filtro mostraría también las ventas nuevas, y la
+             lista tendría más comercios que el número que se acaba de tocar.
+             Para volver a ver todo está «Quitar filtros». */""}
+      ${tarjeta("cartera", "Cartera", CF.cartera.size, "Customer ID de BBVA", "")}
+      ${tarjeta("cobertura", "Comercios gestionados", CF.cobertura.size,
+        linea(CF.cobertura.size, CF.metaCobertura),
+        puerta("sin_cobertura", sinCob, "sin contacto logrado"))}
+      ${tarjeta("visitas", "Visitas efectivas", CF.visitas.size,
+        linea(CF.visitas.size, CF.metaVisitas),
+        puerta("sin_visitas", sinVis, "sin visita"))}
+      ${tarjeta("retenciones", "Retenciones", CF.retenciones.size,
+        linea(CF.retenciones.size, CF.metaRetenciones),
+        puerta("negociando", nego, "en negociación"))}
+      ${tarjeta("ventas", "Ventas nuevas", CF.ventas.size,
+        linea(CF.ventas.size, CF.metaVentas), "")}
+    </div>`;
+  })()}
 
   <div class="filtros">
     <div class="search"><span class="mag">⌕</span>
       <input type="search" id="q" placeholder="Buscar por Customer ID, nombre, distrito o dirección…" value="${esc(S.q)}"></div>
 
-    ${/* Arriba de todo, y arriba a propósito: es con lo que se abre la pantalla
-         por la mañana. Los de abajo miran toda la campaña; estos, el periodo
-         en curso, y lo dicen en su encabezado. */
-      filtrosPeriodo(base)}
+    ${/* Acá vivían dos filas de filtros: los ocho chips del periodo
+         (`filtrosPeriodo`) y las siete pestañas de situación. José, 07/09:
+         «estos filtros vamos a eliminarlos, nos quedaremos con los banners
+         numéricos pero serán botones ahora».
 
-    <!-- «Gestionados» faltaba y era la pregunta más obvia: cuáles ya recibieron
-         trabajo, sin importar si contestaron. Se podía preguntar por los que no
-         se tocaron y por los que respondieron, pero no por el conjunto. -->
-    <div class="seg" role="group" aria-label="Situación del comercio">
-      ${[["todos","Todos"],["sin","Sin intentar"],["gestionado","Gestionados este periodo"],
-         ["sin_gestion","Faltan por gestionar"],
-         ["intento","Intentados, sin respuesta"],["con","Respondieron"],["cumple","Cumple visita"]]
-        .map(([k,l]) => `<button class="${S.fContacto===k?"on":""}" data-f="contacto" data-v="${k}"${
-          k === "gestionado" ? ` title="Comercios cuya ÚLTIMA gestión DENTRO DE ESTE PERIODO (${esc(textoPeriodo(periodoHoy()))}) es un hecho con resultado: correo al banco o al comercio, contacto efectivo, reunión o visita realizada, o cierre registrado. El periodo corre del 19 al 18: lo trabajado el 18 no cuenta para el que arranca el 19"`
-          : k === "sin_gestion" ? ` title="Comercios que en ESTE PERIODO (${esc(textoPeriodo(periodoHoy()))}) todavía no tienen un hecho con resultado: no se han tocado, o lo último que quedó fue un intento sin respuesta. Los segundos se ven trabajados y no lo están: son los que hay que retomar"` : ""
-        }>${l}</button>`).join("")}
-    </div>
+         La razón no es estética. Eran quince controles con nombres parecidos
+         —«Pendientes de gestionar», «Faltan por gestionar», «Sin intentar»,
+         «Intentados sin respuesta»— repartidos en dos filas que se leían como
+         una sola, encima de unas tarjetas que contaban otra cosa. El ejecutivo
+         que abría esta pantalla tenía que elegir entre quince respuestas sin
+         saber a qué pregunta contestaba cada una.
+
+         Ahora hay cinco tarjetas y cada lista cuelga de la cifra que la
+         nombra. Lo que se perdió: los chips de «Perdidos», «Agendados» y «Sin
+         agendar», que no tienen tarjeta. Los dos primeros se ven en la ficha
+         del comercio y en el Calendario; si «Sin agendar» hace falta, vuelve
+         como enlace de la tarjeta de visitas y no como chip suelto. */""}
+
     ${avisoPorActualizar()}
     ${S.fContacto === "registrado" ? `<div class="note" style="margin:0">
       Mostrando los <b>registrados en el CRM</b>: fichas de la cartera de BBVA que alguien
@@ -9098,6 +9202,21 @@ function renderFormulario(){
           <span class="rd"></span><span><b>${r.label}</b><span>${r.desc}</span></span>
         </div>`).join("")}
     </div>
+    ${/* ---- Antes esto era un aviso emergente AL GUARDAR, y perdía la gestión.
+           Aníbal, 07/09/2026: creía que al marcar la opción del aviso la
+           gestión quedaba registrada. No quedaba. El aviso salía después de
+           pulsar «Registrar contacto»; si elegías «Atendió otra persona», el
+           CRM cambiaba el resultado, cerraba el aviso, mostraba un mensajito
+           que decía «revísalo y guarda» y SALÍA SIN GUARDAR NADA. Quien no
+           leyó el mensajito perdió el registro, y no era solo Aníbal: esa rama
+           es la misma para todo el equipo.
+
+           Ahora la pregunta vive acá, entre las opciones, y aparece mientras
+           se escribe en vez de después de pulsar guardar. El único botón que
+           manda sigue siendo «Registrar contacto» —que era exactamente lo que
+           pidió José— y no hay ninguna forma de que el formulario se cierre
+           solo. */""}
+    <div id="boxDudoso"></div>
   </div>`}
 
   <div id="boxGps"></div>
@@ -9150,10 +9269,49 @@ function bindForm(c){
   $("#view").querySelectorAll("[data-res]").forEach(el => el.onclick = () => {
     f.Resultado = el.dataset.res;
     $("#view").querySelectorAll("[data-res]").forEach(x => x.classList.toggle("on", x.dataset.res === f.Resultado));
-    pintarDerivado(); pintarVoz(); pintarCierre(c); pintarSeguimiento();
+    pintarDerivado(); pintarVoz(); pintarCierre(c); pintarSeguimiento(); pintarDudoso();
   });
+  /* El aviso del titular se repinta solo, como los demás recuadros vivos del
+     formulario. Reacciona a lo que se MARCA y a lo que se ESCRIBE: aparece
+     cuando el comentario delata a un tercero y desaparece en cuanto se corrige
+     el resultado. Repintar el formulario entero acá le haría perder el foco a
+     quien está escribiendo, que es la razón por la que esto no es un render. */
+  const pintarDudoso = () => {
+    const caja = $("#boxDudoso");
+    if (!caja) return;
+    if (!respuestaDudosa(f)){ caja.innerHTML = ""; return; }
+    const lbl = (RESULTADOS.find(r => r.id === f.Resultado) || {}).label || "El cliente respondió";
+    caja.innerHTML = `
+      <div class="aviso-dud">
+        <b>¿Hablaste con el titular?</b>
+        <p>Marcaste <b>«${esc(lbl)}»</b>, y en el comentario aparece alguien que suele no ser
+        el titular —o un «vuelvan a llamar», que es un aplazamiento y no una respuesta.</p>
+        <div class="cita">${esc(String(f.Comentario_Cliente || f.Comentario_Ejecutivo || "").slice(0,220))}</div>
+        <p>Si atendió otra persona, el resultado es <b>Titular ausente</b>. Si de verdad hablaste
+        con el titular, déjalo como está: nadie lo va a cambiar por ti.</p>
+        <button type="button" class="btn ghost sm" data-dud="titular_ausente">
+          Cambiarlo a «Titular ausente»</button>
+      </div>`;
+    const b = caja.querySelector("[data-dud]");
+    if (b) b.onclick = () => {
+      f.Resultado = b.dataset.dud;
+      $("#view").querySelectorAll("[data-res]").forEach(x =>
+        x.classList.toggle("on", x.dataset.res === f.Resultado));
+      pintarDerivado(); pintarVoz(); pintarCierre(c); pintarSeguimiento(); pintarDudoso();
+      /* Se dice en voz alta lo que falta. Antes este mismo mensaje aparecía
+         DESPUÉS de haber descartado la gestión; ahora aparece con todo lo
+         escrito todavía en pantalla y el botón de guardar a la vista. */
+      toast("Cambiado a «Titular ausente». Falta guardar con «Registrar contacto».");
+    };
+  };
   $("#guardar").onclick = () => guardar(c);
-  pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c); pintarSeguimiento();
+  pintarDerivado(); pintarCopia(); pintarVoz(); pintarGps(); pintarCierre(c);
+  pintarSeguimiento(); pintarDudoso();
+  /* El aviso lo dispara el TEXTO del comentario, así que si solo reaccionara
+     al resultado no aparecería en el orden real: primero se marca «respondió»
+     y después se cuenta qué pasó. */
+  $("#view").querySelectorAll("textarea, input[data-c]").forEach(el =>
+    el.addEventListener("input", pintarDudoso));
 }
 
 /* -------------------------------------------------------------------------
@@ -9540,35 +9698,16 @@ async function guardar(c){
      nombran al encargado. Por eso el CRM pregunta y ofrece el arreglo en el
      mismo sitio, y quien registró decide. Es la misma regla de «Perdido»: el
      CRM no asume por nadie. */
-  if (respuestaDudosa(f)){
-    const eleccion = await new Promise(res => {
-      modal(`
-        <h3>¿Habló el titular?</h3>
-        <p style="margin-top:0">Marcaste <b>«El cliente respondió»</b>, y en el comentario aparece
-        alguien que suele no ser el titular —o un «vuelvan a llamar», que es un aplazamiento y no
-        una respuesta.</p>
-        <div class="cita" style="margin:12px 0">${esc(String(f.Comentario_Cliente || f.Comentario_Ejecutivo || "").slice(0,220))}</div>
-        <div class="note">Si atendió otra persona, el resultado es <b>«Titular ausente»</b>. Si de
-        verdad hablaste con el titular, guárdalo como está: nadie va a cambiarlo por ti.</div>
-        <div style="display:flex;gap:8px;margin-top:15px;flex-wrap:wrap">
-          <button class="btn" id="dudSi" style="flex:1 1 180px">Sí, hablé con el titular</button>
-          <button class="btn ghost" id="dudNo" style="flex:1 1 180px">Atendió otra persona</button>
-        </div>
-        <button class="btn ghost sm" id="dudCancel" style="width:100%;margin-top:8px">Volver a editarlo</button>`);
-      $("#dudSi").onclick     = () => { cerrarModal(); res("titular"); };
-      $("#dudNo").onclick     = () => { cerrarModal(); res("tercero"); };
-      $("#dudCancel").onclick = () => { cerrarModal(); res("volver"); };
-    });
-    if (eleccion === "volver") return;
-    if (eleccion === "tercero"){
-      /* No se guarda a sus espaldas: se le deja el formulario con el resultado
-         correcto puesto y decide él si lo manda. */
-      f.Resultado = "titular_ausente";
-      render();
-      toast("Cambiado a «Titular ausente». Revísalo y guarda.");
-      return;
-    }
-  }
+  /* Acá vivía el aviso emergente «¿Habló el titular?». Se fue al formulario,
+     entre las opciones de resultado, y por una razón que no es de estilo: en
+     su rama «Atendió otra persona» este código hacía `return` y la gestión NO
+     se guardaba. Aníbal, 07/09/2026, creía que al marcar la opción el registro
+     quedaba hecho —y el aviso se cerraba, que es exactamente lo que parece—.
+
+     Ninguna pregunta de confirmación puede vivir DESPUÉS del botón de guardar
+     si una de sus salidas descarta lo que el usuario ya escribió. La pregunta
+     sigue estando; ahora se ve mientras se llena el formulario y no puede
+     tragarse nada. */
 
   const btn = $("#guardar");
   btn.disabled = true; btn.textContent = "Guardando…";
@@ -22604,6 +22743,103 @@ async function pdfFichaProyecto(btn){
    pestaña dijeran cosas distintas de la misma persona, el problema no sería
    estético.
    ========================================================================= */
+/* =========================================================================
+   Las cuatro cifras del ejecutivo, como CONJUNTOS y no como números
+
+   José, 07/09/2026: «los banners numéricos serán botones ahora, y esto debe
+   conversar con lo que enviamos». Las tarjetas de la Cartera pasan a decir
+   exactamente lo que dice el correo semanal —cobertura, visitas, retenciones,
+   ventas— y además abren la lista de comercios detrás de cada cifra.
+
+   Eso obliga a algo que hasta hoy no existía: que cada cifra sepa QUIÉNES la
+   componen y no solo cuántos son. Y obliga a que la regla esté escrita UNA
+   SOLA VEZ. Si la Cartera recalculara «visitas efectivas» por su cuenta, en un
+   mes tendríamos la tarjeta diciendo 13 y el correo diciendo 11 —que es el
+   error que este proyecto lleva persiguiendo desde agosto y que ya le costó la
+   confianza de un ejecutivo—.
+
+   Por eso esta función devuelve los conjuntos, `datosFichaEjecutivo` toma de
+   acá sus cuatro números y la Cartera toma de acá sus cuatro listas. Una
+   fuente, tres pantallas.
+
+   Acepta varios correos para la vista de supervisión: unión de conjuntos y
+   suma de metas. Un comercio vinculado a dos ejecutivos se cuenta una sola vez
+   porque son Sets, que es la respuesta correcta.
+   ========================================================================= */
+function conjuntosFicha(correos, p){
+  const lista = (Array.isArray(correos) ? correos : [correos]).filter(Boolean);
+  const v = ventanaPeriodo(p), hoy = hoyISO();
+  const hasta = hoy < v.fin ? hoy : v.fin;
+  const B = paramsDe(p), R = B.requisitos || {}, M = metaPeriodo(p, B);
+  const enV = f => { const d = String(f || "").slice(0,10);
+    return !!d && d >= v.ini && d <= hasta; };
+
+  const O = { cartera:new Set(), cobertura:new Set(), visitas:new Set(),
+              retenciones:new Set(), ventas:new Set(),
+              metaCobertura:0, metaVisitas:0, metaRetenciones:0, metaVentas:0 };
+
+  lista.forEach(correo => {
+    const ll   = llaveDe(correo, p);
+    const gest = gestionesDe(correo, p).filter(r => repDia(r.Fecha_Contacto) <= hasta);
+    const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
+
+    mios.forEach(c => O.cartera.add(String(c.customer_id)));
+    /* La cobertura NO se recalcula acá: sale del mismo conjunto que ya expone
+       la llave, el que alimenta Incentivos y la ficha. */
+    (ll.cobertura.idsCubiertos || new Set()).forEach(id => O.cobertura.add(String(id)));
+    idsConVisita(gest.filter(esAlCliente)).forEach(id => O.visitas.add(String(id)));
+    mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enV(c.cerrado_en))
+        .forEach(c => O.retenciones.add(String(c.customer_id)));
+    CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
+                      && enV(c.cerrado_en || c.creado_en))
+        .forEach(c => O.ventas.add(String(c.customer_id)));
+
+    O.metaCobertura   += Math.ceil(ll.cartera.n * (R.cobertura_pct || 90) / 100);
+    O.metaVisitas     += R.visitas_periodo || 40;
+    O.metaRetenciones += Math.ceil(ll.cartera.n * (M.reactivacion_pp || 5) / 100);
+    O.metaVentas      += M.ventas_mes || 7;
+  });
+  return O;
+}
+
+/* De quién son las cifras que se están mirando: uno si se ve el CRM como
+   alguien o si quien mira es ejecutivo; todo el equipo en la vista de
+   campaña. */
+/* Las tarjetas de la Cartera preguntan por su propio conjunto. Se memoiza por
+   render porque `conjuntosFicha` recorre la cartera entera y esto se llama una
+   vez por comercio de la lista. */
+function conjuntosFichaVista(){
+  return memoRender('cf|' + correosDeFicha().join(',') + '|' + periodoHoy(),
+                    () => conjuntosFicha(correosDeFicha(), periodoHoy()));
+}
+function pasaFiltroFicha(c, k){
+  const CF = conjuntosFichaVista(), id = String(c.customer_id);
+  switch (k){
+    case "cartera":       return CF.cartera.has(id);
+    case "cobertura":     return CF.cobertura.has(id);
+    case "visitas":       return CF.visitas.has(id);
+    case "retenciones":   return CF.retenciones.has(id);
+    case "ventas":        return CF.ventas.has(id);
+    /* Los complementos son «de tu cartera, los que TODAVÍA no cuentan». Las
+       ventas nuevas quedan fuera: no son cartera de BBVA y meterlas haría que
+       la lista no cuadre con el número que se acaba de tocar. */
+    case "sin_cobertura": return !esClienteNuevo(c) && !CF.cobertura.has(id);
+    case "sin_visitas":   return !esClienteNuevo(c) && !CF.visitas.has(id);
+    /* Para retenciones el complemento útil no es «todos menos los retenidos»
+       —eso son 204 comercios y no es una lista de trabajo— sino los que están
+       en negociación abierta, que son los candidatos reales a retener. */
+    case "negociando":    return !esClienteNuevo(c) && estadoDerivado(c) === "EN_NEGOCIACION";
+    default: return true;
+  }
+}
+
+function correosDeFicha(){
+  const q = correoObservado()
+         || ((S.user || {}).rol === "Ejecutivo" ? S.user.correo : "");
+  if (q) return [q];
+  return (USUARIOS || []).filter(u => u.rol === "Ejecutivo").map(u => u.correo);
+}
+
 function datosFichaEjecutivo(correo){
   const hoy = hoyISO(), p = periodoHoy(), v = ventanaPeriodo(p);
   const B = paramsDe(p), M = metaPeriodo(p, B), R = B.requisitos || {};
@@ -22694,21 +22930,27 @@ function datosFichaEjecutivo(correo){
   });
   const distritos = Object.values(porD).sort((x, y) => y.sinVisita - x.sinVisita || y.total - x.total);
 
-  const metaCob = Math.ceil(ll.cartera.n * (R.cobertura_pct || 90) / 100);
-  const metaVis = R.visitas_periodo || 40;
-  const metaRet = Math.ceil(ll.cartera.n * (M.reactivacion_pp || 5) / 100);
-  const metaVen = M.ventas_mes || 7;
+  /* Las cuatro cifras del periodo salen de `conjuntosFicha`, que es la misma
+     función que alimenta las tarjetas de la Cartera. Antes se calculaban acá y
+     la Cartera calculaba las suyas por su lado: así es como una pantalla
+     terminó diciendo «55 con respuesta» donde la ficha decía 49. */
+  const CF = conjuntosFicha(correo, p);
+  const metaCob = CF.metaCobertura;
+  const metaVis = CF.metaVisitas;
+  const metaRet = CF.metaRetenciones;
+  const metaVen = CF.metaVentas;
 
   return {
     hoy, periodo:p, ventana:v, mes:M.i, total:M.total,
     nombre: u.nombreCompleto || u.nombre || correo, correo,
     puesto: "Ejecutivo Comercial Adquirencia MASTERCARD BBVA",
     cartera: ll.cartera.n,
-    cobertura: { n: ll.cobertura.cubiertos, meta: metaCob, pct: ll.cobertura.valor,
+    cobertura: { n: CF.cobertura.size, meta: metaCob, pct: ll.cobertura.valor,
                  metaPct: R.cobertura_pct || 90 },
-    visitas: { n: vis.total, cartera: vis.cartera, venta: vis.total - vis.cartera, meta: metaVis },
-    retenciones: { n: retEn(v.ini, hoy), meta: metaRet },
-    ventas: { n: venEn(v.ini, hoy), meta: metaVen },
+    visitas: { n: CF.visitas.size, cartera: vis.cartera, venta: CF.visitas.size - vis.cartera,
+               meta: metaVis },
+    retenciones: { n: CF.retenciones.size, meta: metaRet },
+    ventas: { n: CF.ventas.size, meta: metaVen },
     puntualidad: { pct: ll.puntualidad.valor, meta: R.puntualidad_pct || 95, de: gest.length },
     gestionesAlComercio: gest.filter(r => esAlCliente(r) && !esReconstruida(r)).length,
     porContactoEfectivo: (() => {
