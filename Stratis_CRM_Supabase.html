@@ -2035,7 +2035,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 16:24", huella:"a8e586" };
+const BUILD = { sello:"07/09/2026 17:00", huella:"52b715" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19465,7 +19465,14 @@ function repLaminaEmbudo(X, f){
       `al corte del ${repFecha(X.corteFecha)}`);
     muestra(1, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:X.H("azul2") }, line:{ type:"none" } }),
-      X.corteCerrado ? "ganado en la semana cerrada" : "ganado esta semana");
+      /* «Ganado desde entonces», no «en la semana cerrada»: la barra plena son
+         los totales de HOY contra el corte del domingo anterior, así que
+         incluye los días de la semana nueva. Con la etiqueta vieja la lámina 5
+         decía «+38 ganado en la semana cerrada» mientras la lámina 4, con la
+         misma palabra, mostraba 36 —los dos del lunes eran toda la diferencia
+         y ninguna de las dos láminas lo decía—. La 3 ya lo dice bien: «desde
+         el corte del 30/08». */
+      "ganado desde entonces");
     if (bajo) muestra(2, x => e.addShape(X.pptx.ShapeType.rect, { x, y:1.71, w:0.18, h:0.14,
       fill:{ color:"FFFFFF" }, line:{ color:X.H("naranja"), width:0.75, dashType:"dash" } }),
       "casos que se enfriaron");
@@ -20158,7 +20165,12 @@ function armarDirectorio(pptx, fondos){
        —16 visitas contra 10 comercios— que desde el 01/09 son la misma. Se deja
        escrita la condición en vez de borrarla: si algún día las dos cifras se
        vuelven a separar, la lámina lo dice sola en lugar de callarlo. */
-    const sobre = serie.k === "visitas" && SEM.curso
+    /* Y SOLO mientras la semana está en curso, que es la única ventana de la
+       que `SEM.curso` habla. Cuando la tarjeta muestra la semana cerrada, esta
+       aclaración comparaba los comercios del lunes contra el total del domingo
+       y salía impresa como «en la semana del 31/08 al 06/09 sobre 2 comercios»
+       —dos ventanas distintas en la misma frase, sin que ninguna lo dijera—. */
+    const sobre = !DIA.cerrada && serie.k === "visitas" && SEM.curso
       && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
       ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
     T(g, DIA.cerrada
@@ -22223,6 +22235,14 @@ function actaIncentivo(doc, u, p, x){
    que dibujan el Tablero y el Reporte. Si un día el embudo cambia, esta hoja
    cambia con él y no puede quedarse atrás diciendo otra cosa.
    ========================================================================= */
+/* La base congelada del proyecto, con la cartera viva como respaldo. La usan
+   el deck y el reporte de campaña: si cada uno eligiera la suya, los dos
+   documentos del mismo día publican denominadores distintos. */
+function portafolioBase(vivos){
+  const b = Number((repProyecto() || {}).base_comercios);
+  return b > 0 ? b : vivos;
+}
+
 function datosFichaProyecto(){
   const hoy = hoyISO(), p = periodoHoy(), v = ventanaPeriodo(p);
   const B = paramsDe(p), M = metaPeriodo(p, B), R = B.requisitos || {};
@@ -22325,7 +22345,18 @@ function datosFichaProyecto(){
     hoy, periodo:p, ventana:v, mes:M.i, total:M.total, equipo,
     plazoProyecto, plazoPeriodo,
     periodosRestantes: Math.max(0, (M.total || 5) - (M.i || 1)),
-    portafolio: cart.length,
+    /* La MISMA base que el deck: la congelada que entregó el banco, no la
+       cartera viva del CRM.
+
+       El 07/09 el deck decía «841 comercios asignados · base congelada por el
+       banco» y este reporte, del mismo día y para el mismo destinatario, decía
+       842. Un comercio de diferencia en el DENOMINADOR de todos los
+       porcentajes, y de paso «faltan 84» contra «faltan 85».
+
+       Gana la congelada porque es la que BBVA fijó y contra la que se mide el
+       proyecto. Si la cartera del CRM se separa de ella, eso es algo que hay
+       que reconciliar con el banco, no publicar como si fueran dos verdades. */
+    portafolio: portafolioBase(cart.length),
     embudo: [
       { rot:"Portafolio asignado", n:cart.length, col:PX.navy,
         pie:"base congelada por el banco" },
