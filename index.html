@@ -469,10 +469,10 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 /* La muestra de la línea en la leyenda: un trazo con su punto, no un cuadrado.
    Así la leyenda dice también la FORMA, y la serie se distingue de las barras
    aunque comparta el verde del cuadro 2. */
-.vs-leg .i-ret{width:16px;height:0;border-radius:0;border-top:2px solid var(--emb-objetivo);
+.vs-leg .i-ret{width:16px;height:0;border-radius:0;border-top:2px solid var(--ret-linea);
   position:relative;vertical-align:2px}
 .vs-leg .i-ret:after{content:"";position:absolute;left:5px;top:-4px;width:6px;height:6px;
-  border-radius:50%;background:var(--emb-objetivo);box-shadow:0 0 0 1.5px var(--card)}
+  border-radius:50%;background:var(--ret-linea);box-shadow:0 0 0 1.5px var(--card)}
 
 /* El alto va en una variable: los dos cuadros y el eje TIENEN que medir lo
    mismo o las barras salen despegadas de su escala. Antes estaba escrito dos
@@ -500,7 +500,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
    `pointer-events:none` para que no tape el título de las barras. */
 .vs-linea{position:absolute;inset:0;pointer-events:none;z-index:2}
 .vs-linea svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-.vs-linea polyline{fill:none;stroke:var(--emb-objetivo);stroke-width:2px;
+.vs-linea polyline{fill:none;stroke:var(--ret-linea);stroke-width:2px;
   stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke;
   /* El halo del color de la tarjeta debajo del trazo: sin él, en el cuadro 2 la
      línea verde cruza barras verdes y desaparece dentro de ellas. */
@@ -508,13 +508,13 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   filter:drop-shadow(0 0 0 var(--card)) drop-shadow(0 0 1.5px var(--card))}
 .vs-linea i{position:absolute;width:9px;height:9px;margin:0 0 -4.5px -4.5px;border-radius:50%;
   font-style:normal; /* es un <i> por brevedad, no por cursiva: la cifra salía inclinada */
-  background:var(--emb-objetivo);box-shadow:0 0 0 2px var(--card)}
+  background:var(--ret-linea);box-shadow:0 0 0 2px var(--card)}
 /* La cifra va a la DERECHA del punto, no encima: encima cae justo en la
    columna donde la barra ya escribe la suya, y cuando la retención mide lo
    que la barra las dos cifras se montan. A un lado, la única que puede
    pisar es la barra del día siguiente, y solo a esa altura exacta. */
 .vs-linea i b{position:absolute;left:8px;top:50%;transform:translateY(-50%);
-  font-size:10.5px;font-weight:700;color:var(--emb-objetivo);font-variant-numeric:tabular-nums;
+  font-size:10.5px;font-weight:700;color:var(--ret-linea);font-variant-numeric:tabular-nums;
   background:var(--card);padding:0 3px;border-radius:3px;line-height:1.3;white-space:nowrap}
 /* Un cero no lleva cifra: la línea en el piso ya lo dice y el «0» se pisaba
    con los rótulos de las barras vacías. */
@@ -1175,11 +1175,20 @@ table.tbl tr:last-child td{border-bottom:0}
   --emb-gestion:#232C86; --emb-efectividad:#3B43FB;
   --ref-sem:#8A93A6; --ref-tot:#4a5568;
   --emb-visita:#F86F35;  --emb-objetivo:#0BBC96;
+  /* La línea de retenciones NO va en el verde del escalón, y es una decisión
+     de José (08/09): «que el color sea azul o celeste encendido, el verde se
+     pierde». Tenía razón medida: en el cuadro 2 cruza barras verdes, y como
+     línea de 2 px el verde #0BBC96 da 2,37:1 contra la tarjeta. El azul
+     #3B43FB da 6,21:1 y es el que más se separa del gris de las barras (2,0:1)
+     y del verde (2,6:1). Un celeste de verdad (#169ACC) daba 3,2:1 contra la
+     tarjeta y 1,04:1 contra el gris: se habría perdido igual que el verde. */
+  --ret-linea:#3B43FB;
 }
 :root[data-theme="dark"]{
   --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
   --ref-sem:#7b8598; --ref-tot:#94a1b8;
   --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
+  --ret-linea:#8E95FF;   /* el mismo azul, un paso más claro: 6:1 sobre la tarjeta */
 }
 /* El reparto se decide por el ANCHO DISPONIBLE, no por el de la ventana. Las
    media queries de antes miraban el viewport y servían mientras el embudo
@@ -2198,7 +2207,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 17:42", huella:"0aaab3" };
+const BUILD = { sello:"08/09/2026 17:59", huella:"d2650f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19158,7 +19167,7 @@ function cuadrosVisitasSemana(correo){
       ${cifra(D.totalPrev, "semana anterior, completa")}
       ${cifra(D.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
       ${cifra(D.agendadasAct, "agendadas por delante")}
-      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--emb-objetivo)")}
+      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref"></i>Semana anterior</span>
@@ -19190,7 +19199,7 @@ function cuadrosVisitasSemana(correo){
       ${cifra(D.totalPrev, "cerró la semana anterior · " + D.ritmoPrev + " por día")}
       ${cifra(D.totalAct, "concretadas esta semana", "var(--emb-objetivo)")}
       ${cifra(D.agendadasAct, "agendadas sin concretar")}
-      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--emb-objetivo)")}
+      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref2"></i>Semana anterior, total</span>
@@ -19301,7 +19310,7 @@ function cuadroVisitasEjecutivo(filas){
       ${cifra(T.totalPrev, "semana anterior, completa")}
       ${cifra(T.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
       ${cifra(T.agendadasAct, "agendadas por delante")}
-      ${cifra(T.retAct, `retenciones esta semana · ${T.retPrev} la anterior`, "var(--emb-objetivo)")}
+      ${cifra(T.retAct, `retenciones esta semana · ${T.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref"></i>Semana anterior</span>
