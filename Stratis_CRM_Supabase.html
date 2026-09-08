@@ -434,12 +434,30 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
    dependencia nueva por dos gráficos no se paga. Las alturas van en % sobre un
    contenedor de alto fijo, así que la escala la decide el JS y el CSS solo
    pinta. */
-.vs-tot{display:flex;gap:20px;margin:0 0 12px;font-size:12px;color:var(--ink-2);flex-wrap:wrap}
-.vs-tot span{font-size:19px;font-weight:730;letter-spacing:-.5px;display:block;
+/* Los dos cuadros van LADO A LADO en escritorio (José, 08/09/2026: «el gráfico
+   está bien pero dividámoslo en 2 columnas para que no se vea tan cargado ni
+   sobre expandido»). Apilados ocupaban dos pantallas y cada barra quedaba
+   estirada a lo ancho de la vista. El corte es 1080px y no 760: a media
+   pantalla, el cuadro 2 todavía tiene que meter su columna del total (84px)
+   más los cinco días. Debajo de eso vuelven a apilarse. */
+.vs-par{display:grid;grid-template-columns:1fr;gap:11px;margin-bottom:11px}
+.vs-par > .card{margin-bottom:0;min-width:0}
+@media(min-width:1080px){ .vs-par{grid-template-columns:1fr 1fr} }
+
+/* Rejilla de tres y no flex: a media pantalla el flex tiraba la tercera cifra a
+   una segunda línea, y una cifra suelta debajo se lee como si midiera otra
+   cosa. En rejilla las tres quedan siempre en la misma fila y lo que se parte
+   es el rótulo, que es donde partir no cuesta nada. */
+.vs-tot{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 11px;
+  font-size:11.5px;line-height:1.32;color:var(--ink-2)}
+.vs-tot > div{min-width:0}
+.vs-tot span{font-size:17px;font-weight:730;letter-spacing:-.5px;display:block;
   font-variant-numeric:tabular-nums;color:var(--ink)}
 /* La leyenda va FUERA del área de barras, que fue lo que pidió José. */
-.vs-leg{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:13px;font-size:11.5px;color:var(--ink-2)}
-.vs-leg i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;
+.vs-leg{display:flex;gap:6px 13px;flex-wrap:wrap;margin-bottom:12px;font-size:11px;
+  color:var(--ink-2)}
+.vs-leg span{white-space:nowrap}
+.vs-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;
   vertical-align:-1px}
 .vs-leg .i-ref{background:var(--ref-sem)}
 .vs-leg .i-ref2{background:var(--ref-tot)}
@@ -447,12 +465,15 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-leg .i-hecho{background:var(--emb-objetivo)}
 .vs-leg .i-plan{background:transparent;border:1.5px dashed var(--emb-visita)}
 
-.vs-g{display:grid;grid-template-columns:28px 1fr;gap:0 9px}
+/* El alto va en una variable: los dos cuadros y el eje TIENEN que medir lo
+   mismo o las barras salen despegadas de su escala. Antes estaba escrito dos
+   veces y cambiar uno solo era cuestión de tiempo. */
+.vs-g{--vs-h:172px;display:grid;grid-template-columns:28px 1fr;gap:0 9px}
 .vs-g2{grid-template-columns:28px 84px 1fr;gap:0 11px}
-.vs-y{position:relative;height:196px;padding-top:2px;font-size:10px;color:var(--muted);
+.vs-y{position:relative;height:var(--vs-h);padding-top:2px;font-size:10px;color:var(--muted);
   font-variant-numeric:tabular-nums}
 .vs-y span{position:absolute;right:0;transform:translateY(-50%)}
-.vs-plot{position:relative;height:196px;border-bottom:1px solid var(--grid)}
+.vs-plot{position:relative;height:var(--vs-h);border-bottom:1px solid var(--grid)}
 .vs-rej{position:absolute;inset:0}
 .vs-rej div{position:absolute;left:0;right:0;border-top:1px solid var(--grid);opacity:.7}
 /* El divisor dice que lo de la izquierda es de OTRA semana. */
@@ -466,8 +487,13 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   position:relative}
 /* El día en curso se marca con una banda de fondo, no con un color de barra:
    el color ya está diciendo otra cosa. */
-.vs-d.hoy:before{content:"";position:absolute;inset:0 2px;background:var(--plane);
-  border-radius:6px 6px 0 0}
+/* La banda es un tinte del propio texto, no `--plane`: en tema oscuro `--plane`
+   es MÁS oscuro que la tarjeta y la columna de hoy salía como un bloque negro
+   de altura completa —se leía como una barra enorme, que es justo lo contrario
+   de lo que la banda quiere decir—. Un tinte de `--ink` aclara en oscuro y
+   oscurece en claro con la misma regla. */
+.vs-d.hoy:before{content:"";position:absolute;inset:0 2px;border-radius:6px 6px 0 0;
+  background:color-mix(in srgb,var(--ink) 7%,transparent)}
 .vs-pila{display:flex;flex-direction:column;justify-content:flex-end;height:100%;width:20px}
 .vs-b{position:relative;width:20px;border-radius:4px 4px 0 0}
 .vs-b.ref{background:var(--ref-sem)}
@@ -2104,7 +2130,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 10:12", huella:"768c29" };
+const BUILD = { sello:"08/09/2026 10:32", huella:"3b5ef0" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18901,7 +18927,11 @@ function cuadrosVisitasSemana(){
 
   const cifra = (n, t, col) => `<div><span${col ? ` style="color:${col}"` : ""}>${n}</span>${t}</div>`;
 
+  /* Los dos van dentro de UN contenedor en rejilla: lado a lado en escritorio,
+     apilados debajo de 1080px. Apilados a ancho completo, cinco barras de 20 px
+     repartidas en 1200 px se veían perdidas y el Reporte pedía dos pantallas. */
   return `
+  <div class="vs-par">
   <div class="card">
     <div class="rep-t">
       <h3>Visitas: esta semana contra la anterior</h3>
@@ -18971,6 +19001,7 @@ function cuadrosVisitasSemana(){
     <div class="rep-pie">La barra de la izquierda es una <b>semana entera</b> y las de la
       derecha son <b>días sueltos</b>: por eso van separadas. La línea punteada es el
       promedio por día de esa semana, que es lo único de ella comparable contra un día.</div>
+  </div>
   </div>`;
 }
 
