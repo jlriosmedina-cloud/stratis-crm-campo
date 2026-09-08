@@ -520,6 +520,13 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-rotTot{margin-top:7px;font-size:11px;color:var(--muted);text-align:center;line-height:1.3}
 .vs-rotTot b{display:block;color:var(--ink-2);font-size:11.5px}
 
+/* El selector de los dos cuadros de Registros. Va pegado a ellos y con su
+   rótulo delante —«El día a día de»—: un grupo de chips suelto entre dos
+   tarjetas no dice a cuál de las dos manda. */
+.vs-sel{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 2px 11px}
+.vs-sel-t{font-size:12px;color:var(--muted);font-weight:600}
+@media(max-width:560px){ .vs-sel{gap:6px} .vs-sel-t{width:100%} }
+
 /* ---- El mismo cuadro, con los ejecutivos en el eje (Registros) -----------
    Reusa todo el bloque de arriba: mismas barras, mismos colores, misma
    leyenda. Solo cambian dos cosas —el alto, porque acá hay una barra por
@@ -2154,7 +2161,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 11:10", huella:"fc9d4f" };
+const BUILD = { sello:"08/09/2026 11:37", huella:"5f20bb" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -4927,6 +4934,11 @@ const S = {
   fActRango:"hoy", fActEjec:"todos", fActTipo:"todos", fActDesfase:false,
   qAct:"", limiteAct:120,
   fPeriodoReg:"todo",           // rango de fechas de la bitácora de gestiones
+  /* Quién está elegido en los dos cuadros de visitas de Registros. Vacío es el
+     equipo. Es SUYO y no del filtro de la tabla de abajo a propósito: ese
+     filtro también mueve el periodo, y un cuadro cuya ventana cambia sin que
+     el título lo diga es el error que ya se corrigió en la Cartera. */
+  vsEjec:"",
   qBit:"", fBitAccion:"todos", fBitQuien:"todos", limiteBit:LOTE_BIT,
   mesPanel:"",   /* mes de la cartera asignada, en Ajustes; vacío = el actual */
   pBono:"",      /* periodo del bono; vacío = el que corre */
@@ -10499,9 +10511,9 @@ function viewRegistros(){
         + `<details class="emb-tabla-c"><summary>La tabla de siempre: en qué está parada la cartera de cada ejecutivo</summary>${
              tablaControl(filas)}</details>`
         /* El embudo mide la campaña acumulada; esto mide la SEMANA. Van
-           juntos a propósito: la pregunta del comité es «cómo vamos» y
-           después «quién bajó esta semana». */
-        + cuadroVisitasEjecutivo(filas);
+           juntos a propósito: la pregunta del comité es «cómo vamos», después
+           «quién bajó esta semana» y después «qué día». */
+        + bloqueVisitasRegistros(filas);
     })() : ""}
 
   <div class="filtros">
@@ -13100,6 +13112,54 @@ function coordBBVA(c){
    Va SOLO en el archivo interno. La coordinación con el banco es cómo trabaja
    Stratis por dentro —incluido cuántas veces tuvimos que insistirle a su
    ejecutivo—, y eso no es parte de lo que se le entrega a BBVA. */
+/* ---- Agendamiento -------------------------------------------------------
+   Una fila por cita. José, 08/09/2026, la pidió con ese nombre después de
+   preguntar si los cuadros del Reporte se podían rehacer en Excel: con la hoja
+   Visitas se reconstruían las barras llenas y **las punteadas no salían de
+   ninguna descarga**. Esta es esa mitad.
+
+   Dos columnas hacen todo el trabajo y por eso van juntas:
+
+     · `Estado` es el veredicto del CRM ya resuelto —Programada, Concretada,
+       Reagendada, Descartada…—, para no reimplementar la regla en Sheets.
+     · `Cuenta_Como_Agendada` es la regla EXACTA de los cuadros: la cita que
+       sigue viva y todavía no se concretó. Una reagendada ya cuenta en su
+       fecha nueva y una descartada dejó de ser un compromiso; las dos van NO.
+
+   Y una advertencia que vale para quien dinamice: acá se cuentan CITAS, no
+   comercios. Es al revés que en la hoja Visitas, y es a propósito: un comercio
+   puede tener dos citas y las dos son compromisos distintos. */
+const COLS_AGENDA = ["Fecha_Objetivo","Hora_Inicio","Duracion_Min","Modalidad",
+  "Ejecutivo","Correo_Stratis","Customer_id","Nombre_Comercio","Rubro","Distrito",
+  "Accion","Estado","Se_Concreto","Cuenta_Como_Agendada",
+  "Fecha_Visita_Que_La_Cumplio","Reagendada_De","Cerrada_En","Cerrada_Por","Motivo_De_Cierre",
+  "Comentario","Creada_En","ID_Cita"];
+
+function filasAgenda(){
+  const dia = v => String(v || "").slice(0,10);
+  return citasTodas()
+    .slice()
+    .sort((a, b) => dia(a.fecha_objetivo).localeCompare(dia(b.fecha_objetivo)))
+    .map(s => {
+      const e = estadoCita(s);
+      const c = byId[String(s.customer_id)] || {};
+      /* La gestión que la cumplió, para poder cruzar esta hoja con Visitas
+         sin adivinar por fecha. */
+      const g = s.interaccion_cumple ? DB.buscar(s.interaccion_cumple) : null;
+      const vive = e !== "reagendada" && e !== "descartada";
+      return [
+        dia(s.fecha_objetivo), horaCorta(s.hora_inicio), s.duracion_min || "", s.modalidad || "",
+        s.ejecutivo || "", s.correo_stratis || "",
+        s.customer_id, c.nombre_comercio || "", c.rubro || "", c.distrito || "",
+        s.accion || "", (ESTADO_CITA[e] || {}).label || e,
+        seConcreto(e) ? "SI" : "NO",
+        (vive && !seConcreto(e)) ? "SI" : "NO",
+        g ? dia(g.Fecha_Contacto) : "",
+        s.reagendada_de || "", dia(s.cerrado_en), s.cerrado_por || "", s.cerrado_motivo || "",
+        s.comentario || "", dia(s.creado_en), s.id];
+    });
+}
+
 const COLS_COORD = ["Fecha_Contacto","Hora_Contacto","Ejecutivo","Correo_Stratis",
   "Customer_id","Nombre_Comercio","Distrito","Ejecutivo_Asignado",
   "Medio","Proposito","Respondio_BBVA","Numero_de_Contacto",
@@ -14023,11 +14083,15 @@ async function exportarBBVA(btn){
      gestión con su fecha, que es lo único con lo que se puede reconstruir el
      conteo diario fuera del CRM. */
   XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
+  /* Y la otra mitad: Visitas reconstruye las barras llenas de los cuadros del
+     Reporte, Agendamiento las punteadas. Sin las dos, el cuadro se rehace a
+     medias fuera del CRM y nadie lo advierte. */
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_AGENDA, filasAgenda()), "Agendamiento");
   XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   const nRet   = cartera().filter(c => !esClienteNuevo(c)).length;
   const nVenta = cartera().filter(esClienteNuevo).length;
-  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta · 2 hojas`);
+  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta · 3 hojas`);
 }
 
 function hojaReporte(admin){
@@ -14091,6 +14155,11 @@ async function exportarExcel(btn){
   XLSX.utils.book_append_sheet(wb, hoja(COLS_COORD, filasCoordinaciones()), "Coordinación BBVA");
 
   if (admin){
+    /* Agendamiento va DENTRO del bloque de mando y no arriba con Visitas, que
+       es donde encajaría por tema: las citas no vienen recortadas por dueño
+       como sí vienen las gestiones, así que en la rama del ejecutivo la hoja
+       le mostraría la agenda de sus compañeros. */
+    XLSX.utils.book_append_sheet(wb, hoja(COLS_AGENDA, filasAgenda()), "Agendamiento");
     XLSX.utils.book_append_sheet(wb, hojaAvance(),         "Avance por ejecutivo");
     XLSX.utils.book_append_sheet(wb, hojaMetas(),          "Cartera asignada");
     XLSX.utils.book_append_sheet(wb, hojaEfectividad(),    "Tasa de respuesta");
@@ -14121,6 +14190,7 @@ function exportarCSV(que){
   try {
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
                  visitas:[COLS_VISITAS, filasVisitas(), "Visitas"],
+                 agenda:[COLS_AGENDA, filasAgenda(), "Agendamiento"],
                  coord:[COLS_COORD, filasCoordinaciones(), "Coordinacion_BBVA"],
                  bbva:[COLS_ENTREGA, filasBBVA(true), "Base_para_BBVA"],
                  nuevos:[COLS_NUEVOS, filasNuevos(), "Ventas_nuevas"] };
@@ -14210,15 +14280,15 @@ function viewAyuda(){
   <div class="card">
     ${ajFilaDescarga(
       "Base para BBVA",
-      "Dos hojas. Base: una fila por comercio, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro. Visitas: una fila por gestión, con su fecha.",
+      "Tres hojas. Base: una fila por comercio, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro. Visitas: una fila por gestión. Agendamiento: una fila por cita.",
       "expBBVA", "Descargar para BBVA",
-      [["bbva","Base para BBVA en CSV"],["nuevos","Ventas nuevas en CSV"]])}
+      [["bbva","Base para BBVA en CSV"],["visitas","Visitas en CSV"],["agenda","Agendamiento en CSV"],["nuevos","Ventas nuevas en CSV"]])}
 
     ${ajFilaDescarga(
       "La campaña completa",
-      "13 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
+      "14 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
       "expXlsx", "Descargar Excel completo",
-      [["base","Base en CSV"],["visitas","Visitas en CSV"],["coord","Coordinación BBVA en CSV"]])}
+      [["base","Base en CSV"],["visitas","Visitas en CSV"],["agenda","Agendamiento en CSV"],["coord","Coordinación BBVA en CSV"]])}
 
     <details class="aj-mas">
       <summary>Qué trae cada archivo y cómo se pega</summary>
@@ -14249,7 +14319,16 @@ function viewAyuda(){
         armar <b>cuadros por día</b> fuera del CRM, que sobre la hoja Base no salen: ahí hay una
         sola <b>Fecha_Visita</b> por comercio, así que un comercio visitado dos veces aporta una
         sola fecha y la semana sale corta sin que nada lo advierta.</p>
-        <p>Tres cuidados al dinamizarla, y los tres cambian el número:
+        <p>La tercera, <b>Agendamiento</b>, tiene <b>una fila por cita</b>: su
+        <b>Fecha_Objetivo</b>, el comercio, el ejecutivo, la modalidad y dos columnas que evitan
+        reimplementar la regla —<b>Estado</b>, ya resuelto por el CRM, y <b>Cuenta_Como_Agendada</b>,
+        que es exactamente lo que dibujan las barras punteadas: la cita que sigue viva y todavía no
+        se concretó—. Una <i>reagendada</i> ya cuenta en su fecha nueva y una <i>descartada</i> dejó
+        de ser un compromiso: las dos van en NO.</p>
+        <p><b>Ojo:</b> acá se cuentan <b>citas, no comercios</b> —al revés que en Visitas—, así que
+        un COUNTIF normal es lo correcto. Un comercio puede tener dos citas y son dos compromisos
+        distintos.</p>
+        <p>Tres cuidados al dinamizar <b>Visitas</b>, y los tres cambian el número:
         <b>1)</b> cuenta <b>Customer_id distintos</b>, no filas —un mismo comercio puede tener dos
         visitas el mismo día y el CRM lo cuenta una vez: se hace con «Agregar al modelo de datos»
         y <i>Recuento distinto</i>—; <b>2)</b> saca los <b>Customer_id que empiezan con NUEVO-</b>,
@@ -18929,8 +19008,12 @@ function datosVisitasSemana(correo){
    semana pasada?». Estructura y colores elegidos por José el 08/09.
 
    Los dos leen de `datosVisitasSemana()`. Ninguno recalcula nada. */
-function cuadrosVisitasSemana(){
-  const D = datosVisitasSemana();
+/* `correo` acota los DOS cuadros a un ejecutivo, para Registros. Es el mismo
+   componente, no una copia: José pidió «los 2 gráficos tal como hemos hecho en
+   la otra pestaña», y dos dibujos del mismo cuadro se separan solos con el
+   tiempo. Lo único que cambia con `correo` es de quién son los días. */
+function cuadrosVisitasSemana(correo){
+  const D = datosVisitasSemana(correo);
   const dias = D.idx.map(i => ({ p:D.prev[i], a:D.act[i] }));
   if (!dias.length) return "";
   const fmt = d => { const [, m, x] = String(d).split("-"); return x + "/" + m; };
@@ -18988,6 +19071,13 @@ function cuadrosVisitasSemana(){
 
   const cifra = (n, t, col) => `<div><span${col ? ` style="color:${col}"` : ""}>${n}</span>${t}</div>`;
 
+  /* De quién son estos días. Va en el SUBTÍTULO de cada cuadro y no solo en el
+     selector de arriba: la tarjeta se lee sola, se comparte en pantalla y se
+     recorta en una captura, y un cuadro que no dice de quién es termina
+     atribuido al equipo entero. */
+  const dueno = correo ? (USUARIOS.find(u => u.correo === correo) || {}).nombre || correo : "";
+  const deQuien = dueno ? `<b>${esc(dueno)}</b> · ` : "";
+
   /* Los dos van dentro de UN contenedor en rejilla: lado a lado en escritorio,
      apilados debajo de 1080px. Apilados a ancho completo, cinco barras de 20 px
      repartidas en 1200 px se veían perdidas y el Reporte pedía dos pantallas. */
@@ -18996,7 +19086,7 @@ function cuadrosVisitasSemana(){
   <div class="card">
     <div class="rep-t">
       <h3>Visitas: esta semana contra la anterior</h3>
-      <span>Comercios de cartera con visita concretada · del ${fmt(D.iniAct)} al ${fmt(D.finAct)},
+      <span>${deQuien}comercios de cartera con visita concretada · del ${fmt(D.iniAct)} al ${fmt(D.finAct)},
         comparada con la del ${fmt(D.iniPrev)} al ${fmt(D.finPrev)}</span>
     </div>
     <div class="vs-tot">
@@ -19026,7 +19116,7 @@ function cuadrosVisitasSemana(){
   <div class="card">
     <div class="rep-t">
       <h3>La semana anterior y el avance de esta</h3>
-      <span>El total de la semana cerrada, y día por día lo que va de la actual</span>
+      <span>${deQuien}el total de la semana cerrada, y día por día lo que va de la actual</span>
     </div>
     <div class="vs-tot">
       ${cifra(D.totalPrev, "cerró la semana anterior · " + D.ritmoPrev + " por día")}
@@ -19170,6 +19260,41 @@ function cuadroVisitasEjecutivo(filas){
       <b>La barra llena mide visitas concretadas; la punteada, citas puestas en el calendario.</b>
       No son la misma unidad: una visita en frío suma sin haber estado agendada.</div>
   </div>`;
+}
+
+/* ---- El bloque completo de visitas en Registros -------------------------
+   José, 08/09/2026, después de ver el comparativo: *«el cuadro está bien, pero
+   necesitamos que se vea por día tal como hicimos en la pestaña Reporte, pero
+   de manera individual por ejecutivo; necesito los 2 gráficos tal como hemos
+   hecho en la otra pestaña»*.
+
+   Se lee de arriba abajo: el comparativo dice QUIÉN bajó, se elige a esa
+   persona y los dos cuadros de abajo dicen QUÉ DÍA. Son los mismos dos cuadros
+   del Reporte —la misma función—, no una segunda versión.
+
+   El selector es propio y no el de la tabla de abajo: ese filtro también mueve
+   el periodo, y un cuadro cuya ventana cambia sin que el título lo diga es
+   exactamente el error que se corrigió en la Cartera. */
+function bloqueVisitasRegistros(filas){
+  const comparativo = cuadroVisitasEjecutivo(filas);
+  if (!comparativo) return "";
+
+  const lista = (filas || []).filter(x => x && x.correo);
+  /* Si el elegido ya no está en el equipo —se desactivó entre dos cargas— se
+     vuelve al equipo en vez de dibujar los cuadros de nadie. */
+  const sel = lista.some(x => x.correo === S.vsEjec) ? S.vsEjec : "";
+
+  const chip = (v, txt) => `<button class="${sel === v ? "on" : ""}" data-vsej="${esc(v)}">${esc(txt)}</button>`;
+
+  return comparativo + `
+  <div class="vs-sel">
+    <span class="vs-sel-t">El día a día de</span>
+    <div class="seg" role="group" aria-label="Ejecutivo del detalle diario">
+      ${chip("", "Todo el equipo")}
+      ${lista.map(x => chip(x.correo, x.nombre)).join("")}
+    </div>
+  </div>
+  ${cuadrosVisitasSemana(sel)}`;
 }
 
 /* ---- Lo que está comprometido de acá al viernes -------------------------
@@ -24081,6 +24206,10 @@ function bindExtras(){
     S.qReg = ""; S.fResultado = S.fMedio = S.fEjecReg = "todos"; S.limiteReg = 40; render(); };
   document.querySelectorAll("[data-fper]").forEach(b => b.onclick = () => {
     S.fPeriodoReg = b.dataset.fper; S.limiteReg = 40; render(); });
+  /* El selector de los dos cuadros de visitas. NO toca `limiteReg` ni ningún
+     filtro de la tabla: cambia de quién son los gráficos y nada más. */
+  document.querySelectorAll("[data-vsej]").forEach(b => b.onclick = () => {
+    S.vsEjec = b.dataset.vsej; render(); });
   /* La fila del tablero funciona como filtro: se toca y vuelve a soltar */
   document.querySelectorAll("[data-fejec]").forEach(tr => tr.onclick = () => {
     S.fEjecReg = S.fEjecReg === tr.dataset.fejec ? "todos" : tr.dataset.fejec;
