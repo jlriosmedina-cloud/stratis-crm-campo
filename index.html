@@ -505,8 +505,12 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-b.plan{background:repeating-linear-gradient(135deg,
     color-mix(in srgb,var(--emb-visita) 26%,transparent) 0 4px,transparent 4px 8px);
   border:1.5px dashed var(--emb-visita);border-bottom:0}
+/* La cifra lleva el fondo de la tarjeta detrás: la línea de ritmo y las de la
+   rejilla la cruzaban y el número salía tachado —en el cuadro 2, con el ritmo
+   en 8.4, el «6» del lunes quedaba partido por la mitad—. */
 .vs-b .n{position:absolute;top:-16px;left:50%;transform:translateX(-50%);white-space:nowrap;
-  font-size:10.5px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  font-size:10.5px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums;
+  background:var(--card);padding:0 3px;border-radius:3px}
 .vs-b.ref .n{color:var(--muted);font-weight:600}
 .vs-b.tot .n{font-size:13px;color:var(--ink)}
 .vs-rot{display:grid;margin-top:7px;font-size:11px;color:var(--muted);text-align:center}
@@ -2130,7 +2134,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 10:32", huella:"3b5ef0" };
+const BUILD = { sello:"08/09/2026 10:43", huella:"f7069e" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
