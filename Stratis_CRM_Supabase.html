@@ -2104,7 +2104,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 10:03", huella:"e8e702" };
+const BUILD = { sello:"08/09/2026 10:12", huella:"768c29" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18870,13 +18870,22 @@ function cuadrosVisitasSemana(){
     <div class="vs-d ${a.esHoy ? "hoy" : ""}">
       <div class="vs-b ref" style="height:${alto(p.visitas, e1)}">${
         p.visitas ? `<span class="n">${p.visitas}</span>` : ""}</div>
+      ${/* Cada estado del día dibuja lo suyo y nada más:
+             · día PASADO  → solo lo concretado. Las citas que quedaron sin
+               concretar ya no van a concretarse; dibujarlas tapaba el número
+               que importa —el lunes salió con «2» y sus 6 visitas invisibles—.
+             · HOY         → las dos, con «N de M», porque el día está a medias.
+             · día FUTURO  → solo lo agendado, que es todo lo que hay.
+             La primera versión usaba una sola rama para los tres y por eso el
+             día pasado mentía. */""}
       <div class="vs-pila">
-        ${a.agendadas ? `<div class="vs-b plan" style="height:${alto(a.agendadas, e1)}">
-            <span class="n">${a.esHoy ? a.visitas + " de " + (a.visitas + a.agendadas) : a.agendadas}</span>
-          </div>` : ""}
+        ${a.esHoy && a.agendadas ? `<div class="vs-b plan" style="height:${alto(a.agendadas, e1)}">
+            <span class="n">${a.visitas} de ${a.visitas + a.agendadas}</span></div>` : ""}
+        ${a.futuro && a.agendadas ? `<div class="vs-b plan" style="height:${alto(a.agendadas, e1)}">
+            <span class="n">${a.agendadas}</span></div>` : ""}
         ${a.visitas ? `<div class="vs-b act" style="height:${alto(a.visitas, e1)}${
-            a.agendadas ? ";border-radius:0" : ""}">${
-            a.agendadas ? "" : `<span class="n">${a.visitas}</span>`}</div>` : ""}
+            a.esHoy && a.agendadas ? ";border-radius:0" : ""}">${
+            a.esHoy && a.agendadas ? "" : `<span class="n">${a.visitas}</span>`}</div>` : ""}
       </div>
     </div>`).join("");
 
