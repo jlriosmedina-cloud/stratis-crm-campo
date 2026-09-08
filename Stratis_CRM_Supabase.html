@@ -519,6 +519,26 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-rot .fut b{font-weight:500;color:var(--muted)}
 .vs-rotTot{margin-top:7px;font-size:11px;color:var(--muted);text-align:center;line-height:1.3}
 .vs-rotTot b{display:block;color:var(--ink-2);font-size:11.5px}
+
+/* ---- El mismo cuadro, con los ejecutivos en el eje (Registros) -----------
+   Reusa todo el bloque de arriba: mismas barras, mismos colores, misma
+   leyenda. Solo cambian dos cosas —el alto, porque acá hay una barra por
+   persona y no por día, y las barras, más anchas porque son cuatro grupos y
+   no siete—. Si esto tuviera CSS propio, en un mes los dos cuadros se verían
+   distintos sin que nadie lo hubiera decidido. */
+.vs-ejec{--vs-h:190px}
+.vs-ejec .vs-b,.vs-ejec .vs-pila{width:30px}
+.vs-ejec .vs-d{gap:7px}
+.vs-rot-ejec span{display:block;font-size:10.5px;font-weight:600;margin-top:1px;
+  font-variant-numeric:tabular-nums}
+@media(max-width:760px){
+  .vs-ejec .vs-b,.vs-ejec .vs-pila{width:17px}
+  .vs-ejec .vs-d{gap:4px}
+  /* En celular el nombre completo no entra en un cuarto de pantalla: se parte
+     y las columnas quedan de distinto alto. */
+  .vs-rot-ejec{font-size:10px}
+  .vs-rot-ejec b{font-size:10.5px;line-height:1.25}
+}
 @media(max-width:760px){
   .vs-g,.vs-g2{grid-template-columns:24px 1fr}
   .vs-g2 > div:nth-child(2){display:none}   /* en celular la referencia va en la cifra */
@@ -2134,7 +2154,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 10:43", huella:"f7069e" };
+const BUILD = { sello:"08/09/2026 11:10", huella:"fc9d4f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -10477,7 +10497,11 @@ function viewRegistros(){
       if (!filas.length) return "";
       return embudoEquipo(filas)
         + `<details class="emb-tabla-c"><summary>La tabla de siempre: en qué está parada la cartera de cada ejecutivo</summary>${
-             tablaControl(filas)}</details>`;
+             tablaControl(filas)}</details>`
+        /* El embudo mide la campaña acumulada; esto mide la SEMANA. Van
+           juntos a propósito: la pregunta del comité es «cómo vamos» y
+           después «quién bajó esta semana». */
+        + cuadroVisitasEjecutivo(filas);
     })() : ""}
 
   <div class="filtros">
@@ -13984,15 +14008,26 @@ async function exportarBBVA(btn){
   if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Generando…"; }
   try { await recargarCartera(); await refrescar(); } catch(e){ toast("No se pudo refrescar: " + e.message); }
   const wb = XLSX.utils.book_new();
-  /* Una sola hoja. La Base trae primero lo que se entrega al banco y a
-     continuación el resto de la gestión, para que sea un solo pegado: es en el
-     archivo de BBVA donde se cruza contra su base y se arman las dinámicas. */
+  /* La Base trae primero lo que se entrega al banco y a continuación el resto
+     de la gestión, para que sea un solo pegado: es en el archivo de BBVA donde
+     se cruza contra su base y se arman las dinámicas. */
   XLSX.utils.book_append_sheet(wb, hojaBBVA(), "Base");
+  /* Y la hoja Visitas, que hasta el 08/09/2026 solo viajaba en el Excel
+     completo (José: «la hoja que se llame Visitas, en el Excel que descargo en
+     Ajustes que dice DESCARGAR PARA BBVA»).
+
+     No es un duplicado de la Base: la Base tiene UNA fila por comercio y por
+     eso solo guarda una Fecha_Visita: hoy son 94 fechas para 121 visitas
+     válidas —27 visitas repetidas sin fecha propia—. Cualquier cuadro por día
+     armado sobre la Base sale corto y nadie lo nota. Visitas trae una fila por
+     gestión con su fecha, que es lo único con lo que se puede reconstruir el
+     conteo diario fuera del CRM. */
+  XLSX.utils.book_append_sheet(wb, hoja(COLS_VISITAS, filasVisitas()), "Visitas");
   XLSX.writeFile(wb, `Base_BBVA_${hoyISO().replace(/-/g,"")}.xlsx`);
   if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt; }
   const nRet   = cartera().filter(c => !esClienteNuevo(c)).length;
   const nVenta = cartera().filter(esClienteNuevo).length;
-  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta`);
+  toast(`Base generada · ${nRet} de retención y ${nVenta} de venta · 2 hojas`);
 }
 
 function hojaReporte(admin){
@@ -14175,7 +14210,7 @@ function viewAyuda(){
   <div class="card">
     ${ajFilaDescarga(
       "Base para BBVA",
-      "Una sola hoja: la Base, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro.",
+      "Dos hojas. Base: una fila por comercio, con la cartera de BBVA y los RUC que trae Stratis separados por la columna Tipo_Registro. Visitas: una fila por gestión, con su fecha.",
       "expBBVA", "Descargar para BBVA",
       [["bbva","Base para BBVA en CSV"],["nuevos","Ventas nuevas en CSV"]])}
 
@@ -14209,6 +14244,17 @@ function viewAyuda(){
         que quedarían vacías en la mayoría de las filas.</p>
         <p>Todo eso es una fila por comercio. Si necesitas dinamizar <b>contacto por contacto</b>,
         esa está en la hoja <b>Coordinación BBVA</b> del archivo completo.</p>
+        <p>La segunda hoja, <b>Visitas</b>, tiene <b>una fila por gestión</b> con su
+        <b>Fecha_Contacto</b>, su <b>Customer_id</b> y su <b>Cumple_Visita</b>. Está para poder
+        armar <b>cuadros por día</b> fuera del CRM, que sobre la hoja Base no salen: ahí hay una
+        sola <b>Fecha_Visita</b> por comercio, así que un comercio visitado dos veces aporta una
+        sola fecha y la semana sale corta sin que nada lo advierta.</p>
+        <p>Tres cuidados al dinamizarla, y los tres cambian el número:
+        <b>1)</b> cuenta <b>Customer_id distintos</b>, no filas —un mismo comercio puede tener dos
+        visitas el mismo día y el CRM lo cuenta una vez: se hace con «Agregar al modelo de datos»
+        y <i>Recuento distinto</i>—; <b>2)</b> saca los <b>Customer_id que empiezan con NUEVO-</b>,
+        que son ventas nuevas y no cartera; <b>3)</b> las semanas del CRM van de <b>lunes a
+        domingo</b>, no «los últimos siete días».</p>
         <p><b>Gestión = SI</b> cuando el comercio quedó como Retenido o Venta; mientras siga
         pendiente o se haya perdido va NO. <b>Cumple_Visita = SI</b> si la gestión fue presencial
         o virtual y además el cliente respondió. <b>Volumen_Comercio</b> no sale: esa columna la
@@ -18806,13 +18852,23 @@ function repCorteSemana(hoy){
                      la lámina de «lo comprometido».
    No son intercambiables: una visita en frío suma en la primera sin haber
    estado nunca en la segunda. */
-function datosVisitasSemana(){
+/* `correo` acota el universo a la cartera de UN ejecutivo, para el cuadro de
+   Registros. No es un camino aparte: es la misma función con menos comercios,
+   así que el corte, la regla de visita y la de cita son idénticas por
+   construcción. Sumar los cuatro ejecutivos tiene que dar el total, y la
+   prueba lo exige — si algún día no da, es que apareció un comercio sin dueño
+   y eso hay que verlo, no taparlo. */
+function datosVisitasSemana(correo){
   const hoy = hoyISO(), corte = repCorteSemana(hoy);
   const mas = (d, n) => new Date(new Date(d + "T00:00:00Z").getTime() + n*86400000)
     .toISOString().slice(0,10);
   const iniPrev = mas(corte, -6), iniAct = mas(corte, 1);
 
-  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  /* El reparto es por DUEÑO del comercio, no por quién registró la gestión: es
+     la misma regla del embudo por ejecutivo que ya vive en esta pestaña, y es
+     la única que garantiza que nadie se cuente dos veces. */
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c)
+    && (!correo || c.asignado_correo === correo));
   const ids  = new Set(cart.map(c => String(c.customer_id)));
 
   const visDia = d => comerciosConVisita(DB.todos().filter(r =>
@@ -18851,7 +18907,8 @@ function datosVisitasSemana(){
 
   /* El domingo de la semana en curso es corte + 7, no + 6: `iniAct` ya es
      corte + 1. La primera version cerraba la ventana un sabado. */
-  return { hoy, corte, iniPrev, finPrev:corte, iniAct, finAct:mas(corte, 7),
+  return { hoy, corte, correo: correo || "", cartera: cart.length,
+    iniPrev, finPrev:corte, iniAct, finAct:mas(corte, 7),
     prev, act, idx,
     totalPrev: suma(prev, "visitas"),
     totalAct:  suma(act,  "visitas"),
@@ -19006,6 +19063,112 @@ function cuadrosVisitasSemana(){
       derecha son <b>días sueltos</b>: por eso van separadas. La línea punteada es el
       promedio por día de esa semana, que es lo único de ella comparable contra un día.</div>
   </div>
+  </div>`;
+}
+
+/* ---- Las mismas visitas, repartidas por ejecutivo -----------------------
+   José, 08/09/2026: *«nos están pidiendo un cuadro con la vista por ejecutivo,
+   hagámoslo igual que los cuadros que hemos trabajado, y esto lo vamos a
+   colocar en la pestaña Registros»*.
+
+   Un solo cuadro con los ejecutivos en el eje, no cuatro gráficos: la pregunta
+   que responde es «quién bajó», y eso se lee de un vistazo o no se lee.
+
+   Mide LO MISMO que los dos cuadros del Reporte —comercios de cartera con
+   visita concretada— y sale de la misma función. La comprobación de fondo, que
+   la prueba exige, es que la suma de los cuatro dé exactamente el total del
+   Reporte: si no da, apareció un comercio sin dueño y eso se muestra, no se
+   redondea. */
+function cuadroVisitasEjecutivo(filas){
+  const lista = (filas || []).filter(x => x && x.correo);
+  if (!lista.length) return "";
+
+  const T = datosVisitasSemana();                    // el total, para cuadrar
+  const D = lista.map(x => ({ nombre:x.nombre, correo:x.correo, d:datosVisitasSemana(x.correo) }));
+  if (!D.some(x => x.d.totalPrev || x.d.totalAct || x.d.agendadasAct)) return "";
+
+  const fmt = d => { const [, m, x] = String(d).split("-"); return x + "/" + m; };
+  const suma = k => D.reduce((n, x) => n + x.d[k], 0);
+  /* Lo que no le pertenece a nadie. Debería ser siempre cero; el día que no lo
+     sea, el cuadro lo dice en vez de dejar que las barras no cuadren en
+     silencio. */
+  const huerfano = { prev: T.totalPrev - suma("totalPrev"),
+                     act:  T.totalAct  - suma("totalAct"),
+                     agen: T.agendadasAct - suma("agendadasAct") };
+
+  /* Misma escala y mismo aire que los cuadros del Reporte. */
+  const tope  = Math.max(1, ...D.map(x => Math.max(x.d.totalPrev, x.d.totalAct + x.d.agendadasAct)));
+  /* OJO con el nombre: acá esta constante se llamó `esc` y tapó a la función
+     global `esc()` que escapa HTML — el cuadro reventó con «esc is not a
+     function» al pintar el nombre del ejecutivo. */
+  const escala = Math.max(4, Math.ceil(tope * 1.12 / 4) * 4);
+  const alto   = v => Math.max(v > 0 ? 3 : 0, v / escala * 100) + "%";
+
+  const cols = D.map(({d}) => `
+    <div class="vs-d">
+      <div class="vs-b ref" style="height:${alto(d.totalPrev)}">${
+        d.totalPrev ? `<span class="n">${d.totalPrev}</span>` : ""}</div>
+      <div class="vs-pila">
+        ${d.agendadasAct ? `<div class="vs-b plan" style="height:${alto(d.agendadasAct)}">
+            <span class="n">${d.agendadasAct}</span></div>` : ""}
+        ${d.totalAct ? `<div class="vs-b act" style="height:${alto(d.totalAct)}${
+            d.agendadasAct ? ";border-radius:0" : ""}"><span class="n">${d.totalAct}</span></div>` : ""}
+      </div>
+    </div>`).join("");
+
+  /* Debajo del nombre va la diferencia contra la semana anterior, que es la
+     razón de ser de este cuadro. Un «0» no se pinta de color: no es ni bueno
+     ni malo, es que va igual. */
+  const rot = D.map(({nombre, d}) => {
+    const dif = d.totalAct - d.totalPrev;
+    const col = !dif ? "var(--muted)" : dif > 0 ? "var(--emb-objetivo)" : "var(--emb-visita)";
+    return `<div><b>${esc(nombre)}</b><span style="color:${col}">${
+      dif > 0 ? "+" : dif < 0 ? "−" : "="}${dif ? Math.abs(dif) : ""} contra la anterior</span></div>`;
+  }).join("");
+
+  const cifra = (n, t, c) => `<div><span${c ? ` style="color:${c}"` : ""}>${n}</span>${t}</div>`;
+
+  return `
+  <div class="card">
+    <div class="rep-t">
+      <h3>Visitas por ejecutivo: esta semana contra la anterior</h3>
+      <span>Comercios de cartera con visita concretada · del ${fmt(T.iniAct)} al ${fmt(T.finAct)},
+        comparada con la del ${fmt(T.iniPrev)} al ${fmt(T.finPrev)}</span>
+    </div>
+    <div class="vs-tot">
+      ${cifra(T.totalPrev, "semana anterior, completa")}
+      ${cifra(T.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
+      ${cifra(T.agendadasAct, "agendadas por delante")}
+    </div>
+    <div class="vs-leg">
+      <span><i class="i-ref"></i>Semana anterior</span>
+      <span><i class="i-act"></i>Esta semana, concretadas</span>
+      <span><i class="i-plan"></i>Agendadas, todavía no ocurridas</span>
+    </div>
+    <div class="vs-g vs-ejec">
+      <div class="vs-y">${[0,1,2,3,4].map(i =>
+        `<span style="bottom:${i*25}%">${i === 4 ? "" : Math.round(escala*i/4)}</span>`).join("")}</div>
+      <div>
+        <div class="vs-plot">
+          <div class="vs-rej">${[0,25,50,75,100].map(p2 =>
+            `<div style="bottom:${p2}%"></div>`).join("")}</div>
+          <div class="vs-dias" style="grid-template-columns:repeat(${D.length},1fr)">${cols}</div>
+        </div>
+        <div class="vs-rot vs-rot-ejec" style="grid-template-columns:repeat(${D.length},1fr)">${rot}</div>
+      </div>
+    </div>
+    <div class="rep-pie">Las tres cifras de arriba son las del <b>Reporte</b>, y las barras las
+      reparten: cada comercio va con el ejecutivo que lo tiene asignado, así que ninguno se
+      cuenta dos veces.${
+      (huerfano.prev || huerfano.act || huerfano.agen)
+        ? ` <b style="color:var(--warn-tx)">Ojo: ${listaEs([
+            huerfano.prev ? huerfano.prev + " de la semana anterior" : "",
+            huerfano.act  ? huerfano.act  + " de esta semana"        : "",
+            huerfano.agen ? huerfano.agen + " agendadas"             : ""
+          ].filter(Boolean))} no le pertenecen a ningún ejecutivo y quedan fuera de las barras.</b>`
+        : ""}<br>
+      <b>La barra llena mide visitas concretadas; la punteada, citas puestas en el calendario.</b>
+      No son la misma unidad: una visita en frío suma sin haber estado agendada.</div>
   </div>`;
 }
 
