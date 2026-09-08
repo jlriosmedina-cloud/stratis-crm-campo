@@ -429,6 +429,73 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   font-size:12.5px;color:var(--ink-2)}
 .aviso-dud .btn{margin-top:9px}
 
+/* ---- Los dos cuadros de visitas del Reporte (José, 08/09/2026) ------------
+   Barras verticales en HTML, sin librería: el CRM ya dibuja así el resto y una
+   dependencia nueva por dos gráficos no se paga. Las alturas van en % sobre un
+   contenedor de alto fijo, así que la escala la decide el JS y el CSS solo
+   pinta. */
+.vs-tot{display:flex;gap:20px;margin:0 0 12px;font-size:12px;color:var(--ink-2);flex-wrap:wrap}
+.vs-tot span{font-size:19px;font-weight:730;letter-spacing:-.5px;display:block;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+/* La leyenda va FUERA del área de barras, que fue lo que pidió José. */
+.vs-leg{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:13px;font-size:11.5px;color:var(--ink-2)}
+.vs-leg i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;
+  vertical-align:-1px}
+.vs-leg .i-ref{background:var(--ref-sem)}
+.vs-leg .i-ref2{background:var(--ref-tot)}
+.vs-leg .i-act{background:var(--emb-visita)}
+.vs-leg .i-hecho{background:var(--emb-objetivo)}
+.vs-leg .i-plan{background:transparent;border:1.5px dashed var(--emb-visita)}
+
+.vs-g{display:grid;grid-template-columns:28px 1fr;gap:0 9px}
+.vs-g2{grid-template-columns:28px 84px 1fr;gap:0 11px}
+.vs-y{position:relative;height:196px;padding-top:2px;font-size:10px;color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.vs-y span{position:absolute;right:0;transform:translateY(-50%)}
+.vs-plot{position:relative;height:196px;border-bottom:1px solid var(--grid)}
+.vs-rej{position:absolute;inset:0}
+.vs-rej div{position:absolute;left:0;right:0;border-top:1px solid var(--grid);opacity:.7}
+/* El divisor dice que lo de la izquierda es de OTRA semana. */
+.vs-sep{position:relative;border-right:1px dashed var(--ring)}
+.vs-uno{position:absolute;inset:0;display:flex;justify-content:center;align-items:flex-end}
+.vs-ritmo{position:absolute;left:0;right:0;border-top:1.5px dashed var(--ref-tot)}
+.vs-ritmo b{position:absolute;right:0;top:-15px;font-size:9.5px;color:var(--muted);
+  background:var(--card);padding:0 4px;font-weight:600;white-space:nowrap}
+.vs-dias{position:absolute;inset:0;display:grid;align-items:end}
+.vs-d{display:flex;justify-content:center;align-items:flex-end;gap:4px;height:100%;
+  position:relative}
+/* El día en curso se marca con una banda de fondo, no con un color de barra:
+   el color ya está diciendo otra cosa. */
+.vs-d.hoy:before{content:"";position:absolute;inset:0 2px;background:var(--plane);
+  border-radius:6px 6px 0 0}
+.vs-pila{display:flex;flex-direction:column;justify-content:flex-end;height:100%;width:20px}
+.vs-b{position:relative;width:20px;border-radius:4px 4px 0 0}
+.vs-b.ref{background:var(--ref-sem)}
+.vs-b.tot{background:var(--ref-tot);width:44px}
+.vs-b.act{background:var(--emb-visita)}
+.vs-b.hecho{background:var(--emb-objetivo)}
+/* Lo agendado: el mismo naranja SIN relleno. No es otra identidad —es la misma
+   cosa que todavía no ocurrió—, así que no gasta un color nuevo. */
+.vs-b.plan{background:repeating-linear-gradient(135deg,
+    color-mix(in srgb,var(--emb-visita) 26%,transparent) 0 4px,transparent 4px 8px);
+  border:1.5px dashed var(--emb-visita);border-bottom:0}
+.vs-b .n{position:absolute;top:-16px;left:50%;transform:translateX(-50%);white-space:nowrap;
+  font-size:10.5px;font-weight:700;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.vs-b.ref .n{color:var(--muted);font-weight:600}
+.vs-b.tot .n{font-size:13px;color:var(--ink)}
+.vs-rot{display:grid;margin-top:7px;font-size:11px;color:var(--muted);text-align:center}
+.vs-rot b{display:block;color:var(--ink-2);font-size:11.5px}
+.vs-rot .hoy b{color:var(--emb-visita)}
+.vs-rot .fut b{font-weight:500;color:var(--muted)}
+.vs-rotTot{margin-top:7px;font-size:11px;color:var(--muted);text-align:center;line-height:1.3}
+.vs-rotTot b{display:block;color:var(--ink-2);font-size:11.5px}
+@media(max-width:760px){
+  .vs-g,.vs-g2{grid-template-columns:24px 1fr}
+  .vs-g2 > div:nth-child(2){display:none}   /* en celular la referencia va en la cifra */
+  .vs-b,.vs-pila{width:15px}
+  .vs-rot{font-size:10px}
+}
+
 /* ---- Las cinco tarjetas de la Cartera (José, 07/09/2026) ------------------
    A diferencia de la tira de métricas de arriba, estas NO se colapsan en
    píldoras en el teléfono. Su subtítulo —«de 186 · faltan 137»— es la línea
@@ -1012,10 +1079,12 @@ table.tbl tr:last-child td{border-bottom:0}
    o vista de tabla. Hay las dos —la tabla de siempre quedó justo debajo. */
 :root{
   --emb-gestion:#232C86; --emb-efectividad:#3B43FB;
+  --ref-sem:#8A93A6; --ref-tot:#4a5568;
   --emb-visita:#F86F35;  --emb-objetivo:#0BBC96;
 }
 :root[data-theme="dark"]{
   --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
+  --ref-sem:#7b8598; --ref-tot:#94a1b8;
   --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
 }
 /* El reparto se decide por el ANCHO DISPONIBLE, no por el de la ventana. Las
@@ -2035,7 +2104,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"07/09/2026 18:20", huella:"be3af1" };
+const BUILD = { sello:"08/09/2026 10:03", huella:"e8e702" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18690,6 +18759,212 @@ function repCorteSemana(hoy){
   return d.toISOString().slice(0, 10);
 }
 
+/* ---- Las visitas de la semana, día por día ------------------------------
+   José, 08/09/2026: dos cuadros en el Reporte para ver si la semana en curso
+   va mejor o peor que la anterior, y qué queda comprometido.
+
+   Los dos leen de ACÁ. Es la lección de la semana: si cada cuadro contara por
+   su lado, en un mes uno diría 42 y el otro 38 sobre el mismo trabajo.
+
+   Dos unidades distintas conviven a propósito y hay que decirlo cada vez que
+   se dibujan:
+     · `visitas`   — COMERCIOS con visita concretada ese día. Es la unidad de
+                     la meta del periodo y sale de `comerciosConVisita`, la
+                     misma que usan el embudo, la ficha y el deck.
+     · `agendadas` — CITAS puestas en el calendario que todavía no se
+                     concretaron. Sale de `citasTodas`/`estadoCita`, igual que
+                     la lámina de «lo comprometido».
+   No son intercambiables: una visita en frío suma en la primera sin haber
+   estado nunca en la segunda. */
+function datosVisitasSemana(){
+  const hoy = hoyISO(), corte = repCorteSemana(hoy);
+  const mas = (d, n) => new Date(new Date(d + "T00:00:00Z").getTime() + n*86400000)
+    .toISOString().slice(0,10);
+  const iniPrev = mas(corte, -6), iniAct = mas(corte, 1);
+
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const ids  = new Set(cart.map(c => String(c.customer_id)));
+
+  const visDia = d => comerciosConVisita(DB.todos().filter(r =>
+    ids.has(String(r.Customer_id)) && repDia(r.Fecha_Contacto) === d));
+
+  /* La cita reagendada ya cuenta en su fecha nueva y la descartada dejó de ser
+     un compromiso: ninguna de las dos entra. Misma regla que `repAgenda`. */
+  const vive = s2 => { const e = estadoCita(s2); return e !== "reagendada" && e !== "descartada"; };
+  const citas = citasTodas().filter(s2 => ids.has(String(s2.customer_id))).filter(vive);
+  const citasDia = d => citas.filter(s2 => String(s2.fecha_objetivo || "").slice(0,10) === d);
+
+  const dia = (d, i) => {
+    const c = citasDia(d);
+    return { iso:d, i, dow:new Date(d + "T00:00:00Z").getUTCDay(),
+      nombre: DIAS_ES[new Date(d + "T00:00:00Z").getUTCDay()].slice(0,3),
+      visitas: visDia(d),
+      /* Lo que sigue comprometido: la cita que todavía no se concretó. */
+      agendadas: c.filter(x => !seConcreto(estadoCita(x))).length,
+      citas: c.length,
+      noTrabajado: diaNoTrabajado(d),
+      pasado: d < hoy, esHoy: d === hoy, futuro: d > hoy };
+  };
+
+  const semana = ini => { const o = []; for (let i = 0; i < 7; i++) o.push(dia(mas(ini, i), i)); return o; };
+  const prev = semana(iniPrev), act = semana(iniAct);
+
+  /* Sábado y domingo solo se dibujan si alguna de las dos semanas tuvo algo
+     ese día. Dos columnas siempre vacías se comen un tercio del gráfico. */
+  const visible = i => i < 5 || prev[i].visitas || act[i].visitas || act[i].agendadas;
+  const idx = [0,1,2,3,4,5,6].filter(visible);
+
+  const suma = (a, k) => a.reduce((n, x) => n + x[k], 0);
+  /* Días CERRADOS de la semana en curso: los que ya terminaron. El de hoy no
+     cuenta —está a medias— y por eso el lunes no hay ninguno. */
+  const cerrados = act.filter(x => x.pasado && !x.noTrabajado).length;
+
+  /* El domingo de la semana en curso es corte + 7, no + 6: `iniAct` ya es
+     corte + 1. La primera version cerraba la ventana un sabado. */
+  return { hoy, corte, iniPrev, finPrev:corte, iniAct, finAct:mas(corte, 7),
+    prev, act, idx,
+    totalPrev: suma(prev, "visitas"),
+    totalAct:  suma(act,  "visitas"),
+    agendadasAct: suma(act.filter(x => !x.pasado), "agendadas"),
+    cerrados,
+    /* El promedio por día de la semana anterior: lo único de una semana entera
+       que se puede poner al lado de un día sin mentir. */
+    ritmoPrev: (() => { const h = prev.filter(x => !x.noTrabajado).length;
+      return h ? Math.round(suma(prev, "visitas") / h * 10) / 10 : 0; })() };
+}
+
+/* ---- Los dos cuadros de visitas del Reporte -----------------------------
+   Cuadro 1 · el comparativo día por día: cada día de esta semana contra el
+   mismo día de la anterior. Contesta «¿voy mejor o peor hoy que el martes
+   pasado?».
+   Cuadro 2 · el total de la semana anterior a la izquierda, separado, y el
+   avance diario a la derecha. Contesta «¿cuánto llevo de lo que hicimos la
+   semana pasada?». Estructura y colores elegidos por José el 08/09.
+
+   Los dos leen de `datosVisitasSemana()`. Ninguno recalcula nada. */
+function cuadrosVisitasSemana(){
+  const D = datosVisitasSemana();
+  const dias = D.idx.map(i => ({ p:D.prev[i], a:D.act[i] }));
+  if (!dias.length) return "";
+  const fmt = d => { const [, m, x] = String(d).split("-"); return x + "/" + m; };
+
+  /* Una escala por cuadro: el 1 compara días contra días, el 2 mete una semana
+     entera. Compartirla aplastaría el cuadro 1 sin ganar nada. */
+  /* Un 12% de aire arriba: la cifra de cada barra se dibuja 16 px POR ENCIMA de
+     su tope, así que una barra que llega al 100% deja su etiqueta fuera del
+     recuadro, pisando la leyenda. */
+  const escala = tope => Math.max(4, Math.ceil(Math.max(1, tope) * 1.12 / 4) * 4);
+  const alto = (v, esc) => Math.max(v > 0 ? 3 : 0, v / esc * 100) + "%";
+
+  const ejeY = esc => `<div class="vs-y">${[0,1,2,3,4].map(i =>
+    `<span style="bottom:${i*25}%">${i === 4 ? "" : Math.round(esc*i/4)}</span>`).join("")}</div>`;
+  const rejilla = () => `<div class="vs-rej">${[0,25,50,75,100].map(p2 =>
+    `<div style="bottom:${p2}%"></div>`).join("")}</div>`;
+  const rotulos = cls => `<div class="vs-rot" style="grid-template-columns:repeat(${dias.length},1fr)">${
+    dias.map(({a}) => `<div class="${a.esHoy ? "hoy" : a.futuro ? "fut" : ""}">
+      <b>${esc(a.nombre)}${a.esHoy ? " · hoy" : ""}</b>${fmt(a.iso)}</div>`).join("")}</div>`;
+
+  /* ---- Cuadro 1 ------------------------------------------------------- */
+  const e1 = escala(Math.max(...dias.map(({p,a}) => Math.max(p.visitas, a.visitas + a.agendadas))));
+  const col1 = dias.map(({p,a}) => `
+    <div class="vs-d ${a.esHoy ? "hoy" : ""}">
+      <div class="vs-b ref" style="height:${alto(p.visitas, e1)}">${
+        p.visitas ? `<span class="n">${p.visitas}</span>` : ""}</div>
+      <div class="vs-pila">
+        ${a.agendadas ? `<div class="vs-b plan" style="height:${alto(a.agendadas, e1)}">
+            <span class="n">${a.esHoy ? a.visitas + " de " + (a.visitas + a.agendadas) : a.agendadas}</span>
+          </div>` : ""}
+        ${a.visitas ? `<div class="vs-b act" style="height:${alto(a.visitas, e1)}${
+            a.agendadas ? ";border-radius:0" : ""}">${
+            a.agendadas ? "" : `<span class="n">${a.visitas}</span>`}</div>` : ""}
+      </div>
+    </div>`).join("");
+
+  /* ---- Cuadro 2 ------------------------------------------------------- */
+  const e2 = escala(Math.max(D.totalPrev, ...dias.map(({a}) => a.visitas + a.agendadas)));
+  const col2 = dias.map(({a}) => `
+    <div class="vs-d ${a.esHoy ? "hoy" : ""}">
+      ${a.visitas ? `<div class="vs-b hecho" style="height:${alto(a.visitas, e2)}">
+          <span class="n">${a.visitas}</span></div>` : ""}
+      ${a.agendadas ? `<div class="vs-b plan" style="height:${alto(a.agendadas, e2)}">
+          <span class="n">${a.agendadas}</span></div>` : ""}
+    </div>`).join("");
+
+  const cifra = (n, t, col) => `<div><span${col ? ` style="color:${col}"` : ""}>${n}</span>${t}</div>`;
+
+  return `
+  <div class="card">
+    <div class="rep-t">
+      <h3>Visitas: esta semana contra la anterior</h3>
+      <span>Comercios de cartera con visita concretada · del ${fmt(D.iniAct)} al ${fmt(D.finAct)},
+        comparada con la del ${fmt(D.iniPrev)} al ${fmt(D.finPrev)}</span>
+    </div>
+    <div class="vs-tot">
+      ${cifra(D.totalPrev, "semana anterior, completa")}
+      ${cifra(D.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
+      ${cifra(D.agendadasAct, "agendadas por delante")}
+    </div>
+    <div class="vs-leg">
+      <span><i class="i-ref"></i>Semana anterior</span>
+      <span><i class="i-act"></i>Esta semana, concretadas</span>
+      <span><i class="i-plan"></i>Agendadas, todavía no ocurridas</span>
+    </div>
+    <div class="vs-g">
+      ${ejeY(e1)}
+      <div>
+        <div class="vs-plot">${rejilla()}
+          <div class="vs-dias" style="grid-template-columns:repeat(${dias.length},1fr)">${col1}</div>
+        </div>
+        ${rotulos()}
+      </div>
+    </div>
+    <div class="rep-pie"><b>La barra llena mide visitas concretadas; la punteada, citas
+      puestas en el calendario.</b> No son la misma unidad: una visita en frío suma sin
+      haber estado agendada. Sábado y domingo solo aparecen si tuvieron actividad.</div>
+  </div>
+
+  <div class="card">
+    <div class="rep-t">
+      <h3>La semana anterior y el avance de esta</h3>
+      <span>El total de la semana cerrada, y día por día lo que va de la actual</span>
+    </div>
+    <div class="vs-tot">
+      ${cifra(D.totalPrev, "cerró la semana anterior · " + D.ritmoPrev + " por día")}
+      ${cifra(D.totalAct, "concretadas esta semana", "var(--emb-objetivo)")}
+      ${cifra(D.agendadasAct, "agendadas sin concretar")}
+    </div>
+    <div class="vs-leg">
+      <span><i class="i-ref2"></i>Semana anterior, total</span>
+      <span><i class="i-hecho"></i>Concretadas</span>
+      <span><i class="i-plan"></i>Agendadas, todavía sin concretar</span>
+    </div>
+    <div class="vs-g vs-g2">
+      ${ejeY(e2)}
+      <div>
+        <div class="vs-sep"><div class="vs-plot">
+          <div class="vs-uno"><div class="vs-b tot" style="height:${alto(D.totalPrev, e2)}">
+            <span class="n">${D.totalPrev}</span></div></div>
+        </div></div>
+        <div class="vs-rotTot"><b>${fmt(D.iniPrev)} → ${fmt(D.finPrev)}</b>semana anterior</div>
+      </div>
+      <div>
+        <div class="vs-plot">${rejilla()}
+          ${/* La línea de ritmo: el promedio diario de la semana anterior. Sin
+                ella una barra de una semana entera al lado de un día hace que
+                cualquier día se lea como un derrumbe. */""}
+          <div class="vs-ritmo" style="bottom:${alto(D.ritmoPrev, e2)}">
+            <b>ritmo de la semana anterior</b></div>
+          <div class="vs-dias" style="grid-template-columns:repeat(${dias.length},1fr)">${col2}</div>
+        </div>
+        ${rotulos()}
+      </div>
+    </div>
+    <div class="rep-pie">La barra de la izquierda es una <b>semana entera</b> y las de la
+      derecha son <b>días sueltos</b>: por eso van separadas. La línea punteada es el
+      promedio por día de esa semana, que es lo único de ella comparable contra un día.</div>
+  </div>`;
+}
+
 /* ---- Lo que está comprometido de acá al viernes -------------------------
    Todas las demás láminas miran hacia atrás. Esta mira hacia adelante, y es la
    única que responde la pregunta con la que alguien se levanta de la reunión:
@@ -19283,6 +19558,11 @@ function viewReporte(){
       </div>`).join("")}</div>` : ""}
     <div class="rep-pie">${esc(repTexto(repNota("embudo"), D))}</div>
   </div>
+
+  ${/* Los dos cuadros del ritmo semanal van AQUÍ, entre el embudo y los
+         objetivos: el embudo dice dónde está el proyecto, los objetivos dónde
+         tiene que llegar, y esto dice si la semana en curso va a alcanzar. */""}
+  ${cuadrosVisitasSemana()}
 
   <div class="card">
     <div class="rep-t">
