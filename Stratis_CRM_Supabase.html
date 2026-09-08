@@ -448,9 +448,7 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
    una segunda línea, y una cifra suelta debajo se lee como si midiera otra
    cosa. En rejilla las tres quedan siempre en la misma fila y lo que se parte
    es el rótulo, que es donde partir no cuesta nada. */
-/* auto-fit y no «3»: con la cuarta cifra —retenciones— la de tres columnas la
-   mandaba sola a una segunda fila, que se lee como si midiera otra cosa. */
-.vs-tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin:0 0 11px;
+.vs-tot{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 11px;
   font-size:11.5px;line-height:1.32;color:var(--ink-2)}
 .vs-tot > div{min-width:0}
 .vs-tot span{font-size:17px;font-weight:730;letter-spacing:-.5px;display:block;
@@ -466,13 +464,6 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-leg .i-act{background:var(--emb-visita)}
 .vs-leg .i-hecho{background:var(--emb-objetivo)}
 .vs-leg .i-plan{background:transparent;border:1.5px dashed var(--emb-visita)}
-/* La muestra de la línea en la leyenda: un trazo con su punto, no un cuadrado.
-   Así la leyenda dice también la FORMA, y la serie se distingue de las barras
-   aunque comparta el verde del cuadro 2. */
-.vs-leg .i-ret{width:16px;height:0;border-radius:0;border-top:2px solid var(--ret-linea);
-  position:relative;vertical-align:2px}
-.vs-leg .i-ret:after{content:"";position:absolute;left:5px;top:-4px;width:6px;height:6px;
-  border-radius:50%;background:var(--ret-linea);box-shadow:0 0 0 1.5px var(--card)}
 
 /* El alto va en una variable: los dos cuadros y el eje TIENEN que medir lo
    mismo o las barras salen despegadas de su escala. Antes estaba escrito dos
@@ -492,34 +483,6 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
 .vs-ritmo b{position:absolute;right:0;top:-15px;font-size:9.5px;color:var(--muted);
   background:var(--card);padding:0 4px;font-weight:600;white-space:nowrap}
 .vs-dias{position:absolute;inset:0;display:grid;align-items:end}
-/* ---- La línea de retenciones (José, 08/09/2026) --------------------------
-   Capa propia sobre las barras, del mismo alto que el recuadro, para que sus
-   puntos compartan la escala del eje. Es el resultado que las visitas
-   persiguen —el último escalón del embudo— y por eso va en el verde de ese
-   escalón y ENCIMA: no compite con las barras, las corona.
-   `pointer-events:none` para que no tape el título de las barras. */
-.vs-linea{position:absolute;inset:0;pointer-events:none;z-index:2}
-.vs-linea svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-.vs-linea polyline{fill:none;stroke:var(--ret-linea);stroke-width:2px;
-  stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke;
-  /* El halo del color de la tarjeta debajo del trazo: sin él, en el cuadro 2 la
-     línea verde cruza barras verdes y desaparece dentro de ellas. */
-  paint-order:stroke;
-  filter:drop-shadow(0 0 0 var(--card)) drop-shadow(0 0 1.5px var(--card))}
-.vs-linea i{position:absolute;width:9px;height:9px;margin:0 0 -4.5px -4.5px;border-radius:50%;
-  font-style:normal; /* es un <i> por brevedad, no por cursiva: la cifra salía inclinada */
-  background:var(--ret-linea);box-shadow:0 0 0 2px var(--card)}
-/* La cifra va a la DERECHA del punto, no encima: encima cae justo en la
-   columna donde la barra ya escribe la suya, y cuando la retención mide lo
-   que la barra las dos cifras se montan. A un lado, la única que puede
-   pisar es la barra del día siguiente, y solo a esa altura exacta. */
-.vs-linea i b{position:absolute;left:8px;top:50%;transform:translateY(-50%);
-  font-size:10.5px;font-weight:700;color:var(--ret-linea);font-variant-numeric:tabular-nums;
-  background:var(--card);padding:0 3px;border-radius:3px;line-height:1.3;white-space:nowrap}
-/* Un cero no lleva cifra: la línea en el piso ya lo dice y el «0» se pisaba
-   con los rótulos de las barras vacías. */
-.vs-linea i.cero b{display:none}
-.vs-linea i.cero{width:6px;height:6px;margin:0 0 -3px -3px;opacity:.55}
 .vs-d{display:flex;justify-content:center;align-items:flex-end;gap:4px;height:100%;
   position:relative}
 /* El día en curso se marca con una banda de fondo, no con un color de barra:
@@ -1175,20 +1138,11 @@ table.tbl tr:last-child td{border-bottom:0}
   --emb-gestion:#232C86; --emb-efectividad:#3B43FB;
   --ref-sem:#8A93A6; --ref-tot:#4a5568;
   --emb-visita:#F86F35;  --emb-objetivo:#0BBC96;
-  /* La línea de retenciones NO va en el verde del escalón, y es una decisión
-     de José (08/09): «que el color sea azul o celeste encendido, el verde se
-     pierde». Tenía razón medida: en el cuadro 2 cruza barras verdes, y como
-     línea de 2 px el verde #0BBC96 da 2,37:1 contra la tarjeta. El azul
-     #3B43FB da 6,21:1 y es el que más se separa del gris de las barras (2,0:1)
-     y del verde (2,6:1). Un celeste de verdad (#169ACC) daba 3,2:1 contra la
-     tarjeta y 1,04:1 contra el gris: se habría perdido igual que el verde. */
-  --ret-linea:#3B43FB;
 }
 :root[data-theme="dark"]{
   --emb-gestion:#576bcb; --emb-efectividad:#9aa1fe;
   --ref-sem:#7b8598; --ref-tot:#94a1b8;
   --emb-visita:#ea6225;  --emb-objetivo:#11ab88;
-  --ret-linea:#8E95FF;   /* el mismo azul, un paso más claro: 6:1 sobre la tarjeta */
 }
 /* El reparto se decide por el ANCHO DISPONIBLE, no por el de la ventana. Las
    media queries de antes miraban el viewport y servían mientras el embudo
@@ -2207,7 +2161,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 17:59", huella:"d2650f" };
+const BUILD = { sello:"08/09/2026 18:09", huella:"5f20bb" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19005,21 +18959,11 @@ function datosVisitasSemana(correo){
   const citas = citasTodas().filter(s2 => ids.has(String(s2.customer_id))).filter(vive);
   const citasDia = d => citas.filter(s2 => String(s2.fecha_objetivo || "").slice(0,10) === d);
 
-  /* La tercera unidad, pedida por José el 08/09: «una línea dentro del gráfico
-     que indique las retenciones logradas». Es el ÚLTIMO escalón del embudo
-     —retenidos y recuperados, la misma regla de `cadenaEntre`—, fechado por su
-     cierre. Se dibuja como línea y no como barra a propósito: no es una
-     actividad del día como la visita, es el resultado que esa actividad
-     persigue, y va encima de las barras diciendo cuánto de todo eso cerró. */
-  const retDia = d => cart.filter(c => (esRetencion(c) || esRecuperado(c))
-    && repDia(c.cerrado_en) === d).length;
-
   const dia = (d, i) => {
     const c = citasDia(d);
     return { iso:d, i, dow:new Date(d + "T00:00:00Z").getUTCDay(),
       nombre: DIAS_ES[new Date(d + "T00:00:00Z").getUTCDay()].slice(0,3),
       visitas: visDia(d),
-      retenciones: retDia(d),
       /* Lo que sigue comprometido: la cita que todavía no se concretó. */
       agendadas: c.filter(x => !seConcreto(estadoCita(x))).length,
       citas: c.length,
@@ -19032,8 +18976,7 @@ function datosVisitasSemana(correo){
 
   /* Sábado y domingo solo se dibujan si alguna de las dos semanas tuvo algo
      ese día. Dos columnas siempre vacías se comen un tercio del gráfico. */
-  const visible = i => i < 5 || prev[i].visitas || act[i].visitas || act[i].agendadas
-    || prev[i].retenciones || act[i].retenciones;
+  const visible = i => i < 5 || prev[i].visitas || act[i].visitas || act[i].agendadas;
   const idx = [0,1,2,3,4,5,6].filter(visible);
 
   const suma = (a, k) => a.reduce((n, x) => n + x[k], 0);
@@ -19048,8 +18991,6 @@ function datosVisitasSemana(correo){
     prev, act, idx,
     totalPrev: suma(prev, "visitas"),
     totalAct:  suma(act,  "visitas"),
-    retPrev:   suma(prev, "retenciones"),
-    retAct:    suma(act,  "retenciones"),
     agendadasAct: suma(act.filter(x => !x.pasado), "agendadas"),
     cerrados,
     /* El promedio por día de la semana anterior: lo único de una semana entera
@@ -19071,21 +19012,6 @@ function datosVisitasSemana(correo){
    componente, no una copia: José pidió «los 2 gráficos tal como hemos hecho en
    la otra pestaña», y dos dibujos del mismo cuadro se separan solos con el
    tiempo. Lo único que cambia con `correo` es de quién son los días. */
-/* La línea de retenciones va SOBRE las barras, en su propia capa. Los puntos
-   y las cifras son HTML posicionado —igual que todo lo demás del cuadro— y
-   solo el trazo entre puntos es un SVG estirado al recuadro, con el grosor
-   fijado para que el estirado no lo deforme. Por eso los puntos no viven en
-   el SVG: estirados, un círculo se vuelve un óvalo. */
-function lineaRetenciones(vals, esc){
-  const n = vals.length; if (!n) return "";
-  const x = i => (i + .5) / n * 100, y = v => 100 - Math.min(100, v / esc * 100);
-  const pts = vals.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  return `<div class="vs-linea" aria-hidden="true">
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pts}"/></svg>
-    ${vals.map((v, i) => `<i class="${v ? "" : "cero"}" style="left:${x(i)}%;bottom:${100 - y(v)}%"><b>${v}</b></i>`).join("")}
-  </div>`;
-}
-
 function cuadrosVisitasSemana(correo){
   const D = datosVisitasSemana(correo);
   const dias = D.idx.map(i => ({ p:D.prev[i], a:D.act[i] }));
@@ -19109,7 +19035,7 @@ function cuadrosVisitasSemana(correo){
       <b>${esc(a.nombre)}${a.esHoy ? " · hoy" : ""}</b>${fmt(a.iso)}</div>`).join("")}</div>`;
 
   /* ---- Cuadro 1 ------------------------------------------------------- */
-  const e1 = escala(Math.max(...dias.map(({p,a}) => Math.max(p.visitas, a.visitas + a.agendadas, a.retenciones))));
+  const e1 = escala(Math.max(...dias.map(({p,a}) => Math.max(p.visitas, a.visitas + a.agendadas))));
   const col1 = dias.map(({p,a}) => `
     <div class="vs-d ${a.esHoy ? "hoy" : ""}">
       <div class="vs-b ref" style="height:${alto(p.visitas, e1)}">${
@@ -19134,7 +19060,7 @@ function cuadrosVisitasSemana(correo){
     </div>`).join("");
 
   /* ---- Cuadro 2 ------------------------------------------------------- */
-  const e2 = escala(Math.max(D.totalPrev, ...dias.map(({a}) => Math.max(a.visitas + a.agendadas, a.retenciones))));
+  const e2 = escala(Math.max(D.totalPrev, ...dias.map(({a}) => a.visitas + a.agendadas)));
   const col2 = dias.map(({a}) => `
     <div class="vs-d ${a.esHoy ? "hoy" : ""}">
       ${a.visitas ? `<div class="vs-b hecho" style="height:${alto(a.visitas, e2)}">
@@ -19167,20 +19093,17 @@ function cuadrosVisitasSemana(correo){
       ${cifra(D.totalPrev, "semana anterior, completa")}
       ${cifra(D.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
       ${cifra(D.agendadasAct, "agendadas por delante")}
-      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref"></i>Semana anterior</span>
       <span><i class="i-act"></i>Esta semana, concretadas</span>
       <span><i class="i-plan"></i>Agendadas, todavía no ocurridas</span>
-      <span><i class="i-ret"></i>Retenciones logradas</span>
     </div>
     <div class="vs-g">
       ${ejeY(e1)}
       <div>
         <div class="vs-plot">${rejilla()}
           <div class="vs-dias" style="grid-template-columns:repeat(${dias.length},1fr)">${col1}</div>
-          ${lineaRetenciones(dias.map(({a}) => a.retenciones), e1)}
         </div>
         ${rotulos()}
       </div>
@@ -19199,13 +19122,11 @@ function cuadrosVisitasSemana(correo){
       ${cifra(D.totalPrev, "cerró la semana anterior · " + D.ritmoPrev + " por día")}
       ${cifra(D.totalAct, "concretadas esta semana", "var(--emb-objetivo)")}
       ${cifra(D.agendadasAct, "agendadas sin concretar")}
-      ${cifra(D.retAct, `retenciones esta semana · ${D.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref2"></i>Semana anterior, total</span>
       <span><i class="i-hecho"></i>Concretadas</span>
       <span><i class="i-plan"></i>Agendadas, todavía sin concretar</span>
-      <span><i class="i-ret"></i>Retenciones logradas</span>
     </div>
     <div class="vs-g vs-g2">
       ${ejeY(e2)}
@@ -19224,7 +19145,6 @@ function cuadrosVisitasSemana(correo){
           <div class="vs-ritmo" style="bottom:${alto(D.ritmoPrev, e2)}">
             <b>ritmo de la semana anterior</b></div>
           <div class="vs-dias" style="grid-template-columns:repeat(${dias.length},1fr)">${col2}</div>
-          ${lineaRetenciones(dias.map(({a}) => a.retenciones), e2)}
         </div>
         ${rotulos()}
       </div>
@@ -19264,11 +19184,10 @@ function cuadroVisitasEjecutivo(filas){
      silencio. */
   const huerfano = { prev: T.totalPrev - suma("totalPrev"),
                      act:  T.totalAct  - suma("totalAct"),
-                     agen: T.agendadasAct - suma("agendadasAct"),
-                     ret:  T.retAct - suma("retAct") };
+                     agen: T.agendadasAct - suma("agendadasAct") };
 
   /* Misma escala y mismo aire que los cuadros del Reporte. */
-  const tope  = Math.max(1, ...D.map(x => Math.max(x.d.totalPrev, x.d.totalAct + x.d.agendadasAct, x.d.retAct)));
+  const tope  = Math.max(1, ...D.map(x => Math.max(x.d.totalPrev, x.d.totalAct + x.d.agendadasAct)));
   /* OJO con el nombre: acá esta constante se llamó `esc` y tapó a la función
      global `esc()` que escapa HTML — el cuadro reventó con «esc is not a
      function» al pintar el nombre del ejecutivo. */
@@ -19310,13 +19229,11 @@ function cuadroVisitasEjecutivo(filas){
       ${cifra(T.totalPrev, "semana anterior, completa")}
       ${cifra(T.totalAct, "esta semana, hasta hoy", "var(--emb-visita)")}
       ${cifra(T.agendadasAct, "agendadas por delante")}
-      ${cifra(T.retAct, `retenciones esta semana · ${T.retPrev} la anterior`, "var(--ret-linea)")}
     </div>
     <div class="vs-leg">
       <span><i class="i-ref"></i>Semana anterior</span>
       <span><i class="i-act"></i>Esta semana, concretadas</span>
       <span><i class="i-plan"></i>Agendadas, todavía no ocurridas</span>
-      <span><i class="i-ret"></i>Retenciones esta semana</span>
     </div>
     <div class="vs-g vs-ejec">
       <div class="vs-y">${[0,1,2,3,4].map(i =>
@@ -19326,7 +19243,6 @@ function cuadroVisitasEjecutivo(filas){
           <div class="vs-rej">${[0,25,50,75,100].map(p2 =>
             `<div style="bottom:${p2}%"></div>`).join("")}</div>
           <div class="vs-dias" style="grid-template-columns:repeat(${D.length},1fr)">${cols}</div>
-          ${lineaRetenciones(D.map(({d}) => d.retAct), escala)}
         </div>
         <div class="vs-rot vs-rot-ejec" style="grid-template-columns:repeat(${D.length},1fr)">${rot}</div>
       </div>
@@ -19334,12 +19250,11 @@ function cuadroVisitasEjecutivo(filas){
     <div class="rep-pie">Las tres cifras de arriba son las del <b>Reporte</b>, y las barras las
       reparten: cada comercio va con el ejecutivo que lo tiene asignado, así que ninguno se
       cuenta dos veces.${
-      (huerfano.prev || huerfano.act || huerfano.agen || huerfano.ret)
+      (huerfano.prev || huerfano.act || huerfano.agen)
         ? ` <b style="color:var(--warn-tx)">Ojo: ${listaEs([
             huerfano.prev ? huerfano.prev + " de la semana anterior" : "",
             huerfano.act  ? huerfano.act  + " de esta semana"        : "",
-            huerfano.agen ? huerfano.agen + " agendadas"             : "",
-            huerfano.ret  ? huerfano.ret  + " retenciones"           : ""
+            huerfano.agen ? huerfano.agen + " agendadas"             : ""
           ].filter(Boolean))} no le pertenecen a ningún ejecutivo y quedan fuera de las barras.</b>`
         : ""}<br>
       <b>La barra llena mide visitas concretadas; la punteada, citas puestas en el calendario.</b>
