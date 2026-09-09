@@ -50,7 +50,7 @@
   --neg-bg:#eef0ff; --neg-ink:#3b43fb; --neg-line:#d8dcff;
   --r:12px; --r-sm:8px;
   --sh:0 1px 2px rgba(13,27,42,.06), 0 6px 16px rgba(13,27,42,.05);
-  --nav-h:62px;
+  --nav-h:68px;
   /* Archivo para los títulos y los números; Public Sans para leer. Se declaran
      como variables para que un cambio de familia sea una línea y no cuarenta. */
   --f-disp:"Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -126,6 +126,7 @@ input[type=text],input[type=email],input[type=password],input[type=date],input[t
 }
 textarea{resize:vertical;min-height:78px;line-height:1.45}
 input:focus,select:focus,textarea:focus{border-color:var(--brand-2);box-shadow:0 0 0 3px rgba(42,120,214,.16)}
+a.btn{text-decoration:none}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;border:1px solid transparent;background:var(--brand-2);color:var(--on-brand);font-weight:650;cursor:pointer;font-size:14.5px}
 @media (hover:hover) and (pointer:fine){.btn:hover{filter:brightness(1.06)}}
 .btn:disabled{opacity:.5;cursor:not-allowed}
@@ -170,8 +171,11 @@ nav.bottom{
   border-top:1px solid var(--grid);display:flex;padding-bottom:env(safe-area-inset-bottom)
 }
 nav.bottom button{
-  flex:1;background:none;border:0;padding:8px 2px 7px;cursor:pointer;color:var(--muted);
-  display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;position:relative
+  flex:1;min-width:0;background:none;border:0;padding:8px 2px 7px;cursor:pointer;color:var(--muted);
+  display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;position:relative;
+  /* «Cluster recomendados» (José, 09/09) no cabe en una línea en el celular:
+     se parte en dos, centrado, y la pestaña no le roba ancho a las demás. */
+  text-align:center;line-height:1.15
 }
 nav.bottom button .ic{font-size:18px;line-height:1}
 nav.bottom button.on{color:var(--brand-2)}
@@ -552,6 +556,13 @@ table.tbl-equipo tr.eq-baja td{opacity:.55}
   .vs-b,.vs-pila{width:15px}
   .vs-rot{font-size:10px}
 }
+
+/* El enlace a Waze de cada parada de la ruta: pequeño, al lado del chip. */
+.rt-p li{position:relative}
+.rt-waze{font-size:11px;font-weight:700;color:var(--brand-2);text-decoration:none;
+  padding:3px 7px;border:1px solid var(--line);border-radius:6px;white-space:nowrap;flex:none}
+@media (hover:hover) and (pointer:fine){ .rt-waze:hover{background:var(--brand-bg)} }
+.llegar .note.warn{padding:7px 10px}
 
 /* ---- Las cinco tarjetas de la Cartera (José, 07/09/2026) ------------------
    A diferencia de la tira de métricas de arriba, estas NO se colapsan en
@@ -2161,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"08/09/2026 18:09", huella:"5f20bb" };
+const BUILD = { sello:"09/09/2026 11:02", huella:"e0ca80" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3402,7 +3413,10 @@ const DISTRITOS_LIMA = ["ANCON","ATE","BARRANCO","BELLAVISTA","BREÑA","CALLAO",
  "LURIN","MAGDALENA DEL MAR","MIRAFLORES","PACHACAMAC","PUEBLO LIBRE","PUENTE PIEDRA","PUNTA HERMOSA",
  "RIMAC","SAN BARTOLO","SAN BORJA","SAN ISIDRO","SAN JUAN DE LURIGANCHO","SAN JUAN DE MIRAFLORES",
  "SAN LUIS","SAN MARTIN DE PORRES","SAN MIGUEL","SANTA ANITA","SANTIAGO DE SURCO","SURQUILLO",
- "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO"];
+ "VENTANILLA","VILLA EL SALVADOR","VILLA MARIA DEL TRIUNFO",
+ /* Los que faltaban de Lima Metropolitana y el Callao. Sin ellos, el traductor
+    de direcciones los mandaba «fuera de Lima». */
+ "CARMEN DE LA LEGUA REYNOSO","MI PERU","SANTA ROSA","PUCUSANA","SANTA MARIA DEL MAR","LIMA"];
 
 /* ---- Datos en memoria --------------------------------------------------- */
 /* CLIENTES es la POBLACIÓN: sobre esta lista se cuenta todo —cobertura,
@@ -5707,7 +5721,7 @@ const NAV = [
   /* Rutas es una herramienta de calle: la ve el ejecutivo y la ve supervisión
      cuando mira «como» uno de ellos, que es donde tiene sentido preguntarse
      por dónde sale mañana. A BBVA no se le ofrece. */
-  { id:"rutas",    ic:"⇢", label:"Rutas" },
+  { id:"rutas",    ic:"⇢", label:"Cluster recomendados" },
   { id:"actividad",ic:"◎", label:"Actividad", soloMando:true },
   { id:"bono",     ic:"◈", label:"Incentivos", soloMando:true },
   { id:"reporte",  ic:"▤", label:"Reporte", soloMando:true },
@@ -6391,11 +6405,186 @@ function leerDireccion(txt){
   return { via: (tipo ? tipo + " " : "") + nombre.join(" "), num: m ? Number(m[1]) : 0, crudo: s };
 }
 
-/* La dirección tal como se le pasa a Google Maps. Sin «Lima, Perú» al final,
-   Maps geocodifica «AV LA MAR 2232» en cualquier país que se le ocurra. */
-const dirParaMapa = c => [String(c.direccion || "").replace(/\s+/g, " ").trim(),
-                          String(c.distrito || "").trim(), "Lima", "Perú"]
-  .filter(Boolean).join(", ");
+/* ---- La dirección traducida para Google Maps y Waze (José, 09/09/2026) ------
+   «Sincerar las direcciones para que los ejecutivos puedan encontrar la ruta».
+
+   La base viene en formato SUNAT: «AV. X NRO. 123 INT. 45 URB. Y (REFERENCIA)
+   LIMA - LIMA - DISTRITO». Maps y Waze no entienden NRO., CAL., los
+   paréntesis ni el sufijo, y hasta hoy se les mandaba eso tal cual más
+   «, Lima, Perú». Esta función es la MISMA regla del libro de sinceramiento
+   del 09/09 (clasificar.py), portada: quien lea el libro y quien toque el
+   botón tienen que llegar al mismo punto.
+
+   Devuelve la cadena de búsqueda y, aparte, lo que Maps no necesita pero el
+   ejecutivo sí: el interior y la referencia. NO geocodifica ni inventa nada. */
+const DIR_DEPARTAMENTOS = "LIMA|ICA|CAJAMARCA|AREQUIPA|ANCASH|LA LIBERTAD|PIURA|LAMBAYEQUE|JUNIN|CUSCO|AMAZONAS|SAN MARTIN|LORETO|PUNO|TACNA|MOQUEGUA|HUANUCO|PASCO|AYACUCHO|APURIMAC|HUANCAVELICA|TUMBES|UCAYALI|MADRE DE DIOS|CALLAO";
+const DIR_REGION = { ICA:"Ica", PARCONA:"Ica", SUBTANJALLA:"Ica", "LA TINGUIÑA":"Ica", SALAS:"Ica", "PUEBLO NUEVO":"Ica",
+  PISCO:"Ica", CHINCHA:"Ica", "CHINCHA ALTA":"Ica", CHIMBOTE:"Áncash", JAZAN:"Amazonas" };
+const DIR_VIAS = [
+  /* La abreviatura exige punto o espacio: «AV.» o «AV », nunca el «AV» de
+     «AVENIDA», que dejaba «Avenida Enida Alfonso Ugarte». */
+  [/^AVENIDA\s+/, "Avenida "], [/^AV\.\s*|^AV\s+/, "Avenida "], [/^JIRON\s+/, "Jirón "], [/^JR\.\s*|^JR\s+/, "Jirón "],
+  [/^CAL\.\s*/, "Calle "], [/^CALLE\s+/, "Calle "],
+  [/^PJ\.\s*|^PJ\s+/, "Pasaje "], [/^PSJE?\.?\s*/, "Pasaje "], [/^MLC\.\s*|^MLC\s+/, "Malecón "], [/^CAR\.\s*|^CAR\s+/, "Carretera "],
+  [/^OTR\.\s*|^OTR\s+/, ""],
+  [/^CARRETERA\s+/, "Carretera "], [/^PROL(?:ONG)?\.?\s*/, "Prolongación "], [/^ALAM\.?\s*/, "Alameda "],
+  [/^OVALO\s+/, "Óvalo "], [/^PLAZUELA\s+/, "Plazuela "], [/^PQUE\.?\s*/, "Parque "],
+  [/^AUTOPISTA\s+/, "Autopista "], [/^BLVD?\.?\s*/, "Boulevard "], [/^PLAZA\s+/, "Plaza "]];
+const DIR_SUFIJO  = new RegExp("\\s+(" + DIR_DEPARTAMENTOS + ")\\s*-\\s*([A-ZÑ][A-ZÑ ]+?)\\s*-\\s*([A-ZÑ][A-ZÑ .]+?)\\s*$", "i");
+const DIR_SUFIJO2 = /\s+LIMA\s*-\s*LIMA\s*$|\s+LIMA\s*-\s*CA[ÑN]ETE\s*$|\s+LIMA\s*$/i;
+const DIR_INT   = /\b(INT|DPTO|OF|OFIC|TDA|TIENDA|PISO|LOCAL|STAND|PUESTO)\.?\s*([0-9A-Z][0-9A-Z\-\/.]*)/gi;
+const DIR_KM    = /\bKM\.?\s*([0-9]+(?:[.,][0-9]+)?)/i;
+const DIR_NRO   = /\bNRO\.?\s*([0-9]+[A-Z]?(?:-[0-9A-Z]+)?)/i;
+const DIR_MZLT  = /\bMZA?\.?\s*([0-9A-ZÑ'\-]+)\s+(?:LOTE?|LT)\.?\s*([0-9A-ZÑ'\-]+)/i;
+const DIR_URB   = /\b(URB|URBANIZACION|COO|COOP|ASOC|AA\.?HH|A\.H|P\.J|Z\.I|CONJ|RES|C\.C|FUNDO|SEC|SECTOR|ETAPA|PARQUE IND|ZONA IND|OTR)\.?\s+(.+)$/i;
+/* Mayúscula inicial por palabra; los artículos en minúscula salvo cuando abren
+   el segmento: «Avenida de la Marina» pero «La Perla». */
+const DIR_MAYUS = s => String(s || "").toLowerCase().replace(/(^|[\s(\-])(\S)/g, (m, a, b) => a + b.toUpperCase())
+  .replace(/(?<=\S\s)(De|Del|La|Los|Las|Y|El|En)\b/g, w => w.toLowerCase());
+
+function traducirDireccion(c){
+  const lim = s => String(s || "").replace(/\s+/g, " ").trim();
+  let distrito = lim(c.distrito).toUpperCase();
+  const ARREGLO = { CER:"CERCADO DE LIMA", "SAN VICIENTE DE CAÑETE":"SAN VICENTE DE CAÑETE" };
+  if (ARREGLO[distrito]) distrito = ARREGLO[distrito];
+  /* Los dos campos cruzados: el distrito trae la dirección y la dirección dice «LIMA». */
+  const distritoEsDireccion = /\bNRO\b|\d{2,}/.test(distrito) && !DISTRITOS_LIMA.includes(distrito);
+  let d = lim(c.direccion).toUpperCase().replace(/^["']+|["']+$/g, "");
+  if (distritoEsDireccion){ d = distrito; distrito = "LIMA"; }
+
+  let region = DIR_REGION[distrito] || "Lima", sufijo = null, otraRegion = false;
+  const ms = d.match(DIR_SUFIJO);
+  if (ms){
+    sufijo = ms.slice(1, 4).map(x => lim(x).toUpperCase());
+    /* Distrito de Lima en el campo y otro departamento en la dirección: manda la
+       dirección. Cuatro comercios cargados como «Cercado» eran de Piura, Paita,
+       Chiclayo y Cajamarca. */
+    if (sufijo[0] !== "LIMA" && DISTRITOS_LIMA.includes(distrito)) otraRegion = true;
+    d = d.slice(0, ms.index);
+  }
+  d = d.replace(DIR_SUFIJO2, "");
+
+  const referencia = [];
+  d = d.replace(/\(([^)]*)\)?/g, (m, r) => { if (lim(r)) referencia.push(lim(r)); return " "; });
+  d = lim(d);
+  const interior = [];
+  let sinInt = d.replace(DIR_INT, (m, a, b) => { interior.push(a.toUpperCase() + ". " + b); return " "; });
+  let urb = "";
+  const mu = sinInt.match(DIR_URB);
+  if (mu){ urb = lim(mu[2]); sinInt = sinInt.slice(0, mu.index); }
+  sinInt = lim(sinInt);
+
+  const mz = sinInt.match(DIR_MZLT), km = sinInt.match(DIR_KM), nro = sinInt.match(DIR_NRO);
+  let numero = nro ? nro[1] : "";
+  /* «LOTE. 7» sin manzana es lote, no número de puerta. */
+  const lote = !mz && sinInt.match(/\bLOTE?\.?\s*([0-9A-Z\-]+)/i);
+  let via = lim(sinInt.replace(DIR_NRO, " ").replace(DIR_MZLT, " ").replace(new RegExp(DIR_KM.source, "gi"), " ")
+                   .replace(/\bLOTE?\.?\s*[0-9A-Z\-]+/gi, " "));
+  if (!numero && !mz && !km){
+    /* Número suelto: el ÚLTIMO con dos o más dígitos, y nunca uno que sea
+       parte del nombre de la vía —«AV. 28 DE JULIO 640» es la 640 de la
+       avenida 28 de Julio, no la 28—. La primera versión tomaba el primero. */
+    const MES = /^(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SETIEMBRE|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)$/;
+    const pal = via.split(" "); let k = -1;
+    for (let i = pal.length - 1; i > 0; i--){
+      if (/^[0-9]{2,5}[A-Z]?$/.test(pal[i]) && !(pal[i+1] === "DE" && MES.test(pal[i+2] || ""))){ k = i; break; }
+    }
+    if (k > 0){ numero = pal[k]; const cola = lim(pal.slice(k + 1).join(" ")); via = lim(pal.slice(0, k).join(" "));
+      if (cola) referencia.push(cola); }
+  }
+  for (const [re, rep] of DIR_VIAS){ if (re.test(via)){ via = via.replace(re, rep); break; } }
+
+  let cabeza = lim(DIR_MAYUS(via) + (numero ? " " + numero : ""));
+  if (mz) cabeza = lim(cabeza + ` Mz. ${mz[1]} Lt. ${mz[2]}`);
+  if (km) cabeza = lim(cabeza + ` Km ${km[1].replace(",", ".")}`);
+  if (lote) cabeza = lim(cabeza + ` Lt. ${lote[1]}`);
+
+  const partes = [];
+  if (cabeza) partes.push(cabeza);
+  if (urb) partes.push(DIR_MAYUS(urb));
+  if (otraRegion && sufijo) partes.push(DIR_MAYUS(sufijo[2]), DIR_MAYUS(sufijo[1]), DIR_MAYUS(sufijo[0]), "Perú");
+  else { if (distrito) partes.push(DIR_MAYUS(distrito)); partes.push(region, "Perú"); }
+
+  /* «Lima, Lima» cuando el distrito es el propio Lima: se deja uno. */
+  const unicas = partes.filter((x, i) => x && x.toLowerCase() !== String(partes[i - 1] || "").toLowerCase());
+  return { busqueda: unicas.join(", "),
+           interior: interior.join(" · "), referencia: referencia.join(" · "),
+           otraRegion, fueraDeLima: !DISTRITOS_LIMA.includes(distrito) && !distritoEsDireccion };
+}
+
+/* La dirección tal como se le pasa a Google Maps: primero la que el ejecutivo
+   corrigió a mano en la ficha; si no hay, la traducida. Nunca la cruda. */
+const lim2 = s => String(s || "").replace(/\s+/g, " ").trim();
+
+/* ---- El mejor punto de un comercio: GPS confiable, o la dirección ----------
+   El GPS que el ejecutivo captura en la visita es la mejor fuente que existe
+   para el mapa… cuando es del comercio. El sinceramiento del 09/09 midió que
+   en 32 de 70 casos no lo era: la misma coordenada en siete distritos con
+   ±500 m —la ubicación aproximada del lugar desde donde se registra—, o una
+   coordenada tomada tres horas después de la visita, desde otro sitio.
+
+   La regla es la MISMA del libro, y se aplica acá para que el botón y el
+   libro coincidan:
+     · precisión menor a 100 m (±500 no es GPS, es la red);
+     · registrada a menos de 45 minutos de la hora declarada de la visita;
+     · y no compartida con comercios de OTRO distrito.
+   Si ninguna visita del comercio pasa las tres, manda la dirección. */
+const GPS_MAX_PRECISION_M = 100, GPS_MAX_DEMORA_MIN = 45;
+const leerCoord = s => { const m = String(s || "").match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  return m ? { lat:+m[1], lng:+m[2], txt:`${m[1]},${m[2]}` } : null; };
+const precisionDe = s => { const m = String(s || "").match(/±\s*(\d+)/); return m ? +m[1] : 999; };
+let _coordDistritos = null, _coordDistritosN = -1;
+function distritosEnCoord(){
+  const filas = DB.todos();
+  if (_coordDistritos && _coordDistritosN === filas.length) return _coordDistritos;
+  const m = new Map();
+  filas.forEach(r => { if (r.Ubicacion_Verificada !== true) return;
+    const c = leerCoord(r.Ubicacion); if (!c) return;
+    const k = c.lat.toFixed(3) + "," + c.lng.toFixed(3);
+    const d = String((byId[String(r.Customer_id)] || {}).distrito || "").toUpperCase();
+    if (!m.has(k)) m.set(k, new Set()); if (d) m.get(k).add(d); });
+  _coordDistritos = m; _coordDistritosN = filas.length; return m;
+}
+function gpsConfiable(r){
+  if (r.Ubicacion_Verificada !== true) return null;
+  const c = leerCoord(r.Ubicacion); if (!c) return null;
+  if (precisionDe(r.Ubicacion) > GPS_MAX_PRECISION_M) return null;
+  const vis = new Date(repDia(r.Fecha_Contacto) + "T" + (String(r.Hora_Contacto || "00:00").slice(0,5)) + ":00-05:00");
+  const reg = new Date(r.Creado_En || 0);
+  const demora = (reg - vis) / 60000;
+  if (!isFinite(demora) || demora > GPS_MAX_DEMORA_MIN || demora < -20) return null;
+  const k = c.lat.toFixed(3) + "," + c.lng.toFixed(3);
+  if ((distritosEnCoord().get(k) || new Set()).size > 1) return null;
+  return c;
+}
+/* Devuelve { coord, fecha } con el GPS confiable más reciente, o null. */
+function mejorUbicacion(cid){
+  const vis = DB.todos().filter(r => String(r.Customer_id) === String(cid) && gpsConfiable(r))
+    .sort((a, b) => String(b.Fecha_Contacto).localeCompare(String(a.Fecha_Contacto)));
+  if (!vis.length) return null;
+  return { coord: leerCoord(vis[0].Ubicacion), fecha: repDia(vis[0].Fecha_Contacto) };
+}
+
+/* Lo que se le manda a Maps y a Waze, en orden de confianza: el GPS confiable
+   de una visita; la dirección que el ejecutivo corrigió a mano en la ficha; y
+   si no hay ninguna de las dos, la traducida. Nunca la cruda de SUNAT. */
+function destinoDe(c){
+  const g = mejorUbicacion(c.customer_id);
+  if (g) return { q: g.coord.txt, fuente: "gps", detalle: `GPS de la visita del ${fmtFecha(g.fecha)}` };
+  const corregida = lim2(c.direccion_maps);
+  if (corregida) return { q: corregida, fuente: "corregida", detalle: "Dirección corregida en la ficha" };
+  const tr = traducirDireccion(c);
+  return { q: tr.busqueda, fuente: "traducida", detalle: "Dirección de la base, traducida para el mapa", tr };
+}
+const dirParaMapa = c => destinoDe(c).q;
+const enlaceMapsDe = c => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(destinoDe(c).q);
+/* Waze: con coordenada navega directo; con texto, busca. `navigate=yes` abre
+   la ruta de una vez, que es lo que el ejecutivo quiere en la calle. */
+function enlaceWazeDe(c){
+  const d = destinoDe(c);
+  return d.fuente === "gps" ? `https://waze.com/ul?ll=${d.q}&navigate=yes`
+                            : `https://waze.com/ul?q=${encodeURIComponent(d.q)}&navigate=yes`;
+}
 
 /* ---- Cuántas paradas por ruta -------------------------------------------
    El enlace de Maps admite origen + destino + 9 paradas intermedias sin API
@@ -6520,7 +6709,7 @@ function viewRutas(){
 
   if (!R.grupos.length) return `
     ${bannerComoEjec()}
-    <div class="page-head"><div><h2>Rutas recomendadas</h2>
+    <div class="page-head"><div><h2>Cluster recomendados</h2>
       <div class="sub">Agrupadas por distrito, para salir una vez y ver a varios</div></div></div>
     <div class="card"><div class="vacio">
       ${R.total
@@ -6535,14 +6724,14 @@ function viewRutas(){
   ${bannerComoEjec()}
   <div class="page-head">
     <div>
-      <h2>Rutas recomendadas</h2>
+      <h2>Cluster recomendados</h2>
       <div class="sub">${R.grupos.length} distrito${R.grupos.length===1?"":"s"} con más de un comercio
         por visitar · ${R.total} pendientes en total</div>
     </div>
   </div>
 
   <div class="note" style="margin:0 0 12px">
-    <b>Cómo salen estas rutas.</b> El CRM agrupa por <b>distrito</b> y ordena por <b>vía y altura</b>:
+    <b>Cómo salen estos cluster.</b> El CRM agrupa por <b>distrito</b> y ordena por <b>vía y altura</b>:
     dentro de una misma avenida el orden es el del recorrido, sin ir y volver. El recorrido fino, la
     distancia y <b>el tráfico en vivo</b> los pone Google Maps al abrir el enlace.
     ${/* Decirlo antes de que lo descubra en la calle. El CRM no tiene las
@@ -6553,8 +6742,8 @@ function viewRutas(){
          orden óptimo que no se puede calcular sería vender el dato que
          justamente falta. */""}
     <br><b>Lo que todavía no hace:</b> entre <em>vías distintas</em> el orden es alfabético, no por
-    cercanía —el CRM no tiene las coordenadas de los locales, solo su dirección escrita—. En un
-    distrito con muchas calles conviene <b>reordenar las paradas arrastrándolas dentro de Google
+    cercanía —el orden sale de la dirección escrita; el GPS de una visita, cuando es confiable,
+    se usa como destino de esa parada, no para ordenar—. En un distrito con muchas calles conviene <b>reordenar las paradas arrastrándolas dentro de Google
     Maps</b> antes de salir.
   </div>
 
@@ -6591,13 +6780,17 @@ function viewRutas(){
                  href="${esc(enlaceMaps(t.map(x => x.c)))}">Abrir en Google Maps ↗</a>
             </div>
             <ol class="rt-p">
-              ${t.map(x => `<li>
+              ${t.map(x => { const dd = destinoDe(x.c); return `<li>
                 <button class="rt-x" data-verficha="${esc(x.c.customer_id)}">
                   <span class="rt-x-n">${esc(x.c.nombre_comercio || x.c.customer_id)}</span>
-                  <span class="rt-x-d">${esc(x.c.direccion || "")}</span>
+                  ${/* La parada muestra la dirección QUE SE LE MANDA AL MAPA, no la cruda
+                       de SUNAT: si el punto está mal, el ejecutivo lo ve acá y lo corrige
+                       en la ficha, no después de manejar hasta el lugar equivocado. */""}
+                  <span class="rt-x-d">${dd.fuente === "gps" ? "📍 GPS de la visita · " + esc(x.c.direccion_maps || traducirDireccion(x.c).busqueda) : esc(dd.q)}</span>
                 </button>
                 <span class="chip ${chip(x.p.k)}">${esc(x.p.lbl)}</span>
-              </li>`).join("")}
+                <a class="rt-waze" href="${esc(enlaceWazeDe(x.c))}" target="_blank" rel="noopener" title="Abrir esta parada en Waze">Waze</a>
+              </li>`; }).join("")}
             </ol>
           </div>`).join("")}
       </div>`).join("")}
@@ -6905,6 +7098,73 @@ function cardCliente(c){
 /* =========================================================================
    Pantalla: Ficha del comercio
    ========================================================================= */
+/* ---- Cómo llegar: Maps y Waze desde la ficha (José, 09/09/2026) -----------
+   Dos botones y una línea que dice DE DÓNDE sale el punto —GPS de la visita,
+   dirección corregida, o dirección traducida— porque un botón que abre el mapa
+   en el lugar equivocado sin decir por qué es peor que ninguno. Y el campo
+   para corregir la dirección a mano, que es donde se sinceran las que la
+   traducción no resuelve sola: lo edita el dueño del comercio o supervisión,
+   queda en la bitácora, y NO toca la dirección original que entregó BBVA. */
+const DIR_CON_VIA = /^(Avenida|Jirón|Calle|Pasaje|Carretera|Autopista|Alameda|Boulevard|Malecón|Parque|Plaza|Plazuela|Prolongación|Óvalo|Mz\.|Lt\.)\b/;
+function bloqueComoLlegar(c){
+  const d = destinoDe(c);
+  const tr = d.tr || traducirDireccion(c);
+  const puede = !esDeCampo() || esMiCliente(c);
+  const avisos = [];
+  if (tr.otraRegion) avisos.push("La dirección trae sufijo de otra región; el mapa se abre allá, no en Lima.");
+  else if (tr.fueraDeLima) avisos.push("Fuera de Lima Metropolitana.");
+  if (d.fuente !== "gps" && !lim2(c.direccion_maps) && /Mz\. |Lt\. | Km /.test(tr.busqueda))
+    avisos.push("Manzana y lote, o kilómetro: Maps llega a la zona, no al local. Conviene corregir con una referencia.");
+  /* Comprobado el 09/09 en Maps: «Cusco 270, Cercado de Lima» cae en Villa
+     María del Triunfo; «Jirón Cusco 270» cae bien. Sin el tipo de vía Maps
+     adivina, y a veces adivina otro distrito. */
+  else if (d.fuente !== "gps" && !lim2(c.direccion_maps) && !DIR_CON_VIA.test(tr.busqueda))
+    avisos.push("La dirección no dice si es avenida, jirón o calle: Maps puede irse a otro distrito. Si el punto cae mal, corrígela anteponiendo el tipo de vía.");
+  return `
+  <div class="llegar" style="margin-top:12px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn sm" href="${enlaceMapsDe(c)}" target="_blank" rel="noopener">Cómo llegar · Maps</a>
+      <a class="btn ghost sm" href="${enlaceWazeDe(c)}" target="_blank" rel="noopener">Waze</a>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px">${esc(d.detalle)}${
+      d.fuente !== "gps" ? ` · <span class="mono" style="font-size:11.5px">${esc(d.q)}</span>` : ""}${
+      tr.interior ? ` · ${esc(tr.interior)}` : ""}${(c.referencia_maps || tr.referencia) ? ` · Ref.: ${esc(c.referencia_maps || tr.referencia)}` : ""}</div>
+    ${avisos.map(a => `<div class="note warn" style="margin-top:6px;font-size:12px">${esc(a)}</div>`).join("")}
+    ${puede ? `<details style="margin-top:8px"><summary style="font-size:12.5px;cursor:pointer">${
+        lim2(c.direccion_maps) ? "Editar la dirección para el mapa" : "Corregir la dirección para el mapa"}</summary>
+      <div class="field" style="margin-top:8px">
+        <label for="dirMaps">Dirección para el mapa <span class="hint">— como la buscarías en Google Maps o Waze</span></label>
+        <input type="text" id="dirMaps" value="${esc(c.direccion_maps || "")}" placeholder="${esc(tr.busqueda)}">
+      </div>
+      <div class="field">
+        <label for="refMaps">Referencia <span class="hint">— lo que le dirías a alguien para que llegue</span></label>
+        <input type="text" id="refMaps" value="${esc(c.referencia_maps || "")}" placeholder="Ej.: frente al parque, segundo piso, puerta verde">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn sm" id="dirMapsOk" data-cid="${esc(c.customer_id)}">Guardar</button>
+        ${lim2(c.direccion_maps) ? `<button class="btn ghost sm" id="dirMapsQuitar" data-cid="${esc(c.customer_id)}">Volver a la traducida</button>` : ""}
+      </div>
+      <div id="dirMapsMsg"></div>
+    </details>` : ""}
+  </div>`;
+}
+
+async function guardarDireccionMaps(cid, dir, ref){
+  const c = byId[String(cid)]; if (!c) return;
+  const msg = $("#dirMapsMsg");
+  try {
+    const { error } = await sb.from("clientes")
+      .update({ direccion_maps: lim2(dir) || null, referencia_maps: lim2(ref) || null })
+      .eq("customer_id", String(cid));
+    if (error) throw new Error(error.message);
+    c.direccion_maps = lim2(dir) || null; c.referencia_maps = lim2(ref) || null;
+    toast(lim2(dir) ? "Dirección para el mapa guardada" : "Vuelve a usarse la dirección traducida");
+    render();
+  } catch (e) {
+    if (msg) msg.innerHTML = `<div class="err">${esc(String(e.message))}</div>`;
+  }
+}
+
 function viewFicha(c){
   if (!c) return `<div class="empty">Comercio no encontrado.</div>`;
   const b = RULES.recomputarBase(c.customer_id);
@@ -7039,9 +7299,7 @@ function viewFicha(c){
       }</dd></div>` : ""}
       ${c.observacion ? `<div class="kv"><dt>Observación</dt><dd>${esc(c.observacion)}</dd></div>` : ""}
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
-      ${c.direccion ? `<div style="margin-top:11px">
-        <a class="btn ghost sm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((c.direccion||"")+", "+(c.distrito||"")+", Lima, Perú")}" target="_blank" rel="noopener">Ver en el mapa</a>
-      </div>` : ""}
+      ${(c.direccion || c.direccion_maps) ? bloqueComoLlegar(c) : ""}
     </div>
 
    </div>
@@ -24215,6 +24473,11 @@ function bindExtras(){
     S.fEjecReg = S.fEjecReg === tr.dataset.fejec ? "todos" : tr.dataset.fejec;
     S.limiteReg = 40; render(); });
   if ($("#bajarReg")) $("#bajarReg").onclick = () => descargarGestiones();
+  /* La dirección para el mapa, desde la ficha del comercio. */
+  if ($("#dirMapsOk")) $("#dirMapsOk").onclick = e =>
+    guardarDireccionMaps(e.currentTarget.dataset.cid, $("#dirMaps").value, $("#refMaps").value);
+  if ($("#dirMapsQuitar")) $("#dirMapsQuitar").onclick = e =>
+    guardarDireccionMaps(e.currentTarget.dataset.cid, "", $("#refMaps") ? $("#refMaps").value : "");
   if ($("#anularUbi")) $("#anularUbi").onclick = () => anularUbicacion(S.editId);
   if ($("#ubiAqui")) $("#ubiAqui").onclick = () => ubicacionDeAqui();
   if ($("#ubiGuardar")) $("#ubiGuardar").onclick = () => guardarUbicacion(S.editId);
