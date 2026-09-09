@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 11:02", huella:"e0ca80" };
+const BUILD = { sello:"09/09/2026 16:08", huella:"3ea03a" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -6138,8 +6138,11 @@ function bindComunes(){
     e.stopPropagation();
     const id = el.dataset.verficha;
     if (!id) return;
-    S.cid = id; S.q = "";
-    go("cartera");
+    /* `go` limpia S.cid: hay que pasárselo, no fijarlo antes. Con S.cid
+       fijado y go("cartera") a secas, el nombre del comercio en Cluster
+       recomendados devolvía a la lista de la cartera (José, 09/09). */
+    S.q = "";
+    go("cartera", id);
   });
   /* Y los estados derivados, igual: cada cifra del panel abre su lista. */
   document.querySelectorAll("[data-verest]").forEach(el => el.onclick = e => {
@@ -7165,6 +7168,51 @@ async function guardarDireccionMaps(cid, dir, ref){
   }
 }
 
+/* ---- Apuntes del ejecutivo (José, 09/09/2026) ----------------------------
+   «un campo debajo de datos del comercio en donde el ejecutivo pueda escribir
+   datos para el mismo, como comentario del mismo ejecutivo o apuntes, los
+   cuales no tendrán relevancia pero servirá para anotar cosas que le sirvan a
+   él y se podrá editar cuando este lo desee».
+
+   Es un bloc de notas y se comporta como tal: no es una gestión, no entra en
+   ningún indicador, no sale en ningún archivo —las hojas tienen sus columnas
+   escritas a mano y esta no está— y no deja rastro en la bitácora. Lo ve y lo
+   edita el dueño del comercio; supervisión también, que es quien mira la
+   ficha «como» el ejecutivo. Se guarda con el botón, no al escribir: en la
+   calle, con señal a medias, un guardado por tecla es una lotería. */
+function bloqueApuntes(c){
+  if (!(!esDeCampo() || esMiCliente(c))) return "";
+  const hay = lim2(c.apuntes);
+  return `
+  <div class="card apuntes">
+    <h3 style="margin-bottom:2px">Mis apuntes</h3>
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:9px">Solo para ti: no cuenta como gestión ni sale en ningún archivo.</div>
+    <textarea id="apuntesTxt" data-cid="${esc(c.customer_id)}" placeholder="Ej.: Hablar con la dueña, no con el hijo. Cierra los martes. Pedir el QR de Yape para el cobro."
+      style="min-height:${hay ? 96 : 64}px">${esc(c.apuntes || "")}</textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <button class="btn sm" id="apuntesOk" data-cid="${esc(c.customer_id)}" disabled>Guardar apuntes</button>
+      <span id="apuntesMsg" style="font-size:12px;color:var(--muted)">${hay ? "Se puede editar cuando quieras." : ""}</span>
+    </div>
+  </div>`;
+}
+async function guardarApuntes(cid){
+  const c = byId[String(cid)]; if (!c) return;
+  const ta = $("#apuntesTxt"), msg = $("#apuntesMsg"), btn = $("#apuntesOk");
+  if (!ta) return;
+  const texto = String(ta.value || "").trim() || null;
+  if (btn) btn.disabled = true;
+  try {
+    const { error } = await sb.from("clientes").update({ apuntes: texto }).eq("customer_id", String(cid));
+    if (error) throw new Error(error.message);
+    c.apuntes = texto;
+    if (msg) msg.textContent = "Guardado " + new Date().toLocaleTimeString("es-PE", { hour:"2-digit", minute:"2-digit", timeZone:"America/Lima" });
+    toast(texto ? "Apuntes guardados" : "Apuntes borrados");
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span class="err">No se pudo guardar: ${esc(String(e.message))}</span>`;
+    if (btn) btn.disabled = false;
+  }
+}
+
 function viewFicha(c){
   if (!c) return `<div class="empty">Comercio no encontrado.</div>`;
   const b = RULES.recomputarBase(c.customer_id);
@@ -7301,6 +7349,7 @@ function viewFicha(c){
       <div class="kv"><dt>Registrado por</dt><dd>${esc(c.asignado)}<div style="font-size:12px;color:var(--muted)">${fmtFecha(String(c.creado_en||"").slice(0,10))}</div></dd></div>
       ${(c.direccion || c.direccion_maps) ? bloqueComoLlegar(c) : ""}
     </div>
+    ${bloqueApuntes(c)}
 
    </div>
 
@@ -24478,6 +24527,13 @@ function bindExtras(){
     guardarDireccionMaps(e.currentTarget.dataset.cid, $("#dirMaps").value, $("#refMaps").value);
   if ($("#dirMapsQuitar")) $("#dirMapsQuitar").onclick = e =>
     guardarDireccionMaps(e.currentTarget.dataset.cid, "", $("#refMaps") ? $("#refMaps").value : "");
+  /* Los apuntes: el botón se enciende recién cuando hay algo distinto a lo guardado. */
+  if ($("#apuntesTxt")) $("#apuntesTxt").oninput = e => {
+    const c = byId[String(e.target.dataset.cid)] || {};
+    const cambio = (String(e.target.value || "").trim() || null) !== (String(c.apuntes || "").trim() || null);
+    if ($("#apuntesOk")) $("#apuntesOk").disabled = !cambio;
+  };
+  if ($("#apuntesOk")) $("#apuntesOk").onclick = e => guardarApuntes(e.currentTarget.dataset.cid);
   if ($("#anularUbi")) $("#anularUbi").onclick = () => anularUbicacion(S.editId);
   if ($("#ubiAqui")) $("#ubiAqui").onclick = () => ubicacionDeAqui();
   if ($("#ubiGuardar")) $("#ubiGuardar").onclick = () => guardarUbicacion(S.editId);
