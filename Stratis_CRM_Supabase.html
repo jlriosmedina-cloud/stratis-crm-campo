@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 16:08", huella:"3ea03a" };
+const BUILD = { sello:"09/09/2026 17:35", huella:"c6d1ed" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3561,13 +3561,18 @@ const BONO_DEF = {
                       de BBVA o gestión efectiva con el cliente—, sobre los
                       Customer ID registrados, y con la carga de la cartera
                       completa como segunda condición.
+       · «correo»   — «contacto» más cualquier correo al cliente registrado en
+                      el periodo, haya respondido o no (José, 09/09/2026:
+                      «todo lo que tenga correo… esté contando»). Mismo
+                      denominador y misma segunda condición que «contacto».
      El primer mes fue por registro: el cuello estaba en la respuesta del
-     banco. De ahí en adelante rige «contacto». Se cambia por periodo desde
-     Ajustes, y cambiarlo no reescribe los meses ya medidos. */
+     banco. El segundo arrancó por «contacto» y el 09/09 pasó a «correo». Se
+     cambia por periodo desde Ajustes, y cambiarlo no reescribe los meses ya
+     medidos. */
   /* visitas_periodo manda sobre visitas_semana; la semanal queda para leer
      las versiones viejas —el periodo 1— sin reescribirlas. Ver reglaVisitas. */
   requisitos: { cobertura_pct:90, visitas_semana:25, visitas_periodo:40,
-                puntualidad_pct:95, cobertura_base:"contacto" },
+                puntualidad_pct:95, cobertura_base:"correo" },
   /* Los días que no son de trabajo, además de sábados y domingos. Se editan
      en Ajustes y viajan con la versión de parámetros. */
   feriados:   FERIADOS_DEF,
@@ -6985,7 +6990,7 @@ function viewCartera(){
       ${tarjeta("cartera", "Cartera", CF.cartera.size, "Customer ID de BBVA", "")}
       ${tarjeta("cobertura", "Comercios gestionados", CF.cobertura.size,
         linea(CF.cobertura.size, CF.metaCobertura),
-        puerta("sin_cobertura", sinCob, "sin contacto logrado"))}
+        puerta("sin_cobertura", sinCob, "sin " + nombreCoberturaDe(CF.baseCobertura).replace(/^con /, "")))}
       ${tarjeta("visitas", "Visitas efectivas", CF.visitas.size,
         linea(CF.visitas.size, CF.metaVisitas),
         puerta("sin_visitas", sinVis, "sin visita"))}
@@ -11954,6 +11959,7 @@ function datosPanelEjec(r){
     faltan: Math.max(0, cartera.length - gestionados),
     cobertura: asignada ? gestionados / asignada * 100 : null,
     logrado, metaLogrado,
+    baseLogrado: llave ? llave.cobertura.base : null,
     faltanLogrado: (logrado !== null && metaLogrado !== null)
       ? Math.max(0, metaLogrado - logrado) : null
   };
@@ -12042,7 +12048,7 @@ function viewPanelEjec(){
         sub: d.asignada ? `${pct1(d.cobertura)}% de tu cartera · incluye intentos sin respuesta`
                         : "incluye intentos sin respuesta",
         ir:'data-pe="gestionados"' })}
-      ${d.logrado === null ? "" : kpiEjec({ lbl:"Con contacto logrado",
+      ${d.logrado === null ? "" : kpiEjec({ lbl:"Con " + nombreCoberturaDe(d.baseLogrado).replace(/^con /, ""),
         val: d.logrado, color:"var(--emb-efectividad)",
         /* La frase que decide va en tinta, no en gris: es la única línea del
            panel que responde «¿cuál de los dos me mide?». El resto —cuánto
@@ -16358,6 +16364,11 @@ function llaveDe(correo, p){
   const base = req.cobertura_base || "gestion";
   const mios = CLIENTES.filter(c => c.asignado_correo === correo && !esClienteNuevo(c));
   const registrados = mios.length;
+  /* Por qué vía entró cada comercio cubierto, para que la ficha y el panel
+     lo puedan decir sin recontar. Un comercio se atribuye a UNA vía, en este
+     orden: contacto logrado con el cliente, correo al cliente sin respuesta
+     todavía, correo declarado al ejecutivo de BBVA. */
+  const vias = { contacto:0, correoCliente:0, correoBanco:0 };
 
   /* `idsCubiertos` es el mismo conjunto que produce el número, expuesto. No es
      un extra: la descarga por ejecutivo tiene que marcar EXACTAMENTE los
@@ -16368,7 +16379,7 @@ function llaveDe(correo, p){
   if (base === "registro"){
     cubiertos = registrados;
     idsCubiertos = new Set(mios.map(c => String(c.customer_id)));
-  } else if (base === "contacto"){
+  } else if (base === "contacto" || base === "correo"){
     /* Los comercios con un contacto logrado dentro del periodo, de los dos
        lados del flujo. Es un Set: el comercio entra una vez por más veces que
        se le haya escrito. */
@@ -16377,8 +16388,22 @@ function llaveDe(correo, p){
        solo el correo, y se agrega abajo. Un chat con el funcionario marcado
        «efectivo» no es cobertura: por eso el filtro pide además que la gestión
        haya ido al comercio. */
+    const porContacto = new Set(), porCorreoCliente = new Set();
     gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
-        .forEach(r => logrados.add(String(r.Customer_id)));
+        .forEach(r => porContacto.add(String(r.Customer_id)));
+    /* José, 09/09/2026: «todo lo que tenga correo —correo BBVA, correo a
+       cliente con copia a BBVA— también esté contando como gestión y por
+       consiguiente a cobertura de cartera». Con «correo», el correo al
+       cliente cubre con cualquier resultado —salió, y hay constancia de que
+       salió—, igual que ya califica como gestión en el embudo. El correo con
+       copia al ejecutivo de BBVA es un correo al cliente y entra por acá.
+       Tiene que ser una gestión DEL PERIODO —`gest` ya viene filtrado por
+       gestionDelPeriodo—: un correo de agosto no cubre septiembre. */
+    if (base === "correo")
+      gest.filter(r => esAlCliente(r) && r.Tipo_Contacto === "correo")
+          .forEach(r => porCorreoCliente.add(String(r.Customer_id)));
+    porContacto.forEach(id => logrados.add(id));
+    porCorreoCliente.forEach(id => logrados.add(id));
     /* Solo las coordinaciones DECLARADAS. Las inferidas son las que el CRM
        dedujo del histórico al migrar: sirven para leer el estado de un
        comercio, pero no son constancia de que alguien escribió el correo, y
@@ -16395,6 +16420,11 @@ function llaveDe(correo, p){
     idsCubiertos = new Set(mios.filter(c => logrados.has(String(c.customer_id)))
                                .map(c => String(c.customer_id)));
     cubiertos = idsCubiertos.size;
+    idsCubiertos.forEach(id => {
+      if (porContacto.has(id)) vias.contacto++;
+      else if (porCorreoCliente.has(id)) vias.correoCliente++;
+      else vias.correoBanco++;
+    });
   } else {
     const tocados = new Set(gest.map(r => String(r.Customer_id)));
     idsCubiertos = new Set(mios.filter(c => tocados.has(String(c.customer_id)))
@@ -16404,7 +16434,7 @@ function llaveDe(correo, p){
 
   /* El denominador es parte de la regla, no un detalle aparte: «registro» y
      «gestion» miden contra lo que BBVA asignó, «contacto» contra lo cargado. */
-  const sobreRegistrados = base === "contacto";
+  const sobreRegistrados = base === "contacto" || base === "correo";
   const denom = sobreRegistrados ? registrados : cart.n;
   const cobertura = denom ? cubiertos / denom * 100 : 0;
   const cargaCompleta = !sobreRegistrados || registrados >= cart.n;
@@ -16427,7 +16457,7 @@ function llaveDe(correo, p){
                ok: cobertura >= req.cobertura_pct && cargaCompleta,
                detalle: `${cubiertos} de ${denom} comercios${
                  cargaCompleta ? "" : ` · faltan ${faltanPorCargar} por cargar`}`,
-               base, cubiertos, idsCubiertos, denom, registrados, cargaCompleta, faltanPorCargar,
+               base, cubiertos, idsCubiertos, vias, denom, registrados, cargaCompleta, faltanPorCargar,
                /* Cuántos comercios más hacen falta para llegar al mínimo. Es el
                   número que el ejecutivo necesita para reaccionar antes del 18,
                   y no lo tenía en ninguna pantalla. */
@@ -16906,8 +16936,13 @@ const comoPct    = v => pct1(v);
 const TEXTO_COBERTURA = {
   registro: "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar",
   gestion:  "Comercios asignados con al menos una gestión o intento de gestión en el periodo",
-  contacto: "Comercios registrados con un contacto logrado en el periodo: correo al ejecutivo de BBVA o gestión efectiva con el cliente. Un comercio cuenta una vez, por muchas gestiones que tenga"
+  contacto: "Comercios registrados con un contacto logrado en el periodo: correo al ejecutivo de BBVA o gestión efectiva con el cliente. Un comercio cuenta una vez, por muchas gestiones que tenga",
+  correo:   "Comercios registrados con un contacto logrado o un correo en el periodo: gestión efectiva con el cliente, correo al cliente —con o sin respuesta, con copia al ejecutivo de BBVA incluido— o correo registrado al ejecutivo de BBVA. Tiene que ser del periodo; un comercio cuenta una vez"
 };
+/* Cómo se llama, en dos palabras, lo que cubre: para la tarjeta del panel y
+   el pie de la Cartera, que no tienen sitio para la frase entera. */
+const NOMBRE_COBERTURA = { registro:"registrado", gestion:"con gestión", contacto:"con contacto logrado", correo:"con contacto o correo" };
+const nombreCoberturaDe = base => NOMBRE_COBERTURA[base] || NOMBRE_COBERTURA.contacto;
 
 /* Lo que falta para llegar al mínimo, y cuántos días quedan.
 
@@ -16923,7 +16958,7 @@ function avisoCobertura(ll, p){
   if (!c.cargaCompleta)
     partes.push(`faltan <b>${c.faltanPorCargar}</b> Customer ID por cargar`);
   if (c.faltan > 0)
-    partes.push(`<b>${c.faltan}</b> ${c.faltan === 1 ? "comercio más" : "comercios más"} con contacto logrado`);
+    partes.push(`<b>${c.faltan}</b> ${c.faltan === 1 ? "comercio más" : "comercios más"} ${nombreCoberturaDe(c.base)}`);
   if (!partes.length) return "";
   return `<div class="bn-req-aviso">Para llegar al mínimo: ${partes.join(" y ")}${
     dias > 0 ? ` · quedan ${dias} ${dias === 1 ? "día" : "días"} de periodo` : " · el periodo ya cerró"}</div>`;
@@ -17842,12 +17877,14 @@ function cardCoberturaBase(val){
     <div class="pie" style="margin:-4px 0 10px">
       Se guarda con la versión del periodo, así que cambiarlo no reescribe los meses
       ya medidos: cada uno se sigue liquidando con la regla que regía cuando se trabajó.
-      En las tres, un comercio cuenta una vez: cinco gestiones sobre la misma bodega
+      En las cuatro, un comercio cuenta una vez: cinco gestiones sobre la misma bodega
       son un comercio gestionado, no cinco.
     </div>
     <div class="opts">
+      ${op("correo", "Un contacto logrado o un correo en el periodo",
+           "La regla de régimen desde el 09/09. Cuenta el comercio con una gestión efectiva con el cliente, con un correo al cliente —con o sin respuesta, con copia al ejecutivo de BBVA incluido— o con un correo registrado al ejecutivo de BBVA. Tiene que ser del periodo. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
       ${op("contacto", "Un contacto logrado en el periodo",
-           "La regla de régimen. Cuenta el comercio con un correo al ejecutivo de BBVA —el medio que deja constancia— o con una gestión efectiva con el cliente, no un intento. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
+           "La regla del periodo 2 hasta el 09/09. Cuenta el comercio con un correo al ejecutivo de BBVA —el medio que deja constancia— o con una gestión efectiva con el cliente, no un intento ni un correo sin respuesta. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
       ${op("gestion", "Al menos un intento de gestión",
            "Cuenta el comercio que recibió contacto o intento de contacto, sobre la cartera asignada")}
       ${op("registro", "El registro del Customer ID en el CRM",
@@ -21840,8 +21877,14 @@ function datosLibro(){
     nombre: r.Ejecutivo, correo: r.Correo_Stratis, cid: String(r.Customer_id),
     comercio: (byId[String(r.Customer_id)] || {}).nombre_comercio || "",
     fecha: r.Fecha_Contacto, medio: nomMedioBBVA(r.Tipo_Contacto) || r.Tipo_Contacto,
-    /* La columna que decide: solo el correo deja constancia consultable. */
-    dejaConstancia: r.Tipo_Contacto === "bbva_correo" ? 1 : 0
+    /* La columna que decide: solo el correo deja constancia consultable, y
+       solo el que alguien registró. La fila inferida —la que la base crea
+       sola al dar de alta el comercio declarando «correo»— es una
+       declaración de medio, no un correo: el CRM no la cuenta desde el
+       principio y el libro la contaba (visto el 09/09 con la suite de la
+       regla «correo»). Libro y CRM tienen que decir lo mismo. */
+    inferida: r.Inferida === true ? 1 : 0,
+    dejaConstancia: (r.Tipo_Contacto === "bbva_correo" && r.Inferida !== true) ? 1 : 0
   }));
 
   return { periodos, idx, ejec, gestiones, cartera, nuevos, coord };
@@ -21883,7 +21926,9 @@ function hojaParametros(p, d){
     ["Peso de venta", B.pesos.venta, "%"],
     ["", "", ""],
     ["LLAVE DE ACCESO", "MÍNIMO", ""],
-    ["Cobertura de cartera", B.requisitos.cobertura_pct, "% de la cartera con al menos una gestión"],
+    /* La regla que rigió ese periodo, no la frase del primer mes: un libro
+       de septiembre que diga «al menos una gestión» contradice al acta. */
+    ["Cobertura de cartera", B.requisitos.cobertura_pct, "% · " + TEXTO_COBERTURA[B.requisitos.cobertura_base || "gestion"]],
     /* Desde el periodo 2 el mínimo es del periodo y no de la semana; el libro
        escribe el que rigió ese periodo, con su unidad, para que una hoja
        vieja no se lea con la regla nueva. */
@@ -22067,19 +22112,19 @@ function hojaGestiones(d, nFer){
    por este lado. */
 function hojaCoordBBVA(d){
   const cols = ["Periodo","Mes","Ejecutivo","Correo","Customer ID","Comercio",
-                "Fecha del contacto","Medio","Deja constancia"];
+                "Fecha del contacto","Medio","Deja constancia","Inferida del alta"];
   const filas = [cols];
   d.coord.forEach(c => filas.push([c.periodo, c.mes, c.nombre, c.correo, c.cid,
-    c.comercio, serial(c.fecha), c.medio, c.dejaConstancia]));
+    c.comercio, serial(c.fecha), c.medio, c.dejaConstancia, c.inferida]));
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
     fmt:[[7, 2, filas.length, "dd/mm/yyyy"]],
-    anchos:[10,6,18,26,14,30,16,18,14] });
+    anchos:[10,6,18,26,14,30,16,18,14,16] });
 }
 
 function hojaCartera(d, nG, nCo){
   const cols = ["Ejecutivo","Correo","Customer ID","Comercio","Distrito","Estado",
                 "Resultado","Fecha de cierre","Periodo del cierre","Mes del cierre",
-                "Cuenta para reactivación","Contacto logrado en el periodo"];
+                "Cuenta para reactivación","Cubierto en el periodo"];
   const filas = [cols];
   d.cartera.forEach((c, i) => {
     const f = i + 2;
@@ -22089,9 +22134,13 @@ function hojaCartera(d, nG, nCo){
        con cinco gestiones sigue siendo un comercio: esta celda es 1 o 0. */
     const efectiva = `COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$O$2:$O$${nG},1)`;
     const correo   = `COUNTIFS('Coordinación BBVA'!$E$2:$E$${nCo},${A1(2,f)},'Coordinación BBVA'!$B$2:$B$${nCo},${P_(FIL.mes)},'Coordinación BBVA'!$I$2:$I$${nCo},1)`;
+    /* Con la regla «correo» (09/09) suma además el correo al cliente del
+       periodo, respondido o no. Con «contacto» este término vale cero: lo
+       decide la hoja de Parámetros, como todo lo demás. */
+    const correoCli = `IF(${P_(FIL.coberturaBase)}="correo",COUNTIFS(Gestiones!$E$2:$E$${nG},${A1(2,f)},Gestiones!$B$2:$B$${nG},${P_(FIL.mes)},Gestiones!$M$2:$M$${nG},"Correo electrónico",Gestiones!$N$2:$N$${nG},"Comercio"),0)`;
     filas.push([c.nombre, c.correo, c.cid, c.comercio, c.distrito,
       c.estado, c.resultado, c.cierre ? serial(c.cierre) : "", c.periodoCierre, c.mesCierre,
-      c.cuenta, `=IF(${efectiva}+${correo}>0,1,0)`]);
+      c.cuenta, `=IF(${efectiva}+${correo}+${correoCli}>0,1,0)`]);
   });
   return hojaLibro(filas, { cabeceraSimple:1, filtro:1, congelar:1,
     fmt:[[8, 2, filas.length, "dd/mm/yyyy"]],
@@ -22130,17 +22179,21 @@ function formulasEjecutivo(correoRef, mesRef, nG, nC, nN){
   const contactados = `SUMIFS(Cartera!$L$2:$L$${nC},${C("B")},${correoRef})`;
   /* Cuál de las tres manda lo decide la hoja de Parámetros, no esta fórmula:
      así el libro que se baja hoy sigue cuadrando si mañana cambia la regla. */
+  /* «contacto» y «correo» se miden igual —sobre lo registrado, con la
+     columna L de Cartera—; la diferencia entre las dos la resuelve esa
+     columna, no estas fórmulas. */
+  const esContacto = `OR(${P_(FIL.coberturaBase)}="contacto",${P_(FIL.coberturaBase)}="correo")`;
   const cubre = `IF(${P_(FIL.coberturaBase)}="registro",${registrados},`
-              + `IF(${P_(FIL.coberturaBase)}="contacto",${contactados},${cubiertos}))`;
-  /* El denominador es parte de la regla: «contacto» mide sobre lo registrado,
-     las otras dos sobre lo que asignó BBVA. */
+              + `IF(${esContacto},${contactados},${cubiertos}))`;
+  /* El denominador es parte de la regla: «contacto» y «correo» miden sobre lo
+     registrado, las otras dos sobre lo que asignó BBVA. */
   const coberturaPct = cel =>
-    `IF(${P_(FIL.coberturaBase)}="contacto",IF(${registrados}=0,0,${contactados}/${registrados}*100),`
+    `IF(${esContacto},IF(${registrados}=0,0,${contactados}/${registrados}*100),`
   + `IF(${cel}=0,0,${cubre}/${cel}*100))`;
   /* Y la segunda condición de la regla de régimen: tener cargada toda la
      cartera asignada, para que nadie suba su porcentaje cargando menos. */
   const cumpleCobertura = (valor, minimo, cartera) =>
-    `IF(AND(${valor}>=${minimo},OR(${P_(FIL.coberturaBase)}<>"contacto",${registrados}>=${cartera})),"Sí","No")`;
+    `IF(AND(${valor}>=${minimo},OR(NOT(${esContacto}),${registrados}>=${cartera})),"Sí","No")`;
   const efectivas  = `SUMIFS(${G("P")},${eG},${mG})`;
   const puntuales  = `SUMIFS(${G("L")},${eG},${mG})`;
   const respuestas = `SUMIFS(${G("O")},${eG},${mG})`;
@@ -23794,7 +23847,8 @@ function conjuntosFicha(correos, p){
 
   const O = { cartera:new Set(), cobertura:new Set(), visitas:new Set(),
               retenciones:new Set(), ventas:new Set(),
-              metaCobertura:0, metaVisitas:0, metaRetenciones:0, metaVentas:0 };
+              metaCobertura:0, metaVisitas:0, metaRetenciones:0, metaVentas:0,
+              baseCobertura: R.cobertura_base || "gestion" };
 
   lista.forEach(correo => {
     const ll   = llaveDe(correo, p);
@@ -23975,6 +24029,10 @@ function datosFichaEjecutivo(correo){
       const s = new Set(gest.filter(r => esAlCliente(r) && esEfectivo(r.Resultado))
         .map(r => String(r.Customer_id)).filter(id => idsCart.has(id)));
       return s.size; })(),
+    /* Por qué vía entró cada cubierto y con qué regla: sale de la llave, no
+       se recuenta acá. */
+    viasCobertura: ll.cobertura.vias || null,
+    baseCobertura: ll.cobertura.base,
     serie, serieVisible, semanaUtil, ultCerrada, minDiasSemana:MIN_DIAS_SEMANA,
     distritos, habiles, diasSem,
     sinVisitaTotal: distritos.reduce((n, x) => n + x.sinVisita, 0),
@@ -24091,11 +24149,18 @@ function fichaEjecutivo(doc, D){
 
   caja(m, y, anI, 27, HUESO, 1.2);
   caja(m, y, 1.1, 27, CORAL);
+  const V = D.viasCobertura;
   const parr = [
-    `De los ${miles(D.cobertura.n)} comercios que hoy cuentan como gestionados, `
-    + `${miles(D.cobertura.n - D.porContactoEfectivo)} entraron por el correo al ejecutivo del banco y `
-    + `${miles(D.porContactoEfectivo)} por contacto directo con el comercio. Para la cobertura las dos `
-    + `vías valen igual. La visita, el cierre y la retención salen de la segunda.`,
+    V && D.baseCobertura === "correo"
+      ? `De los ${miles(D.cobertura.n)} comercios que hoy cuentan como gestionados, `
+        + `${miles(V.contacto)} entraron por contacto logrado con el comercio, `
+        + `${miles(V.correoCliente)} por un correo al comercio que todavía no responde y `
+        + `${miles(V.correoBanco)} por el correo al ejecutivo del banco. Para la cobertura las tres `
+        + `vías valen igual, siempre que sean del periodo. La visita, el cierre y la retención salen de la primera.`
+      : `De los ${miles(D.cobertura.n)} comercios que hoy cuentan como gestionados, `
+        + `${miles(D.cobertura.n - D.porContactoEfectivo)} entraron por el correo al ejecutivo del banco y `
+        + `${miles(D.porContactoEfectivo)} por contacto directo con el comercio. Para la cobertura las dos `
+        + `vías valen igual. La visita, el cierre y la retención salen de la segunda.`,
     frasePaso
   ];
   let yT = y + 4.6;
