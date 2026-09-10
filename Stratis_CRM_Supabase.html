@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 20:54", huella:"cef406" };
+const BUILD = { sello:"09/09/2026 21:41", huella:"a6f060" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19860,7 +19860,32 @@ function repSemanaDia(f){
   }));
   const diasAct = cerrada ? 7
     : Math.min(7, Math.round((new Date(f.hoy) - new Date(iniAct)) / 86400000) + 1);
-  return { corte, corteAnterior: mas(corte, -7), iniPrev, iniAct, finAct, diasAct, cerrada, series,
+
+  /* El puente entre «trabajados» y el acumulado del embudo.
+   *
+   * José, 10/09: «en comercios trabajados se entiende que es gestionados, y
+   * dice 159 y ahora 225 […] y en la lámina del embudo dice 785 con +81». Son
+   * dos medidas ciertas: trabajados es la ACTIVIDAD de la ventana (un comercio
+   * cuenta en cada semana en que se trabajó) y el +81 es lo que creció el
+   * ACUMULADO desde el corte. Para que las dos cifras se lean juntas, la
+   * lámina dice de qué están hechos los trabajados: cuántos entran por
+   * primera vez al acumulado, cuántos ya estaban contados y cuántos salieron
+   * de él porque su última actividad quedó sin respuesta. Sale de la MISMA
+   * línea de tiempo que el embudo (`repIdsGestionados`), así que
+   * nuevos − salidas es exactamente el +N de la lámina del embudo. */
+  const corteRef = cerrada ? mas(corte, -7) : corte;
+  const acumAntes = repIdsGestionados(act, corteRef);
+  const acumHoy   = repIdsGestionados(act, finAct);
+  const trabajados = new Set();
+  act.forEach((hist, cid) => { if (repUltimaCalifica(hist, iniAct, finAct)) trabajados.add(cid); });
+  let nuevos = 0, yaEstaban = 0, salidas = 0;
+  trabajados.forEach(cid => { if (acumAntes.has(cid)) yaEstaban++; else nuevos++; });
+  acumAntes.forEach(cid => { if (!acumHoy.has(cid)) salidas++; });
+  const gestion = { corteRef, acumAntes: acumAntes.size, acumHoy: acumHoy.size,
+                    trabajados: trabajados.size, nuevos, yaEstaban, salidas,
+                    neto: acumHoy.size - acumAntes.size };
+
+  return { corte, corteAnterior: mas(corte, -7), iniPrev, iniAct, finAct, diasAct, cerrada, series, gestion,
     /* El punto justo de comparación: dónde iba la semana pasada al mismo día
        en que va la actual. Comparar contra su total sería comparar siete días
        contra tres. */
@@ -21122,8 +21147,12 @@ function armarDirectorio(pptx, fondos){
     caja(g, px, SY, SW, SH, "FFFFFF", REP_LINEA);
     g.addShape(pptx.ShapeType.rect, { x:px, y:SY, w:SW, h:0.09,
       fill:{ color:H(serie.color) }, line:{ type:"none" } });
-    T(g, serie.nombre, { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
-      bold:true, fontFace:NEG, color:H("navy") });
+    /* José, 10/09: «en comercios trabajados se entiende que es gestionados».
+       El rótulo dice que es la actividad DE LA SEMANA; «con gestión» queda
+       para el acumulado de las láminas 3 y 5. */
+    T(g, serie.k === "contactos" ? "Comercios trabajados en la semana" : serie.nombre,
+      { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
+        bold:true, fontFace:NEG, color:H("navy") });
 
     const dd = DIA.series.find(x => x.k === serie.k) || { previa:[], actual:[] };
     const comp = DIA.alMismoDia.find(x => x.k === serie.k) || { previa:0, actual:0 };
@@ -21289,6 +21318,26 @@ function armarDirectorio(pptx, fondos){
 
      El subtítulo de la lámina sigue diciendo «Actividad de cada semana —no el
      acumulado—», que es la única de las tres que evitaba una confusión real. */
+
+  /* Una línea al pie, y solo una: de qué están hechos los trabajados de la
+     semana respecto del acumulado del embudo. José, 10/09: «dice 159 y ahora
+     225 […] y en la lámina del embudo 785 con +81»: sin esta línea, 225 y +81
+     se leen como dos cuentas de lo mismo que no cuadran. Los cuatro números
+     salen de la misma línea de tiempo que el embudo, así que
+     nuevos − salidas ES el +N de esa lámina. */
+  const GES = DIA.gestion;
+  if (GES){
+    const cuando = DIA.cerrada ? "en la semana cerrada" : "esta semana";
+    const salieron = GES.salidas
+      ? ` ${GES.salidas} salieron del acumulado porque su última actividad quedó sin respuesta.`
+      : "";
+    const neto = (GES.neto >= 0 ? "+" : "−") + Math.abs(GES.neto);
+    T(g, `Cómo se lee con el embudo: los ${GES.trabajados} comercios trabajados ${cuando} son `
+       + `${GES.nuevos} que entran por primera vez al acumulado de ${GES.acumHoy} comercios con gestión `
+       + `y ${GES.yaEstaban} que ya estaban contados.${salieron} `
+       + `Neto: ${neto} desde el corte del ${repFecha(GES.corteRef).slice(0, 5)}, la misma cifra que la lámina del embudo.`,
+      { x:0.57, y:SY + SH + 0.10, w:12.38, h:0.44, fontSize:9.5, color:H("gris"), valign:"top" });
+  }
 
 
   /* ---- 4 y 5 · El embudo con el corte, y los tres objetivos --------------
