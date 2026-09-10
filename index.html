@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"10/09/2026 09:47", huella:"c8a7ca" };
+const BUILD = { sello:"10/09/2026 09:55", huella:"3d118b" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -2653,6 +2653,12 @@ const idsConVisita = filas => conVinculados(new Set((filas || [])
   .filter(r => r && r.Cumple_Visita === "SI" && !esReconstruida(r))
   .map(r => String(r.Customer_id))));
 const comerciosConVisita = filas => idsConVisita(filas).size;
+/* La gestión es sobre un comercio de la CARTERA de BBVA —no sobre un alta por
+   RUC—. José, 10/09: «en visitas están incluyendo los RUC, pero solo debe ser
+   retención». El requisito de visitas de la llave, la tarjeta de la Cartera,
+   la ficha, el libro y el acta cuentan comercios de cartera con visita; la
+   venta nueva se ve en su propia tarjeta. */
+const esDeCartera = r => { const c = byId[String(r.Customer_id)]; return !!c && !esClienteNuevo(c); };
 
 /* =========================================================================
    Dos customer_id, un solo comercio
@@ -16442,7 +16448,9 @@ function llaveDe(correo, p){
 
   /* Una visita a la agencia del banco no es una visita al comercio. El
      requisito mide terreno con el cliente, así que se pide las dos cosas. */
-  const efectivas = comerciosConVisita(gest.filter(esAlCliente));
+  /* Y sobre la cartera de retención: la visita a un alta por RUC (venta
+     nueva) no cuenta para el requisito (José, 10/09). */
+  const efectivas = comerciosConVisita(gest.filter(esAlCliente).filter(esDeCartera));
   const semanas   = semanasPeriodo(p);
   /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
      de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
@@ -22162,7 +22170,10 @@ function hojaGestiones(d, nFer){
          filas: la auditoría del 09/09 lo encontró dando 27 donde el CRM decía
          23. Esta celda vale 1 solo en la primera visita efectiva de cada par
          ejecutivo-comercio dentro del periodo; el resumen suma esta columna. */
-      `=IF(AND(${A1(15,f)}=1,${A1(18,f)}=1,COUNTIFS($D$2:${A1(3,f)},${A1(3,f)},$E$2:${A1(4,f)},${A1(4,f)},$B$2:${A1(1,f)},${A1(1,f)},$P$2:${A1(15,f)},1,$S$2:${A1(18,f)},1)=1),1,0)`
+      /* Y solo comercios de cartera —«De su cartera» o «De otra cartera»—:
+         la visita a un alta por RUC no cuenta para el requisito (José,
+         10/09). El CRM aplica la misma regla en `esDeCartera`. */
+      `=IF(AND(${A1(15,f)}=1,${A1(18,f)}=1,OR(${A1(17,f)}="De su cartera",${A1(17,f)}="De otra cartera"),COUNTIFS($D$2:${A1(3,f)},${A1(3,f)},$E$2:${A1(4,f)},${A1(4,f)},$B$2:${A1(1,f)},${A1(1,f)},$P$2:${A1(15,f)},1,$S$2:${A1(18,f)},1)=1),1,0)`
     ]);
   });
   /* Hoja de datos: se deja sobria a propósito. Es de donde se copia y sobre
@@ -23337,9 +23348,11 @@ function datosFichaProyecto(){
                         .filter(g => idsCart.has(String(g.Customer_id)));
   const enR = (a, b) => g => { const d = repDia(g.Fecha_Contacto); return d >= a && d <= b; };
   /* Visitas del periodo con la MISMA regla que la llave de cada ejecutivo:
-     comercios distintos con visita concretada, ventas nuevas incluidas. */
-  const visP = (() => { const f = DB.todos().filter(esGestionCliente).filter(enR(v.ini, hoy));
-    return { total: comerciosConVisita(f), cartera: comerciosConVisita(f.filter(g => idsCart.has(String(g.Customer_id)))) }; })();
+     comercios de CARTERA distintos con visita concretada. José, 10/09: «en
+     visitas están incluyendo los RUC, pero solo debe ser retención». */
+  const visP = (() => { const f = DB.todos().filter(esGestionCliente).filter(esDeCartera).filter(enR(v.ini, hoy));
+    const n = comerciosConVisita(f);
+    return { total: n, cartera: n }; })();
   const retEn = (a, b) => cart.filter(c => (esRetencion(c) || esRecuperado(c)) && c.cerrado_en
     && String(c.cerrado_en).slice(0,10) >= a && String(c.cerrado_en).slice(0,10) <= b).length;
   const venEn = (a, b) => CLIENTES.filter(c => esVentaNueva(c)
@@ -23726,8 +23739,7 @@ function fichaProyecto(doc, D){
       pie:"del portafolio asignado", falta:`faltan ${miles(D.portafolio - D.embudo[1].n)}`,
       plazo: alProy, avance:true },
     { rot:"Visitas del periodo", val:miles(D.objetivos[1].n), meta:"de " + miles(D.metaVis),
-      pie: D.objetivos[1].venta ? `${miles(D.objetivos[1].cartera)} de cartera + ${miles(D.objetivos[1].venta)} de venta nueva`
-                                : "comercios distintos visitados",
+      pie: "comercios de cartera con visita · la venta nueva no cuenta acá",
       falta:`faltan ${miles(Math.max(0, D.metaVis - D.objetivos[1].n))}`,
       /* Verde también, aunque el plazo sea corto. José, 07/09: «esto va para
          el CEO y no queremos que se alarme porque el proyecto tiene poco
@@ -23955,7 +23967,7 @@ function conjuntosFicha(correos, p){
     /* La cobertura NO se recalcula acá: sale del mismo conjunto que ya expone
        la llave, el que alimenta Incentivos y la ficha. */
     (ll.cobertura.idsCubiertos || new Set()).forEach(id => O.cobertura.add(String(id)));
-    idsConVisita(gest.filter(esAlCliente)).forEach(id => O.visitas.add(String(id)));
+    idsConVisita(gest.filter(esAlCliente).filter(esDeCartera)).forEach(id => O.visitas.add(String(id)));
     mios.filter(c => (esRetencion(c) || esRecuperado(c)) && enV(c.cerrado_en))
         .forEach(c => O.retenciones.add(String(c.customer_id)));
     CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
@@ -24018,9 +24030,12 @@ function datosFichaEjecutivo(correo){
   const idsCart = new Set(mios.map(c => String(c.customer_id)));
 
   const enW = (r, a, b) => { const d = repDia(r.Fecha_Contacto); return d >= a && d <= b; };
-  const visEn = (a, b) => { const f = gest.filter(r => esAlCliente(r) && enW(r, a, b));
+  /* Solo cartera (José, 10/09): el requisito no cuenta las visitas a altas
+     por RUC. `total` y `cartera` son ahora la misma cifra; se conservan los
+     dos nombres para no romper a quien los lee. */
+  const visEn = (a, b) => { const f = gest.filter(r => esAlCliente(r) && esDeCartera(r) && enW(r, a, b));
     const total = comerciosConVisita(f);
-    return { total, cartera: comerciosConVisita(f.filter(r => idsCart.has(String(r.Customer_id)))) }; };
+    return { total, cartera: total }; };
   const retEn = (a, b) => mios.filter(c => (esRetencion(c) || esRecuperado(c)) && c.cerrado_en
     && String(c.cerrado_en).slice(0,10) >= a && String(c.cerrado_en).slice(0,10) <= b).length;
   const venEn = (a, b) => CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
@@ -24171,7 +24186,7 @@ function fichaEjecutivo(doc, D){
       pie:`la meta es el ${D.cobertura.metaPct}% de los ${miles(D.cartera)} de su cartera`,
       falta:`faltan ${miles(Math.max(0, D.cobertura.meta - D.cobertura.n))}` },
     { rot:"Visitas efectivas", val:miles(D.visitas.n), meta:"de " + miles(D.visitas.meta),
-      pie:`${D.visitas.cartera} de cartera + ${D.visitas.venta} de venta nueva`,
+      pie:"comercios de cartera con visita · la venta nueva no cuenta acá",
       falta:`faltan ${miles(Math.max(0, D.visitas.meta - D.visitas.n))}` },
     { rot:"Retenciones", val:miles(D.retenciones.n), meta:"de " + miles(D.retenciones.meta),
       pie:"la meta del periodo sobre su cartera",
@@ -24194,8 +24209,7 @@ function fichaEjecutivo(doc, D){
   titulo("Cuánto falta para cada meta", yB, xB, anB);
   yB += 5;
   [["Comercios gestionados", D.cobertura.n, D.cobertura.meta, AZUL2, "comercios " + nombreCoberturaDe(D.baseCobertura)],
-   ["Visitas efectivas", D.visitas.n, D.visitas.meta, CORAL,
-    `${D.visitas.cartera} de cartera + ${D.visitas.venta} de venta nueva`],
+   ["Visitas efectivas", D.visitas.n, D.visitas.meta, CORAL, "comercios de cartera con visita"],
    ["Retenciones", D.retenciones.n, D.retenciones.meta, VERDE, "cerradas en el periodo"],
    ["Ventas", D.ventas.n, D.ventas.meta, [59,67,251], "afiliaciones nuevas cerradas"]
   ].forEach(b => {
