@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 18:51", huella:"dd5865" };
+const BUILD = { sello:"09/09/2026 20:54", huella:"cef406" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -20678,13 +20678,25 @@ function repLaminaCambios(X, f){
      Es el mismo freno de proyección que ya rige en el deck, en las fichas y en
      el libro de facturación. Acá faltaba: comparar dos semanas cerradas es la
      única comparación entre periodos del mismo largo. */
+  /* José, 10/09: el esquema de todo el deck es la semana pasada COMPLETA
+     contra lo que va de esta hasta el día de descarga. Solo cuando la semana
+     nueva no tiene días suficientes (el freno del 07/09, lunes y martes) se
+     comparan las dos últimas cerradas. */
   const SEMc = repSemanal(f);
-  const vUlt = (SEMc.ultima || {}).visitas, vPrev = (SEMc.previa || {}).visitas;
-  const frase = (typeof vUlt === "number" && typeof vPrev === "number")
-    ? (vUlt > vPrev
-        ? `Las visitas de la semana cerrada (${vUlt} comercios) superan a las de la anterior (${vPrev}).`
-        : `Visitas: ${vUlt} comercios en la semana cerrada contra ${vPrev} de la anterior.`)
-    : "";
+  const DIAc = X.semana || repSemanaDia(f);
+  const vUlt = (SEMc.ultima || {}).visitas, vPrev = (SEMc.previa || {}).visitas,
+        vCur = (SEMc.curso || {}).visitas;
+  const frase = DIAc.cerrada
+    ? ((typeof vUlt === "number" && typeof vPrev === "number")
+        ? (vUlt > vPrev
+            ? `Las visitas de la semana cerrada (${vUlt} comercios) superan a las de la anterior (${vPrev}).`
+            : `Visitas: ${vUlt} comercios en la semana cerrada contra ${vPrev} de la anterior.`)
+        : "")
+    : ((typeof vCur === "number" && typeof vUlt === "number")
+        ? (vCur > vUlt
+            ? `Las visitas de lo que va de la semana (${vCur} comercios al día ${DIAc.diasAct}) ya superan a las de la semana pasada completa (${vUlt}).`
+            : `Visitas: ${vCur} comercios al día ${DIAc.diasAct} de esta semana contra ${vUlt} de la semana pasada completa.`)
+        : "");
 
   X.caja(s, 0.57, YB, 12.38, HBanda, REP_BANDA);
   s.addShape(X.pptx.ShapeType.rect, { x:0.57, y:YB, w:0.09, h:HBanda,
@@ -21099,7 +21111,7 @@ function armarDirectorio(pptx, fondos){
     DIA.cerrada
       ? `Actividad de la semana cerrada del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}, `
         + `comparada con la anterior · la semana nueva todavía no tiene días suficientes para leerla`
-      : `Actividad de cada semana —no el acumulado— · la semana cierra el domingo a las 23:59 · última cumplida al ${repFechaLarga(SEM.corte)}`);
+      : `Lo que va de esta semana (${repFecha(DIA.iniAct).slice(0, 5)} a hoy) contra la semana pasada completa (${repFecha(DIA.iniPrev).slice(0, 5)} al ${repFecha(SEM.corte).slice(0, 5)}) · la semana cierra el domingo a las 23:59`);
   /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
      pie: sin ella el tercio de abajo de la lámina quedaba vacío y las tres
      curvas apretadas arriba. El alto que liberó el texto se lo lleva el
@@ -21151,11 +21163,16 @@ function armarDirectorio(pptx, fondos){
     const sobre = !DIA.cerrada && serie.k === "visitas" && SEM.curso
       && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
       ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
+    /* José, 10/09: «quedamos en que sería el vs de la semana completa anterior
+       (lunes a domingo) vs el alcance al día de descarga». El «la pasada iba
+       en N» —el mismo día de la semana anterior, miércoles contra miércoles—
+       se va: la referencia es el cierre de la semana pasada entera, que es el
+       número que la curva clara rotula al final. */
     T(g, DIA.cerrada
         ? `en la semana del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}${sobre}`
           + ` · la anterior cerró en ${cierrePrev !== null ? cierrePrev : comp.previa}`
-        : `al día ${DIA.diasAct} de la semana${sobre} · la pasada iba en ${comp.previa}`
-          + (cierrePrev !== null && cierrePrev !== comp.previa ? ` y cerró en ${cierrePrev}` : ""),
+        : `al día ${DIA.diasAct} de la semana (${repFecha(DIA.iniAct).slice(0, 5)} a hoy)${sobre}`
+          + ` · la semana pasada completa cerró en ${cierrePrev !== null ? cierrePrev : comp.previa}`,
       /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
          una sola y sin sitio se montaba sobre la curva. */
       { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
