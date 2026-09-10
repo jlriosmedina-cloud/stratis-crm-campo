@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 22:24", huella:"e7cb29" };
+const BUILD = { sello:"10/09/2026 09:47", huella:"c8a7ca" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -16647,10 +16647,19 @@ function cumplimientoDe(correo, p){
    octubre dirá «cierre de septiembre» sin que nadie lo toque. */
 const mesDelDatoFact = p => nombreMes(mesAnterior(p));
 
+/* En millones con dos decimales —«S/ 19,24 MM → S/ 18,76 MM»— y no en soles
+   con céntimos. José, 10/09: «cierre de agosto también redondeemos en MM».
+   La cifra exacta sigue en el libro de facturación, que es donde se edita;
+   acá, en la pantalla de incentivos y en el acta, va la que se lee. El
+   porcentaje de crecimiento se calcula sobre el monto exacto, no sobre el
+   redondeado. */
+const solesMM = n => (n === null || n === undefined || n === "" || isNaN(n)) ? ""
+  : Math.abs(Number(n)) >= 1000000 ? "S/ " + repNum(Number(n) / 1000000, 2) + " MM"
+  : soles(n);
 function montoFact(correo, p){
   const f = factDe(correo, p), ini = inicioFact(correo, p);
   if (!f) return "";
-  return `${soles(ini.monto)} → ${soles(f.monto_final)} · cierre de ${mesDelDatoFact(p)}${
+  return `${solesMM(ini.monto)} → ${solesMM(f.monto_final)} · cierre de ${mesDelDatoFact(p)}${
     ini.fuente === "base" ? ", sobre la base congelada del proyecto" : ""}`;
 }
 /* Decir qué falta exactamente: no es lo mismo que nadie fijó la base del
