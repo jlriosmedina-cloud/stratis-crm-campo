@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"10/09/2026 09:55", huella:"3d118b" };
+const BUILD = { sello:"10/09/2026 10:24", huella:"a65218" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19762,13 +19762,65 @@ function repEmbudoAl(fecha, f){
     const d = c.cerrado_en ? String(c.cerrado_en).slice(0, 10) : null;
     return d !== null && d <= fecha;
   };
+  /* Los CONJUNTOS también, no solo las cuentas: la lámina del desarrollo
+     semanal los necesita para decir cuántos de los visitados de la semana
+     son nuevos en el escalón (José, 10/09: «la lámina 3 dice +29 y la 4 dice
+     31»). Salen de acá para que sea imposible que las dos láminas cuenten
+     con reglas distintas. */
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const soloCart = s2 => new Set([...s2].filter(x => idsCart.has(x)));
+  const ids = {
+    gestion:  soloCart(conGestion),
+    visita:   soloCart(y(idsDe(g => g.Cumple_Visita === "SI"), conGestion)),
+    objetivo: new Set(cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).map(c => String(c.customer_id)))
+  };
   return {
     contacto:    enCartera(idsDe(() => true)),
-    gestion:     enCartera(conGestion),
+    gestion:     ids.gestion.size,
     efectividad: enCartera(y(idsDe(g => esEfectivo(g.Resultado)), conGestion)),
-    visita:      enCartera(y(idsDe(g => g.Cumple_Visita === "SI"), conGestion)),
-    objetivo:    cart.filter(c => (esRetencion(c) || esRecuperado(c)) && cerradoAl(c)).length
+    visita:      ids.visita.size,
+    objetivo:    ids.objetivo.size,
+    ids
   };
+}
+
+/* El puente entre la ACTIVIDAD de la semana (la barra de la lámina 4) y el
+   ACUMULADO del embudo (la línea, y las láminas 3 y 5), para cada escalón.
+   José, 10/09: «la lámina 3 y 4 no conversan en torno a visitas: en la 3
+   dice 29 visitas incrementadas desde la semana pasada y la 4 dice 31». Las
+   dos son ciertas: 31 comercios recibieron visita esta semana y 29 de ellos
+   entraron por primera vez al escalón; los otros 2 ya estaban visitados. Un
+   deck de directorio no puede dejar esa resta al lector, así que cada
+   tarjeta la escribe. Todo sale de `repEmbudoAl` con los mismos conjuntos
+   que dibujan el embudo. */
+function repPuenteSemana(f, SEM, DIA){
+  const corteRef = DIA.cerrada ? DIA.corteAnterior : SEM.corte;
+  const finAct = DIA.finAct, iniAct = DIA.iniAct;
+  const antes = repEmbudoAl(corteRef, f), hoy = repEmbudoAl(finAct, f);
+  const cart = CLIENTES.filter(c => !esClienteNuevo(c));
+  const idsCart = new Set(cart.map(c => String(c.customer_id)));
+  const act = f.linea || repLineaGestion(f);
+  const enV = g => { const d = repDia(g.Fecha_Contacto); return d >= iniAct && d <= finAct; };
+  const ges = DB.todos().filter(esGestionCliente).filter(g => idsCart.has(String(g.Customer_id)));
+  /* Los conjuntos de la ACTIVIDAD, con la misma regla que las barras. */
+  const semana = {
+    contactos: (() => { const o = new Set(); act.forEach((h, cid) => { if (repUltimaCalifica(h, iniAct, finAct)) o.add(cid); }); return o; })(),
+    visitas: new Set([...idsConVisita(ges.filter(enV))].filter(x => idsCart.has(x))),
+    retenciones: new Set(cart.filter(c => (esRetencion(c) || esRecuperado(c)) && c.cerrado_en
+      && String(c.cerrado_en).slice(0,10) >= iniAct && String(c.cerrado_en).slice(0,10) <= finAct).map(c => String(c.customer_id)))
+  };
+  const escalon = { contactos:"gestion", visitas:"visita", retenciones:"objetivo" };
+  const out = {};
+  Object.keys(semana).forEach(k => {
+    const A = antes.ids[escalon[k]], H = hoy.ids[escalon[k]], W = semana[k];
+    let nuevos = 0, yaEstaban = 0, salidas = 0, otrasEntradas = 0;
+    W.forEach(id => { if (A.has(id)) yaEstaban++; else nuevos++; });
+    A.forEach(id => { if (!H.has(id)) salidas++; });
+    H.forEach(id => { if (!A.has(id) && !W.has(id)) otrasEntradas++; });
+    out[k] = { corteRef, actividad: W.size, acumAntes: A.size, acumHoy: H.size,
+               nuevos, yaEstaban, salidas, otrasEntradas, neto: H.size - A.size };
+  });
+  return out;
 }
 
 /* ---- Las dos semanas, día a día ----------------------------------------
@@ -21193,6 +21245,7 @@ function armarDirectorio(pptx, fondos){
   const g = lamina(fondos.contenido);
   const DIA = DIA_SEM;
   const COLS = repCincoSemanas(f, SEM, DIA);
+  const PU = repPuenteSemana(f, SEM, DIA);
   const ultCol = COLS[COLS.length - 1], prevCol = COLS[COLS.length - 2];
   const dm = iso => repFecha(iso).slice(0, 5);
   titulo(g, "El desarrollo, semana a semana",
@@ -21227,15 +21280,22 @@ function armarDirectorio(pptx, fondos){
         + (actPrev !== null ? ` · la anterior: ${actPrev}` : "")
       : `${serie.actividad} esta semana (${dm(DIA.iniAct)} a hoy)`
         + (actPrev !== null ? ` · la semana pasada completa: ${actPrev}` : "");
+    /* Y el puente con la barra: cuántos de los de la semana son nuevos en
+       el escalón. José, 10/09: «la lámina 3 dice +29 y la 4 dice 31». */
+    const pu = PU[k] || {};
+    const puente = !actUlt ? ""
+      : pu.yaEstaban ? ` · ${pu.nuevos} de los ${actUlt} son nuevos en el escalón`
+      : ` · los ${actUlt} son nuevos en el escalón`;
     const linea2 = `${acumHoy} ${fem ? "acumuladas" : "acumulados"}`
       + (movK === null ? ""
          : movK === 0 ? ` · sin cambios desde el corte del ${dm(X.corteFecha)}`
-         : ` · ${movK > 0 ? "+" : "−"}${Math.abs(movK)} desde el corte del ${dm(X.corteFecha)}`);
+         : ` · ${movK > 0 ? "+" : "−"}${Math.abs(movK)} desde el corte del ${dm(X.corteFecha)}`)
+      + puente;
     T(g, linea1 + "\n" + linea2,
-      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.40, fontSize:9, color:H("gris2"), valign:"top" });
+      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.52, fontSize:8.5, color:H("gris2"), valign:"top" });
 
     /* ---- El gráfico: cinco barras y una línea sobre el mismo eje ---------- */
-    const GX = px + 0.30, GY = SY + 1.66, GW = SW - 0.60, GH = 2.40;
+    const GX = px + 0.30, GY = SY + 1.76, GW = SW - 0.60, GH = 2.30;
     const n = COLS.length, gw = GW / n, bw = gw * 0.56;
     const tope = Math.max(1, ...COLS.filter(Boolean).map(c => Math.max(c.sem[k] || 0, c.acum[k] || 0))) * 1.12;
     const ejeX = j => GX + gw * j + gw / 2;
@@ -21332,11 +21392,20 @@ function armarDirectorio(pptx, fondos){
     const cierre = DIA.cerrada
       ? " La última barra es la semana cerrada; las cuatro anteriores, las semanas previas."
       : ` La última barra y el último punto son la semana en curso, con ${DIA.diasAct} de 7 días.`;
-    T(g, `Cómo se lee con el embudo: los ${GES.trabajados} comercios trabajados ${cuando} son `
-       + `${GES.nuevos} que entran por primera vez al acumulado de ${GES.acumHoy} comercios con gestión `
-       + `y ${GES.yaEstaban} que ya estaban contados.${salieron} `
-       + `Neto: ${neto} desde el corte del ${repFecha(GES.corteRef).slice(0, 5)}, la misma cifra que la lámina del embudo.${cierre}`,
-      { x:0.57, y:SY + SH + 0.10, w:12.38, h:0.44, fontSize:9.5, color:H("gris"), valign:"top" });
+    /* Y las visitas, que son las que se leen contra el «+N» de la lámina 3:
+       31 visitados y +29 en el embudo son 29 nuevos y 2 revisitas. */
+    const PV = PU.visitas || {};
+    const visitasTxt = !PV.actividad ? ""
+      : ` De los ${PV.actividad} visitados, ${PV.nuevos} entran por primera vez al escalón de visitas`
+        + (PV.yaEstaban ? ` y ${PV.yaEstaban} ya estaban visitados` : "")
+        + (PV.salidas ? `; ${PV.salidas} salieron del escalón` : "")
+        + ` (neto ${PV.neto >= 0 ? "+" : "−"}${Math.abs(PV.neto)}, la cifra de la lámina anterior).`;
+    T(g, `Cómo se lee con el embudo: de los ${GES.trabajados} comercios trabajados ${cuando}, `
+       + `${GES.nuevos} entran por primera vez al acumulado de ${GES.acumHoy} con gestión `
+       + `y ${GES.yaEstaban} ya estaban contados.${salieron} `
+       + `Neto: ${neto} desde el corte del ${repFecha(GES.corteRef).slice(0, 5)}, la misma cifra que la lámina del embudo.`
+       + visitasTxt + cierre,
+      { x:0.57, y:SY + SH + 0.08, w:12.38, h:0.56, fontSize:9, color:H("gris"), valign:"top" });
   }
 
 
