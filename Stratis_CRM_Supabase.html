@@ -2172,7 +2172,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"09/09/2026 21:41", huella:"a6f060" };
+const BUILD = { sello:"09/09/2026 22:24", huella:"e7cb29" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19894,6 +19894,40 @@ function repSemanaDia(f){
       actual: x.actual[diasAct - 1] || 0 })) };
 }
 
+/* Las cinco columnas de la lámina del desarrollo semanal.
+ *
+ * José, 10/09, sobre el boceto B: «barras = actividad semanal, línea =
+ * acumulado […] siempre mostremos la variación de 5 semanas, es decir deben
+ * haber siempre esas 5 barras».
+ *
+ * Cada columna es una semana de lunes a domingo: la barra es lo que se hizo
+ * ESA semana (comercios trabajados, comercios visitados —aunque ya se hayan
+ * visitado antes—, retenciones concretadas) y el punto de la línea es el
+ * ACUMULADO del proyecto al cierre de esa semana, leído del mismo embudo que
+ * la lámina 5 (`repEmbudoAl`), así que el último punto es la cifra de hoy y
+ * la diferencia con el anterior es el «+N desde el corte».
+ *
+ * En régimen son las cuatro últimas cerradas más la semana en curso hasta
+ * hoy, marcada como parcial. Bajo el freno del lunes (`DIA.cerrada`) son las
+ * cinco últimas cerradas. Si el proyecto todavía no tiene cinco semanas, las
+ * que faltan van vacías a la izquierda: las cinco barras están siempre. */
+function repCincoSemanas(f, SEM, DIA){
+  const cerradas = SEM.semanas.filter(x => x.completa);
+  const cols = DIA.cerrada ? cerradas.slice(-5)
+             : cerradas.slice(-4).concat(SEM.curso ? [SEM.curso] : []);
+  while (cols.length < 5) cols.unshift(null);
+  const acumDe = {};
+  const columnas = cols.map(s => {
+    if (!s) return null;
+    const fin = s.completa ? s.hasta : f.hoy;
+    if (!acumDe[fin]) acumDe[fin] = repEmbudoAl(fin, f);
+    return { desde: s.desde, hasta: s.hasta, fin, parcial: !s.completa, dias: s.dias || 7,
+             sem: { contactos: s.contactos, visitas: s.visitas, retenciones: s.retenciones },
+             acum: { contactos: acumDe[fin].gestion, visitas: acumDe[fin].visita, retenciones: acumDe[fin].objetivo } };
+  });
+  return columnas;
+}
+
 /* Las tres series que mira el comité, semana a semana. Semanas de LUNES A
    DOMINGO —el corte es el domingo a las 23:59:59, ver `repCorteSemana`—; la
    última, la que va corriendo, llega hasta hoy y se marca como incompleta para
@@ -20020,15 +20054,18 @@ function repSemanal(f){
          naranja, justo al revés que el embudo de la lámina anterior. El mismo
          concepto con dos colores en dos láminas seguidas hace que la leyenda
          no sirva de nada. */
-      { k:"contactos",   nombre:"Comercios trabajados", color:"azul2" },
-      /* «Por primera vez» no es un adorno: esta serie es el AVANCE DEL EMBUDO
-         —comercios que cruzaron al escalón de visitados—, no los comercios
-         visitados en la semana. Son 36 y 42 sobre el mismo trabajo: seis
-         comercios recibieron visita esa semana y ya estaban visitados antes.
-         Las dos cifras son correctas y salen el mismo día en dos documentos
-         distintos; lo único que estaba mal era llamarlas igual. */
-      { k:"visitas",     nombre:"Comercios visitados por primera vez", color:"naranja" },
-      { k:"retenciones", nombre:"Retenciones concretadas", color:"verde" }
+      /* José, 10/09: el nombre de la tarjeta es el del ESCALÓN del embudo
+         —con gestión, visitados, retenciones— y el pie dice qué se mide de
+         él: la barra es la actividad de la semana y la línea el acumulado.
+         «Por primera vez» se fue el mismo día: «puede ser que hayamos
+         visitado estos comercios antes en el periodo anterior, o sea una
+         gestión pendiente; solo contemos comercios visitados en la semana».
+         Así, la barra de visitas es `visitas` (comercios con visita en la
+         semana, revisitas incluidas) y el avance del embudo —quiénes cruzaron
+         al escalón— es la diferencia entre dos puntos de la línea. */
+      { k:"contactos",   nombre:"Comercios con gestión", color:"azul2", actividad:"trabajados" },
+      { k:"visitas",     nombre:"Comercios visitados",   color:"naranja", actividad:"visitados" },
+      { k:"retenciones", nombre:"Retenciones",           color:"verde",  actividad:"concretadas" }
     ],
     variacion: { contactos: dif("contactos"), retenciones: dif("retenciones"),
                  visitas: dif("visitas") } };
@@ -21124,205 +21161,148 @@ function armarDirectorio(pptx, fondos){
       { x:0.57, y:7.06, w:12.38, h:0.20, fontSize:8, color:H("naranja"), valign:"top" });
 
   /* ---- 3 · El desarrollo semanal ----------------------------------------
-     Tres series y su comparación contra la semana anterior. No es la misma
-     lámina que el acumulado: el acumulado nunca baja y por eso nunca alarma.
-     Esta puede bajar, y esa es exactamente su utilidad. */
+     Cinco semanas, tres escalones. José, 10/09, sobre el boceto B: «barras =
+     actividad semanal, línea = acumulado […] siempre mostremos la variación
+     de 5 semanas, es decir deben haber siempre esas 5 barras».
+
+     Hasta el a6f060 la lámina comparaba dos curvas —la semana pasada y lo
+     que va de esta, día a día— y el acumulado vivía solo en las láminas 3 y
+     5. Leídas juntas, «226 trabajados» y «785 con gestión, +81» parecían dos
+     cuentas de lo mismo que no cuadraban. Ahora cada tarjeta trae las dos
+     cosas en la misma unidad (comercios): la barra es lo que se hizo esa
+     semana y el punto es el acumulado al cierre de esa semana, leído del
+     mismo embudo que la lámina 5; la última columna es la semana en curso,
+     en claro y punteada, para que nadie la lea como una caída. */
   const g = lamina(fondos.contenido);
   const DIA = DIA_SEM;
-  /* El subtítulo dice QUÉ semana se está mirando. Corrida una semana atrás,
-     decir «última cumplida al 6 de septiembre» era cierto pero describía otra
-     cosa que la que muestran las tarjetas. */
+  const COLS = repCincoSemanas(f, SEM, DIA);
+  const ultCol = COLS[COLS.length - 1], prevCol = COLS[COLS.length - 2];
+  const dm = iso => repFecha(iso).slice(0, 5);
   titulo(g, "El desarrollo, semana a semana",
     DIA.cerrada
-      ? `Actividad de la semana cerrada del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}, `
-        + `comparada con la anterior · la semana nueva todavía no tiene días suficientes para leerla`
-      : `Lo que va de esta semana (${repFecha(DIA.iniAct).slice(0, 5)} a hoy) contra la semana pasada completa (${repFecha(DIA.iniPrev).slice(0, 5)} al ${repFecha(SEM.corte).slice(0, 5)}) · la semana cierra el domingo a las 23:59`);
-  /* Las tarjetas crecieron el 27/08, cuando salió la banda explicativa del
-     pie: sin ella el tercio de abajo de la lámina quedaba vacío y las tres
-     curvas apretadas arriba. El alto que liberó el texto se lo lleva el
-     gráfico, que es lo que la lámina viene a mostrar. */
+      ? `Las cinco últimas semanas cerradas, hasta la del ${dm(DIA.iniAct)} al ${dm(DIA.finAct)} · barras: la semana · línea: el acumulado · la semana nueva aún no tiene días para leerla`
+      : `Lo que va de esta semana (${dm(DIA.iniAct)} a hoy) contra la semana pasada completa (${dm(DIA.iniPrev)} al ${dm(SEM.corte)}) · barras: la semana · línea: el acumulado`);
+
   const SW = 3.95, SG = 0.28, SY = 1.80, SH = 4.80;
   SEM.series.forEach((serie, i2) => {
     const px = 0.57 + i2 * (SW + SG);
+    const k = serie.k;
     caja(g, px, SY, SW, SH, "FFFFFF", REP_LINEA);
     g.addShape(pptx.ShapeType.rect, { x:px, y:SY, w:SW, h:0.09,
       fill:{ color:H(serie.color) }, line:{ type:"none" } });
-    /* José, 10/09: «en comercios trabajados se entiende que es gestionados».
-       El rótulo dice que es la actividad DE LA SEMANA; «con gestión» queda
-       para el acumulado de las láminas 3 y 5. */
-    T(g, serie.k === "contactos" ? "Comercios trabajados en la semana" : serie.nombre,
-      { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
-        bold:true, fontFace:NEG, color:H("navy") });
+    T(g, serie.nombre, { x:px + 0.22, y:SY + 0.24, w:SW - 0.44, h:0.30, fontSize:12.5,
+      bold:true, fontFace:NEG, color:H("navy") });
 
-    const dd = DIA.series.find(x => x.k === serie.k) || { previa:[], actual:[] };
-    const comp = DIA.alMismoDia.find(x => x.k === serie.k) || { previa:0, actual:0 };
-    T(g, String(comp.actual), { x:px + 0.22, y:SY + 0.58, w:1.50, h:0.58, fontSize:30,
+    /* La cifra grande es la actividad de la última columna; el pie dice
+       contra qué se compara y, en la segunda línea, el acumulado con su
+       movimiento desde el corte —el MISMO «+N» que el embudo, porque sale
+       del mismo objeto (`X.corte`)—. */
+    const actUlt = ultCol ? ultCol.sem[k] : 0;
+    const actPrev = prevCol ? prevCol.sem[k] : null;
+    const acumHoy = ultCol ? ultCol.acum[k] : 0;
+    const kEmb = { contactos:"gestion", visitas:"visita", retenciones:"objetivo" }[k];
+    const movK = (X.corte && X.corte[kEmb] !== undefined) ? acumHoy - X.corte[kEmb] : null;
+    const fem = k === "retenciones";
+    T(g, String(actUlt), { x:px + 0.22, y:SY + 0.58, w:1.50, h:0.58, fontSize:30,
       bold:true, fontFace:NEG, color:H(serie.color) });
-    /* El badge «▼ 79% vs. la semana pasada» salió el 27/08, con el formato que
-       José fijó sobre el deck que se presenta. La comparación no se pierde: la
-       curva clara es la semana pasada y el pie dice en cuánto iba al mismo
-       día. Lo que se va es el porcentaje, que sobre bases chicas grita —una
-       retención menos es «▼ 100%»— y en una lámina de comité se lee como una
-       alarma donde hay ruido. */
-    /* Dos referencias, no una: contra la semana pasada al mismo día —que es la
-       comparación honesta— y contra el promedio semanal, que es la que
-       sobrevive a una semana excepcional. */
-    /* El promedio semanal salió del pie por lo mismo: era la tercera cifra de
-       una línea que ya traía dos, y el pico de la semana del 14 —que es lo
-       que el promedio venía a matizar— ya no se compara con un porcentaje. */
-    /* Y el cierre de la semana pasada, que es el número que la curva rotula al
-       final de su línea. Sin nombrarlo, la tarjeta decía «la pasada iba en 10»
-       mientras el gráfico de al lado mostraba 14: dos cifras ciertas —al mismo
-       día y al cierre de la semana— que sin etiqueta se leen como un error de
-       cuenta. José lo marcó como «datos de visitas realizadas inconsistentes»,
-       y tenía razón en que la lámina no se explicaba. */
-    const cierrePrev = (() => {
-      const v2 = (dd.previa || []).filter(x => x !== null && x !== undefined);
-      return v2.length ? v2[v2.length - 1] : null;
-    })();
-    /* La aclaración «sobre N comercios» existía para reconciliar dos unidades
-       —16 visitas contra 10 comercios— que desde el 01/09 son la misma. Se deja
-       escrita la condición en vez de borrarla: si algún día las dos cifras se
-       vuelven a separar, la lámina lo dice sola en lugar de callarlo. */
-    /* Y SOLO mientras la semana está en curso, que es la única ventana de la
-       que `SEM.curso` habla. Cuando la tarjeta muestra la semana cerrada, esta
-       aclaración comparaba los comercios del lunes contra el total del domingo
-       y salía impresa como «en la semana del 31/08 al 06/09 sobre 2 comercios»
-       —dos ventanas distintas en la misma frase, sin que ninguna lo dijera—. */
-    const sobre = !DIA.cerrada && serie.k === "visitas" && SEM.curso
-      && SEM.curso.visitasComercios && SEM.curso.visitasComercios !== comp.actual
-      ? ` sobre ${SEM.curso.visitasComercios} comercios` : "";
-    /* José, 10/09: «quedamos en que sería el vs de la semana completa anterior
-       (lunes a domingo) vs el alcance al día de descarga». El «la pasada iba
-       en N» —el mismo día de la semana anterior, miércoles contra miércoles—
-       se va: la referencia es el cierre de la semana pasada entera, que es el
-       número que la curva clara rotula al final. */
-    T(g, DIA.cerrada
-        ? `en la semana del ${repFecha(DIA.iniAct)} al ${repFecha(DIA.finAct)}${sobre}`
-          + ` · la anterior cerró en ${cierrePrev !== null ? cierrePrev : comp.previa}`
-        : `al día ${DIA.diasAct} de la semana (${repFecha(DIA.iniAct).slice(0, 5)} a hoy)${sobre}`
-          + ` · la semana pasada completa cerró en ${cierrePrev !== null ? cierrePrev : comp.previa}`,
-      /* Dos líneas de alto: con el promedio agregado, la frase ya no entra en
-         una sola y sin sitio se montaba sobre la curva. */
-      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.36, fontSize:9, color:H("gris2"), valign:"top" });
+    const linea1 = DIA.cerrada
+      ? `${serie.actividad} en la semana cerrada (${ultCol ? dm(ultCol.desde) : "—"} al ${ultCol ? dm(ultCol.hasta) : "—"})`
+        + (actPrev !== null ? ` · la anterior: ${actPrev}` : "")
+      : `${serie.actividad} esta semana (${dm(DIA.iniAct)} a hoy)`
+        + (actPrev !== null ? ` · la semana pasada completa: ${actPrev}` : "");
+    const linea2 = `${acumHoy} ${fem ? "acumuladas" : "acumulados"}`
+      + (movK === null ? ""
+         : movK === 0 ? ` · sin cambios desde el corte del ${dm(X.corteFecha)}`
+         : ` · ${movK > 0 ? "+" : "−"}${Math.abs(movK)} desde el corte del ${dm(X.corteFecha)}`);
+    T(g, linea1 + "\n" + linea2,
+      { x:px + 0.22, y:SY + 1.12, w:SW - 0.44, h:0.40, fontSize:9, color:H("gris2"), valign:"top" });
 
-    /* Las dos líneas, acumuladas, sobre el mismo eje de siete días. */
-    const GX = px + 0.34, GY = SY + 1.52, GW = SW - 0.68, GH = 2.60;
-    const tope = Math.max(1, ...dd.previa.filter(x => x !== null),
-                             ...dd.actual.filter(x => x !== null));
+    /* ---- El gráfico: cinco barras y una línea sobre el mismo eje ---------- */
+    const GX = px + 0.30, GY = SY + 1.66, GW = SW - 0.60, GH = 2.40;
+    const n = COLS.length, gw = GW / n, bw = gw * 0.56;
+    const tope = Math.max(1, ...COLS.filter(Boolean).map(c => Math.max(c.sem[k] || 0, c.acum[k] || 0))) * 1.12;
+    const ejeX = j => GX + gw * j + gw / 2;
+    const ejeY = v => GY + GH * (1 - v / tope);
     g.addShape(pptx.ShapeType.rect, { x:GX, y:GY + GH, w:GW, h:0.015,
       fill:{ color:"C6D0E6" }, line:{ type:"none" } });
-    const ejeX = k2 => GX + GW * k2 / 6;
-    const ejeY = val => GY + GH * (1 - val / tope);
-    /* pptxgenjs no dibuja líneas sueltas: cada tramo es un rectángulo fino
-       rotado, y se coloca centrado en el punto medio porque PowerPoint rota
-       sobre el centro de la forma y no sobre su esquina. */
-    const tramo = (x1, y1, x2, y2, color, transp) => {
-      const dx = x2 - x1, dy = y2 - y1, largo = Math.sqrt(dx*dx + dy*dy);
+
+    /* Barras. La parcial va en claro y con borde punteado. */
+    COLS.forEach((c, j) => {
+      if (!c) return;
+      const v = c.sem[k] || 0, y0 = ejeY(v);
+      g.addShape(pptx.ShapeType.rect, { x:ejeX(j) - bw / 2, y:y0, w:bw, h:Math.max(0.005, GY + GH - y0),
+        fill:{ color:H(serie.color), transparency: c.parcial ? 72 : 12 },
+        line: c.parcial ? { color:H(serie.color), width:1, dashType:"dash" } : { type:"none" } });
+    });
+
+    /* La línea del acumulado: tramos rectos (pptxgenjs no dibuja líneas
+       sueltas; cada tramo es un rectángulo fino rotado). El último tramo va
+       punteado porque termina en un día que no es cierre. */
+    const tramo = (x1, y1, x2, y2, punteado) => {
+      const dx = x2 - x1, dy = y2 - y1, largo = Math.sqrt(dx * dx + dy * dy);
       if (largo < 0.001) return;
-      g.addShape(pptx.ShapeType.rect, {
-        x:(x1 + x2) / 2 - largo / 2, y:(y1 + y2) / 2 - 0.021,
-        w:largo, h:0.042, fill:{ color:H(color), transparency: transp || 0 },
-        line:{ type:"none" }, rotate: Math.atan2(dy, dx) * 180 / Math.PI });
-    };
-    /* Cada punto lleva su nodo, y el último de cada línea lleva su cifra. Una
-       curva sin números obliga a estimar la altura contra un eje que no está
-       dibujado; con el valor al final de cada línea, las dos semanas se
-       comparan leyendo, no midiendo. */
-    let puesto = null;   // dónde quedó el rótulo anterior, para no pisarlo
-    const linea = (vals, transp, pleno) => {
-      for (let k2 = 1; k2 < vals.length; k2++){
-        if (vals[k2] === null || vals[k2 - 1] === null) continue;
-        tramo(ejeX(k2 - 1), ejeY(vals[k2 - 1]), ejeX(k2), ejeY(vals[k2]), serie.color, transp);
+      const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (!punteado){
+        g.addShape(pptx.ShapeType.rect, { x:(x1 + x2) / 2 - largo / 2, y:(y1 + y2) / 2 - 0.018,
+          w:largo, h:0.036, fill:{ color:H(serie.color) }, line:{ type:"none" }, rotate:ang });
+        return;
       }
-      const R = pleno ? 0.13 : 0.10;
-      vals.forEach((v2, k2) => {
-        if (v2 === null) return;
-        g.addShape(pptx.ShapeType.ellipse, { x:ejeX(k2) - R/2, y:ejeY(v2) - R/2, w:R, h:R,
-          fill:{ color:H(serie.color), transparency: pleno ? 0 : 50 },
-          line:{ color:"FFFFFF", width: pleno ? 1.2 : 0.8 } });
-      });
-      const ult = vals.reduce((a, x, k2) => x === null ? a : k2, 0);
-      if (vals[ult] === null || vals[ult] === undefined) return;
-      /* La cifra de esta semana va ARRIBA del nodo y la de la pasada ABAJO.
-         No es capricho: las dos líneas terminan a un día de distancia y con
-         las dos cifras en la misma altura se leían como un solo número de dos
-         dígitos. Si el nodo está pegado al techo, la de arriba baja. */
-      const yv = ejeY(vals[ult]);
-      /* Arriba la de esta semana, abajo la de la pasada… salvo que abajo no
-         quepa: con la línea pegada al piso —una serie en cero— la cifra caía
-         encima de las fechas del eje. Entonces sube. */
-      const cabeArriba = yv - GY > 0.24;
-      const cabeAbajo  = yv + 0.28 <= GY + GH;
-      const arriba = pleno ? cabeArriba : (!cabeAbajo && cabeArriba);
-      let lx = Math.min(GX + GW - 0.46, Math.max(GX - 0.10, ejeX(ult) - 0.23));
-      let ly = arriba ? yv - 0.26 : yv + 0.08;
-      /* Las dos líneas terminan a un día de distancia, y cuando además caen a
-         la misma altura los dos rótulos quedan pegados y se leen como un solo
-         número: en la tarjeta de visitas del 26/08 salía «14 14». La regla de
-         arriba/abajo no alcanzaba porque con el nodo pegado al techo NINGUNO
-         de los dos cabe arriba y los dos bajan al mismo sitio.
-         Acá el segundo rótulo se aparta del primero: primero probando el otro
-         lado del nodo, y si tampoco, corriéndose en horizontal. */
-      /* El paso era de 0,22" con rótulos de 0,20" de alto: 0,02" de aire, medio
-         milímetro. Técnicamente no se solapaban y en pantalla se leían pegados
-         —José, 07/09: «los números no se deben interponer»—. Ahora el paso es
-         de 0,30" y quedan 0,10" de separación real. La detección sube con él:
-         si se dispara a 0,22 y se aparta 0,30, dos rótulos a 0,25 se quedaban
-         donde estaban. */
-      const ALTO = 0.20, PASO = 0.30;
-      if (puesto && Math.abs(lx - puesto.x) < 0.50
-                 && Math.abs(ly - puesto.y) < ALTO + 0.08){
-        /* Se apila SOBRE el anterior, no debajo: abajo está el eje con las
-           fechas, y una cifra encima de «27/08» es el mismo problema con otro
-           vecino. Solo baja si arriba se saldría de la tarjeta. */
-        ly = (puesto.y - PASO >= GY - 0.30) ? puesto.y - PASO : puesto.y + PASO;
+      const N = 7;   // siete guiones, seis huecos
+      for (let t = 0; t < N; t++){
+        const a = (t * 2) / (N * 2 - 1), b = (t * 2 + 1) / (N * 2 - 1);
+        const ax = x1 + dx * a, ay = y1 + dy * a, bx = x1 + dx * b, by = y1 + dy * b;
+        const l2 = largo * (b - a);
+        g.addShape(pptx.ShapeType.rect, { x:(ax + bx) / 2 - l2 / 2, y:(ay + by) / 2 - 0.018,
+          w:l2, h:0.036, fill:{ color:H(serie.color) }, line:{ type:"none" }, rotate:ang });
       }
-      T(g, String(vals[ult]), {
-        x: lx, y: ly, w:0.46, h:0.20,
-        fontSize: pleno ? 10 : 8.5, bold:true, align:"center",
-        color: pleno ? H(serie.color) : H("gris2") });
-      puesto = { x:lx, y:ly };
     };
-    linea(dd.previa, 62, false);   // la semana pasada, en claro
-    linea(dd.actual, 0, true);     // esta semana, en pleno
-    /* El eje lleva fechas, no «D1» y «D7»: nadie tiene por qué traducir un día
-       ordinal a un día del calendario mientras escucha. A la izquierda el
-       domingo del corte, a la derecha hoy —puesto bajo el nodo de hoy y no en el
-       borde, porque la semana en curso casi nunca llega al día siete. */
-    /* Día y mes, sin el año: en una caja de media pulgada «20/08/2026» se parte
-       en dos líneas y deja de leerse. El año ya está en el subtítulo. */
-    const dm = iso => repFecha(iso).slice(0, 5);
-    /* Cada rótulo es el CIERRE de su ventana, no una fecha fija. Corrida la
-       lámina a la semana cerrada, el eje seguía diciendo 06/09 y 07/09
-       mientras las curvas mostraban 24/08-30/08 y 31/08-06/09: dos fechas
-       ciertas describiendo otra cosa. */
-    T(g, dm(DIA.cerrada ? DIA.corteAnterior : DIA.corte),
-      { x:GX - 0.34, y:GY + GH + 0.06, w:0.68, h:0.20,
-      fontSize:8, color:H("gris2"), align:"center" });
-    T(g, dm(DIA.finAct), { x:Math.min(GX + GW - 0.34, ejeX(DIA.diasAct - 1) - 0.34),
-      y:GY + GH + 0.06, w:0.68, h:0.20, fontSize:8, bold:true, color:H("navy"), align:"center" });
-    T(g, DIA.cerrada ? "Claro: la semana anterior · Pleno: la semana cerrada"
-                      : "Claro: semana pasada · Pleno: esta semana",
-      { x:px + 0.22, y:SY + SH - 0.34, w:SW - 0.44, h:0.26, fontSize:8.5, color:H("gris2") });
+    const pts = COLS.map((c, j) => c ? [ejeX(j), ejeY(c.acum[k] || 0)] : null);
+    for (let j = 1; j < n; j++){
+      if (!pts[j] || !pts[j - 1]) continue;
+      tramo(pts[j - 1][0], pts[j - 1][1], pts[j][0], pts[j][1], !!(COLS[j] && COLS[j].parcial));
+    }
+    pts.forEach((p2, j) => {
+      if (!p2) return;
+      const ultimo = j === n - 1, R = ultimo ? 0.13 : 0.10;
+      g.addShape(pptx.ShapeType.ellipse, { x:p2[0] - R / 2, y:p2[1] - R / 2, w:R, h:R,
+        fill:{ color: ultimo ? H(serie.color) : "FFFFFF" },
+        line:{ color:H(serie.color), width:1.5 } });
+    });
+
+    /* Rótulos: el de la barra encima de la barra, en gris; el del acumulado
+       encima del punto, en el color de la serie. Si los dos caen en el mismo
+       sitio, el del punto sube un escalón. José, 07/09: «los números no se
+       deben interponer». */
+    COLS.forEach((c, j) => {
+      if (!c) { T(g, "—", { x:ejeX(j) - 0.25, y:GY + GH - 0.24, w:0.5, h:0.18, fontSize:8.5, align:"center", color:H("gris2") }); return; }
+      const yb = ejeY(c.sem[k] || 0) - 0.20;
+      const yp0 = (pts[j] ? pts[j][1] : GY + GH) - 0.22;
+      const choca = Math.abs(yp0 - yb) < 0.19;
+      const yp = choca ? yb - 0.19 : yp0;
+      T(g, String(c.sem[k] || 0), { x:ejeX(j) - 0.30, y:yb, w:0.60, h:0.18, fontSize:8.5, bold:true,
+        align:"center", color:H("gris") });
+      T(g, String(c.acum[k] || 0), { x:ejeX(j) - 0.30, y:yp, w:0.60, h:0.18, fontSize:9, bold:true,
+        align:"center", color:H(serie.color) });
+    });
+
+    /* El eje: el domingo de cierre de cada columna; la última, «hoy» y sus
+       días si es parcial. */
+    COLS.forEach((c, j) => {
+      const rot = !c ? "—" : c.parcial ? "hoy " + dm(c.fin) : dm(c.fin);
+      const sub = !c ? "" : c.parcial ? `${c.dias} de 7 días` : "cierre";
+      T(g, rot, { x:ejeX(j) - 0.40, y:GY + GH + 0.05, w:0.80, h:0.18, fontSize:8,
+        bold: !!(c && c.parcial), color: c && c.parcial ? H("navy") : H("gris2"), align:"center" });
+      T(g, sub, { x:ejeX(j) - 0.40, y:GY + GH + 0.22, w:0.80, h:0.16, fontSize:7.5,
+        color:H("gris2"), align:"center" });
+    });
+    T(g, `Barras: la semana · Línea: acumulado al cierre` + (DIA.cerrada ? "" : " · punteado: en curso"),
+      { x:px + 0.22, y:SY + SH - 0.30, w:SW - 0.44, h:0.22, fontSize:7.5, color:H("gris2") });
   });
 
-  /* La banda explicativa del pie salió el 27/08, con el formato que José fijó
-     sobre el deck que se presenta. Decía tres cosas ciertas —qué mide esta
-     lámina contra el embudo, que la comparación es al mismo día, y que la
-     semana del 14 fue un pico—, pero un comité no lee un párrafo de seis
-     líneas debajo de tres gráficos: los mira y pasa. Lo que la banda protegía
-     —que un −92% no se leyera como un derrumbe— ya no hace falta, porque el
-     porcentaje también salió: quedan las dos curvas, y una curva clara por
-     encima de la plena dice «la semana pasada iba mejor» sin ningún párrafo.
-
-     El subtítulo de la lámina sigue diciendo «Actividad de cada semana —no el
-     acumulado—», que es la única de las tres que evitaba una confusión real. */
-
-  /* Una línea al pie, y solo una: de qué están hechos los trabajados de la
-     semana respecto del acumulado del embudo. José, 10/09: «dice 159 y ahora
-     225 […] y en la lámina del embudo 785 con +81»: sin esta línea, 225 y +81
-     se leen como dos cuentas de lo mismo que no cuadran. Los cuatro números
+  /* Una línea al pie: de qué están hechos los trabajados de la semana
+     respecto del acumulado del embudo. José, 10/09: «dice 159 y ahora 225
+     […] y en la lámina del embudo 785 con +81»: sin esta línea, 226 y +81 se
+     leen como dos cuentas de lo mismo que no cuadran. Los cuatro números
      salen de la misma línea de tiempo que el embudo, así que
      nuevos − salidas ES el +N de esa lámina. */
   const GES = DIA.gestion;
@@ -21332,10 +21312,13 @@ function armarDirectorio(pptx, fondos){
       ? ` ${GES.salidas} salieron del acumulado porque su última actividad quedó sin respuesta.`
       : "";
     const neto = (GES.neto >= 0 ? "+" : "−") + Math.abs(GES.neto);
+    const cierre = DIA.cerrada
+      ? " La última barra es la semana cerrada; las cuatro anteriores, las semanas previas."
+      : ` La última barra y el último punto son la semana en curso, con ${DIA.diasAct} de 7 días.`;
     T(g, `Cómo se lee con el embudo: los ${GES.trabajados} comercios trabajados ${cuando} son `
        + `${GES.nuevos} que entran por primera vez al acumulado de ${GES.acumHoy} comercios con gestión `
        + `y ${GES.yaEstaban} que ya estaban contados.${salieron} `
-       + `Neto: ${neto} desde el corte del ${repFecha(GES.corteRef).slice(0, 5)}, la misma cifra que la lámina del embudo.`,
+       + `Neto: ${neto} desde el corte del ${repFecha(GES.corteRef).slice(0, 5)}, la misma cifra que la lámina del embudo.${cierre}`,
       { x:0.57, y:SY + SH + 0.10, w:12.38, h:0.44, fontSize:9.5, color:H("gris"), valign:"top" });
   }
 
