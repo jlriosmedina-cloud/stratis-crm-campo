@@ -2152,6 +2152,12 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 .lf-hl .q{color:var(--muted);font-size:11.5px}
 .lf-hl.vig .m{color:var(--ok-ink)}
 .lf-hl.anu .m{color:var(--muted);text-decoration:line-through}
+/* Seis tarjetas en la Cartera desde el 11/09 (entró «Leads de venta»). Va al
+   final y con dos clases para ganarle a las reglas genéricas de .stat-row de
+   más arriba: en tablet, dos filas de tres; en escritorio, las seis en una
+   fila; en el celular sigue la rejilla de dos. */
+@media(min-width:760px){ .stat-row.stat-row-5{grid-template-columns:repeat(3,1fr)} }
+@media(min-width:1180px){ .stat-row.stat-row-5{grid-template-columns:repeat(6,1fr)} }
 </style>
 </head>
 <body>
@@ -2172,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"10/09/2026 10:49", huella:"524fd6" };
+const BUILD = { sello:"11/09/2026 09:55", huella:"351f9a" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -7003,6 +7009,11 @@ function viewCartera(){
       ${tarjeta("retenciones", "Retenciones", CF.retenciones.size,
         linea(CF.retenciones.size, CF.metaRetenciones),
         puerta("negociando", nego, "en negociación"))}
+      ${/* José, 11/09: los leads de venta a la izquierda de las ventas. Son
+             RUC, no Customer ID: no entran en ninguna otra tarjeta, y por eso
+             sin este botón había que buscarlos uno a uno. */""}
+      ${tarjeta("leads", "Leads de venta", CF.leads.size,
+        `RUC registrados · ${miles(CF.leadsAbiertos.size)} en trabajo`, "")}
       ${tarjeta("ventas", "Ventas nuevas", CF.ventas.size,
         linea(CF.ventas.size, CF.metaVentas), "")}
     </div>`;
@@ -24036,7 +24047,7 @@ function conjuntosFicha(correos, p){
     return !!d && d >= v.ini && d <= hasta; };
 
   const O = { cartera:new Set(), cobertura:new Set(), visitas:new Set(),
-              retenciones:new Set(), ventas:new Set(),
+              retenciones:new Set(), ventas:new Set(), leads:new Set(), leadsAbiertos:new Set(),
               metaCobertura:0, metaVisitas:0, metaRetenciones:0, metaVentas:0,
               baseCobertura: R.cobertura_base || "gestion" };
 
@@ -24055,6 +24066,15 @@ function conjuntosFicha(correos, p){
     CLIENTES.filter(c => esVentaNueva(c) && c.asignado_correo === correo
                       && enV(c.cerrado_en || c.creado_en))
         .forEach(c => O.ventas.add(String(c.customer_id)));
+    /* Los leads de venta: TODOS los RUC que registró el ejecutivo, sin
+       ventana —es una lista de trabajo, no una cifra del periodo—. José,
+       11/09: «un botón con Leads de ventas, en donde estarán todos los leads
+       que han registrado los ejecutivos para que los puedan ubicar más
+       rápido». Aparte, cuántos siguen abiertos (ni venta ni perdido). */
+    CLIENTES.filter(c => esClienteNuevo(c) && c.asignado_correo === correo).forEach(c => {
+      O.leads.add(String(c.customer_id));
+      if (!tieneCierreRegistrado(c)) O.leadsAbiertos.add(String(c.customer_id));
+    });
 
     O.metaCobertura   += Math.ceil(ll.cartera.n * (R.cobertura_pct || 90) / 100);
     O.metaVisitas     += R.visitas_periodo || 40;
@@ -24082,6 +24102,7 @@ function pasaFiltroFicha(c, k){
     case "visitas":       return CF.visitas.has(id);
     case "retenciones":   return CF.retenciones.has(id);
     case "ventas":        return CF.ventas.has(id);
+    case "leads":         return CF.leads.has(id);
     /* Los complementos son «de tu cartera, los que TODAVÍA no cuentan». Las
        ventas nuevas quedan fuera: no son cartera de BBVA y meterlas haría que
        la lista no cuadre con el número que se acaba de tocar. */
