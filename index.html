@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"11/09/2026 09:55", huella:"351f9a" };
+const BUILD = { sello:"14/09/2026 08:34", huella:"d09030" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -19328,6 +19328,15 @@ function datosVisitasSemana(correo){
 
   const visDia = d => comerciosConVisita(DB.todos().filter(r =>
     ids.has(String(r.Customer_id)) && repDia(r.Fecha_Contacto) === d));
+  /* El TOTAL de la semana cuenta comercios distintos en la semana entera, no
+     la suma de los días: un comercio visitado el martes y otra vez el jueves
+     aparece en las dos barras y cuenta UNA vez en el total. José, 14/09: «en
+     la imagen figura 62 cuando en el deck figura 60 […] se debe contar por
+     comercio; los números deben coincidir». Es la misma cuenta que la barra
+     de la lámina 4 del deck y que la ficha del ejecutivo. */
+  const visEntre = (a, b) => comerciosConVisita(DB.todos().filter(r => {
+    const d = repDia(r.Fecha_Contacto);
+    return ids.has(String(r.Customer_id)) && d >= a && d <= b; }));
 
   /* La cita reagendada ya cuenta en su fecha nueva y la descartada dejó de ser
      un compromiso: ninguna de las dos entra. Misma regla que `repAgenda`. */
@@ -19365,14 +19374,18 @@ function datosVisitasSemana(correo){
   return { hoy, corte, correo: correo || "", cartera: cart.length,
     iniPrev, finPrev:corte, iniAct, finAct:mas(corte, 7),
     prev, act, idx,
-    totalPrev: suma(prev, "visitas"),
-    totalAct:  suma(act,  "visitas"),
+    totalPrev: visEntre(iniPrev, corte),
+    totalAct:  visEntre(iniAct, mas(corte, 7)),
+    /* Cuántos comercios se visitaron en más de un día de la semana: es la
+       diferencia entre sumar las barras y contar comercios. */
+    repetidosPrev: suma(prev, "visitas") - visEntre(iniPrev, corte),
+    repetidosAct:  suma(act,  "visitas") - visEntre(iniAct, mas(corte, 7)),
     agendadasAct: suma(act.filter(x => !x.pasado), "agendadas"),
     cerrados,
     /* El promedio por día de la semana anterior: lo único de una semana entera
        que se puede poner al lado de un día sin mentir. */
     ritmoPrev: (() => { const h = prev.filter(x => !x.noTrabajado).length;
-      return h ? Math.round(suma(prev, "visitas") / h * 10) / 10 : 0; })() };
+      return h ? Math.round(visEntre(iniPrev, corte) / h * 10) / 10 : 0; })() };
 }
 
 /* ---- Los dos cuadros de visitas del Reporte -----------------------------
@@ -19484,9 +19497,11 @@ function cuadrosVisitasSemana(correo){
         ${rotulos()}
       </div>
     </div>
-    <div class="rep-pie"><b>La barra llena mide visitas concretadas; la punteada, citas
+    <div class="rep-pie"><b>La barra llena mide comercios con visita concretada ese día; la punteada, citas
       puestas en el calendario.</b> No son la misma unidad: una visita en frío suma sin
-      haber estado agendada. Sábado y domingo solo aparecen si tuvieron actividad.</div>
+      haber estado agendada. El total de la semana cuenta comercios distintos: un comercio visitado
+      dos días distintos aparece en las dos barras y cuenta una vez${D.repetidosPrev ? ` (la semana anterior, ${D.repetidosPrev})` : ""}.
+      Sábado y domingo solo aparecen si tuvieron actividad.</div>
   </div>
 
   <div class="card">
@@ -19633,8 +19648,9 @@ function cuadroVisitasEjecutivo(filas){
             huerfano.agen ? huerfano.agen + " agendadas"             : ""
           ].filter(Boolean))} no le pertenecen a ningún ejecutivo y quedan fuera de las barras.</b>`
         : ""}<br>
-      <b>La barra llena mide visitas concretadas; la punteada, citas puestas en el calendario.</b>
-      No son la misma unidad: una visita en frío suma sin haber estado agendada.</div>
+      <b>La barra llena mide comercios con visita concretada ese día; la punteada, citas puestas en el calendario.</b>
+      No son la misma unidad: una visita en frío suma sin haber estado agendada. El total de la semana
+      cuenta comercios distintos: un comercio visitado dos días distintos cuenta una vez.</div>
   </div>`;
 }
 
