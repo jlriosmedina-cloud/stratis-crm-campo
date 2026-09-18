@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"18/09/2026 10:12", huella:"3e5b72" };
+const BUILD = { sello:"18/09/2026 10:31", huella:"e59d0f" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18523,9 +18523,26 @@ function repLineaGestionCalc(f){
     if (!d || d > f.hoy) return;
     if (!negocia.has(cid) || d < negocia.get(cid)) negocia.set(cid, d);
   });
+  /* Y los DÍAS en que cada comercio respondió, para poder preguntar «¿respondió
+     dentro de esta ventana?». Es la pregunta que el embudo por periodo tiene
+     que hacer (18/09, Bet-El): una negociación nacida en el periodo anterior
+     que el cliente volvió a atender —una visita concretada, una llamada
+     contestada— dentro del periodo sigue viva en este, y un intento muerto
+     posterior no la borra. Va sin excluir a los cerrados: la respuesta ocurrió
+     igual, y el cierre entra por su lado. */
+  const respondio = new Map();
+  DB.todos().filter(r => !esReconstruida(r) && esEfectivo(r.Resultado)).forEach(r => {
+    const cid = String(r.Customer_id);
+    if (!enCartera.has(cid)) return;
+    const d = repDia(r.Fecha_Contacto);
+    if (!d || d > f.hoy) return;
+    if (!respondio.has(cid)) respondio.set(cid, []);
+    respondio.get(cid).push(d);
+  });
   m.forEach(a => a.sort((x, y) => x.d.localeCompare(y.d) || x.orden.localeCompare(y.orden)));
   m.sinFechaDeCierre = sinFecha;
   m.negociaDesde = negocia;
+  m.respondioEn = respondio;
   return m;
 }
 
@@ -18655,12 +18672,23 @@ function cadenaEntreCalc(desde, hasta){
        la visita con ellos. Un embudo no puede perder por arriba lo que ya
        ocurrió abajo.
 
-       Acotada, eso sí: cuenta la negociación que NACIÓ dentro de la ventana.
-       Un cliente que contestó el 12/08 y a quien nadie tocó después sigue
-       pendiente en el periodo que arranca el 19 —que es la regla que pidió
-       José ese mismo día—, y aparece en el acumulado, donde sí pertenece. */
-    (linea.negociaDesde || new Map()).forEach((nace, cid) => {
-      if (idsCart.has(cid) && nace >= ventanaReal && nace <= hoy) gestionSet.add(cid);
+       Acotada, eso sí: cuenta la negociación que el cliente ATENDIÓ dentro de
+       la ventana. Un cliente que contestó el 12/08 y a quien nadie tocó
+       después sigue pendiente en el periodo que arranca el 19 —que es la regla
+       que pidió José ese mismo día—, y aparece en el acumulado, donde sí
+       pertenece.
+
+       Hasta el 18/09 la condición era más estrecha: que la negociación hubiera
+       NACIDO dentro de la ventana (la primera respuesta de toda la campaña).
+       Eso dejaba fuera a Bet-El, de Vanessa: respondió el 12/08, la visitó el
+       20/08 —visita concretada— y el 24/08 no contestó una llamada. Como su
+       primera respuesta era del periodo anterior, la excepción no lo alcanzaba
+       y la llamada muerta borraba la visita del periodo: Incentivos con la
+       regla vieja decía 40 visitas y el Tablero 39. José, 18/09: «una visita
+       hecha es una visita hecha». Lo que sostiene la negociación en un periodo
+       es que el cliente haya respondido EN ese periodo, no cuándo empezó. */
+    (linea.respondioEn || new Map()).forEach((dias, cid) => {
+      if (idsCart.has(cid) && dias.some(d => d >= ventanaReal && d <= hoy)) gestionSet.add(cid);
     });
   } else {
     gestionSet = new Set([...repIdsGestionados(linea, hoy)].filter(id => idsCart.has(id)));
