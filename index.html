@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"14/09/2026 08:34", huella:"d09030" };
+const BUILD = { sello:"18/09/2026 09:49", huella:"459d80" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3577,10 +3577,19 @@ const BONO_DEF = {
                       el periodo, haya respondido o no (José, 09/09/2026:
                       «todo lo que tenga correo… esté contando»). Mismo
                       denominador y misma segunda condición que «contacto».
+       · «embudo»   — la misma medición del Tablero, del Reporte y del embudo
+                      por ejecutivo: `cadenaEntre` acotada al periodo y
+                      recortada a la cartera asignada (José, 18/09/2026: «los
+                      incentivos deben conversar con los cuadros… la misma
+                      medición»). Rige «manda la última actividad» y el
+                      denominador es la cartera que asignó BBVA. Con esta
+                      regla las visitas del requisito también salen del
+                      embudo: comercios de la cartera con visita concretada.
      El primer mes fue por registro: el cuello estaba en la respuesta del
-     banco. El segundo arrancó por «contacto» y el 09/09 pasó a «correo». Se
-     cambia por periodo desde Ajustes, y cambiarlo no reescribe los meses ya
-     medidos. */
+     banco. El segundo arrancó por «contacto», el 09/09 pasó a «correo» y el
+     18/09 a «embudo» —se enciende por versión en Ajustes; el valor de acá es
+     el de respaldo cuando la versión no dice nada—. Cambiarlo no reescribe
+     los meses ya medidos. */
   /* visitas_periodo manda sobre visitas_semana; la semanal queda para leer
      las versiones viejas —el periodo 1— sin reescribirlas. Ver reglaVisitas. */
   requisitos: { cobertura_pct:90, visitas_semana:25, visitas_periodo:40,
@@ -14516,6 +14525,122 @@ async function exportarExcel(btn){
   }
 }
 
+/* ------------------------------------------------------------------------
+   Respaldo completo de la base (16/09/2026)
+   ------------------------------------------------------------------------
+   «Descargar Excel completo» es un INFORME: columnas elegidas, textos
+   armados, cálculos aplicados. No sirve para reconstruir la base ni para
+   responder, en diciembre, por qué un acta dice lo que dice. Esto es otra
+   cosa: TODAS las tablas tal cual están, una hoja por tabla, sin tocar una
+   columna, más el mismo contenido en JSON (que conserva tipos y jsonb sin
+   perder nada). Pensado para el cierre de la v1 del CRM y para cualquier
+   corte en el que haga falta una copia fiel. Solo Analista y Manager.
+
+   Las tablas grandes se traen por tramos con `traerTodo` (la API devuelve
+   mil filas como máximo por pedido); las chicas, de una vez. La lista es
+   explícita a propósito: si mañana aparece una tabla nueva, se agrega aquí
+   y la prueba `qa_respaldo.mjs` lo exige. */
+const TABLAS_RESPALDO = [
+  ["clientes",             "customer_id"],
+  ["interacciones",        "id"],
+  ["seguimientos",         "id"],
+  ["auditoria",            "id"],
+  ["comercios_vinculados", "id"],
+  ["periodos_cerrados",    "id"],
+  ["facturacion_mes",      "id"],
+  ["usuarios",             null],
+  ["metas",                null],
+  ["bono_parametros",      null],
+  ["facturacion",          null],
+  ["facturacion_base",     null],
+  ["reporte_config",       null],
+  ["config",               null],
+  ["feriados",             null],
+  ["rubros",               null],
+  ["acciones_seguimiento", null],
+];
+
+async function traerTablaRespaldo(tabla, llave){
+  if (llave) return traerTodo(tabla, llave);
+  const { data, error } = await conLimite(sb.from(tabla).select("*"), tabla);
+  return { data: data || [], error };
+}
+
+/* jsonb y arreglos van como texto en la hoja: Excel no tiene celdas
+   anidadas y perderlos en silencio sería justo lo que este respaldo evita.
+   En el JSON viajan enteros. */
+function filaPlana(fila){
+  const out = {};
+  for (const k of Object.keys(fila)){
+    const v = fila[k];
+    out[k] = (v !== null && typeof v === "object") ? JSON.stringify(v) : v;
+  }
+  return out;
+}
+
+function descargarTexto(nombre, texto, tipo){
+  const blob = new Blob([texto], { type: tipo || "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function armarRespaldo(){
+  const tablas = {}; const fallas = [];
+  for (const [tabla, llave] of TABLAS_RESPALDO){
+    const { data, error } = await traerTablaRespaldo(tabla, llave);
+    if (error){ fallas.push(`${tabla}: ${error.message || error}`); tablas[tabla] = null; }
+    else tablas[tabla] = data;
+  }
+  return { generado: new Date().toISOString(), generado_lima: fmtLima(new Date()),
+           por: S.user.correo, rol: S.user.rol,
+           build: (typeof BUILD !== "undefined") ? BUILD : null,
+           tablas, fallas };
+}
+
+function libroRespaldo(r){
+  const wb = XLSX.utils.book_new();
+  const indice = [["Respaldo completo · CRM Stratis · Campaña BBVA Adquirencia"], [],
+    ["Generado", r.generado_lima + " (hora de Lima)"],
+    ["Generado por", r.por + " (" + r.rol + ")"],
+    ["Build del CRM", r.build ? `${r.build.huella} · ${r.build.sello}` : "—"], [],
+    ["Tabla", "Filas", "Estado"]];
+  for (const [tabla] of TABLAS_RESPALDO){
+    const filas = r.tablas[tabla];
+    indice.push([tabla, filas ? filas.length : 0, filas ? "ok" : "NO SE PUDO TRAER"]);
+  }
+  indice.push([], ["Nota", "Cada hoja es la tabla tal cual está en la base, sin transformar. Los campos jsonb van como texto; el archivo JSON los conserva enteros."]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(indice), "Índice");
+  for (const [tabla] of TABLAS_RESPALDO){
+    const filas = r.tablas[tabla];
+    const hoja = filas && filas.length
+      ? XLSX.utils.json_to_sheet(filas.map(filaPlana))
+      : XLSX.utils.aoa_to_sheet([[filas ? "(sin filas)" : "(no se pudo traer)"]]);
+    XLSX.utils.book_append_sheet(wb, hoja, tabla.slice(0, 31));
+  }
+  return wb;
+}
+
+async function exportarRespaldo(btn){
+  if (!window.XLSX) return toast("La librería de Excel aún no cargó, intenta de nuevo");
+  if (S.user.rol === "Ejecutivo") return toast("El respaldo completo lo descargan el Analista o el Manager");
+  if (btn){ btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = "Trayendo todas las tablas…"; }
+  try {
+    const r = await armarRespaldo();
+    const sello = r.generado.replace(/[-:]/g, "").replace("T", "_").slice(0, 15);
+    XLSX.writeFile(libroRespaldo(r), `Respaldo_CRM_BBVA_${sello}.xlsx`);
+    descargarTexto(`Respaldo_CRM_BBVA_${sello}.json`, JSON.stringify(r, null, 1));
+    const total = TABLAS_RESPALDO.reduce((n, [t]) => n + ((r.tablas[t] || []).length), 0);
+    if (r.fallas.length) toast(`Respaldo con ${r.fallas.length} tabla(s) sin traer: ${r.fallas.join(" · ")}`);
+    else toast(`Respaldo completo: ${TABLAS_RESPALDO.length} tablas · ${total.toLocaleString("es-PE")} filas · Excel y JSON`);
+  } catch (e){
+    toast("No se pudo generar el respaldo: " + (e.message || e));
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = btn.dataset.txt || "Descargar respaldo completo"; }
+  }
+}
+
 function exportarCSV(que){
   try {
   const mapa = { base:[COLS_BASE, filasBase(), "Base"],
@@ -14619,6 +14744,11 @@ function viewAyuda(){
       "14 hojas con todo lo que hay en el CRM al momento de generarlo, para tu análisis.",
       "expXlsx", "Descargar Excel completo",
       [["base","Base en CSV"],["visitas","Visitas en CSV"],["agenda","Agendamiento en CSV"],["coord","Coordinación BBVA en CSV"]])}
+
+    ${ajFilaDescarga(
+      "Respaldo completo de la base",
+      "Todas las tablas tal cual están en la base —" + TABLAS_RESPALDO.length + " hojas, sin transformar— más el mismo contenido en JSON. Es la copia fiel: sirve para reconstruir el CRM o responder por un acta. Bájalo en cada cierre de periodo y guárdalo en OneDrive, no en GitHub.",
+      "expRespaldo", "Descargar respaldo completo")}
 
     <details class="aj-mas">
       <summary>Qué trae cada archivo y cómo se pega</summary>
@@ -16392,8 +16522,24 @@ function llaveDe(correo, p){
      comercios que el requisito contó, y calcularlo por su cuenta sería tener
      dos veces la misma regla en dos sitios que se van a separar el día que
      alguien cambie una de las dos. */
-  let cubiertos, idsCubiertos;
-  if (base === "registro"){
+  let cubiertos, idsCubiertos, embudoVisitas = null;
+  if (base === "embudo"){
+    /* José, 18/09/2026: «lo que quiero es que los incentivos conversen con los
+       cuadros [del Tablero]: debe tener la misma medición». Hasta hoy la llave
+       preguntaba «¿alguna vez en el periodo hubo contacto o correo?» y el
+       Tablero «¿en qué quedó la última actividad?»; a Juan le daban 315 y
+       311, a Vanessa 168 y 167, y a Vanessa 40 visitas contra 39 porque la
+       llave contaba las visitas que ELLA hizo y el embudo las de SU cartera.
+       Desde acá los dos leen el mismo conjunto: `cadenaEntre` sobre la ventana
+       del periodo, recortada a lo que esta persona tiene a su nombre, igual
+       que `cifrasTablero` atribuye cada comercio por `asignado_correo`. */
+    const v = ventanaPeriodo(p);
+    const C = cadenaEntre(v.ini, v.fin);
+    idsCubiertos = new Set(mios.filter(c => C.gestion.has(String(c.customer_id)))
+                               .map(c => String(c.customer_id)));
+    cubiertos = idsCubiertos.size;
+    embudoVisitas = mios.filter(c => C.visita.has(String(c.customer_id))).length;
+  } else if (base === "registro"){
     cubiertos = registrados;
     idsCubiertos = new Set(mios.map(c => String(c.customer_id)));
   } else if (base === "contacto" || base === "correo"){
@@ -16461,7 +16607,8 @@ function llaveDe(correo, p){
      requisito mide terreno con el cliente, así que se pide las dos cosas. */
   /* Y sobre la cartera de retención: la visita a un alta por RUC (venta
      nueva) no cuenta para el requisito (José, 10/09). */
-  const efectivas = comerciosConVisita(gest.filter(esAlCliente).filter(esDeCartera));
+  const efectivas = embudoVisitas !== null ? embudoVisitas
+                  : comerciosConVisita(gest.filter(esAlCliente).filter(esDeCartera));
   const semanas   = semanasPeriodo(p);
   /* Desde el 19/08 el mínimo se mide en el periodo y no por semana. La regla
      de cada versión decide cuál rige; acá solo se usa el número que devuelve. */
@@ -16962,6 +17109,7 @@ const comoPct    = v => pct1(v);
 /* Cómo se está midiendo la cobertura, dicho donde se lee el número. Sin esta
    línea el mismo «90%» significa tres cosas distintas según el periodo. */
 const TEXTO_COBERTURA = {
+  embudo:   "Comercios de la cartera asignada cuya última actividad del periodo fue un hecho con resultado: correo al banco o al comercio, contacto efectivo, visita realizada o cierre. Es la misma medición del Tablero y del embudo; un intento sin respuesta después del correo lo enfría",
   registro: "Comercios de la cartera asignada registrados en el CRM. Este periodo se mide por el registro: el mes se fue en coordinar con BBVA, y sin la respuesta del banco no había a quién llamar",
   gestion:  "Comercios asignados con al menos una gestión o intento de gestión en el periodo",
   contacto: "Comercios registrados con un contacto logrado en el periodo: correo al ejecutivo de BBVA o gestión efectiva con el cliente. Un comercio cuenta una vez, por muchas gestiones que tenga",
@@ -16969,7 +17117,7 @@ const TEXTO_COBERTURA = {
 };
 /* Cómo se llama, en dos palabras, lo que cubre: para la tarjeta del panel y
    el pie de la Cartera, que no tienen sitio para la frase entera. */
-const NOMBRE_COBERTURA = { registro:"registrado", gestion:"con gestión", contacto:"con contacto logrado", correo:"con contacto o correo" };
+const NOMBRE_COBERTURA = { embudo:"con gestión (embudo)", registro:"registrado", gestion:"con gestión", contacto:"con contacto logrado", correo:"con contacto o correo" };
 const nombreCoberturaDe = base => NOMBRE_COBERTURA[base] || NOMBRE_COBERTURA.contacto;
 
 /* Lo que falta para llegar al mínimo, y cuántos días quedan.
@@ -17909,8 +18057,10 @@ function cardCoberturaBase(val){
       son un comercio gestionado, no cinco.
     </div>
     <div class="opts">
+      ${op("embudo", "La misma medición del Tablero (embudo del periodo)",
+           "La regla vigente desde el 18/09. Cuenta el comercio de la cartera asignada cuya última actividad del periodo fue un hecho con resultado —correo al banco o al comercio, contacto efectivo, visita o cierre—, exactamente como la columna Gestionados del Tablero. Las visitas del requisito también salen del embudo: comercios de la cartera con visita concretada. Se mide sobre la cartera asignada por BBVA")}
       ${op("correo", "Un contacto logrado o un correo en el periodo",
-           "La regla de régimen desde el 09/09. Cuenta el comercio con una gestión efectiva con el cliente, con un correo al cliente —con o sin respuesta, con copia al ejecutivo de BBVA incluido— o con un correo registrado al ejecutivo de BBVA. Tiene que ser del periodo. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
+           "La regla del 09/09 al 18/09. Cuenta el comercio con una gestión efectiva con el cliente, con un correo al cliente —con o sin respuesta, con copia al ejecutivo de BBVA incluido— o con un correo registrado al ejecutivo de BBVA. Tiene que ser del periodo. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
       ${op("contacto", "Un contacto logrado en el periodo",
            "La regla del periodo 2 hasta el 09/09. Cuenta el comercio con un correo al ejecutivo de BBVA —el medio que deja constancia— o con una gestión efectiva con el cliente, no un intento ni un correo sin respuesta. Se mide sobre los Customer ID registrados, y aparte se exige tener cargada toda la cartera asignada")}
       ${op("gestion", "Al menos un intento de gestión",
@@ -24839,6 +24989,7 @@ function bindExtras(){
   if ($("#expXlsx"))  $("#expXlsx").onclick  = e => exportarExcel(e.currentTarget);
   if ($("#expXlsx2")) $("#expXlsx2").onclick = e => exportarExcel(e.currentTarget);
   if ($("#expBBVA"))  $("#expBBVA").onclick  = e => exportarBBVA(e.currentTarget);
+  if ($("#expRespaldo")) $("#expRespaldo").onclick = e => exportarRespaldo(e.currentTarget);
 
   if (typeof bindEquipo === "function") bindEquipo();
   if (typeof bindMetas === "function") bindMetas();
