@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"18/09/2026 10:04", huella:"da23b6" };
+const BUILD = { sello:"18/09/2026 10:12", huella:"3e5b72" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -18272,6 +18272,7 @@ function cardParametrosBono(){
   </div>`;
 }
 
+const VACIO_ES_NULL = new Set(["requisitos.visitas_periodo", "bolsa.cumplimiento_pct", "metas.facturacion_pct_mensual"]);
 async function guardarParametros(){
   const pv = periodoParam();
   const nuevo = paramsDe(pv);
@@ -18281,17 +18282,15 @@ async function guardarParametros(){
     /* Vaciar el mínimo del periodo no es escribir un cero: es decir «este
        periodo se mide con la regla semanal», que es como quedó medido el
        primero. Un cero pediría cero visitas, que no es lo mismo. */
-    if (txt === "" && el.dataset.bono === "requisitos.visitas_periodo"){
-      ponerBono(nuevo, el.dataset.bono, null);
-      return;
-    }
-    /* El umbral de la bolsa está vacío A PROPÓSITO desde el 23/08: mientras
-       la dirección no lo fije, el CRM muestra el avance sin veredicto. El
-       18/09 ese vacío bloqueaba guardar CUALQUIER otro parámetro («Hay un
-       valor que no es un número: bolsa.cumplimiento_pct»), así que activar
-       la regla «embudo» era imposible desde la pantalla. Vacío = null, igual
-       que el mínimo de visitas. */
-    if (txt === "" && el.dataset.bono === "bolsa.cumplimiento_pct"){
+    /* Tres campos pueden ir vacíos, y vacío significa algo: el mínimo de
+       visitas del periodo (vacío = rige la regla semanal, como el periodo 1),
+       el umbral de la bolsa (vacío A PROPÓSITO desde el 23/08: sin veredicto
+       hasta que la dirección lo fije) y la meta mensual de facturación
+       (vacía cuando la lectura es acumulada). El 18/09 esos vacíos bloqueaban
+       guardar CUALQUIER otro parámetro —«Hay un valor que no es un número:
+       bolsa.cumplimiento_pct»— y activar la regla «embudo» era imposible
+       desde la pantalla. Vacío = null; lo demás sigue exigiendo un número. */
+    if (txt === "" && VACIO_ES_NULL.has(el.dataset.bono)){
       ponerBono(nuevo, el.dataset.bono, null);
       return;
     }
