@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"18/09/2026 10:31", huella:"e59d0f" };
+const BUILD = { sello:"21/09/2026 11:39", huella:"4544d0" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -2199,7 +2199,13 @@ const CONFIG = {
      llega esta fecha, que vive en la base. Así el cambio entra a una hora
      elegida y no en el momento en que alguien recarga la página, y si algo no
      cuadra se corre la fecha desde Ajustes sin volver a publicar nada. */
-  flujoBbvaDesde: ""
+  flujoBbvaDesde: "",
+  /* Registro extendido por periodo, p. ej. {"2026-09":"2026-09-21"}. Vive en la
+     tabla config (clave «registro_extendido») y lo decide la dirección: el 21/09
+     se dio una bandera para que lo registrado ese lunes con fecha del periodo
+     que cerró el 18 cuente en ese periodo. No toca la fecha de la gestión ni la
+     puntualidad, que sigue midiendo días hábiles de demora como siempre. */
+  registroExtendido: {}
 };
 const flujoBbva = () => !!CONFIG.flujoBbvaDesde && new Date() >= new Date(CONFIG.flujoBbvaDesde);
 
@@ -3728,7 +3734,16 @@ function registradaEnPeriodo(r, p){
   const c = String((r && r.Creado_En) || "").slice(0,10);
   /* Sin sello de creación no se puede afirmar que llegó tarde. Se deja pasar:
      la duda no puede convertirse en un descuento. */
-  return !c || !v.fin || c <= v.fin;
+  return !c || !v.fin || c <= limiteRegistro(p);
+}
+/* Hasta qué día se acepta el registro de un periodo: su cierre, o la bandera
+   que la dirección haya dado para ese periodo en particular. Una bandera no
+   puede acortar el plazo: si alguien escribe una fecha anterior al cierre, rige
+   el cierre. */
+function limiteRegistro(p){
+  const fin = ventanaPeriodo(p).fin || "";
+  const ext = String((CONFIG.registroExtendido || {})[p] || "").slice(0,10);
+  return ext && ext > fin ? ext : fin;
 }
 /* Las dos condiciones juntas, que es como se debe preguntar siempre. */
 const gestionDelPeriodo = (r, p) =>
@@ -5553,6 +5568,9 @@ async function cargarDatos(){
        del cambio se decide sin volver a publicar la app, y si algo no cuadra
        se corre la fecha en vez de tener que revertir una publicación. */
     if (clave === "flujo_bbva_desde")      CONFIG.flujoBbvaDesde = valor;
+    if (clave === "registro_extendido"){
+      try { CONFIG.registroExtendido = JSON.parse(valor) || {}; } catch (e){ CONFIG.registroExtendido = {}; }
+    }
   });
 
   DB.cargar(inter.data || []);
@@ -17506,7 +17524,9 @@ function viewBono(){
   return `
   <h2 style="margin:0 0 3px">Incentivos</h2>
   <div class="sub">Periodo del ${esc(textoPeriodo(p))} — se paga en ${esc(nombrePeriodo(p))}${
-    abierto && !sello ? " · el periodo sigue abierto, los números se mueven" : ""}</div>
+    abierto && !sello ? " · el periodo sigue abierto, los números se mueven" : ""}${
+    limiteRegistro(p) > v.fin ? ` · registro extendido hasta el ${esc(fmtFecha(limiteRegistro(p)))} por decisión de dirección${
+      hoyISO() <= limiteRegistro(p) && !sello ? ", los números todavía se mueven" : ""}` : ""}</div>
 
   ${cardSello(p, sello, ver, abierto)}
 
