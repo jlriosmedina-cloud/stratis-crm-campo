@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"21/09/2026 11:39", huella:"4544d0" };
+const BUILD = { sello:"21/09/2026 15:02", huella:"70e4a0" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -5570,6 +5570,11 @@ async function cargarDatos(){
     if (clave === "flujo_bbva_desde")      CONFIG.flujoBbvaDesde = valor;
     if (clave === "registro_extendido"){
       try { CONFIG.registroExtendido = JSON.parse(valor) || {}; } catch (e){ CONFIG.registroExtendido = {}; }
+    }
+    /* El dato oficial de BBVA sobre los comercios trabajados, que entrega el
+       banco en su lámina y no sale del CRM. Lo usa la hoja de campaña. */
+    if (clave === "facturacion_bbva_oficial"){
+      try { CONFIG.factBbva = JSON.parse(valor) || null; } catch (e){ CONFIG.factBbva = null; }
     }
   });
 
@@ -23679,12 +23684,23 @@ function datosFichaProyecto(){
      el mismo corte del deck: la semana cierra el domingo. */
   const mas = (d, n) => new Date(new Date(d + "T00:00:00Z").getTime() + n*86400000)
     .toISOString().slice(0,10);
-  const semanas = []; let a = v.ini;
+  /* José, 21/09/2026: la hoja salió el lunes 21 con el periodo 3 recién
+     abierto, y la única «semana cerrada» era el sábado 19 y el domingo 20: una
+     barra en cero en cada gráfico y un párrafo que decía «0 comercios
+     visitados», el mismo día en que el deck de dirección mostraba 58. Las
+     semanas ya no se cortan por el periodo: son las cinco últimas semanas
+     completas, de lunes a domingo, como la lámina 4 del deck, más la semana en
+     curso cuando ya dice algo. El periodo sigue mandando en la tarjeta de
+     visitas, que es donde se mide. */
+  const semanas = []; const inicioProy = P.inicio || PROYECTO.inicio || v.ini;
+  let domingo = mas(hoy, -1);
+  while (new Date(domingo + "T00:00:00Z").getUTCDay() !== 0) domingo = mas(domingo, -1);
+  let a = mas(domingo, -34);
+  if (a < inicioProy) a = inicioProy;
   while (a <= hoy && semanas.length < 8){
     let d = new Date(a + "T00:00:00Z");
     while (d.getUTCDay() !== 0) d = new Date(d.getTime() + 86400000);
-    let fin = d.toISOString().slice(0,10);
-    if (fin > v.fin) fin = v.fin;
+    const fin = d.toISOString().slice(0,10);
     semanas.push({ desde:a, hasta: fin > hoy ? hoy : fin, cerrada: fin < hoy });
     a = mas(fin, 1);
   }
@@ -23711,13 +23727,22 @@ function datosFichaProyecto(){
   /* La facturación del equipo entero. Se suma la base y se suma el cierre; el
      porcentaje sale de los totales y no del promedio de los porcentajes, que
      daría otra cosa cuando las carteras son de tamaños tan distintos. */
+  /* El periodo del DATO, no el de la hoja. José, 21/09/2026: la hoja del
+     periodo 3 salió con «-100,00% · S/ 35,33 MM a S/ 0,00 MM» porque el
+     periodo recién abierto no tiene facturación cargada y el cierre sumaba
+     cero. El banco entrega el mes un periodo tarde; mientras no llegue, la
+     hoja lee el último periodo cargado (hoy, el cierre de agosto). Es la misma
+     regla que ya usaba el deck (`ultimoP`). */
+  const pFact = FACTURACION.filter(x => x.monto_final !== null && x.monto_final !== undefined
+                                     && String(x.periodo) <= p)
+                           .map(x => String(x.periodo)).sort().pop() || p;
   let fBase = 0, fCierre = 0, fFaltan = 0;
   ejecutivosDelBono().forEach(u => {
-    const i = inicioFact(u.correo, p), f = factDe(u.correo, p);
+    const i = inicioFact(u.correo, pFact), f = factDe(u.correo, pFact);
     if (i.monto !== null) fBase += Number(i.monto); else fFaltan++;
     if (f && f.monto_final !== null && f.monto_final !== undefined) fCierre += Number(f.monto_final);
   });
-  const fCrec = fBase ? (fCierre - fBase) / fBase * 100 : null;
+  const fCrec = fBase && fCierre ? (fCierre - fBase) / fBase * 100 : null;
 
   /* Los distritos, sin nombre de ejecutivo: es un mapa del portafolio, no un
      reparto de responsabilidades. */
@@ -23809,7 +23834,8 @@ function datosFichaProyecto(){
     fact: { base:fBase, cierre:fCierre, crec:fCrec, faltan:fFaltan,
             metaPct:B.metas.facturacion_pct || 15,
             metaMonto: fBase * (1 + (B.metas.facturacion_pct || 15)/100),
-            mesDelDato: mesDelDatoFact(p), arrancaEn: mesArranqueFact(B) },
+            mesDelDato: mesDelDatoFact(pFact), arrancaEn: mesArranqueFact(B),
+            bbva: CONFIG.factBbva && CONFIG.factBbva.comercios ? CONFIG.factBbva : null },
     serie, serieVisible, semanaUtil, ultCerrada, distritos,
     nDistritos: distritos.length,
     top7: distritos.slice(0,7).reduce((n,x) => n + x.total, 0),
@@ -23923,8 +23949,11 @@ function dibujoFicha(doc){
       txt(t.val, x + 2, y + 13.4, { size:12.5, bold:true, color:PX.navy });
       txt(t.meta, x + 2 + ancho(t.val, 12.5, true) + 1.3, y + 13.4, { size:6, color:GRIS });
       fuente(5.9, false); doc.setTextColor(...PX.gris);
-      doc.splitTextToSize(sanear(t.pie), anT - 4).slice(0,2)
-         .forEach((l, j) => doc.text(l, x + 2, y + 17.4 + j*2.5));
+      /* Un «\n» en el pie fuerza el corte donde tiene sentido (facturación:
+         el monto arriba, el dato de BBVA abajo). La segunda línea sube 0,3 mm
+         para no rozar el «faltan», que en visitas ya se tocaba. */
+      String(t.pie).split("\n").flatMap(tr => doc.splitTextToSize(sanear(tr), anT - 4)).slice(0,2)
+         .forEach((l, j) => doc.text(l, x + 2, y + 17.2 + j*2.4));
       const yF = t.plazo ? y + alT - 5.4 : y + alT - 1.9;
       txt(t.falta, x + 2, yF, { size:6.2, bold:true, color: tinta });
       /* El plazo va en gris incluso en la tarjeta urgente: el color ya dice
@@ -24072,7 +24101,9 @@ function fichaProyecto(doc, D){
       falta:`faltan ${miles(Math.max(0, D.metaVen - D.objetivos[2].n))}`,
       plazo: alProy, avance:true },
     { rot:"Facturación", val: F.crec === null ? "-" : pctT(F.crec, 2), meta:`de +${F.metaPct}%`,
-      pie: F.crec === null ? "sin monto cargado" : `${mm2(F.base)} a ${mm2(F.cierre)}`,
+      pie: F.crec === null ? "sin monto cargado"
+        : `de ${mm2(F.base).replace(" MM", "")} a ${mm2(F.cierre)}`
+          + (F.bbva ? `\nBBVA: ${pctT(F.bbva.pct, 2)} en ${F.bbva.comercios} trabajados` : ""),
       falta:`dato de ${F.mesDelDato}`, plazo: alProy, neutro:true }
   ];
   y = X.tarjetas(y, TARJETAS) + 4;
@@ -24137,6 +24168,7 @@ function fichaProyecto(doc, D){
      Se saltaba la semana de 42 —la mejor de la campaña— y terminaba la frase
      en cero, dos centímetros debajo de un gráfico que decía lo contrario. */
   const S = D.serieVisible && D.serieVisible.length ? D.serieVisible : D.serie;
+  const mm1 = v => "S/ " + (Math.round(v/1e5)/10).toFixed(1).replace(".", ",") + " MM";
   caja(m, y, anI, 30, HUESO, 1.2);
   caja(m, y, 1.1, 30, CORAL);
   const parr = [
@@ -24149,11 +24181,20 @@ function fichaProyecto(doc, D){
         + `cerrada del periodo, con ${S[0].ret} retenciones.`
       : `La visita es lo que se movió: ${listaEs(S.map(s => s.visitas))} comercios visitados, `
         + `semana a semana. Las retenciones siguen el mismo camino: ${listaEs(S.map(s => s.ret))}.`,
+    /* Dos lecturas de la facturación, cada una con su fuente. La del
+       portafolio es la que mide la meta: los 841 contra la base congelada. La
+       de BBVA mira solo los comercios que la campaña trabajó, de un mes al
+       siguiente, y es la que muestra el efecto de la gestión. José,
+       21/09/2026: se publican las dos. */
     F.crec === null ? "La facturación del periodo todavía no está cargada."
-    : `La facturación entrega su primer dato medible: ${mm2(F.base)} de base contra ${mm2(F.cierre)} `
-      + `al cierre de ${F.mesDelDato}, ${pctT(F.crec, 2)} de variación. Corresponde al mes en que la `
-      + `campaña recién arrancaba y llega un periodo después, así que la medición contra la meta de `
-      + `+${F.metaPct}% empieza en el ${F.arrancaEn}.`
+    : `Facturación al cierre de ${F.mesDelDato}: el portafolio completo suma ${mm2(F.cierre)} contra `
+      + `${mm2(F.base)} de base, ${pctT(F.crec, 2)}; la meta de +${F.metaPct}% se mide al cierre del proyecto.`
+      /* Con un decimal: BBVA entrega los montos redondeados a S/ 0,1 MM y
+         escribirlos con dos inventaría una precisión que el dato no tiene. */
+      + (F.bbva ? ` Según BBVA, los ${F.bbva.comercios} comercios trabajados por la campaña pasaron de `
+          + `${mm1(F.bbva.desde)} en ${F.bbva.mesDesde} a ${mm1(F.bbva.hasta)} en ${F.bbva.mesHasta}: `
+          + `+${mm1(F.bbva.hasta - F.bbva.desde)}, ${pctT(F.bbva.pct, 2)}`
+          + (F.bbva.detalle ? ` (${F.bbva.detalle})` : "") + "." : "")
   ];
   let yT = y + 5;
   parr.forEach(p2 => { fuente(7.2, false); doc.setTextColor(...PX.gris);
