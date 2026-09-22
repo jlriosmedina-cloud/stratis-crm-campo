@@ -181,7 +181,44 @@ textarea.campo{min-height:78px;resize:vertical}
 .nav2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .btn-waze{background:#33CCFF;color:#0C1137}
 .aprox{font-size:11.5px;color:var(--ambar);font-weight:600}
+
+/* ---- Mi avance ---- */
+.puntaje{display:flex;align-items:baseline;gap:8px;margin:2px 0 14px}
+.puntaje b{font-size:44px;font-weight:800;color:var(--ink);line-height:1;font-variant-numeric:tabular-nums}
+.puntaje small{font-size:13px;color:var(--muted);font-weight:600}
+.regla{position:relative;height:10px;border-radius:5px;background:var(--suelo);overflow:visible}
+.regla i{position:absolute;inset:0 auto 0 0;border-radius:5px;background:var(--navy-2);display:block}
+.regla u{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--muted);border-radius:1px}
+.regla u.dentro{background:#fff;box-shadow:0 0 0 1px rgba(12,17,55,.25)}
+.regla-pie{display:flex;justify-content:space-between;margin-top:6px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ind{padding:12px 0;border-top:1px solid var(--linea)}
+.ind:first-of-type{border-top:0;padding-top:4px}
+.ind .t{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.ind .t b{font-size:14px;color:var(--ink);font-weight:700}
+.ind .t span{font-size:13px;color:var(--texto);font-variant-numeric:tabular-nums;font-weight:600}
+.ind .barra-i{height:8px;border-radius:4px;background:var(--suelo);margin-top:8px;overflow:hidden}
+.ind .barra-i i{display:block;height:100%;border-radius:4px}
+.ind .pie{display:flex;justify-content:space-between;margin-top:6px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ind.r .barra-i i{background:var(--verde)} .ind.r .t b::before{background:var(--verde)}
+.ind.v .barra-i i{background:var(--naranja)} .ind.v .t b::before{background:var(--naranja)}
+.ind.c .barra-i i{background:var(--azul)} .ind.c .t b::before{background:var(--azul)}
+.ind .t b::before{content:"";display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:7px;vertical-align:baseline}
+.ejec{padding:12px 0;border-top:1px solid var(--linea)}
+.ejec:first-of-type{border-top:0;padding-top:6px}
+.ejec .l1{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.ejec .l1 b{font-size:14.5px;color:var(--ink);font-weight:700}
+.ejec .l1 span{font-size:19px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ejec .l1 span small{font-size:11.5px;font-weight:700;color:var(--muted);margin-left:2px}
+.ejec .mini{height:6px;border-radius:3px;background:var(--suelo);margin:8px 0 7px;overflow:hidden}
+.ejec .mini i{display:block;height:100%;border-radius:3px;background:var(--navy-2)}
+.ejec .l2{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--texto);font-variant-numeric:tabular-nums}
+.ejec .l2 b{color:var(--ink);font-weight:700}
+.ejec .l3{font-size:11.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.reglas li{margin:0 0 7px}
+.reglas{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--texto)}
+.reglas b{color:var(--ink)}
 </style>
+
 </head><body>
 <div class="tel" id="app"><div id="pantalla" style="flex:1;display:flex;flex-direction:column;min-height:0"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -194,7 +231,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "66df3b";
+const BUILD = "56cd9d";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -210,12 +247,13 @@ const ESTADOS = {
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, cola:leerCola() };
+  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 const pct = v => (Math.round(v*10)/10).toFixed(1).replace(".", ",") + "%";
+const num1 = v => { if (v == null) return "—"; const x = Math.round(Number(v)*10)/10; return (x % 1 === 0 ? String(x) : x.toFixed(1).replace(".", ",")); };
 const lima = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone:"America/Lima" }));
 const fechaCorta = d => lima(d).toLocaleDateString("es-PE",{ day:"2-digit", month:"2-digit" });
 const horaCorta = d => lima(d).toLocaleTimeString("es-PE",{ hour:"2-digit", minute:"2-digit" });
@@ -288,7 +326,15 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.`); recargarBase(); }
 }
-async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } }
+async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } S.avance = null; }
+async function cargarAvance(){
+  if (S.avance || S._avanceCargando) return;
+  S._avanceCargando = true; S.avanceErr = "";
+  const { data, error } = await sb.rpc("v2_avance");
+  S._avanceCargando = false;
+  if (error){ S.avanceErr = error.message || String(error); } else { S.avance = data || []; }
+  S._mantenerScroll = true; pintar();
+}
 
 const miCorreo = () => (S.yo && S.yo.correo || "").toLowerCase();
 const esMio = c => S.admin ? !!c.correo : c.correo === miCorreo();
@@ -495,15 +541,118 @@ function vistaFicha(c){
     </div></div>`;
 }
 function vistaAvance(){
-  return `<div class="vista">
-    <div class="barra"><h1>${S.admin?"Avance":"Mi avance"}</h1><div style="color:var(--cabecera-sub);font-size:13px">${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}` : ""}</div></div>
-    <div class="cuerpo" style="margin-top:14px">
-      <div class="card" style="text-align:center;padding:28px 18px">
-        <span class="pill e-esp" style="margin:0 auto">Próximamente</span>
-        <h2 style="margin-top:14px;font-size:18px">Aquí vas a ver tu avance y tu bono</h2>
-        <div class="nota" style="max-width:32ch;margin:8px auto 0">Estamos afinando cómo mostrar la medición con la data de BBVA. Mientras tanto, en Inicio ves tus comercios visitados, tus reactivados y tu conversión.</div>
-      </div>
-    </div></div>`;
+  cargarAvance();
+  const tit = S.admin ? "Avance del equipo" : "Mi avance";
+  const sub = S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)} · quedan ${diasQuedan()} días` : "";
+  const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${c}</div></div>`;
+
+  if (S.avanceErr) return envolver(`<div class="card"><h2>No se pudo calcular el avance</h2>
+    <div class="nota">${esc(S.avanceErr)}</div>
+    <button class="btn btn-sec btn-full" style="margin-top:10px" data-reintentar-avance>Reintentar</button></div>`);
+  if (!S.avance) return envolver(`<div class="card"><div class="nota">Calculando el avance…</div></div>`);
+  if (!S.avance.length) return envolver(`<div class="card"><h2>Todavía no hay base asignada en este periodo</h2>
+    <div class="nota">Apenas se cargue la base del periodo, aquí vas a ver el avance.</div></div>`);
+
+  const a0 = S.avance[0];
+  const avisoTrx = a0.hay_transacciones ? "" : `<div class="card" style="border:1.5px solid var(--ambar-t)">
+    <div class="eyebrow" style="color:var(--ambar)">Falta la data de BBVA</div>
+    <h2>Los reactivados están en cero porque todavía no se carga el detalle de transacciones</h2>
+    <div class="nota">Un comercio queda reactivado con dos días distintos de transacción después de la visita. Apenas se cargue la data diaria de BBVA, este número se mueve solo.</div></div>`;
+
+  const reglas = `<div class="card"><h2>Cómo se cuenta</h2><ul class="reglas">
+    <li><b>Visita:</b> ir al comercio y registrarlo con la ubicación validada. Cuenta una vez por comercio en el periodo, sea cual sea el resultado.</li>
+    <li><b>Reactivado:</b> el comercio vuelve a transaccionar en <b>dos días distintos</b> posteriores al día de la visita, hasta el 18, según la data de BBVA. Un POS cancelado no cuenta.</li>
+    <li><b>Conversión:</b> reactivados entre comercios visitados.</li>
+    <li>Cada indicador se lee <b>hasta 100 %</b>: pasarte en uno no cubre lo que falta en otro.</li></ul></div>`;
+
+  if (!S.admin){
+    const a = S.avance.find(x => x.correo === miCorreo()) || a0;
+    if (a.sin_parametros) return envolver(`${tarjetaIndicadores(a)}
+      <div class="card"><h2>El modelo de este periodo todavía no está cargado</h2>
+      <div class="nota">Tus números ya se están contando. El puntaje aparece apenas se carguen los pesos y las metas del periodo.</div></div>${avisoTrx}${reglas}`);
+    return envolver(`${avisoTrx}${tarjetaPuntaje(a)}${tarjetaIndicadores(a)}${reglas}`);
+  }
+
+  const f = S.avance;
+  const tVis = f.reduce((x,y) => x + y.visitados, 0), tRea = f.reduce((x,y) => x + y.reactivados, 0);
+  const mVis = f.reduce((x,y) => x + (y.meta_visitas||0), 0), mRea = f.reduce((x,y) => x + (y.meta_reactivados||0), 0);
+  const tConv = tVis ? tRea / tVis * 100 : 0;
+  const filas = f.map(x => {
+    const pts = x.puntos == null ? null : Number(x.puntos);
+    const bono = x.bono_pct == null ? null : Number(x.bono_pct);
+    return `<div class="ejec">
+      <div class="l1"><b>${esc(x.nombre)}</b><span>${pts == null ? "\u2014" : num1(pts)}<small>pts</small></span></div>
+      <div class="mini"><i style="width:${Math.max(0, Math.min(100, pts || 0))}%"></i></div>
+      <div class="l2"><span><b>${x.visitados}</b> de ${x.meta_visitas ?? "\u2014"} visitas · <b>${x.reactivados}</b> de ${x.meta_reactivados ?? "\u2014"} reactivados</span><span>conv. ${pct(x.conversion)}</span></div>
+      <div class="l3">${bono ? `Bono ${num1(bono)}% del sueldo · paga ${num1(x.bono_pagado)} y retiene ${num1(x.bono_retenido)}${x.objetivo_bbva && pts >= Number(x.puntos_tope) ? " · con el objetivo de BBVA" : ""}` : (bono === 0 ? `Sin bono todavía · faltan ${num1(Number(x.puntos_min) - (pts || 0))} puntos para los ${num1(x.puntos_min)}` : "Sin parámetros del periodo")}</div>
+    </div>`;
+  }).join("");
+
+  return envolver(`
+    <div class="card">
+      <div class="fila-ent"><h2>Los cuatro ejecutivos</h2><span class="pill e-por">${f.length}</span></div>
+      ${filas}
+      <div class="nota" style="margin-top:10px">El bono es el % del sueldo de cada uno: se paga el ${a0.pago_pct == null ? 80 : num1(a0.pago_pct)} % y se retiene el resto. El ejecutivo no ve esta columna en su celular.</div>
+    </div>
+    <div class="card">
+      <div class="eyebrow">Equipo · los ${f.reduce((x,y)=>x+y.base,0)} leads</div>
+      <h2>${tVis} de ${mVis} comercios visitados · ${tRea} de ${mRea} reactivados</h2>
+      <div class="nota">Conversión del equipo ${pct(tConv)}.</div>
+    </div>
+    ${avisoTrx}
+    <div class="card"><h2>La lectura de BBVA (80/20)</h2>
+      <div class="nota">BBVA mide a Stratis con 80 % de facturación de POS reactivados y 20 % de recupero, sobre la base completa. Falta cargar la facturación y los recuperos confirmados para calcularla aquí; este periodo el recupero va en marcha blanca.</div></div>
+    ${a0.sin_parametros ? `<div class="card"><h2>Este periodo no tiene parámetros cargados</h2><div class="nota">Los indicadores se cuentan igual, pero el ponderado y el bono necesitan los pesos, las metas y la escala del periodo.</div></div>` : tarjetaParametros(a0)}
+    ${reglas}`);
+}
+
+function tarjetaPuntaje(a){
+  const p = Number(a.puntos) || 0, min = Number(a.puntos_min), tope = Number(a.puntos_tope);
+  const falta = p < min ? `Te faltan <b>${num1(min - p)}</b> puntos para llegar a ${num1(min)}, que es donde empieza a contar el bono.`
+    : p < tope ? `Ya pasaste los ${num1(min)} puntos. Te faltan <b>${num1(tope - p)}</b> para el tope de ${num1(tope)}.`
+    : `Llegaste al tope de ${num1(tope)} puntos.`;
+  return `<div class="card">
+    <div class="eyebrow">Tu puntaje del periodo</div>
+    <div class="puntaje"><b>${num1(p)}</b><small>de ${num1(tope)} puntos</small></div>
+    <div class="regla"><i style="width:${Math.max(0, Math.min(100, p))}%"></i><u class="${p >= min ? "dentro" : ""}" style="left:${Math.max(0, Math.min(100, min))}%"></u></div>
+    <div class="regla-pie"><span>0</span><span>${num1(min)} · entra el bono</span><span>${num1(tope)}</span></div>
+    <div class="nota" style="margin-top:10px">${falta}</div>
+  </div>`;
+}
+
+function tarjetaIndicadores(a){
+  const ind = [
+    { k:"r", nom:"Reactivados", val:a.reactivados, meta:a.meta_reactivados, u:"",  cumpl:a.cumpl_reactivados, peso:a.peso_reactivados },
+    { k:"v", nom:"Visitas",     val:a.visitados,   meta:a.meta_visitas,     u:"",  cumpl:a.cumpl_visitas,     peso:a.peso_visitas },
+    { k:"c", nom:"Conversión",  val:a.conversion,  meta:a.meta_conversion,  u:"%", cumpl:a.cumpl_conversion,  peso:a.peso_conversion }
+  ];
+  return `<div class="card">
+    <h2>Cómo se arma tu puntaje</h2>
+    ${ind.map(i => {
+      const c = i.cumpl == null ? null : Number(i.cumpl);
+      const aporta = (c == null || i.peso == null) ? null : c * Number(i.peso) / 100;
+      const val = i.u === "%" ? num1(i.val) + "%" : i.val;
+      const meta = i.meta == null ? "—" : (i.u === "%" ? num1(i.meta) + "%" : i.meta);
+      return `<div class="ind ${i.k}">
+        <div class="t"><b>${i.nom}</b><span>${val} <small style="color:var(--muted);font-weight:600">de ${meta}</small></span></div>
+        <div class="barra-i"><i style="width:${c == null ? 0 : Math.max(0, Math.min(100, c))}%"></i></div>
+        <div class="pie"><span>${c == null ? "sin metas cargadas" : num1(c) + "% de cumplimiento" + (c >= 100 ? " · tope" : "") + (i.peso == null ? "" : " · peso " + num1(i.peso))}</span>
+          <span>${aporta == null ? "" : num1(aporta) + " pts"}</span></div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+function tarjetaParametros(a){
+  return `<div class="card"><h2>El modelo que está aplicando el CRM</h2>
+    <ul class="reglas">
+      <li>Pesos: reactivados ${num1(a.peso_reactivados)}, visitas ${num1(a.peso_visitas)}, conversión ${num1(a.peso_conversion)}.</li>
+      <li>Metas por ejecutivo: ${a.meta_visitas} visitas, ${a.meta_reactivados} reactivados, ${num1(a.meta_conversion)}% de conversión.</li>
+      <li>Escala: ${num1(a.puntos_min)} puntos = ${num1(a.bono_min)}% del sueldo y ${num1(a.puntos_tope)} puntos = ${num1(a.bono_tope)}%, sin sobrecumplimiento. Con ${num1(a.puntos_tope)} puntos más el objetivo de BBVA en la cartera (${a.bbva_meta_reactivados ?? "—"} reactivados), sube a ${num1(a.bono_max)}%.</li>
+      <li>Se paga el ${num1(a.pago_pct)}% y se retiene el ${num1(100 - Number(a.pago_pct))}%.</li>
+    </ul>
+    <div class="nota" style="margin-top:8px">Esto sale de la tabla de parámetros del periodo ${esc(a.periodo)}. Cambiarlo ahí cambia el cálculo en todo el CRM.</div></div>`;
 }
 
 /* ---------------- registrar visita ---------------- */
@@ -594,6 +743,7 @@ function enlazar(){
     S.sesion = data.session; cargar(); };
   p.querySelectorAll("[data-salir]").forEach(b => b.onclick = async () => { await sb.auth.signOut(); location.reload(); });
   p.querySelectorAll("[data-reintentar]").forEach(b => b.onclick = cargar);
+  p.querySelectorAll("[data-reintentar-avance]").forEach(b => b.onclick = () => { S.avanceErr = ""; S.avance = null; cargarAvance(); });
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => { S.vista = b.dataset.vista; S.ficha = null; pintar(); });
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; pintar(); });
