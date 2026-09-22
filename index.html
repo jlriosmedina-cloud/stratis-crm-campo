@@ -257,7 +257,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "186d9f";
+const BUILD = "6b1c10";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -557,9 +557,12 @@ function vistaFicha(c){
           <dt>Distrito</dt><dd>${esc(c.distrito)}</dd>
           <dt>Provincia · Depto.</dt><dd>${esc(c.provincia)} · ${esc(c.departamento)}</dd>
           <dt>Zona</dt><dd>${esc(c.zona)}</dd>
+          ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
+          ${c.terminales ? `<dt>Terminales POS</dt><dd>${c.terminales}</dd>` : ""}
           ${S.admin ? `<dt>Ejecutivo</dt><dd>${esc(c.correo)}</dd>` : ""}
         </dl>
         <div class="tasas"><div class="tasa"><b>${tasa(c.tasa_debito)}</b><small>Débito</small></div><div class="tasa"><b>${tasa(c.tasa_credito)}</b><small>Crédito</small></div><div class="tasa"><b>${tasa(c.tasa_foranea)}</b><small>Foránea</small></div></div>
+        ${c.tasa_debito != null && c.tasas_aprox !== false ? `<div class="aprox" style="text-align:center;margin-top:8px">Tasas referenciales · confirmar la vigente con BBVA</div>` : ""}
       </div>
       <div class="btns">
         <a class="btn btn-sec" href="${urlGoogle(c)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a>
