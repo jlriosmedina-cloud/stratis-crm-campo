@@ -243,6 +243,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .acc-panel textarea.campo{background:#fff;min-height:70px;resize:vertical}
 .anulada > .fila-ent b, .anulada .h b{text-decoration:line-through;color:var(--muted)}
 .anulada{opacity:.72}
+
+.card.sunat{border:1.5px solid var(--azul-t)}
+.card.sunat h2{font-size:14.5px;margin-bottom:6px}
 </style>
 
 </head><body>
@@ -257,7 +260,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "6b1c10";
+const BUILD = "a68469";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -285,7 +288,8 @@ const fechaCorta = d => lima(d).toLocaleDateString("es-PE",{ day:"2-digit", mont
 const horaCorta = d => lima(d).toLocaleTimeString("es-PE",{ hour:"2-digit", minute:"2-digit" });
 const diaLargo = d => lima(d).toLocaleDateString("es-PE",{ weekday:"long", day:"numeric", month:"long" });
 const fISO = s => { const [a,m,d] = String(s).split("-"); return `${d}/${m}`; };
-const tasa = v => v == null ? "—" : Number(v).toFixed(2).replace(".", ",") + "%";
+// las tasas vienen como fracción: 0,0344 se muestra 3,44 %
+const tasa = v => v == null ? "—" : (Number(v) * 100).toFixed(2).replace(".", ",") + "%";
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2));
 function leerCola(){ try { return JSON.parse(localStorage.getItem("stratis-v2-cola") || "[]"); } catch(e){ return []; } }
 function guardarCola(){ try { localStorage.setItem("stratis-v2-cola", JSON.stringify(S.cola)); } catch(e){} }
@@ -569,6 +573,7 @@ function vistaFicha(c){
         <a class="btn btn-waze" href="${urlWaze(c)}" target="_blank" rel="noopener">${ICON.pin} Waze</a>
       </div>
       ${c.geo_calidad ? `<div class="aprox" style="text-align:center;margin-top:-6px">${esc(CALIDAD[c.geo_calidad] || "")}</div>` : ""}
+      ${tarjetaSunat(c)}
       ${S.admin ? "" : `<button class="btn btn-pri btn-full" data-registrar="${esc(c.customer_id)}">Registrar visita</button>`}
       <div class="card">
         <div class="fila-ent"><h2>Datos del comercio</h2><button class="btn btn-lin" style="padding:8px 12px;font-size:13px" data-editar="${esc(c.customer_id)}">${editando ? "Cancelar" : "Corregir datos"}</button></div>
@@ -667,6 +672,26 @@ function lineaVisita(v){
     ${botonesVisita(v)}${panelAccion(v)}
   </div>`;
 }
+function tarjetaSunat(c){
+  if (!c.sunat_direccion) return "";
+  const lejos = c.sunat_metros == null || c.sunat_metros >= 300;
+  if (!lejos) return "";
+  const dist = c.sunat_metros == null ? "" :
+    c.sunat_metros < 1000 ? `a ${c.sunat_metros} m de la dirección de arriba`
+    : `a ${(Math.round(c.sunat_metros/100)/10).toFixed(1).replace(".", ",")} km de la dirección de arriba`;
+  return `<div class="card sunat">
+    <div class="eyebrow">Segunda dirección · SUNAT</div>
+    <h2>${esc(c.sunat_direccion)}</h2>
+    <div class="nota">Es el domicilio que el titular declara ante SUNAT${dist ? " · " + dist : ""}. Si en la dirección de arriba no está el comercio, prueba acá.</div>
+    ${c.sunat_estado ? `<div class="aprox" style="margin-top:8px">En SUNAT este RUC figura en ${esc(c.sunat_estado.toLowerCase())}</div>` : ""}
+    ${c.sunat_lat != null ? `<div class="nav2">
+        <a class="btn btn-sec" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${c.sunat_lat},${c.sunat_lng}" target="_blank" rel="noopener">${ICON.pin} Ir con Google Maps</a>
+        <a class="btn btn-waze" href="https://waze.com/ul?ll=${c.sunat_lat},${c.sunat_lng}&navigate=yes" target="_blank" rel="noopener">${ICON.pin} Waze</a>
+      </div>`
+      : `<div class="nota" style="margin-top:8px">No se pudo ubicar esta dirección en el mapa; búscala por el texto.</div>`}
+  </div>`;
+}
+
 function vistaAvance(){
   cargarAvance();
   const tit = S.admin ? "Avance del equipo" : "Mi avance";
