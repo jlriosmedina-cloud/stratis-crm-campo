@@ -217,6 +217,23 @@ textarea.campo{min-height:78px;resize:vertical}
 .reglas li{margin:0 0 7px}
 .reglas{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--texto)}
 .reglas b{color:var(--ink)}
+
+/* ---- ubicación de la visita ---- */
+.ubi-fila{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-top:7px}
+.ubi{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--azul);text-decoration:none;background:var(--azul-t);padding:5px 9px;border-radius:9px}
+.ubi svg{flex:none}
+/* ---- actividad del equipo ---- */
+.dias{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.dias button{background:var(--tarjeta);border:1px solid var(--linea);border-radius:11px;padding:9px 6px;font-size:13px;font-weight:700;color:var(--texto)}
+.dias button.on{border-color:var(--azul);background:var(--azul-t);color:var(--azul)}
+.act{padding:12px 0;border-top:1px solid var(--linea)}
+.act:first-of-type{border-top:0;padding-top:4px}
+.act .h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.act .h b{font-size:14px;color:var(--ink);font-weight:700}
+.act .h span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700}
+.act .q{font-size:12.5px;color:var(--texto);margin-top:2px}
+.act .c{font-size:12.5px;color:var(--muted);margin-top:4px}
+.lejos{color:var(--ambar);font-weight:700}
 </style>
 
 </head><body>
@@ -231,7 +248,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "56cd9d";
+const BUILD = "806be9";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -247,7 +264,7 @@ const ESTADOS = {
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", cola:leerCola() };
+  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", act:null, actErr:"", actDia:"hoy", cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -288,6 +305,7 @@ const ICON = {
   avance:'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
   reloj:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  act:'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
   atras:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>'
 };
 
@@ -309,7 +327,7 @@ async function cargar(){
   S.cargando = false; pintar(); vaciarCola();
 }
 async function historial(cid){
-  const { data } = await sb.from("v2_visitas").select("visitado_en,con,motivo,que,decision,equipo,fecha_reagenda,comentario,lat").eq("customer_id", cid).is("anulada_en", null).order("visitado_en", { ascending:false });
+  const { data } = await sb.rpc("v2_visitas_de", { p_customer_id: cid });
   S.hist[cid] = data || []; S._mantenerScroll = true; pintar();
 }
 async function enviar(v){
@@ -326,7 +344,19 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.`); recargarBase(); }
 }
-async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } S.avance = null; }
+async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; }
+async function cargarActividad(){
+  if (S._actCargando) return;
+  S._actCargando = true; S.actErr = "";
+  const hoy = new Date().toLocaleDateString("en-CA", { timeZone:"America/Lima" });
+  const menos = n => { const d = new Date(new Date(hoy + "T12:00:00Z").getTime() - n*86400000); return d.toISOString().slice(0,10); };
+  const arg = S.actDia === "hoy" ? { p_desde: hoy } : S.actDia === "ayer" ? { p_desde: menos(1), p_hasta: menos(1) }
+            : { p_desde: (S.periodo && S.periodo.ini) || menos(30), p_hasta: hoy };
+  const { data, error } = await sb.rpc("v2_actividad", arg);
+  S._actCargando = false;
+  if (error){ S.actErr = error.message || String(error); } else { S.act = data || []; }
+  S._mantenerScroll = true; pintar();
+}
 async function cargarAvance(){
   if (S.avance || S._avanceCargando) return;
   S._avanceCargando = true; S.avanceErr = "";
@@ -365,6 +395,7 @@ function pintar(){
   else if (S.vista === "base") h = vistaBase();
   else if (S.vista === "rutas") h = vistaRutas();
   else if (S.vista === "avance") h = vistaAvance();
+  else if (S.vista === "actividad") h = vistaActividad();
   h += nav();
   if (S.reg) h += hojaRegistro();
   if (S.toast) h += `<div class="toast" role="status"><div>${S.toast}</div></div>`;
@@ -388,7 +419,9 @@ function vistaIngreso(){
 }
 function nav(){
   const b = (v, ico, t) => `<button data-vista="${v}" class="${S.vista===v && !S.ficha ? "on":""}" aria-label="${t}">${ico}<span>${t}</span></button>`;
-  const fab = S.admin ? `<button class="fab" style="background:var(--linea);box-shadow:none" disabled aria-label="Solo ejecutivos registran visitas">${ICON.mas}</button>` : `<button class="fab" data-registrar="" aria-label="Registrar visita">${ICON.mas}</button>`;
+  const fab = S.admin
+    ? `<button class="fab${S.vista==="actividad" && !S.ficha ? " on":""}" data-vista="actividad" aria-label="Actividad del equipo">${ICON.act}</button>`
+    : `<button class="fab" data-registrar="" aria-label="Registrar visita">${ICON.mas}</button>`;
   return `<nav class="abajo">${b("inicio",ICON.casa,"Inicio")}${b("base",S.admin?ICON.lista:ICON.lista,S.admin?"Base":"Mi base")}${fab}${b("rutas",ICON.ruta,"Rutas")}${b("avance",ICON.avance,S.admin?"Avance":"Mi avance")}</nav>`;
 }
 function cabeceraMenu(){
@@ -413,7 +446,7 @@ function vistaInicio(){
       </div>
     </div>
     <div class="cuerpo">
-      ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} visita(s) guardadas en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
+      ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} ${S.cola.length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
       ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
         <div class="nota">Mientras se termina la asignación, cualquier ejecutivo puede visitar un comercio libre. El primero que registra la visita se queda con él y desde ahí aparece solo en su base.</div>
@@ -430,6 +463,7 @@ function vistaInicio(){
       <div class="accesos">
         <button class="acceso" data-vista="base"><span class="ico" style="background:var(--azul-t);color:var(--azul)">${ICON.lista}</span><b>${S.admin?"Base":"Mi base"}</b><small>${m.total} comercios asignados</small></button>
         <button class="acceso" data-vista="rutas"><span class="ico" style="background:var(--naranja-t);color:var(--naranja)">${ICON.ruta}</span><b>Rutas</b><small>${rs.length} grupos de visita</small></button>
+        ${S.admin ? "" : `<button class="acceso" data-vista="actividad" style="grid-column:1/-1;min-height:0;flex-direction:row;align-items:center;gap:12px"><span class="ico" style="background:var(--verde-t);color:var(--verde)">${ICON.pin}</span><b>Lo que registré</b><small style="margin-left:auto">hoy y en el periodo</small></button>`}
       </div>
       <div class="nota" style="text-align:center">versión ${BUILD}</div>
     </div></div>`;
@@ -535,10 +569,27 @@ function vistaFicha(c){
             <button class="btn btn-pri btn-full" data-guardar-datos="${esc(c.customer_id)}">Guardar corrección</button></div>`
           : `<div class="nota" style="margin-top:6px">Si la dirección o el nombre no coinciden con lo que ves en la calle, corrígelos aquí.</div>`}
       </div>
-      <div class="card"><h2>Visitas en este periodo</h2>
-        ${!h ? `<div class="nota">Cargando…</div>` : h.length ? `<div class="hist">${h.map(v => `<div><b>${fechaCorta(v.visitado_en)} · ${horaCorta(v.visitado_en)}</b> · ${esc(v.que)}${v.motivo ? " (" + esc(v.motivo.toLowerCase()) + ")" : ""}${v.decision ? " · " + esc(v.decision) : ""}${v.equipo ? " · equipo: " + esc(v.equipo) : ""}${v.fecha_reagenda ? " · vuelve el " + fISO(v.fecha_reagenda) : ""}${v.lat == null ? " · <span style='color:var(--rojo)'>sin ubicación</span>" : ""}<br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}</span></div>`).join("")}</div>` : `<div class="nota">Todavía no lo visitas en este periodo.</div>`}
+      <div class="card"><h2>Visitas de este periodo</h2>
+        ${!h ? `<div class="nota">Cargando…</div>` : h.length ? `<div class="hist">${h.map(lineaVisita).join("")}</div>`
+          : `<div class="nota">${S.admin ? "Todavía nadie lo visita en este periodo." : "Todavía no lo visitas en este periodo."}</div>`}
       </div>
     </div></div>`;
+}
+const urlPunto = (lat, lng) => "https://www.google.com/maps/search/?api=1&query=" + lat + "," + lng;
+const textoDistancia = d => d == null ? "" : d < 1000 ? d + " m del punto del comercio" : (Math.round(d/100)/10).toFixed(1).replace(".", ",") + " km del punto del comercio";
+function lineaVisita(v){
+  const enc = [esc(v.que), v.motivo ? "(" + esc(v.motivo.toLowerCase()) + ")" : "", v.decision ? "· " + esc(v.decision) : "",
+               v.equipo ? "· equipo: " + esc(v.equipo) : "", v.fecha_reagenda ? "· vuelve el " + fISO(v.fecha_reagenda) : ""].filter(Boolean).join(" ");
+  const ubi = v.lat == null
+    ? `<span style="color:var(--rojo);font-weight:600">Sin ubicación</span>`
+    : `<a href="${urlPunto(v.lat, v.lng)}" target="_blank" rel="noopener" class="ubi">${ICON.pin} Ver dónde se registró</a>
+       <span class="nota">±${Math.round(Number(v.precision_m) || 0)} m${v.distancia_m == null ? "" : " · a " + textoDistancia(v.distancia_m)}</span>`;
+  return `<div>
+    <b>${fechaCorta(v.visitado_en)} · ${horaCorta(v.visitado_en)}</b> · ${enc}
+    ${S.admin && v.ejecutivo ? `<br><span class="nota">Registró ${esc(v.ejecutivo)}</span>` : ""}
+    <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}</span>
+    <div class="ubi-fila">${ubi}</div>
+  </div>`;
 }
 function vistaAvance(){
   cargarAvance();
@@ -605,6 +656,59 @@ function vistaAvance(){
       <div class="nota">BBVA mide a Stratis con 80 % de facturación de POS reactivados y 20 % de recupero, sobre la base completa. Falta cargar la facturación y los recuperos confirmados para calcularla aquí; este periodo el recupero va en marcha blanca.</div></div>
     ${a0.sin_parametros ? `<div class="card"><h2>Este periodo no tiene parámetros cargados</h2><div class="nota">Los indicadores se cuentan igual, pero el ponderado y el bono necesitan los pesos, las metas y la escala del periodo.</div></div>` : tarjetaParametros(a0)}
     ${reglas}`);
+}
+
+function vistaActividad(){
+  if (S.act === null && !S._actCargando) cargarActividad();
+  const tit = S.admin ? "Actividad del equipo" : "Lo que registré";
+  const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">Fecha y hora del celular al momento de registrar</div></div>`;
+  const dias = `<div class="dias">
+    ${[["hoy","Hoy"],["ayer","Ayer"],["periodo","El periodo"]].map(([k,t]) =>
+      `<button data-dia="${k}" class="${S.actDia===k?"on":""}">${t}</button>`).join("")}</div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${dias}${c}</div></div>`;
+
+  if (S.actErr) return envolver(`<div class="card"><h2>No se pudo cargar la actividad</h2>
+    <div class="nota">${esc(S.actErr)}</div>
+    <button class="btn btn-sec btn-full" style="margin-top:10px" data-reintentar-act>Reintentar</button></div>`);
+  if (S.act === null) return envolver(`<div class="card"><div class="nota">Cargando…</div></div>`);
+  if (!S.act.length) return envolver(`<div class="card"><h2>Todavía no hay visitas registradas${S.actDia==="hoy"?" hoy":S.actDia==="ayer"?" ayer":" en el periodo"}</h2>
+    <div class="nota">Aquí van a aparecer apenas ${S.admin ? "el equipo empiece a registrar" : "registres tu primera visita"}.</div></div>`);
+
+  const porEjec = new Map();
+  S.act.forEach(v => porEjec.set(v.ejecutivo, (porEjec.get(v.ejecutivo)||0) + 1));
+  const sinUbi = S.act.filter(v => v.lat == null).length;
+  const lejos = S.act.filter(v => v.distancia_m != null && v.distancia_m >= 1000).length;
+
+  const grupos = [];
+  S.act.forEach(v => {
+    const d = fechaCorta(v.visitado_en);
+    if (!grupos.length || grupos[grupos.length-1].d !== d) grupos.push({ d, vs:[] });
+    grupos[grupos.length-1].vs.push(v);
+  });
+
+  return envolver(`
+    <div class="card">
+      <div class="eyebrow">${S.act.length} ${S.act.length === 1 ? "visita registrada" : "visitas registradas"}</div>
+      <h2>${[...porEjec.entries()].map(([n,c]) => esc(n) + " " + c).join(" · ")}</h2>
+      ${sinUbi || lejos ? `<div class="nota" style="margin-top:6px">${[sinUbi ? sinUbi + " sin ubicación" : "", lejos ? lejos + " a más de 1 km del punto que tenemos del comercio" : ""].filter(Boolean).join(" · ")}.</div>` : `<div class="nota" style="margin-top:6px">Todas con ubicación.</div>`}
+    </div>
+    ${grupos.map(g => `<div class="card">
+      <div class="eyebrow">${esc(g.d)}</div>
+      ${g.vs.map(v => `<div class="act">
+        <div class="h"><b>${esc(v.comercio)}</b><span>${horaCorta(v.visitado_en)}</span></div>
+        <div class="q">${esc(v.que)}${v.motivo ? " (" + esc(v.motivo.toLowerCase()) + ")" : ""}${v.decision ? " · " + esc(v.decision) : ""}${S.admin ? " · " + esc(v.ejecutivo) : ""}</div>
+        <div class="c">${esc([v.distrito, v.direccion].filter(Boolean).join(" · "))}</div>
+        ${v.comentario ? `<div class="c">${esc(v.comentario)}</div>` : ""}
+        <div class="ubi-fila">
+          ${v.lat == null ? `<span style="color:var(--rojo);font-weight:600">Sin ubicación</span>`
+            : `<a href="${urlPunto(v.lat, v.lng)}" target="_blank" rel="noopener" class="ubi">${ICON.pin} Ver en el mapa</a>
+               <span class="nota">±${Math.round(Number(v.precision_m)||0)} m${v.distancia_m == null ? "" : ` · <span class="${v.distancia_m >= 1000 ? "lejos" : ""}">a ${esc(textoDistancia(v.distancia_m))}</span>`}</span>`}
+          <button class="btn btn-lin" style="padding:4px 8px;font-size:12px" data-ficha="${esc(v.customer_id)}">Abrir la ficha</button>
+        </div>
+      </div>`).join("")}
+    </div>`).join("")}
+    <div class="card"><h2>Cómo leer la distancia</h2>
+      <div class="nota">Es cuánto hay entre donde estuvo el ejecutivo y el punto que el CRM tenía del comercio. La mayoría de las direcciones se ubicaron a nivel de calle, así que unos cientos de metros son normales en avenidas largas. Lo que vale mirar son los casos de varios kilómetros: casi siempre es la dirección la que está mal, no la visita.</div></div>`);
 }
 
 function tarjetaPuntaje(a){
@@ -744,6 +848,8 @@ function enlazar(){
   p.querySelectorAll("[data-salir]").forEach(b => b.onclick = async () => { await sb.auth.signOut(); location.reload(); });
   p.querySelectorAll("[data-reintentar]").forEach(b => b.onclick = cargar);
   p.querySelectorAll("[data-reintentar-avance]").forEach(b => b.onclick = () => { S.avanceErr = ""; S.avance = null; cargarAvance(); });
+  p.querySelectorAll("[data-reintentar-act]").forEach(b => b.onclick = () => { S.actErr = ""; S.act = null; cargarActividad(); });
+  p.querySelectorAll("[data-dia]").forEach(b => b.onclick = () => { S.actDia = b.dataset.dia; S.act = null; cargarActividad(); });
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => { S.vista = b.dataset.vista; S.ficha = null; pintar(); });
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; pintar(); });
