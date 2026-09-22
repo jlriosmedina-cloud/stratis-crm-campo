@@ -2178,7 +2178,7 @@ tr.lf-tot td{border-top:2px solid var(--ink);font-weight:700;padding-top:10px}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const BUILD = { sello:"21/09/2026 15:02", huella:"70e4a0" };
+const BUILD = { sello:"21/09/2026 21:49", huella:"7407e1" };
 /* =========================================================================
    STRATIS CRM — Campaña BBVA Adquirencia
    Núcleo: conexión a Supabase, reglas de negocio y estado
@@ -3694,13 +3694,41 @@ const versionDe = p => PARAMS.filter(x => String(x.vigente_desde) <= String(p))
 const selloDe = p => CIERRES_PERIODO.find(x => x.periodo === p && !x.anulado_en) || null;
 const periodoSellado = p => !!selloDe(p);
 
-function ventanaPeriodo(p){
+/* ---- El cierre movido ----------------------------------------------------
+   Jose, 21/09/2026: «todo lo que ha ingresado hoy cuente para el periodo
+   anterior, ya que hemos cambiado toda la métrica». El periodo 2 cerraba el
+   18/09 y el modelo nuevo arranca con el periodo 3; lo trabajado el sábado 19,
+   el domingo 20 y el lunes 21 pertenece todavía al esquema viejo. En vez de
+   refechar gestiones —que es cambiar lo que pasó—, se corre el CIERRE: la
+   config «cierre_movido» = {"2026-09":"2026-09-21"} hace que el periodo 2
+   termine el 21 y el 3 empiece el 22. Un cierre movido no puede adelantarse:
+   una fecha anterior al 18 no acorta nada. */
+function finMovido(p){
+  const x = String((CONFIG.cierreMovido || {})[p] || "").slice(0,10);
+  return x;
+}
+function ventanaBase(p){
   const [a, m] = String(p || "").split("-").map(Number);
   if (!a || !m) return { ini:"", fin:"" };
   let am = m - 1, aa = a; if (am === 0){ am = 12; aa -= 1; }
   let ini = `${aa}-${pad(am)}-${pad(PROYECTO.corte + 1)}`;
   if (ini < PROYECTO.inicio) ini = PROYECTO.inicio;   // el primero arranca con el proyecto
   return { ini, fin: `${a}-${pad(m)}-${pad(PROYECTO.corte)}` };
+}
+function ventanaPeriodo(p){
+  const v = ventanaBase(p);
+  if (!v.ini) return v;
+  const mf = finMovido(p);
+  if (mf && mf > v.fin) v.fin = mf;
+  /* El anterior corrió su cierre: este arranca el día siguiente. */
+  const [a, m] = String(p).split("-").map(Number);
+  const pa = m === 1 ? `${a-1}-12` : `${a}-${pad(m-1)}`;
+  const mfa = finMovido(pa), fa = ventanaBase(pa).fin;
+  if (mfa && fa && mfa > fa){
+    const sig = new Date(new Date(mfa + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0,10);
+    if (sig > v.ini) v.ini = sig;
+  }
+  return v;
 }
 /* «enPeriodo» ya está tomado por el filtro de fechas de Registros; esta es la
    ventana del bono, que es otra cosa. */
@@ -3754,8 +3782,12 @@ const gestionDelPeriodo = (r, p) =>
 function periodoDe(iso){
   const f = String(iso || "").slice(0,10); if (!f) return "";
   let [a, m, d] = f.split("-").map(Number);
+  const pBase = `${a}-${pad(m)}`;
   if (d > PROYECTO.corte){ m += 1; if (m === 13){ m = 1; a += 1; } }
-  return `${a}-${pad(m)}`;
+  const p = `${a}-${pad(m)}`;
+  /* Del 19 en adelante es del siguiente, salvo que el cierre se haya movido. */
+  if (p !== pBase && f <= (finMovido(pBase) || "")) return pBase;
+  return p;
 }
 const periodoHoy = () => periodoDe(hoyISO());
 /* En qué mes del proyecto estamos: 1 para el primer periodo del bono, 5 para
@@ -5573,6 +5605,9 @@ async function cargarDatos(){
     }
     /* El dato oficial de BBVA sobre los comercios trabajados, que entrega el
        banco en su lámina y no sale del CRM. Lo usa la hoja de campaña. */
+    if (clave === "cierre_movido"){
+      try { CONFIG.cierreMovido = JSON.parse(valor) || {}; } catch (e){ CONFIG.cierreMovido = {}; }
+    }
     if (clave === "facturacion_bbva_oficial"){
       try { CONFIG.factBbva = JSON.parse(valor) || null; } catch (e){ CONFIG.factBbva = null; }
     }
