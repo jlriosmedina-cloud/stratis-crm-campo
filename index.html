@@ -7,24 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap">
 <style>
-:root{
+:root{ color-scheme:light;
   --navy:#0C1137; --navy-2:#232C86; --azul:#3B43FB; --naranja:#F86F35; --verde:#0BBC96;
   --ink:#1b2340; --texto:#3F5073; --muted:#7d89a3; --linea:#D3DBEB; --suelo:#EEF1F8; --tarjeta:#FFFFFF;
   --azul-t:#DDE4F4; --naranja-t:#FDE6DA; --verde-t:#DDF5EE; --rojo:#D6455D; --rojo-t:#FADDE2; --ambar:#B7791F; --ambar-t:#FBEFD5;
   --cabecera:#0C1137; --cabecera-txt:#FFFFFF; --cabecera-sub:#AEB6E8; --sombra:0 6px 18px rgba(12,17,55,.08);
   --marco:#dfe4ef;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --ink:#E9ECF7; --texto:#C1C8DC; --muted:#8C96B2; --linea:#2A3259; --suelo:#070B24; --tarjeta:#11173F;
-    --azul-t:#1E2566; --naranja-t:#3A2217; --verde-t:#0E3230; --rojo-t:#3A1820; --ambar-t:#35290F;
-    --azul:#7C82FF; --cabecera:#11173F; --cabecera-sub:#9aa3d8; --sombra:0 6px 18px rgba(0,0,0,.35); --marco:#03050f;
-  }
-}
-:root[data-theme="dark"]{
-  --ink:#E9ECF7; --texto:#C1C8DC; --muted:#8C96B2; --linea:#2A3259; --suelo:#070B24; --tarjeta:#11173F;
-  --azul-t:#1E2566; --naranja-t:#3A2217; --verde-t:#0E3230; --rojo-t:#3A1820; --ambar-t:#35290F;
-  --azul:#7C82FF; --cabecera:#11173F; --cabecera-sub:#9aa3d8; --sombra:0 6px 18px rgba(0,0,0,.35); --marco:#03050f;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -81,8 +69,6 @@ button{cursor:pointer}
 .e-rea{background:var(--verde-t);color:#079477}
 .e-can{background:var(--rojo-t);color:var(--rojo)}
 .e-seg{background:var(--suelo);color:var(--texto);border:1px solid var(--linea)}
-:root[data-theme="dark"] .e-esp{color:#ff9a6b} :root[data-theme="dark"] .e-rea{color:#34d6b1}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .e-esp{color:#ff9a6b} :root:not([data-theme="light"]) .e-rea{color:#34d6b1} }
 
 /* Mi base */
 .barra{position:sticky;top:0;z-index:5;background:var(--cabecera);padding:16px 16px 14px;color:#fff}
@@ -94,8 +80,6 @@ button{cursor:pointer}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;border:1px solid var(--linea);background:var(--tarjeta);color:var(--texto);border-radius:999px;padding:7px 13px;font-size:12.5px;font-weight:600}
 .chip.on{background:var(--navy);color:#fff;border-color:var(--navy)}
-:root[data-theme="dark"] .chip.on{background:var(--azul);border-color:var(--azul)}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .chip.on{background:var(--azul);border-color:var(--azul)} }
 .filtros{display:flex;gap:8px;padding:8px 16px 0}
 .filtros select{flex:1;min-width:0;border:1px solid var(--linea);background:var(--tarjeta);border-radius:10px;padding:9px 10px;font-size:13px}
 .lista{display:flex;flex-direction:column;gap:10px;padding:12px 16px}
@@ -194,6 +178,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .ingreso .quien button small{color:var(--cabecera-sub);font-weight:500}
 .recordar{display:flex;gap:10px;align-items:center;font-size:13px;color:var(--cabecera-sub)}
 @media (prefers-reduced-motion:no-preference){ .hoja{animation:sube .22s ease-out} @keyframes sube{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}} }
+.nav2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.btn-waze{background:#33CCFF;color:#0C1137}
+.aprox{font-size:11.5px;color:var(--ambar);font-weight:600}
 </style>
 </head><body>
 <div class="tel" id="app"><div id="pantalla" style="flex:1;display:flex;flex-direction:column;min-height:0"></div></div>
@@ -207,7 +194,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "eb3dd9";
+const BUILD = "66df3b";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -240,6 +227,19 @@ function leerCola(){ try { return JSON.parse(localStorage.getItem("stratis-v2-co
 function guardarCola(){ try { localStorage.setItem("stratis-v2-cola", JSON.stringify(S.cola)); } catch(e){} }
 const nombreDe = c => c.nombre_comercial || c.razon_social;
 const dirDe = c => c.direccion_corregida || c.direccion || "";
+const refDe = c => c.referencia || c.referencia_base || "";
+const tieneGeo = c => c.geo_lat != null && c.geo_lng != null && c.geo_calidad !== "distrito";
+const destinoTxt = c => [dirDe(c), c.distrito, "Lima"].filter(Boolean).join(", ");
+const urlGoogle = c => "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
+const urlWaze = c => tieneGeo(c) ? `https://waze.com/ul?ll=${c.geo_lat},${c.geo_lng}&navigate=yes` : "https://waze.com/ul?navigate=yes&q=" + encodeURIComponent(destinoTxt(c));
+function urlRuta(cs){
+  const ps = cs.filter(c => c.estado === "por" || c.estado === "uno" || c.estado === "rag").slice(0, 10);
+  const lista = (ps.length ? ps : cs.slice(0, 10)).map(c => tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
+  if (!lista.length) return "#";
+  const dest = lista[lista.length-1], way = lista.slice(0, -1);
+  return "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(dest) + (way.length ? "&waypoints=" + encodeURIComponent(way.join("|")) : "");
+}
+const CALIDAD = { comercio:"ubicado por el nombre del comercio", numero:"ubicado por calle y número", calle:"ubicación aproximada: la calle", lugar:"ubicación aproximada: la zona", distrito:"solo el distrito: confirma la dirección en campo" };
 function avisar(msg, ms){ S.toast = msg; pintar(); clearTimeout(avisar._t); avisar._t = setTimeout(() => { S.toast = null; pintar(); }, ms || 3600); }
 
 const ICON = {
@@ -376,6 +376,7 @@ function vistaInicio(){
         <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
+        <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
         <div class="paradas">${rutaHoy.cs.slice(0,12).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(dirDe(c))}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div>
       </div>` : ""}
       ${volver.length ? `<div class="card"><div class="eyebrow" style="color:var(--ambar)">Vale la pena volver</div><h2>${volver.length} comercio(s) con un solo día de transacción</h2><div class="nota">Un segundo día distinto antes del cierre los convierte en reactivados.</div>
@@ -425,6 +426,7 @@ function vistaBase(){
       <select id="fRuta" aria-label="Ruta"><option value="">Todas las rutas</option>${rs.map(r => `<option ${S.filtroRuta===r.nombre?"selected":""}>${esc(r.nombre)}</option>`).join("")}</select>
     </div>
     ${S.admin ? `<div class="filtros"><select id="fEjec" aria-label="Ejecutivo"><option value="">Todos los ejecutivos</option>${ejec.map(e => `<option value="${esc(e)}" ${S.filtroEjecutivo===e?"selected":""}>${esc(e.split("@")[0])}</option>`).join("")}</select></div>` : ""}
+    ${S.filtroRuta ? `<div style="padding:10px 16px 0"><a class="btn btn-sec btn-full" href="${urlRuta(filtrar())}" target="_blank" rel="noopener">${ICON.ruta} Abrir esta ruta en Google Maps</a></div>` : ""}
     <div class="conteo">${total} de ${S.base.length} comercios${total > 300 ? " · se muestran los primeros 300, usa el buscador" : ""}</div>
     <div class="lista">${lista.length ? lista.map(tarjeta).join("") : `<div class="vacio">${S.base.length ? "No hay comercios con este filtro." : "Tu base todavía no está cargada."}</div>`}</div>
   </div>`;
@@ -435,14 +437,15 @@ function vistaRutas(){
     <div class="barra"><h1>Rutas</h1><div style="color:var(--cabecera-sub);font-size:13px">Grupos de comercios cercanos: un día de trabajo cada uno.</div></div>
     ${!S.base.some(c => c.ruta) ? `<div class="lista"><div class="vacio">Las rutas se arman cuando llegue la base completa con distritos y direcciones. Mientras tanto, busca el comercio en ${S.admin?"Base":"Mi base"}.</div></div>` : ""}
     <div class="lista">${S.base.some(c => c.ruta) && rs.length ? rs.map(r => { const hechos = r.cs.filter(c => c.visitas > 0).length;
-      return `<button class="com" data-ruta="${esc(r.nombre)}"><div class="l1"><span>${r.cs.length} comercios</span><span class="pill ${hechos===r.cs.length?"e-rea":"e-por"}">${hechos} de ${r.cs.length} visitados</span></div><b>${esc(r.nombre)}</b>
-        <div class="pista"><i style="width:${r.cs.length?hechos/r.cs.length*100:0}%;background:var(--naranja)"></i></div></button>`; }).join("") : ""}</div>
+      return `<div class="com"><div class="l1"><span>${r.cs.length} comercios</span><span class="pill ${hechos===r.cs.length?"e-rea":"e-por"}">${hechos} de ${r.cs.length} visitados</span></div><b>${esc(r.nombre)}</b>
+        <div class="pista"><i style="width:${r.cs.length?hechos/r.cs.length*100:0}%;background:var(--naranja)"></i></div>
+        <div class="nav2"><button class="btn btn-lin" data-ruta="${esc(r.nombre)}">Ver comercios</button><a class="btn btn-sec" href="${urlRuta(r.cs)}" target="_blank" rel="noopener">Google Maps</a></div></div>`; }).join("") : ""}</div>
   </div>`;
 }
 function vistaFicha(c){
   if (!c){ S.ficha = null; return vistaInicio(); }
   const e = ESTADOS[c.estado] || ESTADOS.por;
-  const mapa = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(dirDe(c) + ", " + (c.distrito||"") + ", Lima");
+
   const editando = S.editando === c.customer_id;
   const h = S.hist[c.customer_id];
   if (!h) historial(c.customer_id);
@@ -460,7 +463,7 @@ function vistaFicha(c){
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
           <dt>Dirección</dt><dd>${esc(dirDe(c))}</dd>
-          ${c.referencia ? `<dt>Referencia</dt><dd>${esc(c.referencia)}</dd>` : ""}
+          ${refDe(c) ? `<dt>Referencia</dt><dd>${esc(refDe(c))}</dd>` : ""}
           ${c.contacto ? `<dt>Contacto</dt><dd>${esc(c.contacto)}</dd>` : ""}
           <dt>Distrito</dt><dd>${esc(c.distrito)}</dd>
           <dt>Provincia · Depto.</dt><dd>${esc(c.provincia)} · ${esc(c.departamento)}</dd>
@@ -470,9 +473,11 @@ function vistaFicha(c){
         <div class="tasas"><div class="tasa"><b>${tasa(c.tasa_debito)}</b><small>Débito</small></div><div class="tasa"><b>${tasa(c.tasa_credito)}</b><small>Crédito</small></div><div class="tasa"><b>${tasa(c.tasa_foranea)}</b><small>Foránea</small></div></div>
       </div>
       <div class="btns">
-        ${S.admin ? `<span></span>` : `<button class="btn btn-pri" data-registrar="${esc(c.customer_id)}">Registrar visita</button>`}
-        <a class="btn btn-sec" href="${mapa}" target="_blank" rel="noopener">${ICON.pin} Cómo llegar</a>
+        <a class="btn btn-sec" href="${urlGoogle(c)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a>
+        <a class="btn btn-waze" href="${urlWaze(c)}" target="_blank" rel="noopener">${ICON.pin} Waze</a>
       </div>
+      ${c.geo_calidad ? `<div class="aprox" style="text-align:center;margin-top:-6px">${esc(CALIDAD[c.geo_calidad] || "")}</div>` : ""}
+      ${S.admin ? "" : `<button class="btn btn-pri btn-full" data-registrar="${esc(c.customer_id)}">Registrar visita</button>`}
       <div class="card">
         <div class="fila-ent"><h2>Datos del comercio</h2><button class="btn btn-lin" style="padding:8px 12px;font-size:13px" data-editar="${esc(c.customer_id)}">${editando ? "Cancelar" : "Corregir datos"}</button></div>
         ${editando ? `<div style="display:grid;gap:10px;margin-top:10px">
