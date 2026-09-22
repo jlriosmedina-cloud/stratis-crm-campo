@@ -207,7 +207,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "c0886d";
+const BUILD = "eb3dd9";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -223,7 +223,7 @@ const ESTADOS = {
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", q:"", reg:null, toast:null, editando:null, hist:{}, cola:leerCola() };
+  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -290,12 +290,14 @@ async function vaciarCola(){
 }
 async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } }
 
+const miCorreo = () => (S.yo && S.yo.correo || "").toLowerCase();
+const esMio = c => S.admin ? !!c.correo : c.correo === miCorreo();
 function metricas(){
-  const mios = S.base;
+  const mios = S.base.filter(esMio);
   const visitados = mios.filter(c => c.visitas_validas > 0).length;
   const reactivados = mios.filter(c => c.estado === "rea").length;
   const conv = visitados ? reactivados / visitados * 100 : 0;
-  return { visitados, reactivados, conv, total: mios.length };
+  return { visitados, reactivados, conv, total: mios.length, libres: S.base.filter(c => !c.correo).length };
 }
 function rutas(){
   const m = new Map();
@@ -349,8 +351,10 @@ function cabeceraMenu(){
 function vistaInicio(){
   const m = metricas();
   const rs = rutas();
-  const rutaHoy = rs.find(r => r.cs.some(c => c.estado === "por")) || rs[0];
-  const volver = S.base.filter(c => c.estado === "uno");
+  const hayRutas = S.base.some(c => c.ruta);
+  const rutaHoy = hayRutas ? (rs.find(r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)))) || rs[0]) : null;
+  const mios = S.base.filter(esMio).sort((a,b) => String(b.ultima_visita||"").localeCompare(String(a.ultima_visita||"")));
+  const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
   const meta = S.admin ? 640 : 160, metaR = S.admin ? 160 : 40;
   return `<div class="vista">
@@ -365,6 +369,11 @@ function vistaInicio(){
     <div class="cuerpo">
       ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} visita(s) guardadas en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
+      ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
+        <div class="nota">Mientras se termina la asignación, cualquier ejecutivo puede visitar un comercio libre. El primero que registra la visita se queda con él y desde ahí aparece solo en su base.</div>
+        <button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base">Buscar un comercio</button></div>` : ""}
+      ${!hayRutas && mios.length ? `<div class="card ruta-hoy"><div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Comercios tomados" : "Tus comercios"}</div><h2>Últimos visitados</h2></div><span class="pill e-por">${mios.length}</span></div>
+        <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
         <div class="paradas">${rutaHoy.cs.slice(0,12).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(dirDe(c))}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div>
@@ -385,6 +394,8 @@ function filtrar(){
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
+    if (S.filtroDueno === "mios" && !esMio(c)) return false;
+    if (S.filtroDueno === "libres" && c.correo) return false;
     if (q && !(String(c.customer_id).includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
     return true;
   });
@@ -392,9 +403,9 @@ function filtrar(){
 function tarjeta(c){
   const e = ESTADOS[c.estado] || ESTADOS.por;
   return `<button class="com" data-ficha="${c.customer_id}">
-    <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin ? " · " + esc(c.correo.split("@")[0]) : ""}</span><span class="pill ${e.c}">${e.t}</span></div>
+    <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
     <b>${esc(nombreDe(c))}</b>
-    <div class="l3"><span>${esc(c.distrito)} · ${esc(dirDe(c))}</span><span>${c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
+    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
   </button>`;
 }
 function vistaBase(){
@@ -407,6 +418,7 @@ function vistaBase(){
   return `<div class="vista">
     <div class="barra"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>
       <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por customer ID o razón social" value="${esc(S.q)}" autocomplete="off"></label></div>
+    ${S.base.some(c => !c.correo) ? `<div class="chips">${[["todos","Todos"],["mios",S.admin?"Tomados":"Míos"],["libres","Libres"]].map(([k,t]) => `<button class="chip ${S.filtroDueno===k?"on":""}" data-dueno="${k}">${t}</button>`).join("")}</div>` : ""}
     <div class="chips">${est.map(([k,t]) => `<button class="chip ${S.filtroEstado===k?"on":""}" data-estado="${k}">${t}</button>`).join("")}</div>
     <div class="filtros">
       <select id="fDistrito" aria-label="Distrito"><option value="">Todos los distritos</option>${distritos.map(d => `<option ${S.filtroDistrito===d?"selected":""}>${esc(d)}</option>`).join("")}</select>
@@ -421,9 +433,10 @@ function vistaRutas(){
   const rs = rutas();
   return `<div class="vista">
     <div class="barra"><h1>Rutas</h1><div style="color:var(--cabecera-sub);font-size:13px">Grupos de comercios cercanos: un día de trabajo cada uno.</div></div>
-    <div class="lista">${rs.length ? rs.map(r => { const hechos = r.cs.filter(c => c.visitas > 0).length;
+    ${!S.base.some(c => c.ruta) ? `<div class="lista"><div class="vacio">Las rutas se arman cuando llegue la base completa con distritos y direcciones. Mientras tanto, busca el comercio en ${S.admin?"Base":"Mi base"}.</div></div>` : ""}
+    <div class="lista">${S.base.some(c => c.ruta) && rs.length ? rs.map(r => { const hechos = r.cs.filter(c => c.visitas > 0).length;
       return `<button class="com" data-ruta="${esc(r.nombre)}"><div class="l1"><span>${r.cs.length} comercios</span><span class="pill ${hechos===r.cs.length?"e-rea":"e-por"}">${hechos} de ${r.cs.length} visitados</span></div><b>${esc(r.nombre)}</b>
-        <div class="pista"><i style="width:${r.cs.length?hechos/r.cs.length*100:0}%;background:var(--naranja)"></i></div></button>`; }).join("") : `<div class="vacio">Las rutas aparecen cuando se carga la base.</div>`}</div>
+        <div class="pista"><i style="width:${r.cs.length?hechos/r.cs.length*100:0}%;background:var(--naranja)"></i></div></button>`; }).join("") : ""}</div>
   </div>`;
 }
 function vistaFicha(c){
@@ -442,8 +455,8 @@ function vistaFicha(c){
     </div>
     <div class="cuerpo">
       <div class="card">
-        <div class="fila-ent"><span class="pill ${e.c}">${e.t}</span><span class="nota">${esc(c.ruta || "")}</span></div>
-        ${e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
+        <div class="fila-ent">${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}<span class="nota">${esc(c.ruta || "")}</span></div>
+        ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
           <dt>Dirección</dt><dd>${esc(dirDe(c))}</dd>
@@ -507,10 +520,10 @@ function hojaRegistro(){
   const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
   const revisita = c && c.visitas > 0;
   let pasos = `<div class="paso"><span class="eyebrow">Comercio</span>${c
-    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)} · ${esc(c.distrito)}</small></div><button data-cambiar-comercio>Cambiar</button></div>
+    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}${c.correo ? "" : " · libre: pasa a tu base al guardar"}</small></div><button data-cambiar-comercio>Cambiar</button></div>
        ${revisita ? `<div class="explica" style="margin-top:8px">Ya lo visitaste en este periodo. La visita queda registrada para el seguimiento, pero no suma otra a las 160.</div>` : ""}`
     : `<input class="campo" id="busca" type="search" placeholder="Customer ID o razón social" value="${esc(r.busca)}" autocomplete="off">
-       <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)} · ${esc(x.distrito)} · ${esc(dirDe(x))}</small></button>`).join("")}</div>`}</div>`;
+       <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
   const gpsTxt = r.gps === "buscando" ? "Tomando ubicación…" : r.gps === "ok" ? `Ubicación tomada ±${r.precision} m` : "Sin ubicación";
   pasos += `<div class="paso"><span class="eyebrow">Se toma solo</span><div class="sello">
       <span class="${r.gps==="ok"?"":"esperando"}">${ICON.pin} ${gpsTxt}</span><span>${ICON.reloj} ${fechaCorta(r.hora)} · ${horaCorta(r.hora)}</span></div>
@@ -563,7 +576,7 @@ async function guardarVisita(){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
       S.cola.push(v); guardarCola(); S.reg = null;
       avisar("Sin señal: la visita quedó guardada en el celular con su hora y ubicación. Se envía sola cuando vuelva la conexión.", 6000);
-    } else { r.enviando = false; avisar("No se guardó: " + esc(e.message), 6000); }
+    } else { r.enviando = false; if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); } avisar("No se guardó: " + esc(e.message), 6000); }
   }
 }
 
@@ -582,6 +595,7 @@ function enlazar(){
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; pintar(); });
   p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
   p.querySelectorAll("[data-estado]").forEach(b => b.onclick = () => { S.filtroEstado = b.dataset.estado; pintar(); });
+  p.querySelectorAll("[data-dueno]").forEach(b => b.onclick = () => { S.filtroDueno = b.dataset.dueno; pintar(); });
   p.querySelectorAll("[data-registrar]").forEach(b => b.onclick = () => nuevoRegistro(b.dataset.registrar || S.ficha));
   p.querySelectorAll("[data-editar]").forEach(b => b.onclick = () => { S.editando = S.editando === b.dataset.editar ? null : b.dataset.editar; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-guardar-datos]").forEach(b => b.onclick = async () => {
