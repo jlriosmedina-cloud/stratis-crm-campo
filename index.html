@@ -246,6 +246,10 @@ textarea.campo{min-height:78px;resize:vertical}
 
 .card.sunat{border:1.5px solid var(--azul-t)}
 .card.sunat h2{font-size:14.5px;margin-bottom:6px}
+
+.fresco{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-4px 2px 2px;
+  font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.fresco .btn.mini{padding:4px 10px;font-size:12px}
 </style>
 
 </head><body>
@@ -260,7 +264,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "a68469";
+const BUILD = "cc75d6";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -276,7 +280,7 @@ const ESTADOS = {
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", act:null, actErr:"", actDia:"hoy", accion:null, cola:leerCola() };
+  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", avanceEn:null, act:null, actErr:"", actEn:null, actDia:"hoy", accion:null, cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -367,15 +371,15 @@ async function cargarActividad(){
             : { p_desde: (S.periodo && S.periodo.ini) || menos(30), p_hasta: hoy };
   const { data, error } = await sb.rpc("v2_actividad", arg);
   S._actCargando = false;
-  if (error){ S.actErr = error.message || String(error); } else { S.act = data || []; }
+  if (error){ S.actErr = error.message || String(error); } else { S.act = data || []; S.actEn = new Date(); }
   S._mantenerScroll = true; pintar();
 }
 async function cargarAvance(){
-  if (S.avance || S._avanceCargando) return;
+  if (S._avanceCargando) return;
   S._avanceCargando = true; S.avanceErr = "";
   const { data, error } = await sb.rpc("v2_avance");
   S._avanceCargando = false;
-  if (error){ S.avanceErr = error.message || String(error); } else { S.avance = data || []; }
+  if (error){ S.avanceErr = error.message || String(error); } else { S.avance = data || []; S.avanceEn = new Date(); }
   S._mantenerScroll = true; pintar();
 }
 
@@ -672,6 +676,10 @@ function lineaVisita(v){
     ${botonesVisita(v)}${panelAccion(v)}
   </div>`;
 }
+const selloFresco = (cuando, cargando, attr) => `<div class="fresco">
+  <span>${cargando ? "Actualizando…" : cuando ? "Actualizado a las " + horaCorta(cuando) : ""}</span>
+  <button class="btn btn-lin mini" ${attr} ${cargando ? "disabled" : ""}>Actualizar</button></div>`;
+
 function tarjetaSunat(c){
   if (!c.sunat_direccion) return "";
   const lejos = c.sunat_metros == null || c.sunat_metros >= 300;
@@ -693,11 +701,11 @@ function tarjetaSunat(c){
 }
 
 function vistaAvance(){
-  cargarAvance();
+  if (S.avance === null) cargarAvance();
   const tit = S.admin ? "Avance del equipo" : "Mi avance";
   const sub = S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)} · quedan ${diasQuedan()} días` : "";
   const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>`;
-  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${c}</div></div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${c}</div></div>`;
 
   if (S.avanceErr) return envolver(`<div class="card"><h2>No se pudo calcular el avance</h2>
     <div class="nota">${esc(S.avanceErr)}</div>
@@ -766,7 +774,7 @@ function vistaActividad(){
   const dias = `<div class="dias">
     ${[["hoy","Hoy"],["ayer","Ayer"],["periodo","El periodo"]].map(([k,t]) =>
       `<button data-dia="${k}" class="${S.actDia===k?"on":""}">${t}</button>`).join("")}</div>`;
-  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${dias}${c}</div></div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${dias}${selloFresco(S.actEn, S._actCargando, "data-refrescar-act")}${c}</div></div>`;
 
   if (S.actErr) return envolver(`<div class="card"><h2>No se pudo cargar la actividad</h2>
     <div class="nota">${esc(S.actErr)}</div>
@@ -965,6 +973,8 @@ function enlazar(){
   p.querySelectorAll("[data-reintentar]").forEach(b => b.onclick = cargar);
   p.querySelectorAll("[data-reintentar-avance]").forEach(b => b.onclick = () => { S.avanceErr = ""; S.avance = null; cargarAvance(); });
   p.querySelectorAll("[data-reintentar-act]").forEach(b => b.onclick = () => { S.actErr = ""; S.act = null; cargarActividad(); });
+  p.querySelectorAll("[data-refrescar-act]").forEach(b => b.onclick = () => cargarActividad());
+  p.querySelectorAll("[data-refrescar-avance]").forEach(b => b.onclick = () => cargarAvance());
   p.querySelectorAll("[data-dia]").forEach(b => b.onclick = () => { S.actDia = b.dataset.dia; S.act = null; cargarActividad(); });
   p.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => abrirAccion(b.dataset.id, b.dataset.acc, b.dataset.acc === "comentario" ? textoComentarioDe(b.dataset.id) : ""));
   p.querySelectorAll("[data-acc-cancelar]").forEach(b => b.onclick = () => { S.accion = null; S._mantenerScroll = true; pintar(); });
@@ -972,7 +982,12 @@ function enlazar(){
   const ta = p.querySelector("#accTexto");
   if (ta) ta.oninput = e => { if (S.accion) S.accion.texto = e.target.value; };
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
-  p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => { S.vista = b.dataset.vista; S.ficha = null; pintar(); });
+  p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => {
+    S.vista = b.dataset.vista; S.ficha = null; S.accion = null;
+    if (S.vista === "actividad") cargarActividad();
+    if (S.vista === "avance") cargarAvance();
+    pintar();
+  });
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; pintar(); });
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; pintar(); });
   p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
