@@ -234,6 +234,15 @@ textarea.campo{min-height:78px;resize:vertical}
 .act .q{font-size:12.5px;color:var(--texto);margin-top:2px}
 .act .c{font-size:12.5px;color:var(--muted);margin-top:4px}
 .lejos{color:var(--ambar);font-weight:700}
+
+/* ---- acciones sobre una visita ---- */
+.acc-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.btn.mini{padding:5px 10px;font-size:12.5px;border:1px solid var(--linea);border-radius:9px;color:var(--azul);background:var(--tarjeta)}
+.acc-panel{margin-top:10px;padding:12px;border-radius:12px;background:var(--suelo);display:grid;gap:8px}
+.acc-panel b{color:var(--ink);font-size:13.5px}
+.acc-panel textarea.campo{background:#fff;min-height:70px;resize:vertical}
+.anulada > .fila-ent b, .anulada .h b{text-decoration:line-through;color:var(--muted)}
+.anulada{opacity:.72}
 </style>
 
 </head><body>
@@ -248,7 +257,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "806be9";
+const BUILD = "186d9f";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -264,7 +273,7 @@ const ESTADOS = {
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", act:null, actErr:"", actDia:"hoy", cola:leerCola() };
+  filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", act:null, actErr:"", actDia:"hoy", accion:null, cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -577,6 +586,66 @@ function vistaFicha(c){
 }
 const urlPunto = (lat, lng) => "https://www.google.com/maps/search/?api=1&query=" + lat + "," + lng;
 const textoDistancia = d => d == null ? "" : d < 1000 ? d + " m del punto del comercio" : (Math.round(d/100)/10).toFixed(1).replace(".", ",") + " km del punto del comercio";
+const ANUL = {
+  pendiente:{ t:"Anulación pendiente", c:"e-uno" },
+  anulada:  { t:"Anulada", c:"e-can" },
+  rechazada:{ t:"Anulación rechazada", c:"e-seg" }
+};
+const ACCION = {
+  comentario:{ t:"Corregir el comentario", ph:"Escribe el comentario corregido", btn:"Guardar la corrección", min:5, rpc:"v2_editar_comentario" },
+  pedir:     { t:"Pedir la anulación", ph:"¿Por qué hay que anular esta visita?", btn:"Enviar el pedido", min:10, rpc:"v2_pedir_anulacion" },
+  aprobar:   { t:"Aprobar la anulación", ph:"Nota para el expediente (opcional)", btn:"Anular la visita", min:0, rpc:"v2_resolver_anulacion" },
+  rechazar:  { t:"Rechazar el pedido", ph:"¿Por qué no se anula? (opcional)", btn:"Rechazar el pedido", min:0, rpc:"v2_resolver_anulacion" }
+};
+function textoComentarioDe(id){
+  const todas = [].concat(S.act || [], ...Object.values(S.hist || {}));
+  const v = todas.find(x => x && x.id === id);
+  return v ? (v.comentario || "") : "";
+}
+function abrirAccion(id, tipo, texto){ S.accion = { id, tipo, texto: texto || "", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); }
+async function enviarAccion(){
+  const a = S.accion; if (!a || a.enviando) return;
+  const cfg = ACCION[a.tipo]; const t = (a.texto || "").trim();
+  if (t.length < cfg.min){ a.error = `Escribe al menos ${cfg.min} caracteres.`; S._mantenerScroll = true; return pintar(); }
+  a.enviando = true; a.error = ""; S._mantenerScroll = true; pintar();
+  const args = a.tipo === "comentario" ? { p_visita_id:a.id, p_comentario:t }
+             : a.tipo === "pedir"      ? { p_visita_id:a.id, p_motivo:t }
+             : { p_visita_id:a.id, p_aprobar: a.tipo === "aprobar", p_nota: t || null };
+  const { error } = await sb.rpc(cfg.rpc, args);
+  if (error){ a.enviando = false; a.error = error.message || String(error); S._mantenerScroll = true; return pintar(); }
+  S.accion = null; S.act = null; S.avance = null;
+  if (S.ficha) historial(S.ficha);
+  if (S.vista === "actividad") cargarActividad(); else pintar();
+  avisar(a.tipo === "comentario" ? "Comentario corregido." : a.tipo === "pedir" ? "Pedido enviado. El analista lo va a revisar."
+       : a.tipo === "aprobar" ? "Visita anulada. Ya no cuenta en la medición." : "Pedido rechazado. La visita sigue contando.");
+}
+function panelAccion(v){
+  const a = S.accion; if (!a || a.id !== v.id) return "";
+  const cfg = ACCION[a.tipo];
+  return `<div class="acc-panel">
+    <b>${cfg.t}</b>
+    ${a.tipo === "aprobar" || a.tipo === "rechazar" ? `<div class="nota">Motivo del ejecutivo: ${esc(v.anul_motivo || "sin motivo")}</div>` : ""}
+    <textarea class="campo" id="accTexto" rows="3" placeholder="${cfg.ph}">${esc(a.texto)}</textarea>
+    ${a.error ? `<div class="falta">${esc(a.error)}</div>` : ""}
+    <div class="nav2">
+      <button class="btn btn-lin" data-acc-cancelar>Cancelar</button>
+      <button class="btn ${a.tipo === "aprobar" ? "btn-pri" : "btn-sec"}" data-acc-enviar ${a.enviando ? "disabled" : ""}>${a.enviando ? "Guardando…" : cfg.btn}</button>
+    </div></div>`;
+}
+function botonesVisita(v){
+  if (S.accion && S.accion.id === v.id) return "";
+  const b = [];
+  if (v.puede_editar) b.push(`<button class="btn btn-lin mini" data-acc="comentario" data-id="${v.id}">Corregir comentario</button>`);
+  if (v.estado_anul === "activa" || v.estado_anul === "rechazada"){
+    if (S.admin) b.push(`<button class="btn btn-lin mini" data-acc="aprobar" data-id="${v.id}">Anular</button>`);
+    else if (v.es_mia) b.push(`<button class="btn btn-lin mini" data-acc="pedir" data-id="${v.id}">Pedir anulación</button>`);
+  }
+  if (S.admin && v.estado_anul === "pendiente"){
+    b.push(`<button class="btn btn-lin mini" data-acc="aprobar" data-id="${v.id}">Aprobar</button>`);
+    b.push(`<button class="btn btn-lin mini" data-acc="rechazar" data-id="${v.id}">Rechazar</button>`);
+  }
+  return b.length ? `<div class="acc-btns">${b.join("")}</div>` : "";
+}
 function lineaVisita(v){
   const enc = [esc(v.que), v.motivo ? "(" + esc(v.motivo.toLowerCase()) + ")" : "", v.decision ? "· " + esc(v.decision) : "",
                v.equipo ? "· equipo: " + esc(v.equipo) : "", v.fecha_reagenda ? "· vuelve el " + fISO(v.fecha_reagenda) : ""].filter(Boolean).join(" ");
@@ -584,11 +653,15 @@ function lineaVisita(v){
     ? `<span style="color:var(--rojo);font-weight:600">Sin ubicación</span>`
     : `<a href="${urlPunto(v.lat, v.lng)}" target="_blank" rel="noopener" class="ubi">${ICON.pin} Ver dónde se registró</a>
        <span class="nota">±${Math.round(Number(v.precision_m) || 0)} m${v.distancia_m == null ? "" : " · a " + textoDistancia(v.distancia_m)}</span>`;
-  return `<div>
-    <b>${fechaCorta(v.visitado_en)} · ${horaCorta(v.visitado_en)}</b> · ${enc}
+  const est = ANUL[v.estado_anul];
+  return `<div class="${v.estado_anul === "anulada" ? "anulada" : ""}">
+    <div class="fila-ent"><b>${fechaCorta(v.visitado_en)} · ${horaCorta(v.visitado_en)}</b>${est ? `<span class="pill ${est.c}">${est.t}</span>` : ""}</div>
+    <span>${enc}</span>
     ${S.admin && v.ejecutivo ? `<br><span class="nota">Registró ${esc(v.ejecutivo)}</span>` : ""}
-    <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}</span>
+    <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}${v.comentario_editado_en ? " <i>(corregido)</i>" : ""}</span>
+    ${v.anul_motivo ? `<br><span class="nota">Motivo: ${esc(v.anul_motivo)}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}</span>` : ""}
     <div class="ubi-fila">${ubi}</div>
+    ${botonesVisita(v)}${panelAccion(v)}
   </div>`;
 }
 function vistaAvance(){
@@ -674,10 +747,13 @@ function vistaActividad(){
   if (!S.act.length) return envolver(`<div class="card"><h2>Todavía no hay visitas registradas${S.actDia==="hoy"?" hoy":S.actDia==="ayer"?" ayer":" en el periodo"}</h2>
     <div class="nota">Aquí van a aparecer apenas ${S.admin ? "el equipo empiece a registrar" : "registres tu primera visita"}.</div></div>`);
 
+  const cuentan = S.act.filter(v => v.estado_anul !== "anulada");
   const porEjec = new Map();
-  S.act.forEach(v => porEjec.set(v.ejecutivo, (porEjec.get(v.ejecutivo)||0) + 1));
-  const sinUbi = S.act.filter(v => v.lat == null).length;
-  const lejos = S.act.filter(v => v.distancia_m != null && v.distancia_m >= 1000).length;
+  cuentan.forEach(v => porEjec.set(v.ejecutivo, (porEjec.get(v.ejecutivo)||0) + 1));
+  const sinUbi = cuentan.filter(v => v.lat == null).length;
+  const lejos = cuentan.filter(v => v.distancia_m != null && v.distancia_m >= 1000).length;
+  const anuladas = S.act.length - cuentan.length;
+  const pendientes = S.admin ? S.act.filter(v => v.estado_anul === "pendiente") : [];
 
   const grupos = [];
   S.act.forEach(v => {
@@ -687,15 +763,26 @@ function vistaActividad(){
   });
 
   return envolver(`
+    ${pendientes.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)">
+      <div class="eyebrow" style="color:var(--ambar)">Esperan tu decisión</div>
+      <h2>${pendientes.length} ${pendientes.length === 1 ? "pedido de anulación" : "pedidos de anulación"}</h2>
+      <div class="nota">Mientras no resuelvas, esas visitas siguen contando en la medición.</div>
+      ${pendientes.map(v => `<div class="act">
+        <div class="h"><b>${esc(v.comercio)}</b><span>${fechaCorta(v.visitado_en)}</span></div>
+        <div class="q">${esc(v.ejecutivo)} · ${esc(v.que)}</div>
+        <div class="c">Motivo: ${esc(v.anul_motivo || "sin motivo")}</div>
+        ${botonesVisita(v)}${panelAccion(v)}
+      </div>`).join("")}</div>` : ""}
     <div class="card">
-      <div class="eyebrow">${S.act.length} ${S.act.length === 1 ? "visita registrada" : "visitas registradas"}</div>
+      <div class="eyebrow">${cuentan.length} ${cuentan.length === 1 ? "visita que cuenta" : "visitas que cuentan"}</div>
       <h2>${[...porEjec.entries()].map(([n,c]) => esc(n) + " " + c).join(" · ")}</h2>
-      ${sinUbi || lejos ? `<div class="nota" style="margin-top:6px">${[sinUbi ? sinUbi + " sin ubicación" : "", lejos ? lejos + " a más de 1 km del punto que tenemos del comercio" : ""].filter(Boolean).join(" · ")}.</div>` : `<div class="nota" style="margin-top:6px">Todas con ubicación.</div>`}
+      ${sinUbi || lejos ? `<div class="nota" style="margin-top:6px">${[sinUbi ? sinUbi + " sin ubicación" : "", lejos ? lejos + " a más de 1 km del punto que tenemos del comercio" : "", anuladas ? anuladas + (anuladas === 1 ? " anulada, que ya no cuenta" : " anuladas, que ya no cuentan") : ""].filter(Boolean).join(" · ")}.</div>` : `<div class="nota" style="margin-top:6px">Todas con ubicación${anuladas ? ", " + anuladas + (anuladas === 1 ? " anulada" : " anuladas") : ""}.</div>`}
     </div>
     ${grupos.map(g => `<div class="card">
       <div class="eyebrow">${esc(g.d)}</div>
-      ${g.vs.map(v => `<div class="act">
+      ${g.vs.map(v => `<div class="act${v.estado_anul === "anulada" ? " anulada" : ""}">
         <div class="h"><b>${esc(v.comercio)}</b><span>${horaCorta(v.visitado_en)}</span></div>
+        ${ANUL[v.estado_anul] ? `<div style="margin-top:4px"><span class="pill ${ANUL[v.estado_anul].c}">${ANUL[v.estado_anul].t}</span></div>` : ""}
         <div class="q">${esc(v.que)}${v.motivo ? " (" + esc(v.motivo.toLowerCase()) + ")" : ""}${v.decision ? " · " + esc(v.decision) : ""}${S.admin ? " · " + esc(v.ejecutivo) : ""}</div>
         <div class="c">${esc([v.distrito, v.direccion].filter(Boolean).join(" · "))}</div>
         ${v.comentario ? `<div class="c">${esc(v.comentario)}</div>` : ""}
@@ -705,6 +792,7 @@ function vistaActividad(){
                <span class="nota">±${Math.round(Number(v.precision_m)||0)} m${v.distancia_m == null ? "" : ` · <span class="${v.distancia_m >= 1000 ? "lejos" : ""}">a ${esc(textoDistancia(v.distancia_m))}</span>`}</span>`}
           <button class="btn btn-lin" style="padding:4px 8px;font-size:12px" data-ficha="${esc(v.customer_id)}">Abrir la ficha</button>
         </div>
+        ${botonesVisita(v)}${panelAccion(v)}
       </div>`).join("")}
     </div>`).join("")}
     <div class="card"><h2>Cómo leer la distancia</h2>
@@ -850,6 +938,11 @@ function enlazar(){
   p.querySelectorAll("[data-reintentar-avance]").forEach(b => b.onclick = () => { S.avanceErr = ""; S.avance = null; cargarAvance(); });
   p.querySelectorAll("[data-reintentar-act]").forEach(b => b.onclick = () => { S.actErr = ""; S.act = null; cargarActividad(); });
   p.querySelectorAll("[data-dia]").forEach(b => b.onclick = () => { S.actDia = b.dataset.dia; S.act = null; cargarActividad(); });
+  p.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => abrirAccion(b.dataset.id, b.dataset.acc, b.dataset.acc === "comentario" ? textoComentarioDe(b.dataset.id) : ""));
+  p.querySelectorAll("[data-acc-cancelar]").forEach(b => b.onclick = () => { S.accion = null; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-acc-enviar]").forEach(b => b.onclick = enviarAccion);
+  const ta = p.querySelector("#accTexto");
+  if (ta) ta.oninput = e => { if (S.accion) S.accion.texto = e.target.value; };
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => { S.vista = b.dataset.vista; S.ficha = null; pintar(); });
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; pintar(); });
