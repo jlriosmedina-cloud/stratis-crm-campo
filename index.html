@@ -268,6 +268,17 @@ textarea.campo{min-height:78px;resize:vertical}
 .fresco{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-4px 2px 2px;
   font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .fresco .btn.mini{padding:4px 10px;font-size:12px}
+
+.ya-cuenta{margin-top:8px;border:1.5px solid var(--ambar);background:var(--ambar-t);border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.45;color:var(--ink)}
+.ya-cuenta b{color:var(--ink)}
+.ya-cuenta span{display:block;margin-top:6px;color:var(--texto)}
+.ya-cuenta .btn{margin-top:8px;width:100%;justify-content:center;padding:9px 12px;font-size:13px}
+.paso.falta-paso{outline:2px solid var(--rojo);outline-offset:6px;border-radius:10px}
+.falta-etq{display:inline-block;margin-bottom:8px;background:var(--rojo-t);color:var(--rojo);font-weight:700;font-size:12px;padding:3px 9px;border-radius:99px}
+.falta-caja{margin-bottom:10px;background:var(--rojo-t);color:#8f2437;border:1.5px solid var(--rojo);border-radius:12px;padding:9px 12px;font-size:13px;line-height:1.4}
+.falta-caja b{color:#8f2437}
+.falta-caja span{font-size:12px;color:var(--texto)}
+.nota-seg{margin-bottom:8px;font-size:12.5px;color:var(--ambar);font-weight:600;text-align:center}
 </style>
 
 </head><body>
@@ -282,7 +293,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "129e59";
+const BUILD = "4e11f0";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -1034,37 +1045,42 @@ function hojaRegistro(){
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-op="${campo}" data-val="${val}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   const q = r.busca.trim().toLowerCase();
   const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
-  const revisita = c && c.visitas > 0;
-  let pasos = `<div class="paso"><span class="eyebrow">Comercio</span>${c
+  const yaCuenta = c && c.visitas_validas > 0, sinContar = c && c.visitas > 0 && !yaCuenta;
+  const ultTxt = c && c.ultima_visita ? `${diaLima(c.ultima_visita) === diaLima(Date.now()) ? "hoy" : "el " + fechaCorta(c.ultima_visita)} a las ${horaCorta(c.ultima_visita)}${c.ultima_que ? " (" + esc(c.ultima_que.toLowerCase()) + ")" : ""}` : "";
+  let pasos = `<div class="paso" data-paso="comercio"><span class="eyebrow">Comercio</span>${c
     ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}${c.correo ? "" : " · libre: pasa a tu base al guardar"}</small></div><button data-cambiar-comercio>Cambiar</button></div>
-       ${revisita ? `<div class="explica" style="margin-top:8px">Ya lo visitaste en este periodo. La visita queda registrada para el seguimiento, pero no suma otra a las 160.</div>` : ""}`
+       ${yaCuenta ? `<div class="ya-cuenta"><b>Este comercio ya cuenta en tus 160.</b> Lo visitaste ${ultTxt}. Esta visita se guarda como seguimiento y <b>no suma otra</b>.
+          <span>¿Estás en otro negocio? Búscalo en tu base para que sí sume.</span><button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div>`
+        : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus 160.</div>` : ""}`
     : `<input class="campo" id="busca" type="search" placeholder="Customer ID o razón social" value="${esc(r.busca)}" autocomplete="off">
        <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
   const gpsTxt = r.gps === "buscando" ? "Tomando ubicación…" : r.gps === "ok" ? `Ubicación tomada ±${r.precision} m` : "Sin ubicación";
-  pasos += `<div class="paso"><span class="eyebrow">Se toma solo</span><div class="sello">
+  pasos += `<div class="paso" data-paso="gps"><span class="eyebrow">Se toma solo</span><div class="sello">
       <span class="${r.gps==="ok"?"":"esperando"}">${ICON.pin} ${gpsTxt}</span><span>${ICON.reloj} ${fechaCorta(r.hora)} · ${horaCorta(r.hora)}</span></div>
       ${distanciaRegistro(r, c)}
       ${r.gps === "error" ? `<div class="explica" style="margin-top:8px;color:var(--rojo)">No se pudo tomar la ubicación. Sin ubicación la visita no cuenta: activa el GPS y el permiso de ubicación del navegador. <button class="btn btn-sec" style="padding:6px 10px;font-size:12.5px;margin-top:6px" data-gps>Intentar otra vez</button></div>` : ""}</div>`;
-  pasos += `<div class="paso"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
-  if (r.con === "Nadie") pasos += `<div class="paso"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div>
+  pasos += `<div class="paso" data-paso="con"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
+  if (r.con === "Nadie") pasos += `<div class="paso" data-paso="motivo"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div>
       <div class="explica" style="margin-top:8px">Queda como visita sin éxito. Igual cuenta como visita, porque estuviste en el comercio.</div></div>`;
-  if (r.con && r.con !== "Nadie") pasos += `<div class="paso"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c3">${op("que","Reunión concretada","Reunión concretada","","verde")}${op("que","Reagendada","Reagendada")}${op("que","Sin éxito","Sin éxito","","rojo")}</div></div>`;
-  if (r.que === "Reunión concretada") pasos += `<div class="paso"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
+  if (r.con && r.con !== "Nadie") pasos += `<div class="paso" data-paso="que"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c3">${op("que","Reunión concretada","Reunión concretada","","verde")}${op("que","Reagendada","Reagendada")}${op("que","Sin éxito","Sin éxito","","rojo")}</div></div>`;
+  if (r.que === "Reunión concretada") pasos += `<div class="paso" data-paso="decision"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
       ${r.decision==="Realizará consumos" ? `<div class="explica" style="margin-top:8px">Todavía no es una reactivación: cuenta cuando la data de BBVA muestre transacciones en dos días distintos después de hoy.</div>` : ""}</div>`;
-  if (r.decision === "Desiste del producto") pasos += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
-  if (r.que === "Reagendada") pasos += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
+  if (r.decision === "Desiste del producto") pasos += `<div class="paso" data-paso="equipo"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
+  if (r.que === "Reagendada") pasos += `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
   const dirAuto = r.con === "Nadie" && r.motivo === "Dirección errada";
-  if (c && !dirAuto) pasos += `<div class="paso"><span class="eyebrow">¿La dirección es correcta?</span>
+  if (c && !dirAuto) pasos += `<div class="paso" data-paso="dir"><span class="eyebrow">¿La dirección es correcta?</span>
       <div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)}</small>` : ""}</div>
       <div class="opciones c2">${op("dirOk","si","Sí, es correcta","","verde")}${op("dirOk","no","No, está en otro lugar","","rojo")}</div>
       ${r.dirOk === "no" ? `<div class="explica" style="margin-top:8px">${r.con && r.con !== "Nadie" ? "Tu ubicación de ahora queda como la del comercio. En el comentario cuenta dónde está realmente (calle, número, referencia)." : "Tu ubicación no se usa como la del comercio. En el comentario cuenta qué encontraste en la dirección."}</div>` : ""}</div>`;
   const phComent = r.dirOk === "no" ? "Ej.: el local se mudó a la Av. Próceres 1450, frente al mercado. El dueño usa POS de otro banco." : "Ej.: el dueño usa el POS de otro banco; lo va a activar esta semana. Puedes dictarlo con el micrófono del teclado.";
-  pasos += `<div class="paso"><span class="eyebrow">Comentario · qué dijo el comercio</span><textarea class="campo" id="coment" placeholder="${esc(phComent)}">${esc(r.comentario)}</textarea></div>`;
+  pasos += `<div class="paso" data-paso="coment"><span class="eyebrow">Comentario · qué dijo el comercio</span><textarea class="campo" id="coment" placeholder="${esc(phComent)}">${esc(r.comentario)}</textarea></div>`;
   const faltan = faltantes();
+  if (r.intento){ const fp = faltantesPasos(); const porPaso = {}; fp.forEach(([k, t]) => { (porPaso[k] ||= []).push(t); });
+    pasos = pasos.replace(/<div class="paso" data-paso="(\w+)">/g, (m, k) => porPaso[k] ? `<div class="paso falta-paso" data-paso="${k}"><span class="falta-etq">Falta: ${porPaso[k].join(", ")}</span>` : m); }
   return `<div class="velo" data-cerrar-velo><div class="hoja" role="dialog" aria-label="Registrar visita">
     <header><div class="asa"></div><div class="fila-ent"><h2>Registrar visita</h2><button class="btn btn-lin" style="padding:6px 12px;font-size:13px" data-cancelar>Cancelar</button></div></header>
     <div class="scroll">${pasos}</div>
-    <footer>${r.intento && faltan.length ? `<div class="falta" style="margin-bottom:8px">Falta: ${faltan.join(", ")}.</div>` : ""}<button class="btn btn-pri btn-full" data-guardar-visita ${r.enviando?"disabled":""}>${r.enviando ? "Guardando…" : "Guardar visita"}</button></footer>
+    <footer>${r.intento && faltan.length ? `<div class="falta-caja" role="alert"><b>No se guardó todavía.</b> ${faltan.length === 1 ? "Te falta 1 dato" : "Te faltan " + faltan.length + " datos"}: ${faltan.join(", ")}. Están marcados en rojo arriba.</div>` : ""}${r.error ? `<div class="falta-caja" role="alert"><b>No se guardó:</b> ${esc(r.error)}<br><span>Revisa y toca «Guardar visita» otra vez. Si sigue fallando, avísale al analista.</span></div>` : ""}${yaCuenta && !(r.intento && faltan.length) ? `<div class="nota-seg">Se guarda como seguimiento: no suma a las 160.</div>` : ""}<button class="btn btn-pri btn-full" data-guardar-visita ${r.enviando?"disabled":""}>${r.enviando ? "Guardando…" : "Guardar visita"}</button></footer>
   </div></div>`;
 }
 function metrosEntre(a1, o1, a2, o2){ if ([a1,o1,a2,o2].some(x => x == null)) return null; const dy = (a1-a2)*111320, dx = (o1-o2)*111320*Math.cos((a1+a2)/2*Math.PI/180); return Math.round(Math.sqrt(dx*dx+dy*dy)); }
@@ -1078,6 +1094,22 @@ function distanciaRegistro(r, c){
   const aprox = c.geo_calidad === "distrito" ? " El punto que tenemos es aproximado (solo el distrito)." : c.geo_calidad === "calle" ? " El punto que tenemos es a nivel de calle." : "";
   const ayuda = tono === "cerca" ? "Estás en el comercio." : tono === "medio" ? "Estás cerca, pero no en la puerta." : "Estás lejos del punto que tenemos. Si el comercio está aquí, marca que la dirección no es correcta.";
   return `<div class="dist-reg ${tono}"><b>A ${txt} del comercio</b><span>${ayuda}${aprox}</span></div>`;
+}
+// cada faltante sabe a qué paso del formulario pertenece, para marcarlo y llevar al ejecutivo hasta ahí
+function faltantesPasos(){
+  const r = S.reg, f = [];
+  if (!r.id) f.push(["comercio","elegir el comercio"]);
+  if (r.gps === "buscando") f.push(["gps","esperar la ubicación"]);
+  if (!r.con) f.push(["con","con quién hablaste"]);
+  if (r.con === "Nadie" && !r.motivo) f.push(["motivo","el motivo"]);
+  if (r.con && r.con !== "Nadie" && !r.que) f.push(["que","qué pasó"]);
+  if (r.que === "Reunión concretada" && !r.decision) f.push(["decision","qué decidió"]);
+  if (r.decision === "Desiste del producto" && !r.equipo) f.push(["equipo","si se recuperó el equipo"]);
+  if (r.que === "Reagendada" && !r.fechaNueva) f.push(["fecha","la fecha en que vuelves"]);
+  if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push(["fecha","una fecha de regreso desde hoy"]);
+  if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push(["dir","si la dirección es correcta"]);
+  if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
+  return f;
 }
 function faltantes(){
   const r = S.reg, f = [];
@@ -1104,9 +1136,13 @@ function cerrarRegistro(){
 async function guardarVisita(){
   const r = S.reg;
   if (!r || r.enviando) return;
-  if (faltantes().length){ r.intento = true; S._mantenerScroll = true; return pintar(); }
+  r.error = "";
+  if (faltantes().length){ r.intento = true; S._mantenerScroll = true; pintar();
+    try { navigator.vibrate && navigator.vibrate(120); } catch(e){}
+    const primero = document.querySelector(".hoja .falta-paso"); if (primero) primero.scrollIntoView({ behavior:"smooth", block:"center" });
+    return; }
   if (r.gps !== "ok" && !confirm("La visita no tiene ubicación y no va a contar. ¿Guardarla igual?")) return;
-  const c = S.base.find(x => x.customer_id === r.id); const nueva = !(c && c.visitas > 0);
+  const c = S.base.find(x => x.customer_id === r.id); const nueva = !(c && c.visitas_validas > 0);
   const v = { p_customer_id:r.id, p_visitado_en:r.hora.toISOString(), p_lat:r.lat, p_lng:r.lng, p_precision:r.precision,
     p_con:r.con, p_motivo:r.con==="Nadie"?r.motivo:null, p_que:r.con==="Nadie"?"Sin éxito":r.que, p_decision:r.que==="Reunión concretada"?r.decision:null,
     p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:r.que==="Reagendada"?r.fechaNueva:null, p_comentario:r.comentario.trim(), p_cliente_uid:r.uid,
@@ -1122,7 +1158,8 @@ async function guardarVisita(){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
       S.cola.push(v); guardarCola(); S.reg = null;
       avisar(`Sin señal: la visita quedó guardada en el celular con su hora y ubicación. Se envía sola cuando vuelva la conexión; para que cuente tiene que llegar a más tardar el ${fISO(plazoDe(v.p_visitado_en))}.`, 7000);
-    } else { r.enviando = false; if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); } avisar("No se guardó: " + esc(e.message), 6000); }
+    } else { r.enviando = false; if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); avisar("No se guardó: " + esc(e.message), 7000); }
+      else { r.error = e.message || "error desconocido"; S._mantenerScroll = true; pintar(); try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch(x){} } }
   }
 }
 
@@ -1195,7 +1232,9 @@ function enlazar(){
     p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.dirOk = null; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-cambiar-comercio]").forEach(b => b.onclick = () => { S.reg.id = null; S.reg.busca = ""; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
-    const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value; };
+    const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value;
+      // si estaba marcado como faltante, se desmarca apenas alcanza el mínimo (sin repintar, para no perder el foco)
+      const paso = cm.closest(".paso"); if (paso && S.reg.intento && cm.value.trim().length >= 5 && paso.classList.contains("falta-paso")){ paso.classList.remove("falta-paso"); paso.querySelector(".falta-etq")?.remove(); } };
     const fn = $("#fechaNueva"); if (fn) fn.onchange = () => { S.reg.fechaNueva = fn.value; };
     p.querySelectorAll("[data-cancelar]").forEach(b => b.onclick = cerrarRegistro);
     p.querySelectorAll("[data-guardar-visita]").forEach(b => b.onclick = guardarVisita);
