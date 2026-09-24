@@ -340,7 +340,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "1ac7a8";
+const BUILD = "be4c50";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -429,6 +429,7 @@ function senales(v){
   if (v.motivo === "Dirección errada" || v.direccion_ok === false) s.push(["i","Dirección no es correcta"]);
   if (v.resultado_editado_en) s.push(["i","Resultado corregido"]);
   if (v.comentario_editado_en) s.push(["i","Comentario corregido"]);
+  if (v.fuera_plazo && v.estado_anul !== "anulada") s.push(["r", `Fuera de plazo (tenía hasta el ${fISO(v.plazo_hasta)})`]);
   if (v.estado_anul === "pendiente") s.push(["r","Pide anulación"]);
   if ((v.comentario || "").trim().length < REGLA.comentarioMin) s.push(["","Comentario corto"]);
   const lag = (D(v.recibido_en) - D(v.visitado_en))/60000; if (lag > REGLA.retrasoMin) s.push(["", `Llegó ${Math.round(lag)} min después`]);
@@ -648,7 +649,7 @@ function vistaValidacion(){
   const lejos = hoy.filter(v => v.estado_anul !== "anulada" && (v.distancia_m == null || v.distancia_m > REGLA.lejos)).length;
   const pedidos = S.act.filter(v => v.estado_anul === "pendiente").length;
   const validas = S.act.filter(v => estadoDe(v) === "val").length, cuentan = S.act.filter(v => v.estado_anul !== "anulada").length;
-  const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null).map(v => v.customer_id)).size;
+  const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size;
   const cnt = k => S.act.filter(v => (k === "todos" || estadoDe(v) === k) && (S.dia !== "hoy" || esHoy(v)) && (S.dia !== "ayer" || esAyer(v)) && (!/^\d{4}-/.test(S.dia) || iso(v.visitado_en) === S.dia) && (S.ej === "todos" || v.correo === S.ej)).length;
   const lista = filtradas();
   if (S.sel && !S.act.find(v => v.id === S.sel)) S.sel = null;
@@ -780,11 +781,13 @@ function ficha(v){
       ${k === "val" ? `<div class="aviso ok"><b>Validada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>` : ""}
       ${k === "anu" ? `<div class="aviso mal"><b>Anulada</b>: ${esc(v.anul_motivo || "")}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}. No cuenta.</div>` : ""}
       ${k === "pend" && v.validacion_nota ? `<div class="aviso">${esc(v.validacion_nota)}</div>` : ""}
+      ${v.fuera_plazo && k !== "anu" ? `<div class="aviso mal"><b>Fuera de plazo</b>: la visita es del ${fISO(iso(v.visitado_en))} y llegó el ${ddhh(v.recibido_en)}; tenía hasta el ${fISO(v.plazo_hasta)}. Queda en el historial pero <b>no cuenta</b> como comercio visitado ni abre reactivación, aunque la valides.</div>` : ""}
       <div>
         <h3>La visita</h3>
         <div class="hechos">
           <div><small>Ejecutivo</small><b><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></b></div>
-          <div><small>Hora declarada · recibida</small><b class="num">${hh(v.visitado_en)} · ${hh(v.recibido_en)}${lag > 0 ? ` <span style="color:var(--muted);font-weight:400">(+${lag} min)</span>` : ""}</b></div>
+          <div><small>Hora declarada · recibida</small><b class="num">${hh(v.visitado_en)} · ${iso(v.recibido_en) !== iso(v.visitado_en) ? fISO(iso(v.recibido_en)) + " " : ""}${hh(v.recibido_en)}${lag > 0 ? ` <span style="color:var(--muted);font-weight:400">(+${lag} min)</span>` : ""}</b></div>
+          <div><small>Plazo para registrarla</small><b style="color:${v.fuera_plazo ? "var(--rojo-txt)" : "inherit"}">${v.plazo_hasta ? "hasta el " + fISO(v.plazo_hasta) + (v.fuera_plazo ? " · llegó fuera de plazo" : " · llegó a tiempo") : "—"}</b></div>
           <div><small>Con quién habló</small><b>${esc(v.con)}${v.motivo ? " · " + esc(v.motivo) : ""}</b></div>
           <div><small>Qué pasó</small><b>${esc(v.que)}</b></div>
           <div><small>Decisión del comercio</small><b>${esc(v.decision || "—")}</b></div>
@@ -846,13 +849,13 @@ function vistaEquipo(){
     const todas = S.act.filter(v => v.correo === e.correo);
     const vs = todas.filter(v => v.estado_anul !== "anulada");
     const porDia = {};
-    vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { com:new Set(), n:0, h1:null, h2:null, obs:0, pend:0 }; o.n++; if (v.lat != null) o.com.add(v.customer_id); const t = D(v.visitado_en); if (!o.h1 || t < o.h1) o.h1 = t; if (!o.h2 || t > o.h2) o.h2 = t; if (estadoDe(v) === "obs") o.obs++; if (estadoDe(v) === "pend") o.pend++; });
-    const com = new Set(vs.filter(v => v.lat != null).map(v => v.customer_id)).size;
+    vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { com:new Set(), n:0, h1:null, h2:null, obs:0, pend:0 }; o.n++; if (v.lat != null && !v.fuera_plazo) o.com.add(v.customer_id); if (v.fuera_plazo) o.tarde = (o.tarde || 0) + 1; const t = D(v.visitado_en); if (!o.h1 || t < o.h1) o.h1 = t; if (!o.h2 || t > o.h2) o.h2 = t; if (estadoDe(v) === "obs") o.obs++; if (estadoDe(v) === "pend") o.pend++; });
+    const com = new Set(vs.filter(v => v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size;
     const restantes = Math.max(1, H.total - H.antes);
     return { e, porDia, com, reg:vs.length,
       val: vs.filter(v => estadoDe(v) === "val").length, pend: vs.filter(v => estadoDe(v) === "pend").length, obs: vs.filter(v => estadoDe(v) === "obs").length, anu: todas.length - vs.length,
       contacto: vs.filter(v => v.con !== "Nadie").length, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
-      lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length,
+      lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length, tarde: vs.filter(v => v.fuera_plazo).length,
       ritmo: H.hastaHoy ? com / H.hastaHoy : 0, necesario: Math.max(0, metaEj - com) / restantes, esperado: metaDia * H.hastaHoy };
   });
   const T = { com: filas.reduce((a,f) => a + f.com, 0), reg: filas.reduce((a,f) => a + f.reg, 0) };
@@ -860,7 +863,7 @@ function vistaEquipo(){
   const ritmoEq = H.hastaHoy ? T.com / H.hastaHoy : 0, necEq = Math.max(0, metaEq - T.com) / Math.max(1, H.total - H.antes);
   const celda = (o, d, correo) => {
     const n = o ? o.com.size : 0; const k = n === 0 ? "c0" : n < metaDia * .5 ? "c1" : n < metaDia ? "c2" : "c3";
-    const tip = o ? `${n} comercios · ${o.n} registros · de ${hh(o.h1)} a ${hh(o.h2)}${o.pend ? ` · ${o.pend} por validar` : ""}${o.obs ? ` · ${o.obs} observadas` : ""}` : "sin visitas";
+    const tip = o ? `${n} comercios · ${o.n} registros · de ${hh(o.h1)} a ${hh(o.h2)}${o.pend ? ` · ${o.pend} por validar` : ""}${o.obs ? ` · ${o.obs} observadas` : ""}${o.tarde ? ` · ${o.tarde} fuera de plazo (no cuentan)` : ""}` : "sin visitas";
     return `<td class="dia ${k}${d.habil ? "" : " finde"}${d.iso === hoy ? " hoy" : ""}"><button data-ir-dia="${d.iso}" data-ir-ej="${esc(correo)}" title="${esc(tip)}" ${o ? "" : "disabled"}>${n || "·"}${o && o.pend ? `<i class="pd" aria-label="por validar"></i>` : ""}</button></td>`;
   };
   // gráfico: comercios por día, apilado por ejecutivo, con la meta diaria del equipo
@@ -888,14 +891,14 @@ function vistaEquipo(){
     <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${necEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Comercios visitados por día</b><span class="lbl">cada color es un ejecutivo · solo visitas con ubicación, no anuladas, un comercio cuenta una vez por día</span>
+    <div class="barra"><b>Comercios visitados por día</b><span class="lbl">cada color es un ejecutivo · solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio cuenta una vez por día</span>
       <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria del equipo · ${Math.round(metaDiaEq)}</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
     <div style="padding:6px 12px 2px;overflow-x:auto">${grafico}</div>
   </div>
   <div class="panel">
     <div class="barra"><b>Por ejecutivo y por día</b><span class="lbl">verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: a más de la mitad · rojo: menos de la mitad · el punto naranja marca visitas por validar</span></div>
     <div style="overflow-x:auto"><table class="datos matriz">
-      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th>Validación</th></tr></thead>
+      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
       <tbody>${filas.map(f => `<tr>
         <td><button class="ej-btn" data-ir-dia="periodo" data-ir-ej="${esc(f.e.correo)}"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></button></td>
         ${dias.map(d => celda(f.porDia[d.iso], d, f.e.correo)).join("")}
@@ -906,14 +909,15 @@ function vistaEquipo(){
         <td class="n num">${f.reunion}</td>
         <td class="n num">${f.consumos}</td>
         <td class="n num ${f.lejos ? "warn" : ""}">${f.lejos}</td>
+        <td class="n num ${f.tarde ? "mal" : ""}">${f.tarde}</td>
         <td><span class="mini-estados"><span class="pill val">${f.val}</span><span class="pill pend">${f.pend}</span>${f.obs ? `<span class="pill obs">${f.obs}</span>` : ""}${f.anu ? `<span class="pill anu">${f.anu}</span>` : ""}</span></td>
       </tr>`).join("")}
       <tr class="total"><td><b>Equipo</b></td>${dias.map((d, i) => `<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${tot[i] || "·"}</b></td>`).join("")}
         <td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${ritmoEq.toFixed(1).replace(".", ",")}</td><td class="n num">${necEq.toFixed(1).replace(".", ",")}</td>
-        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td>
+        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
         <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
       </tbody></table></div>
-    <div class="atajos">Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
+    <div class="atajos">Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
   </div>`;
 }
 
@@ -945,7 +949,7 @@ function trazaDetalle(v){
   const lag = Math.round((D(v.recibido_en) - D(v.visitado_en))/60000);
   const ev = eventos(v); const corr = ev.filter(b => ["resultado","comentario","traslado"].includes(b.accion)).length;
   const c = S.baseMap[v.customer_id] || {};
-  const texto = [`Visita ${v.id} · ${v.comercio} (Customer ID ${v.customer_id})`, `Ejecutivo: ${e.nombre}`, `Declarada ${ddhh(v.visitado_en)} · recibida ${ddhh(v.recibido_en)} (+${lag} min)`, `GPS: ${v.lat==null?"sin ubicación":`${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} ±${Math.round(v.precision_m)} m · a ${mDist(v.distancia_m)} del comercio`}`, `Resultado: ${v.con}${v.motivo?" · "+v.motivo:""} · ${v.que}${v.decision?" · "+v.decision:""}`, `Comentario: ${v.comentario||""}`, `Estado: ${ESTADO[estadoDe(v)][1]}${v.validacion_motivo ? " · " + v.validacion_motivo : ""}`, "", "Bitácora:", ...ev.map(b => `- ${ddhh(b.en)} · ${b.accion} · ${nomDe(b.por)}${b.antes?` · antes: ${b.antes} · después: ${b.despues}`:b.despues?` · ${b.despues}`:""}`)].join("\n");
+  const texto = [`Visita ${v.id} · ${v.comercio} (Customer ID ${v.customer_id})`, `Ejecutivo: ${e.nombre}`, `Declarada ${ddhh(v.visitado_en)} · recibida ${ddhh(v.recibido_en)} (+${lag} min)`, `GPS: ${v.lat==null?"sin ubicación":`${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} ±${Math.round(v.precision_m)} m · a ${mDist(v.distancia_m)} del comercio`}`, `Resultado: ${v.con}${v.motivo?" · "+v.motivo:""} · ${v.que}${v.decision?" · "+v.decision:""}`, `Comentario: ${v.comentario||""}`, `Estado: ${ESTADO[estadoDe(v)][1]}${v.validacion_motivo ? " · " + v.validacion_motivo : ""}${v.fuera_plazo ? " · FUERA DE PLAZO (tenía hasta el " + fISO(v.plazo_hasta) + "), no cuenta" : ""}`, "", "Bitácora:", ...ev.map(b => `- ${ddhh(b.en)} · ${b.accion} · ${nomDe(b.por)}${b.antes?` · antes: ${b.antes} · después: ${b.despues}`:b.despues?` · ${b.despues}`:""}`)].join("\n");
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <div><h2>${esc(v.comercio)} ${pill(v)}</h2><div class="sub">Customer ID ${esc(v.customer_id)}${v.ruc ? " · RUC " + esc(v.ruc) : ""} · ${esc(v.distrito || "")} · ${esc(e.nombre)}${c.estado ? " · en el CRM: " + esc(c.estado) : ""}</div></div>
