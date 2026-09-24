@@ -279,6 +279,11 @@ textarea.campo{min-height:78px;resize:vertical}
 .falta-caja b{color:#8f2437}
 .falta-caja span{font-size:12px;color:var(--texto)}
 .nota-seg{margin-bottom:8px;font-size:12.5px;color:var(--ambar);font-weight:600;text-align:center}
+
+.ubi-nueva{margin-top:8px;border:1.5px solid var(--azul);background:var(--azul-t);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;font-size:13px;color:var(--ink)}
+.ubi-nueva .marca{display:flex;gap:8px;align-items:center;font-weight:600}
+.ubi-nueva .marca input{width:20px;height:20px}
+.ubi-nueva .btn{align-self:flex-start}
 </style>
 
 </head><body>
@@ -293,7 +298,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "4e11f0";
+const BUILD = "0e964a";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -737,8 +742,33 @@ function abrirCorreccion(id){
   S.accion = null;
   S.corr = { id, con:v.con || null, motivo:v.motivo || null, que:v.que || null, decision:v.decision || null,
              equipo:v.equipo || null, fechaNueva:v.fecha_reagenda || "", comentario:v.comentario || "",
-             limite:v.limite_edicion || null, enviando:false, error:"" };
+             limite:v.limite_edicion || null, enviando:false, error:"",
+             cid:v.customer_id, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
   S._mantenerScroll = true; pintar();
+}
+function pasoUbicacionCorreccion(r){
+  const c = S.base.find(x => x.customer_id === r.cid);
+  const actual = r.lat0 == null ? `<b style="color:var(--rojo)">Sin ubicación</b>` : `±${Math.round(Number(r.prec0) || 0)} m${r.dist0 == null ? "" : " · a " + textoDistancia(r.dist0)}`;
+  let h = `<div class="paso"><span class="eyebrow">Ubicación</span><div class="nota">Registrada: ${actual}</div>`;
+  if (r.gps === "buscando") h += `<div class="sello" style="margin-top:8px"><span class="esperando">${ICON.pin} Tomando tu ubicación de ahora…</span></div>`;
+  else if (r.gps === "ok" && r.nueva){
+    const d = c ? metrosEntre(r.nueva.lat, r.nueva.lng, c.geo_lat, c.geo_lng) : null;
+    h += `<div class="ubi-nueva"><b>Nueva: ±${r.nueva.precision} m${d == null ? "" : " · a " + textoDistancia(d)}</b>
+      <label class="marca"><input type="checkbox" id="corrReemplazar" ${r.reemplazar ? "checked" : ""}> Usar esta ubicación y borrar la anterior</label>
+      <span class="nota">Si no lo marcas, la visita se queda con la ubicación registrada.</span>
+      <button class="btn btn-lin mini" data-corr-gps>Volver a tomarla</button></div>`;
+  } else {
+    if (r.gps === "error") h += `<div class="explica" style="margin-top:8px;color:var(--rojo)">${esc(r.gpsError || "No se pudo obtener la ubicación.")}</div>`;
+    h += `<button class="btn btn-sec" style="margin-top:8px;padding:8px 12px;font-size:13px" data-corr-gps>${ICON.pin} Actualizar ubicación</button>
+      <div class="nota" style="margin-top:6px">Toma tu ubicación de ahora. Úsala solo si estás en el comercio.</div>`;
+  }
+  return h + `</div>`;
+}
+function tomarGPSCorreccion(){
+  const r = S.corr; if (!r) return; r.gps = "buscando"; r.gpsError = ""; r.nueva = null; r.reemplazar = false; S._mantenerScroll = true; pintar();
+  const id0 = r.id;
+  tomarGPS(g => { if (!S.corr || S.corr.id !== id0) return; S.corr.gps = "ok"; S.corr.nueva = g; S._mantenerScroll = true; pintar(); },
+           m => { if (!S.corr || S.corr.id !== id0) return; S.corr.gps = "error"; S.corr.gpsError = m; S._mantenerScroll = true; pintar(); });
 }
 function faltaCorreccion(){
   const r = S.corr, f = [];
@@ -755,7 +785,13 @@ async function guardarCorreccion(){
   const r = S.corr; if (!r || r.enviando) return;
   const f = faltaCorreccion();
   if (f.length){ r.error = "Falta: " + f.join(", ") + "."; S._mantenerScroll = true; return pintar(); }
+  if (r.reemplazar && r.nueva && !confirm(`¿Borrar la ubicación anterior${r.lat0 == null ? "" : " (±" + Math.round(Number(r.prec0) || 0) + " m)"} y quedarte con la de ahora (±${r.nueva.precision} m)?`)) return;
   r.enviando = true; r.error = ""; S._mantenerScroll = true; pintar();
+  if (r.reemplazar && r.nueva && !r.ubicacionHecha){
+    const u = await sb.rpc("v2_actualizar_ubicacion", { p_visita_id:r.id, p_lat:r.nueva.lat, p_lng:r.nueva.lng, p_precision:r.nueva.precision });
+    if (u.error){ r.enviando = false; r.error = "No se actualizó la ubicación: " + (u.error.message || u.error); S._mantenerScroll = true; return pintar(); }
+    r.ubicacionHecha = true;
+  }
   const { error } = await sb.rpc("v2_editar_resultado", {
     p_visita_id:r.id, p_con:r.con, p_motivo:r.con === "Nadie" ? r.motivo : null,
     p_que:r.con === "Nadie" ? "Sin éxito" : r.que,
@@ -770,13 +806,13 @@ async function guardarCorreccion(){
   await recargarBase();
   if (ficha) historial(ficha);
   if (S.vista === "actividad"){ S.act = null; cargarActividad(); } else pintar();
-  avisar("Visita corregida. El estado del comercio se actualizó.");
+  avisar(r.ubicacionHecha ? "Visita corregida y ubicación actualizada." : "Visita corregida. El estado del comercio se actualizó.");
 }
 function panelCorreccion(v){
   const r = S.corr; if (!r || r.id !== v.id) return "";
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-cop="${campo}" data-val="${esc(val)}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   let h = `<div class="acc-panel"><b>Corregir lo que registré</b>
-    <div class="nota">La fecha, la hora y la ubicación no se tocan: son el sello de la visita.${r.limite ? " Puedes corregirla hasta el " + fISO(r.limite) + "." : ""}</div>
+    <div class="nota">La fecha y la hora no se tocan: son el sello de la visita.${r.limite ? " Puedes corregirla hasta el " + fISO(r.limite) + "." : ""}</div>
     <div class="paso"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
   if (r.con === "Nadie") h += `<div class="paso"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div></div>`;
   if (r.con && r.con !== "Nadie") h += `<div class="paso"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c3">${op("que","Reunión concretada","Reunión concretada","","verde")}${op("que","Reagendada","Reagendada")}${op("que","Sin éxito","Sin éxito","","rojo")}</div></div>`;
@@ -784,6 +820,7 @@ function panelCorreccion(v){
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
+  h += pasoUbicacionCorreccion(r);
   h += `<div class="paso"><span class="eyebrow">Comentario</span><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea></div>`;
   if (r.error) h += `<div class="falta">${esc(r.error)}</div>`;
   h += `<div class="nav2"><button class="btn btn-lin" data-corr-cancelar>Cancelar</button>
@@ -1033,12 +1070,22 @@ function nuevoRegistro(id){
   S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
 }
+// Pide una ubicación nueva (nunca una guardada) y, si el celular no contesta en 20 s —pasa cuando se
+// descarta el aviso de permiso o el GPS se queda pensando—, lo da por fallido para poder reintentar.
+function tomarGPS(ok, falla){
+  if (!navigator.geolocation) return falla("Este celular no entrega ubicación.");
+  let listo = false;
+  const reloj = setTimeout(() => { if (!listo){ listo = true; falla("El celular no respondió. Revisa que el GPS esté encendido y que el navegador tenga permiso de ubicación."); } }, 20000);
+  navigator.geolocation.getCurrentPosition(
+    p => { if (listo) return; listo = true; clearTimeout(reloj); ok({ lat:p.coords.latitude, lng:p.coords.longitude, precision:Math.round(p.coords.accuracy) }); },
+    e => { if (listo) return; listo = true; clearTimeout(reloj); falla(e && e.code === 1 ? "No se dio permiso de ubicación al navegador." : "No se pudo obtener la ubicación."); },
+    { enableHighAccuracy:true, timeout:18000, maximumAge:0 });
+}
 function pedirGPS(){
-  const r = S.reg; if (!r) return; r.gps = "buscando"; S._mantenerScroll = true; pintar();
-  if (!navigator.geolocation){ r.gps = "error"; return pintar(); }
-  navigator.geolocation.getCurrentPosition(p => { if (!S.reg) return; Object.assign(S.reg, { gps:"ok", lat:p.coords.latitude, lng:p.coords.longitude, precision:Math.round(p.coords.accuracy) }); S._mantenerScroll = true; pintar(); },
-    () => { if (!S.reg) return; S.reg.gps = "error"; S._mantenerScroll = true; pintar(); },
-    { enableHighAccuracy:true, timeout:20000, maximumAge:30000 });
+  const r = S.reg; if (!r) return; r.gps = "buscando"; r.gpsError = ""; S._mantenerScroll = true; pintar();
+  const uid0 = r.uid;
+  tomarGPS(g => { if (!S.reg || S.reg.uid !== uid0) return; Object.assign(S.reg, { gps:"ok", lat:g.lat, lng:g.lng, precision:g.precision }); S._mantenerScroll = true; pintar(); },
+           m => { if (!S.reg || S.reg.uid !== uid0) return; S.reg.gps = "error"; S.reg.gpsError = m; S._mantenerScroll = true; pintar(); });
 }
 function hojaRegistro(){
   const r = S.reg, c = r.id ? S.base.find(x => x.customer_id === r.id) : null;
@@ -1058,7 +1105,7 @@ function hojaRegistro(){
   pasos += `<div class="paso" data-paso="gps"><span class="eyebrow">Se toma solo</span><div class="sello">
       <span class="${r.gps==="ok"?"":"esperando"}">${ICON.pin} ${gpsTxt}</span><span>${ICON.reloj} ${fechaCorta(r.hora)} · ${horaCorta(r.hora)}</span></div>
       ${distanciaRegistro(r, c)}
-      ${r.gps === "error" ? `<div class="explica" style="margin-top:8px;color:var(--rojo)">No se pudo tomar la ubicación. Sin ubicación la visita no cuenta: activa el GPS y el permiso de ubicación del navegador. <button class="btn btn-sec" style="padding:6px 10px;font-size:12.5px;margin-top:6px" data-gps>Intentar otra vez</button></div>` : ""}</div>`;
+      ${r.gps === "error" ? `<div class="explica" style="margin-top:8px;color:var(--rojo)">No se pudo tomar la ubicación${r.gpsError ? ": " + esc(r.gpsError) : "."} Sin ubicación la visita no cuenta. <button class="btn btn-sec" style="padding:6px 10px;font-size:12.5px;margin-top:6px" data-gps>Intentar otra vez</button></div>` : ""}</div>`;
   pasos += `<div class="paso" data-paso="con"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
   if (r.con === "Nadie") pasos += `<div class="paso" data-paso="motivo"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div>
       <div class="explica" style="margin-top:8px">Queda como visita sin éxito. Igual cuenta como visita, porque estuviste en el comercio.</div></div>`;
@@ -1207,6 +1254,8 @@ function enlazar(){
       if (k === "decision") r.equipo = null;
       S._mantenerScroll = true; pintar(); });
     const cc = $("#corrComent"); if (cc) cc.oninput = () => { S.corr.comentario = cc.value; };
+    p.querySelectorAll("[data-corr-gps]").forEach(b => b.onclick = tomarGPSCorreccion);
+    const crr = $("#corrReemplazar"); if (crr) crr.onchange = () => { S.corr.reemplazar = crr.checked; };
     const cf = $("#corrFecha"); if (cf) cf.onchange = () => { S.corr.fechaNueva = cf.value; };
   }
   p.querySelectorAll("[data-registrar]").forEach(b => b.onclick = () => nuevoRegistro(b.dataset.registrar || S.ficha));
