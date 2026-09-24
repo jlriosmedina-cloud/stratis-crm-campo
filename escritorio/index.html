@@ -2,6 +2,8 @@
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0C1137">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("stratis-esc-tema")||"light"}catch(e){document.documentElement.dataset.theme="light"}</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <title>Stratis · CRM de campo · escritorio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap">
@@ -96,7 +98,7 @@ a{color:var(--azul-txt)}
 .tile.warn .v{color:var(--ambar-txt)} .tile.bad .v{color:var(--rojo-txt)} .tile.ok .v{color:var(--verde-txt)} .tile.acc .v{color:var(--naranja)}
 
 /* ---------- validación: cola + ficha ---------- */
-.split{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:16px;align-items:start}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:16px;align-items:start}
 .panel{background:var(--tarjeta);border:1px solid var(--linea);border-radius:14px;overflow:hidden}
 .barra{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--linea);flex-wrap:wrap}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -108,7 +110,7 @@ select.sel{border:1px solid var(--linea);background:var(--tarjeta);border-radius
 .barra .der{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 
-table.cola{width:100%;min-width:760px;border-collapse:collapse;font-size:12.5px}
+table.cola{width:100%;min-width:720px;border-collapse:collapse;font-size:12.5px}
 table.cola th{position:sticky;top:0;background:var(--tarjeta);text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:8px 10px;border-bottom:1px solid var(--linea);z-index:1}
 table.cola td{padding:8px 10px;border-bottom:1px solid var(--linea);vertical-align:middle}
 table.cola tr.f{cursor:pointer}
@@ -119,10 +121,10 @@ table.cola tr.nueva td{animation:llega 1.6s ease-out}
 .tabla-wrap{max-height:calc(100vh - 330px);overflow:auto}
 .ej{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
 .ej .avatar{width:22px;height:22px;font-size:9.5px}
-.com b{display:block;color:var(--ink);font-weight:700;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
-.com small{color:var(--muted);font-size:11.5px;white-space:nowrap}
+.com b{display:block;color:var(--ink);font-weight:700;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.com small{color:var(--muted);font-size:11.5px;white-space:nowrap;display:block;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .res{line-height:1.3;white-space:nowrap}
-.res small{white-space:normal;max-width:170px}
+.res small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
 .res small{display:block;color:var(--muted);font-size:11.5px}
 .dist{display:inline-flex;align-items:center;gap:5px;font-weight:700;white-space:nowrap}
 .dist i{width:8px;height:8px;border-radius:50%;display:inline-block}
@@ -154,7 +156,19 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .coment{background:var(--suelo);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5}
 .coment .ed{font-size:11px;color:var(--muted);margin-top:4px}
 .mapa{border:1px solid var(--linea);border-radius:10px;overflow:hidden;background:var(--suelo)}
-.mapa svg{display:block;width:100%;height:auto}
+.mapa > svg{display:block;width:100%;height:auto}
+.mapa-real{height:270px;width:100%;background:var(--suelo)}
+.mapa .leyenda{display:flex;flex-direction:column;gap:5px;padding:9px 11px;font-size:12px;color:var(--texto);border-top:1px solid var(--linea);background:var(--tarjeta)}
+.mapa .leyenda em{font-style:normal;color:var(--muted)}
+.mapa .leyenda .nota-mapa{color:var(--muted);font-size:11.5px}
+.pt{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px;border:2px solid var(--tarjeta);box-shadow:0 0 0 1px var(--linea)}
+.pt.ref{background:var(--navy-2)} .pt.act{background:var(--muted)}
+.pt.vis.ok{background:var(--verde)} .pt.vis.med{background:var(--ambar)} .pt.vis.mal{background:var(--rojo)} .pt.vis.no{background:var(--muted)}
+.mapa .links{display:flex;gap:12px;flex-wrap:wrap}
+.leaflet-tooltip.etq{font-family:inherit;font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--tarjeta);color:var(--ink);border:1px solid var(--linea);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.leaflet-tooltip.etq::before{display:none}
+.leaflet-container{font-family:inherit}
+.leaflet-control-attribution{font-size:9px}
 .mapa .pie{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--linea);background:var(--tarjeta);flex-wrap:wrap;gap:6px}
 .linea-t{display:flex;flex-direction:column;gap:0}
 .ev{display:grid;grid-template-columns:14px 1fr;gap:10px;position:relative;padding-bottom:12px;font-size:12.5px}
@@ -206,6 +220,34 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .mini small{font-size:10.5px;color:var(--muted);line-height:1.2;display:block}
 .mini div.mal{border-top-color:var(--rojo)} .mini div.med{border-top-color:var(--ambar)} .mini div.ok{border-top-color:var(--verde)}
 .hist-h{margin-top:8px}
+/* ---------- por ejecutivo ---------- */
+.leyenda-ej{display:flex;gap:12px;flex-wrap:wrap;font-size:12px}
+.leyenda-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.leyenda-ej i.meta{width:16px;height:0;border-top:2px dashed var(--naranja);border-radius:0;vertical-align:3px}
+.leyenda-ej span:first-child{color:var(--naranja);font-weight:700}
+table.matriz th.dia,table.matriz td.dia{text-align:center;padding:6px 3px;min-width:46px}
+table.matriz th.dia{font-size:10px;line-height:1.3}
+table.matriz th.dia.hoy{color:var(--naranja)}
+table.matriz th.finde{opacity:.7}
+table.matriz td.dia button{width:40px;height:32px;border-radius:8px;border:1px solid transparent;font-weight:800;font-size:13px;position:relative;font-variant-numeric:tabular-nums;background:var(--suelo);color:var(--muted)}
+table.matriz td.dia button:not([disabled]):hover{border-color:var(--ink)}
+table.matriz td.dia button[disabled]{cursor:default}
+table.matriz td.c1 button{background:var(--rojo-t);color:var(--rojo-txt)}
+table.matriz td.c2 button{background:var(--ambar-t);color:var(--ambar-txt)}
+table.matriz td.c3 button{background:var(--verde-t);color:var(--verde-txt)}
+table.matriz td.hoy button{box-shadow:0 0 0 2px var(--naranja-t)}
+table.matriz td.dia button .pd{position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--naranja)}
+table.matriz tr.total td{background:var(--suelo);border-top:2px solid var(--linea)}
+table.matriz td.tot{color:var(--ink)}
+table.matriz .ej-btn{background:none;border:0;padding:0;text-align:left;color:inherit}
+table.matriz .ej-btn:hover .ej{text-decoration:underline}
+.muted{color:var(--muted);font-weight:400}
+td.ok{color:var(--verde-txt)} td.warn{color:var(--ambar-txt)} td.mal{color:var(--rojo-txt)}
+.barrita{position:relative;height:5px;border-radius:3px;background:var(--linea);margin-top:5px;min-width:90px}
+.barrita i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--naranja)}
+.barrita u{position:absolute;top:-3px;width:2px;height:11px;background:var(--ink);text-decoration:none;margin-left:-1px}
+.mini-estados{display:inline-flex;gap:4px;flex-wrap:nowrap}
+.mini-estados .pill{padding:2px 7px;font-size:10.5px}
 .hist-h svg{width:100%;height:auto;display:block}
 .flags{margin-top:10px;display:flex;flex-direction:column;gap:6px;font-size:12px}
 .flags div{display:flex;gap:8px;align-items:flex-start}
@@ -282,9 +324,11 @@ table.datos tr.err td{background:var(--rojo-t)}
 .btn.cargando-btn{opacity:.6;pointer-events:none}
 .ver-mas{font-size:12px;color:var(--muted);padding:8px 12px;text-align:center}
 </style>
+<style>table.cola td.sn{white-space:normal;max-width:150px} table.cola td.sn .senal{white-space:nowrap}</style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script>
 /* =========================================================================
@@ -295,14 +339,14 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "926dd1";
+const BUILD = "ce71a7";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
 const REGLA = { cerca:150, lejos:500, precision:60, jornadaIni:8, jornadaFin:20, retrasoMin:30, comentarioMin:12, ritmoMin:8 };
 const OBS_MOTIVOS = ["Visita lejos del comercio","GPS impreciso","Comentario insuficiente","Comercio repetido en el día","Hora fuera de jornada","El resultado no coincide con el comentario","Otro"];
 const ANU_MOTIVOS = ["Comercio equivocado","Visita duplicada","Registro de prueba","No hubo visita presencial","Otro"];
-const COLORES = ["#232C86","#3B43FB","#F86F35","#0BBC96","#B7791F","#D6455D"];
+const COLORES = ["#8B5CF6","#3B43FB","#F86F35","#0BBC96","#B7791F","#D6455D"];
 
 /* ---------- utilidades ---------- */
 const $ = s => document.querySelector(s);
@@ -336,8 +380,20 @@ const ICON = {
   ind:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>',
   ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
   lupa:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+  equipo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  luna:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  sol:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
   salir:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
 };
+
+/* ---------- tema ---------- */
+const temaActual = () => document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+function cambiarTema(){
+  const t = temaActual() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("stratis-esc-tema", t); } catch(e){}
+  pintar();
+}
 
 /* ---------- ejecutivos y avatares ---------- */
 function ejDe(correo){
@@ -359,7 +415,7 @@ const ESTADO = { pend:["pend","Por validar"], val:["val","Validada"], obs:["obs"
 const pill = v => { const k = estadoDe(v); return `<span class="pill ${ESTADO[k][0]}">${ESTADO[k][1]}</span>`; };
 const esHoy = v => iso(v.visitado_en) === hoyISO();
 const esAyer = v => iso(v.visitado_en) === ayerISO();
-const resumenRes = v => `${esc(v.con)}${v.motivo ? " · " + esc(v.motivo) : ""}<small>${esc(v.que)}${v.decision ? " · " + esc(v.decision) : ""}${v.fecha_reagenda ? " · " + fISO(v.fecha_reagenda) : ""}</small>`;
+const resumenRes = v => { const l2 = `${v.que}${v.decision ? " · " + v.decision : ""}${v.fecha_reagenda ? " · " + fISO(v.fecha_reagenda) : ""}`; return `${esc(v.con)}${v.motivo ? " · " + esc(v.motivo) : ""}<small title="${esc(l2)}">${esc(l2)}</small>`; };
 function repetidaHoy(v){ const d = iso(v.visitado_en); return S.act.some(x => x.id !== v.id && x.customer_id === v.customer_id && x.correo === v.correo && iso(x.visitado_en) === d && x.estado_anul !== "anulada"); }
 function senales(v){
   const s = [];
@@ -396,7 +452,7 @@ async function cargar(){
     S.periodo = p.data || null;
     const us = await sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("activo", true).order("nombre");
     S.ejecutivos = (us.data || []).filter(x => x.rol === "Ejecutivo").map((x, i) => ({ correo:x.correo, nombre:x.nombre_corto || x.nombre, ini:iniciales(x.nombre_corto || x.nombre), color:COLORES[i % COLORES.length] }));
-    await Promise.all([cargarActividad(true), cargarBase()]);
+    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance()]);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar();
   escuchar();
@@ -407,6 +463,9 @@ async function cargarActividad(silencio){
   const { data, error } = await sb.rpc("v2_actividad", { p_desde: desde, p_hasta: hoyISO() });
   S._actCargando = false;
   if (error){ if (!silencio) toast("No se pudo actualizar: " + error.message); return; }
+  const firma = JSON.stringify(data || []);
+  if (silencio && firma === S._firma){ S.actEn = new Date(); const el = $("#ahora"); if (el) el.textContent = hh(S.actEn); return; }
+  S._firma = firma;
   const antes = new Set(S.act.map(v => v.id));
   const nuevas = (data || []).filter(v => !antes.has(v.id));
   S.act = data || [];
@@ -489,6 +548,7 @@ async function accion(id, tipo, motivo, nota){
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
 const VISTAS = [
   ["validacion","Validación", ICON.cola, () => S.act.filter(v => estadoDe(v) === "pend").length],
+  ["equipo","Por ejecutivo", ICON.equipo, null],
   ["auditoria","Auditoría", ICON.aud, null],
   ["cargas","Cargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
@@ -512,12 +572,17 @@ function pintar(){
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   const c = $("#contenido");
   const T = { validacion:["Validación de gestiones","La visita cuenta desde que se registra. Si la observas, el ejecutivo la ve «en revisión» y puede corregirla; si la anulas, deja de contar."],
+              equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
               cargas:["Cargas masivas","Transacciones diarias o acumuladas del mes por comercio. Se valida fila por fila antes de escribir."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
-  c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
+  $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
+  if (S._mapa){ try { S._mapa.remove(); } catch(e){} S._mapa = null; }
+  c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "equipo" ? vistaEquipo() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
+  despuesDePintar();
 }
+function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); }
 function cascaron(){
   return `<div class="app">
   <aside class="rail">
@@ -533,6 +598,7 @@ function cascaron(){
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
+        <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
         <button class="btn q" data-salir title="Cerrar sesión">${ICON.salir}</button>
@@ -561,6 +627,7 @@ function filtradas(){
     if (S.ej !== "todos" && v.correo !== S.ej) return false;
     if (S.dia === "hoy" && !esHoy(v)) return false;
     if (S.dia === "ayer" && !esAyer(v)) return false;
+    if (/^\d{4}-/.test(S.dia) && iso(v.visitado_en) !== S.dia) return false;
     if (S.soloSenal && senales(v).length === 0) return false;
     return true;
   });
@@ -573,7 +640,7 @@ function vistaValidacion(){
   const pedidos = S.act.filter(v => v.estado_anul === "pendiente").length;
   const validas = S.act.filter(v => estadoDe(v) === "val").length, cuentan = S.act.filter(v => v.estado_anul !== "anulada").length;
   const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null).map(v => v.customer_id)).size;
-  const cnt = k => S.act.filter(v => (k === "todos" || estadoDe(v) === k) && (S.dia !== "hoy" || esHoy(v)) && (S.dia !== "ayer" || esAyer(v)) && (S.ej === "todos" || v.correo === S.ej)).length;
+  const cnt = k => S.act.filter(v => (k === "todos" || estadoDe(v) === k) && (S.dia !== "hoy" || esHoy(v)) && (S.dia !== "ayer" || esAyer(v)) && (!/^\d{4}-/.test(S.dia) || iso(v.visitado_en) === S.dia) && (S.ej === "todos" || v.correo === S.ej)).length;
   const lista = filtradas();
   if (S.sel && !S.act.find(v => v.id === S.sel)) S.sel = null;
   if (!S.sel && lista.length) S.sel = lista[0].id;
@@ -595,13 +662,13 @@ function vistaValidacion(){
         </div>
         <div class="der">
           <select class="sel" id="fEj"><option value="todos">Todos los ejecutivos</option>${S.ejecutivos.map(e=>`<option value="${esc(e.correo)}" ${S.ej===e.correo?"selected":""}>${esc(e.nombre)}</option>`).join("")}</select>
-          <select class="sel" id="fDia"><option value="hoy" ${S.dia==="hoy"?"selected":""}>Hoy ${fISO(hoyISO())}</option><option value="ayer" ${S.dia==="ayer"?"selected":""}>Ayer ${fISO(ayerISO())}</option><option value="periodo" ${S.dia==="periodo"?"selected":""}>Todo el periodo</option></select>
+          <select class="sel" id="fDia"><option value="hoy" ${S.dia==="hoy"?"selected":""}>Hoy ${fISO(hoyISO())}</option><option value="ayer" ${S.dia==="ayer"?"selected":""}>Ayer ${fISO(ayerISO())}</option><option value="periodo" ${S.dia==="periodo"?"selected":""}>Todo el periodo</option>${diasPeriodo().filter(d => d.iso !== hoyISO() && d.iso !== ayerISO()).reverse().map(d => `<option value="${d.iso}" ${S.dia===d.iso?"selected":""}>${DOW[d.dow]} ${fISO(d.iso)}</option>`).join("")}</select>
           <label class="lbl"><input type="checkbox" id="fSenal" ${S.soloSenal?"checked":""}> Solo con señales</label>
         </div>
       </div>
       ${S.marcadas.size ? `<div class="barra" style="background:var(--azul-t)"><b class="num">${S.marcadas.size} seleccionadas</b><span class="lbl">en bloque solo se validan las que no tienen señales</span><div class="der"><button class="btn v" id="valBloque">${ICON.ok} Validar ${[...S.marcadas].filter(id => { const v = S.act.find(x=>x.id===id); return v && senales(v).length===0; }).length} sin señales</button><button class="btn" id="limpiarSel">Quitar selección</button></div></div>` : ""}
       <div class="tabla-wrap">
-      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Ubicación</th><th>Señales</th><th>Estado</th></tr></thead><tbody>
+      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Ubicación</th><th>Señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
         ${lista.slice(0, 400).map(v => { const e = ejDe(v.correo), sn = senales(v); return `
         <tr class="f ${S.sel===v.id?"sel":""} ${S.nuevas.has(v.id)?"nueva":""}" data-sel="${v.id}">
           <td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>
@@ -610,8 +677,8 @@ function vistaValidacion(){
           <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(v.distrito || "sin distrito")} · ${esc(v.customer_id)}</small></td>
           <td class="res">${resumenRes(v)}</td>
           <td><span class="dist ${claseDist(v)} num"><i></i>${mDist(v.distancia_m)}${v.precision_m != null ? `<small>±${Math.round(v.precision_m)} m</small>` : ""}</span></td>
-          <td>${sn.length ? sn.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("") : `<span style="color:var(--muted);font-size:11.5px">ninguna</span>`}</td>
-          <td>${pill(v)}</td>
+          <td class="sn">${sn.length ? sn.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("") : `<span style="color:var(--muted);font-size:11.5px">ninguna</span>`}</td>
+          ${S.filtro === "todos" ? `<td>${pill(v)}</td>` : ""}
         </tr>`; }).join("")}
       </tbody></table>${lista.length > 400 ? `<div class="ver-mas">Se muestran 400 de ${lista.length}. Afina el filtro.</div>` : ""}` : `<div class="vacio">No hay visitas con ese filtro.${S.filtro === "pend" ? " La cola está al día." : ""}</div>`}
       </div>
@@ -621,33 +688,61 @@ function vistaValidacion(){
   </div>`;
 }
 
+function puntoRef(v){
+  if (v.ref_lat != null) return { lat:v.ref_lat, lng:v.ref_lng, cal:v.ref_calidad, nota:v.ref_nota };
+  if (v.geo_lat != null) return { lat:v.geo_lat, lng:v.geo_lng, cal:v.geo_calidad, nota:"punto actual del comercio" };
+  return null;
+}
+const CAL_TXT = { numero:"dirección con número", calle:"dirección a nivel de calle", comercio:"el local ubicado por nombre", distrito:"solo el distrito (aproximado)", lugar:"un lugar de referencia", visita:"el GPS de otra visita", sunat:"la dirección fiscal de SUNAT", sin_ubicar:"sin ubicar" };
+const gmaps = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 function mapa(v){
-  if (v.distancia_m == null) return `<div class="mapa"><div class="vacio" style="padding:22px">${v.lat == null ? "La visita llegó sin ubicación. No se puede comparar con el punto del comercio." : "El comercio no tiene un punto en el mapa todavía; la visita sí trae GPS."}</div>${v.lat != null ? `<div class="pie"><span></span><a href="https://www.google.com/maps?q=${v.lat},${v.lng}" target="_blank" rel="noopener">Ver la visita en el mapa ↗</a></div>` : ""}</div>`;
-  const W = 400, H = 190, cx = 150, cy = 95;
-  const dist = Math.max(1, v.distancia_m), prec = Math.max(1, Number(v.precision_m) || 1);
-  const escala = Math.min(150 / Math.max(dist, 80), 1.2);
-  const ang = (parseInt(v.id.replace(/-/g,"").slice(0,6), 16) % 360) * Math.PI/180;
-  const vx = cx + Math.cos(ang) * dist * escala, vy = cy + Math.sin(ang) * dist * escala * 0.55;
-  const rp = Math.max(4, prec * escala);
-  const barraM = [50,100,200,500,1000,2000,5000,10000].find(m => m * escala >= 50) || 10000;
-  const col = claseDist(v) === "ok" ? "var(--verde)" : claseDist(v) === "med" ? "var(--ambar)" : "var(--rojo)";
-  const cal = v.geo_calidad === "exacta" || v.geo_calidad === "visita" ? "punto exacto" : v.geo_calidad === "calle" ? "a nivel de calle" : v.geo_calidad === "distrito" ? "a nivel de distrito" : (v.geo_calidad || "punto de la base");
-  const link = v.geo_lat != null ? `https://www.google.com/maps/dir/?api=1&origin=${v.lat},${v.lng}&destination=${v.geo_lat},${v.geo_lng}&travelmode=walking` : `https://www.google.com/maps?q=${v.lat},${v.lng}`;
-  return `<div class="mapa"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Esquema de distancia entre la visita y el comercio">
-    <defs><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="var(--linea)" stroke-width=".6"/></pattern></defs>
-    <rect width="${W}" height="${H}" fill="url(#g)"/>
-    <line x1="${cx}" y1="${cy}" x2="${vx.toFixed(1)}" y2="${vy.toFixed(1)}" stroke="${col}" stroke-width="1.5" stroke-dasharray="4 3"/>
-    <circle cx="${vx.toFixed(1)}" cy="${vy.toFixed(1)}" r="${rp.toFixed(1)}" fill="${col}" fill-opacity=".12" stroke="${col}" stroke-width="1"/>
-    <circle cx="${cx}" cy="${cy}" r="7" fill="var(--navy-2)" stroke="var(--tarjeta)" stroke-width="2"/>
-    <circle cx="${vx.toFixed(1)}" cy="${vy.toFixed(1)}" r="6" fill="${col}" stroke="var(--tarjeta)" stroke-width="2"/>
-    <text x="${cx}" y="${cy+22}" text-anchor="middle" font-size="10.5" fill="var(--texto)" font-weight="700">Comercio</text>
-    <text x="${cx}" y="${cy+34}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${esc(cal)}</text>
-    <text x="${vx.toFixed(1)}" y="${(vy - rp - 6).toFixed(1)}" text-anchor="middle" font-size="10.5" fill="var(--texto)" font-weight="700">Visita ±${Math.round(prec)} m</text>
-    <text x="${(dist*escala < 40 ? cx + 40 : (cx+vx)/2).toFixed(1)}" y="${(dist*escala < 40 ? cy - 24 : (cy+vy)/2 - 6).toFixed(1)}" text-anchor="middle" font-size="11" fill="${col}" font-weight="800">${mDist(v.distancia_m)}</text>
-    <line x1="${W-20-barraM*escala}" y1="${H-14}" x2="${W-20}" y2="${H-14}" stroke="var(--texto)" stroke-width="2"/>
-    <text x="${W-20}" y="${H-19}" text-anchor="end" font-size="9.5" fill="var(--muted)">${barraM >= 1000 ? barraM/1000 + " km" : barraM + " m"}</text>
-  </svg>
-  <div class="pie"><span>Hasta ${REGLA.cerca} m se valida sin mirar; de ${REGLA.cerca} a ${REGLA.lejos} m se revisa; más de ${REGLA.lejos} m se observa.</span><a href="${link}" target="_blank" rel="noopener">Abrir en el mapa ↗</a></div></div>`;
+  const r = puntoRef(v);
+  const regla = `<span>Hasta ${REGLA.cerca} m se valida sin mirar; de ${REGLA.cerca} a ${REGLA.lejos} m se revisa; más de ${REGLA.lejos} m se observa.</span>`;
+  if (v.lat == null) return `<div class="mapa"><div class="vacio" style="padding:22px">La visita llegó sin ubicación. No se puede comparar con el punto del comercio.</div>${r ? `<div class="pie"><span></span><a href="${gmaps(r.lat, r.lng)}" target="_blank" rel="noopener">Ver el comercio en Google Maps ↗</a></div>` : ""}</div>`;
+  const col = claseDist(v);
+  const actualDistinto = v.geo_lat != null && r && v2m(v.geo_lat, v.geo_lng, r.lat, r.lng) > 15 && v2m(v.geo_lat, v.geo_lng, v.lat, v.lng) > 15;
+  const anclado = v.geo_lat != null && r && v2m(v.geo_lat, v.geo_lng, v.lat, v.lng) <= 3 && v2m(r.lat, r.lng, v.lat, v.lng) > 15;
+  return `<div class="mapa">
+    <div id="mapaVisita" class="mapa-real" data-id="${v.id}"></div>
+    <div class="leyenda">
+      <span><i class="pt ref"></i><b>Comercio</b> · ${r ? esc(r.nota || CAL_TXT[r.cal] || "punto de la base") : "sin punto"}${r && r.cal && CAL_TXT[r.cal] && r.nota !== CAL_TXT[r.cal] ? ` <em>(${esc(CAL_TXT[r.cal])})</em>` : ""}</span>
+      <span><i class="pt vis ${col}"></i><b>Visita</b> · ${esc(nombreCorto(ejDe(v.correo).nombre))} a las ${hh(v.visitado_en)} · GPS ±${Math.round(Number(v.precision_m) || 0)} m · <b class="dist ${col}" style="display:inline">${mDist(v.distancia_m)}</b> del comercio</span>
+      ${actualDistinto ? `<span><i class="pt act"></i><b>Punto actual del comercio</b> · ${esc(CAL_TXT[v.geo_calidad] || v.geo_calidad || "")}</span>` : ""}
+      ${anclado ? `<span class="nota-mapa">La ficha del comercio quedó anclada a este GPS después de la visita, por eso el punto de comparación es el que tenía antes.</span>` : ""}
+    </div>
+    <div class="pie">${regla}<span class="links">${r ? `<a href="${gmaps(r.lat, r.lng)}" target="_blank" rel="noopener">Comercio ↗</a>` : ""}<a href="${gmaps(v.lat, v.lng)}" target="_blank" rel="noopener">Visita ↗</a>${r && (v.distancia_m || 0) > 10 ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${v.lat},${v.lng}&destination=${r.lat},${r.lng}&travelmode=walking" target="_blank" rel="noopener">Ruta entre ambos ↗</a>` : ""}</span></div>
+  </div>`;
+}
+function v2m(a1, o1, a2, o2){ if ([a1,o1,a2,o2].some(x => x == null)) return null; const dy = (a1-a2)*111320, dx = (o1-o2)*111320*Math.cos((a1+a2)/2*Math.PI/180); return Math.round(Math.sqrt(dx*dx+dy*dy)); }
+function montarMapa(el){
+  const v = S.act.find(x => x.id === el.dataset.id); if (!v) return;
+  if (!window.L){ el.innerHTML = `<div class="vacio" style="padding:22px">No se pudo cargar el mapa. Usa los enlaces de abajo.</div>`; return; }
+  const r = puntoRef(v);
+  const css = getComputedStyle(document.documentElement);
+  const color = k => css.getPropertyValue(k).trim();
+  const colVis = { ok:color("--verde"), med:color("--ambar"), mal:color("--rojo"), no:color("--muted") }[claseDist(v)];
+  const oscuro = temaActual() === "dark";
+  const m = L.map(el, { zoomControl:true, attributionControl:true, scrollWheelZoom:false });
+  m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${oscuro ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, { maxZoom:20, subdomains:"abcd", attribution:'&copy; OpenStreetMap &copy; CARTO' }).addTo(m);
+  const pts = [];
+  const vis = [v.lat, v.lng]; pts.push(vis);
+  L.circle(vis, { radius:Math.max(3, Number(v.precision_m) || 3), color:colVis, weight:1, fillColor:colVis, fillOpacity:.12 }).addTo(m);
+  if (r){
+    const ref = [r.lat, r.lng]; pts.push(ref);
+    L.polyline([vis, ref], { color:colVis, weight:2, dashArray:"5 5" }).addTo(m);
+    L.circleMarker(ref, { radius:8, color:"#fff", weight:2, fillColor:color("--navy-2") || "#232C86", fillOpacity:1 }).addTo(m)
+      .bindTooltip(`Comercio · ${esc(v.comercio)}`, { permanent:true, direction:"bottom", offset:[0,8], className:"etq" });
+  }
+  if (v.geo_lat != null && r && v2m(v.geo_lat, v.geo_lng, r.lat, r.lng) > 15 && v2m(v.geo_lat, v.geo_lng, v.lat, v.lng) > 15){
+    const act = [v.geo_lat, v.geo_lng]; pts.push(act);
+    L.circleMarker(act, { radius:6, color:"#fff", weight:2, fillColor:color("--muted"), fillOpacity:1 }).addTo(m).bindTooltip("Punto actual", { direction:"right", className:"etq" });
+  }
+  L.circleMarker(vis, { radius:7, color:"#fff", weight:2, fillColor:colVis, fillOpacity:1 }).addTo(m)
+    .bindTooltip(`Visita ${hh(v.visitado_en)} · ${mDist(v.distancia_m)}`, { permanent:true, direction:"top", offset:[0,-8], className:"etq" });
+  if (pts.length > 1 && v2m(pts[0][0], pts[0][1], pts[1][0], pts[1][1]) > 25) m.fitBounds(pts, { padding:[36, 36], maxZoom:18 });
+  else m.setView(vis, 18);
+  S._mapa = m;
 }
 
 const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val" };
@@ -713,6 +808,104 @@ function ficha(v){
 function siguientePendiente(actual){
   const l = filtradas(); const i = l.findIndex(v => v.id === actual);
   const sig = l[i+1] || l[i-1]; if (sig) S.sel = sig.id;
+}
+
+/* =========================================================================
+   1b · Por ejecutivo y día
+   ========================================================================= */
+const DOW = ["dom","lun","mar","mié","jue","vie","sáb"];
+function diasPeriodo(){
+  const p = S.periodo; if (!p) return [];
+  const fin = hoyISO() < p.fin ? hoyISO() : p.fin;
+  const out = []; const d = new Date(p.ini + "T12:00:00Z");
+  while (d.toISOString().slice(0,10) <= fin){ const s2 = d.toISOString().slice(0,10), dow = d.getUTCDay(); out.push({ iso:s2, dow, habil: dow >= 1 && dow <= 5 }); d.setUTCDate(d.getUTCDate() + 1); }
+  return out.filter(x => x.dow !== 0 || S.act.some(v => iso(v.visitado_en) === x.iso));
+}
+function habiles(){
+  const p = S.periodo; if (!p) return { total:0, antes:0, hastaHoy:0 };
+  let total = 0, antes = 0, hastaHoy = 0; const hoy = hoyISO(); const d = new Date(p.ini + "T12:00:00Z");
+  while (d.toISOString().slice(0,10) <= p.fin){ const s2 = d.toISOString().slice(0,10), dow = d.getUTCDay();
+    if (dow >= 1 && dow <= 5){ total++; if (s2 < hoy) antes++; if (s2 <= hoy) hastaHoy++; } d.setUTCDate(d.getUTCDate() + 1); }
+  return { total, antes, hastaHoy };
+}
+function vistaEquipo(){
+  const dias = diasPeriodo(), H = habiles();
+  const metaEj = (S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160;
+  const metaDia = H.total ? metaEj / H.total : 8;
+  const hoy = hoyISO();
+  const filas = S.ejecutivos.map(e => {
+    const todas = S.act.filter(v => v.correo === e.correo);
+    const vs = todas.filter(v => v.estado_anul !== "anulada");
+    const porDia = {};
+    vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { com:new Set(), n:0, h1:null, h2:null, obs:0, pend:0 }; o.n++; if (v.lat != null) o.com.add(v.customer_id); const t = D(v.visitado_en); if (!o.h1 || t < o.h1) o.h1 = t; if (!o.h2 || t > o.h2) o.h2 = t; if (estadoDe(v) === "obs") o.obs++; if (estadoDe(v) === "pend") o.pend++; });
+    const com = new Set(vs.filter(v => v.lat != null).map(v => v.customer_id)).size;
+    const restantes = Math.max(1, H.total - H.antes);
+    return { e, porDia, com, reg:vs.length,
+      val: vs.filter(v => estadoDe(v) === "val").length, pend: vs.filter(v => estadoDe(v) === "pend").length, obs: vs.filter(v => estadoDe(v) === "obs").length, anu: todas.length - vs.length,
+      contacto: vs.filter(v => v.con !== "Nadie").length, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
+      lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length,
+      ritmo: H.hastaHoy ? com / H.hastaHoy : 0, necesario: Math.max(0, metaEj - com) / restantes, esperado: metaDia * H.hastaHoy };
+  });
+  const T = { com: filas.reduce((a,f) => a + f.com, 0), reg: filas.reduce((a,f) => a + f.reg, 0) };
+  const metaEq = metaEj * filas.length, metaDiaEq = metaDia * filas.length;
+  const ritmoEq = H.hastaHoy ? T.com / H.hastaHoy : 0, necEq = Math.max(0, metaEq - T.com) / Math.max(1, H.total - H.antes);
+  const celda = (o, d, correo) => {
+    const n = o ? o.com.size : 0; const k = n === 0 ? "c0" : n < metaDia * .5 ? "c1" : n < metaDia ? "c2" : "c3";
+    const tip = o ? `${n} comercios · ${o.n} registros · de ${hh(o.h1)} a ${hh(o.h2)}${o.pend ? ` · ${o.pend} por validar` : ""}${o.obs ? ` · ${o.obs} observadas` : ""}` : "sin visitas";
+    return `<td class="dia ${k}${d.habil ? "" : " finde"}${d.iso === hoy ? " hoy" : ""}"><button data-ir-dia="${d.iso}" data-ir-ej="${esc(correo)}" title="${esc(tip)}" ${o ? "" : "disabled"}>${n || "·"}${o && o.pend ? `<i class="pd" aria-label="por validar"></i>` : ""}</button></td>`;
+  };
+  // gráfico: comercios por día, apilado por ejecutivo, con la meta diaria del equipo
+  const W = 920, Hc = 190, pl = 34, pr = 12, pt = 16, pb = 34;
+  const tot = dias.map(d => filas.reduce((a,f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0), 0));
+  const ymax = Math.max(metaDiaEq, ...tot, 1) * 1.15;
+  const bw = Math.min(46, (W - pl - pr) / Math.max(1, dias.length) * .62), step = (W - pl - pr) / Math.max(1, dias.length);
+  const y = n => pt + (Hc - pt - pb) * (1 - n / ymax);
+  const barras = dias.map((d, i) => { let acc = 0; const x = pl + step * i + (step - bw) / 2;
+    const segs = filas.map(f => { const n = f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0; if (!n) return ""; const y1 = y(acc + n), y0 = y(acc); acc += n;
+      return `<rect x="${x.toFixed(1)}" y="${y1.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, y0 - y1 - 1.5).toFixed(1)}" rx="2" fill="${f.e.color}"><title>${esc(f.e.nombre)} · ${n} comercios el ${fISO(d.iso)}</title></rect>`; }).join("");
+    return `${segs}${tot[i] ? `<text x="${(x + bw/2).toFixed(1)}" y="${(y(tot[i]) - 5).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">${tot[i]}</text>` : ""}
+      <text x="${(x + bw/2).toFixed(1)}" y="${Hc - 18}" text-anchor="middle" font-size="10.5" fill="${d.iso === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d.iso === hoy ? 700 : 400}">${fISO(d.iso)}</text>
+      <text x="${(x + bw/2).toFixed(1)}" y="${Hc - 5}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${DOW[d.dow]}</text>`; }).join("");
+  const grafico = `<svg viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios visitados por día y por ejecutivo">
+    <line x1="${pl}" y1="${y(0)}" x2="${W - pr}" y2="${y(0)}" stroke="var(--linea)"/>
+    <line x1="${pl}" y1="${y(metaDiaEq).toFixed(1)}" x2="${W - pr}" y2="${y(metaDiaEq).toFixed(1)}" stroke="var(--naranja)" stroke-width="1.5" stroke-dasharray="6 4"/>
+    ${barras}</svg>`;
+  const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+  return `
+  <div class="resumen">
+    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${T.com}<small> / ${metaEq}</small></div><div class="d">${pct(T.com, metaEq)} % de la meta del periodo · ${T.reg} registros</div></div>
+    <div class="tile"><div class="k">Días hábiles</div><div class="v num">${H.hastaHoy}<small> de ${H.total}</small></div><div class="d">${pct(H.hastaHoy, H.total)} % del periodo corrido, contando hoy</div></div>
+    <div class="tile ${ritmoEq >= metaDiaEq ? "ok" : "warn"}"><div class="k">Ritmo del equipo</div><div class="v num">${ritmoEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">meta ${Math.round(metaDiaEq)} por día hábil (${Math.round(metaDia)} por ejecutivo)</div></div>
+    <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${necEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
+  </div>
+  <div class="panel" style="margin-bottom:16px">
+    <div class="barra"><b>Comercios visitados por día</b><span class="lbl">cada color es un ejecutivo · solo visitas con ubicación, no anuladas, un comercio cuenta una vez por día</span>
+      <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria del equipo · ${Math.round(metaDiaEq)}</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
+    <div style="padding:6px 12px 2px;overflow-x:auto">${grafico}</div>
+  </div>
+  <div class="panel">
+    <div class="barra"><b>Por ejecutivo y por día</b><span class="lbl">verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: a más de la mitad · rojo: menos de la mitad · el punto naranja marca visitas por validar</span></div>
+    <div style="overflow-x:auto"><table class="datos matriz">
+      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th>Validación</th></tr></thead>
+      <tbody>${filas.map(f => `<tr>
+        <td><button class="ej-btn" data-ir-dia="periodo" data-ir-ej="${esc(f.e.correo)}"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></button></td>
+        ${dias.map(d => celda(f.porDia[d.iso], d, f.e.correo)).join("")}
+        <td class="n num"><b>${f.com}</b> <span class="muted">/ ${metaEj}</span><div class="barrita"><i style="width:${Math.min(100, pct(f.com, metaEj))}%"></i><u style="left:${Math.min(100, pct(f.esperado, metaEj))}%" title="donde debería ir hoy"></u></div></td>
+        <td class="n num ${f.ritmo >= metaDia ? "ok" : "warn"}">${f.ritmo.toFixed(1).replace(".", ",")}</td>
+        <td class="n num ${f.necesario > metaDia ? "mal" : ""}">${f.necesario.toFixed(1).replace(".", ",")}</td>
+        <td class="n num">${f.contacto}<span class="muted"> / ${f.reg}</span></td>
+        <td class="n num">${f.reunion}</td>
+        <td class="n num">${f.consumos}</td>
+        <td class="n num ${f.lejos ? "warn" : ""}">${f.lejos}</td>
+        <td><span class="mini-estados"><span class="pill val">${f.val}</span><span class="pill pend">${f.pend}</span>${f.obs ? `<span class="pill obs">${f.obs}</span>` : ""}${f.anu ? `<span class="pill anu">${f.anu}</span>` : ""}</span></td>
+      </tr>`).join("")}
+      <tr class="total"><td><b>Equipo</b></td>${dias.map((d, i) => `<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${tot[i] || "·"}</b></td>`).join("")}
+        <td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${ritmoEq.toFixed(1).replace(".", ",")}</td><td class="n num">${necEq.toFixed(1).replace(".", ",")}</td>
+        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td>
+        <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
+      </tbody></table></div>
+    <div class="atajos">Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
+  </div>`;
 }
 
 /* =========================================================================
@@ -974,11 +1167,13 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-ir-dia],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
   if (t.hasAttribute("data-refrescar")){ S.bit = {}; await cargarActividad(); await cargarBase(); toast("Actualizado."); pintar(); return; }
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
+  if (t.id === "btnTema"){ cambiarTema(); return; }
+  if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; S.ej = t.dataset.irEj || "todos"; S.sel = null; S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
   if (t.dataset.vista){ S.vista = t.dataset.vista; if (t.dataset.tab) S.tab = t.dataset.tab; S.accion = null; try { history.replaceState(null, "", "#" + S.vista); } catch(e){} pintar(); return; }
   if (t.dataset.filtro){ S.filtro = t.dataset.filtro; S.sel = null; S.accion = null; pintar(); return; }
   if (t.dataset.sel){ if (ev.target.closest("input")) return; S.sel = t.dataset.sel; S.accion = null; pintar(); return; }
@@ -1029,7 +1224,7 @@ document.addEventListener("keydown", ev => {
 
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["validacion","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["validacion","equipo","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
