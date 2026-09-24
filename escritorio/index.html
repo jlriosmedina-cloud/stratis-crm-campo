@@ -402,7 +402,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "146234";
+const BUILD = "378433";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -492,6 +492,7 @@ function senales(v){
   const h = horaLima(v.visitado_en); if (h < REGLA.jornadaIni || h >= REGLA.jornadaFin) s.push(["r","Fuera de jornada"]);
   if (repetidaHoy(v)) s.push(["","Repetida hoy"]);
   if (v.motivo === "Dirección errada" || v.direccion_ok === false) s.push(["i","Dirección no es correcta"]);
+  if (v.ubicacion_editada_en) s.push(["r","Ubicación actualizada después"]);
   if (v.resultado_editado_en) s.push(["i","Resultado corregido"]);
   if (v.comentario_editado_en) s.push(["i","Comentario corregido"]);
   if (v.fuera_plazo && v.estado_anul !== "anulada") s.push(["r", `Fuera de plazo (tenía hasta el ${fISO(v.plazo_hasta)})`]);
@@ -823,8 +824,8 @@ function montarMapa(el){
   S._mapa = m;
 }
 
-const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val" };
-const BIT_TIT = { comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
+const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val", ubicacion:"ed" };
+const BIT_TIT = { ubicacion:"Ubicación actualizada por el ejecutivo (la anterior quedó aquí)", comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
 function eventos(v){
   const b = S.bit[v.id];
   const base = [{ accion:"registro", por:v.correo, en:v.recibido_en, antes:null, despues:`${v.con}${v.motivo ? " · " + v.motivo : ""} · ${v.que}${v.decision ? " · " + v.decision : ""} · ${v.lat == null ? "sin GPS" : "GPS ±" + Math.round(v.precision_m) + " m"}` }];
@@ -1023,7 +1024,7 @@ function trazaDetalle(v){
   const trx = (S.trx[v.customer_id] || []).filter(t => t.fecha_corte > iso(v.visitado_en) && t.trx > 0);
   const dias = new Set(trx.map(t=>t.fecha_corte)).size;
   const lag = Math.round((D(v.recibido_en) - D(v.visitado_en))/60000);
-  const ev = eventos(v); const corr = ev.filter(b => ["resultado","comentario","traslado"].includes(b.accion)).length;
+  const ev = eventos(v); const corr = ev.filter(b => ["resultado","comentario","traslado","ubicacion"].includes(b.accion)).length;
   const c = S.baseMap[v.customer_id] || {};
   const texto = [`Visita ${v.id} · ${v.comercio} (Customer ID ${v.customer_id})`, `Ejecutivo: ${e.nombre}`, `Declarada ${ddhh(v.visitado_en)} · recibida ${ddhh(v.recibido_en)} (+${lag} min)`, `GPS: ${v.lat==null?"sin ubicación":`${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} ±${Math.round(v.precision_m)} m · a ${mDist(v.distancia_m)} del comercio`}`, `Resultado: ${v.con}${v.motivo?" · "+v.motivo:""} · ${v.que}${v.decision?" · "+v.decision:""}`, `Comentario: ${v.comentario||""}`, `Estado: ${ESTADO[estadoDe(v)][1]}${v.validacion_motivo ? " · " + v.validacion_motivo : ""}${v.fuera_plazo ? " · FUERA DE PLAZO (tenía hasta el " + fISO(v.plazo_hasta) + "), no cuenta" : ""}`, "", "Bitácora:", ...ev.map(b => `- ${ddhh(b.en)} · ${b.accion} · ${nomDe(b.por)}${b.antes?` · antes: ${b.antes} · después: ${b.despues}`:b.despues?` · ${b.despues}`:""}`)].join("\n");
   return `<div class="card">
