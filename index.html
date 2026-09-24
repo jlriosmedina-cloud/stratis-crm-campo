@@ -251,6 +251,8 @@ textarea.campo{min-height:78px;resize:vertical}
 .acc-panel textarea.campo{background:#fff;min-height:70px;resize:vertical}
 .anulada > .fila-ent b, .anulada .h b{text-decoration:line-through;color:var(--muted)}
 .anulada{opacity:.72}
+.revision{margin:6px 0 4px;padding:9px 11px;border-radius:10px;background:var(--ambar-t);color:var(--ink);font-size:13px;line-height:1.4}
+.revision b{color:var(--ambar)}
 
 .card.sunat{border:1.5px solid var(--azul-t)}
 .card.sunat h2{font-size:14.5px;margin-bottom:6px}
@@ -272,7 +274,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "20f436";
+const BUILD = "9af3fd";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -340,12 +342,14 @@ async function cargar(){
   S.cargando = true; S.error = ""; pintar();
   try {
     const hoy = new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
-    const [u, p, b] = await Promise.all([
+    const [u, p, b, r] = await Promise.all([
       sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("correo", S.sesion.user.email.toLowerCase()).maybeSingle(),
       sb.from("v2_periodos").select("*").lte("ini", hoy).gte("fin", hoy).maybeSingle(),
-      sb.rpc("v2_mi_base")
+      sb.rpc("v2_mi_base"),
+      sb.rpc("v2_mis_revisiones")
     ]);
     if (u.error) throw u.error; if (b.error) throw b.error;
+    S.rev = (r && r.data && r.data[0]) || null;
     if (!u.data || !u.data.activo) throw new Error("Tu usuario no está activo en el CRM. Escríbele a Jose.");
     S.yo = u.data; S.admin = ["Analista","Manager"].includes(u.data.rol);
     S.periodo = p.data || null; S.base = b.data || [];
@@ -370,7 +374,7 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.`); recargarBase(); }
 }
-async function recargarBase(){ const b = await sb.rpc("v2_mi_base"); if (!b.error){ S.base = b.data || []; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; }
+async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones")]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; }
 async function cargarActividad(){
   if (S._actCargando) return;
   S._actCargando = true; S.actErr = "";
@@ -472,6 +476,7 @@ function vistaInicio(){
       </div>
     </div>
     <div class="cuerpo">
+      ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Ábrelas desde «Visitados» para ver el motivo y corregirlas dentro del plazo.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button></div>` : ""}
       ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} ${S.cola.length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
       ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
@@ -752,9 +757,10 @@ function lineaVisita(v){
     ? `<span style="color:var(--rojo);font-weight:600">Sin ubicación</span>`
     : `<a href="${urlPunto(v.lat, v.lng)}" target="_blank" rel="noopener" class="ubi">${ICON.pin} Ver dónde se registró</a>
        <span class="nota">±${Math.round(Number(v.precision_m) || 0)} m${v.distancia_m == null ? "" : " · a " + textoDistancia(v.distancia_m)}</span>`;
-  const est = ANUL[v.estado_anul];
+  const est = ANUL[v.estado_anul] || (v.validacion === "observada" ? { t:"En revisión", c:"e-uno" } : v.validacion === "validada" ? { t:"Validada", c:"e-rea" } : null);
   return `<div class="${v.estado_anul === "anulada" ? "anulada" : ""}">
     <div class="fila-ent"><b>${fechaCorta(v.visitado_en)} · ${horaCorta(v.visitado_en)}</b>${est ? `<span class="pill ${est.c}">${est.t}</span>` : ""}</div>
+    ${v.estado_anul !== "anulada" && v.validacion === "observada" ? `<div class="revision"><b>El analista la puso en revisión${v.validacion_en ? " el " + fechaCorta(v.validacion_en) : ""}:</b> ${esc(v.validacion_motivo || "")}${v.validacion_nota ? "<br>" + esc(v.validacion_nota) : ""}<br><span class="nota">${v.puede_editar ? `Sigue contando. Corrígela o confírmala con «Corregir lo que registré» hasta el ${v.limite_edicion ? fISO(v.limite_edicion) : "plazo"}.` : "Sigue contando mientras el analista decide; el plazo para corregirla ya venció."}</span></div>` : ""}
     <span>${enc}</span>
     ${S.admin && v.ejecutivo ? `<br><span class="nota">Registró ${esc(v.ejecutivo)}</span>` : ""}
     <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}${(v.editado_en || v.comentario_editado_en) ? " <i>(corregido)</i>" : ""}</span>
@@ -1071,6 +1077,7 @@ function enlazar(){
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => {
     S.vista = b.dataset.vista; S.ficha = null; S.accion = null; S.corr = null;
+    if (b.dataset.filtroVisita) S.filtroVisita = "vis";
     if (S.vista === "actividad") cargarActividad();
     if (S.vista === "avance") cargarAvance();
     pintar();
