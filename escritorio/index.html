@@ -434,7 +434,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "c7b9ed";
+const BUILD = "d6c4cf";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -722,6 +722,7 @@ function cascaron(){
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
+        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: KPIs, una fila por Customer ID y una por visita">Base para BBVA</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
@@ -1606,6 +1607,121 @@ function vistaIndicadores(){
 }
 
 /* =========================================================================
+   Base para BBVA (Excel) · modelo validado por Jose el 24/09/2026
+   Llave Customer_ID (texto, 8 dígitos). Hojas: KPIs · Base · Visitas · Diccionario.
+   ========================================================================= */
+const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "POS no enciende", "Soporte no ayudó al comercio",
+  "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS no cuenta con la tarifa acordada", "POS problema con abonos",
+  "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta"];
+function cargarScript(src){ return new Promise((ok, mal) => { const e = document.createElement("script"); e.src = src; e.onload = ok; e.onerror = () => mal(new Error("No se pudo cargar " + src)); document.head.appendChild(e); }); }
+async function baseBBVA(){
+  if (S._bajandoBase) return; S._bajandoBase = true; toast("Armando la base para BBVA…");
+  try {
+    if (!window.ExcelJS) await cargarScript("https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js");
+    await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido()]);
+    const per = S.periodo ? S.periodo.id : null;
+    const TIPOS = BBVA_ORDEN.concat(FB_NINGUNO);
+    const dmy = s => s ? String(s).slice(0, 10).split("-").reverse().join("/") : "";
+    const vs = S.act.filter(v => v.estado_anul !== "anulada" && (!per || v.periodo === per)).sort((a, b) => a.visitado_en < b.visitado_en ? -1 : 1);
+    const valida = v => v.lat != null && !v.fuera_plazo;
+    const porCid = {}; vs.forEach(v => (porCid[v.customer_id] ||= []).push(v));
+    const base = S.base.slice().sort((a, b) => a.customer_id < b.customer_id ? -1 : 1);
+    const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
+    const k = wb.addWorksheet("KPIs"); // primera hoja; se llena al final, cuando ya se conocen los rangos
+    const AZ = "FF0C1137", NA = "FFF86F35", IN = "FF232C86", GR = "FF5B6680";
+    const cab = (ws, cols, grupos) => { const r = ws.getRow(1); r.height = 62;
+      cols.forEach((c, i) => { const x = r.getCell(i + 1); x.font = { name:"Arial", bold:true, color:{ argb:"FFFFFFFF" }, size:10 };
+        x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: grupos.fb && grupos.fb(i + 1) ? NA : grupos.k && grupos.k(i + 1) ? IN : AZ } };
+        x.alignment = { wrapText:true, vertical:"middle" }; }); };
+    const tabla = (ws, nombre, cols, filas, anchos, grupos) => {
+      ws.addTable({ name:nombre, ref:"A1", headerRow:true, style:{ theme:"TableStyleLight1", showRowStripes:true }, columns:cols.map(c => ({ name:c, filterButton:true })), rows:filas.length ? filas : [cols.map(() => "")] });
+      cab(ws, cols, grupos); anchos.forEach((w, i) => ws.getColumn(i + 1).width = w);
+      ws.getColumn(1).numFmt = "@"; ws.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
+      ws.eachRow((row, n) => { if (n > 1) row.eachCell(c => c.font = { name:"Arial", size:10 }); });
+    };
+    // Base: una fila por Customer ID
+    const colsB = ["Customer_ID","Nombre_Comercial","Razon_Social","RUC","Rubro","Distrito","Direccion","Zona","Terminales","Ejecutivo","Visitado","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(TIPOS, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional"]);
+    const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
+      const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [];
+      l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota); });
+      if (fb.has(FB_NINGUNO) && fb.size > 1) fb.delete(FB_NINGUNO);
+      const des = l.filter(v => v.decision === "Desiste del producto");
+      return [c.customer_id, c.nombre_comercial || "", c.razon_social || "", c.ruc || "", c.rubro || "", String(c.distrito || "").toUpperCase(), c.direccion_corregida || c.direccion || "", c.zona || "", c.terminales ?? "", c.correo ? ejDe(c.correo).nombre : "",
+        l.some(valida) ? "SI" : "NO", l.length, l.filter(valida).length, l.filter(v => v.con !== "Nadie").length, l.length ? dmy(iso(l[0].visitado_en)) : "", ult ? dmy(iso(ult.visitado_en)) : "",
+        ult ? ult.con : "", ult ? ult.que + (ult.motivo ? " · " + ult.motivo : "") : "", ult ? ult.decision || "" : "", ult ? String(ult.comentario || "").replace(/\s+/g, " ") : "",
+        c.dias_trx || 0, (c.dias_trx || 0) >= 2 ? "SI" : "NO", des.length ? "SI" : "NO", des.length ? des[des.length - 1].equipo || "" : "",
+        TIPOS.filter(t => fb.has(t)).join(" | "), [...fuentes].sort().join(" + ")].concat(TIPOS.map(t => fb.has(t) ? 1 : 0), [[...fuera].sort().join(" | "), notas.join(" / ")]); });
+    const wsB = wb.addWorksheet("Base");
+    tabla(wsB, "Base", colsB, filasB, [12,28,28,13,18,20,30,10,9,16,9,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(TIPOS.map(() => 13), [30,30]), { k:i => i >= 11 && i <= 24, fb:i => i >= 25 });
+    // Visitas: una fila por visita
+    const colsV = ["Customer_ID","Nombre_Comercial","Fecha","Hora","Ejecutivo","Con_Quien","Motivo_Sin_Contacto","Que_Paso","Decision","Equipo_Recuperado","Fecha_Reagenda","Comentario","Registrada_a_Tiempo","Feedback","Fuente_Feedback"].concat(TIPOS, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional"]);
+    const nom = {}; base.forEach(c => nom[c.customer_id] = c.nombre_comercial || c.razon_social || "");
+    const filasV = vs.map(v => { const f = fbDe(v) || { tipos:[], fuera:[] };
+      return [v.customer_id, nom[v.customer_id] || v.comercio || "", dmy(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.con, v.motivo || "", v.que, v.decision || "", v.equipo || "", dmy(v.fecha_reagenda), String(v.comentario || "").replace(/\s+/g, " "), v.fuera_plazo ? "NO" : "SI",
+        TIPOS.filter(t => f.tipos.includes(t)).join(" | "), v.con === "Nadie" ? "No aplica (sin contacto)" : f.fuente === "ejecutivo" ? "Ejecutivo" : f.fuente === "inferido" ? "Inferido del comentario" : ""].concat(TIPOS.map(t => f.tipos.includes(t) ? 1 : 0), [f.fuera.join(" | "), f.nota || ""]); });
+    const wsV = wb.addWorksheet("Visitas");
+    tabla(wsV, "Visitas", colsV, filasV, [12,28,11,7,16,10,16,18,18,11,11,50,10,40,18].concat(TIPOS.map(() => 13), [30,30]), { fb:i => i >= 14 });
+    // KPIs con fórmulas (rangos fijos, se recalculan en Excel)
+    const nB = filasB.length + 1, nV = Math.max(2, filasV.length + 1);
+    const col = (cols, nombre) => { let n = cols.indexOf(nombre) + 1, s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+    const RB = n => `Base!$${col(colsB, n)}$2:$${col(colsB, n)}$${nB}`, RV = n => `Visitas!$${col(colsV, n)}$2:$${col(colsV, n)}$${nV}`;
+    k.views = [{ showGridLines:false }];
+    const ult = vs.length ? vs[vs.length - 1].visitado_en : null;
+    const put = (r, c, v, st) => { const x = k.getCell(r, c); x.value = v; x.font = Object.assign({ name:"Arial", size:10 }, st || {}); return x; };
+    put(1, 1, "Campaña BBVA Adquirencia · periodo " + (per || "") + " · base para BBVA", { size:14, bold:true, color:{ argb:AZ } });
+    put(2, 1, `Periodo del ${fISO(S.periodo && S.periodo.ini)} al ${fISO(S.periodo && S.periodo.fin)}/${S.periodo ? S.periodo.fin.slice(0, 4) : ""} · corte ${ult ? dmy(iso(ult)) + " " + hh(ult) : "—"} · llave: Customer_ID (8 dígitos, texto) · una fila por comercio en «Base» y una por visita en «Visitas»`, { size:9, italic:true, color:{ argb:GR } });
+    const tit = (r, t) => put(r, 1, t, { size:11, bold:true, color:{ argb:IN } });
+    const fil = (r, a, f, c) => { put(r, 1, a); put(r, 2, { formula:f }, { bold:true }); if (c) put(r, 3, c, { size:9, italic:true, color:{ argb:GR } }); };
+    tit(4, "Definición de KPIs a medir");
+    fil(5, "Universo", `COUNTA(${RB("Customer_ID")})`, "Total de clientes: los 900 leads del periodo");
+    fil(6, "Visitas registradas", `COUNTA(${RV("Customer_ID")})`, "Todas las visitas no anuladas, con o sin contacto");
+    fil(7, "Comercios visitados", `COUNTIF(${RB("Visitado")},"SI")`, "Con al menos una visita válida y registrada a tiempo (la que cuenta)");
+    fil(8, "Reactivación", `COUNTIF(${RB("Reactivado")},"SI")`, "Comercios con transacciones en 2 días distintos después de la visita, según la data de BBVA");
+    fil(9, "Recuperados (derivados a recuperación)", `COUNTIF(${RB("Derivado_Recuperacion")},"SI")`, "Comercios que desistieron del producto: se derivan a la recuperación del POS");
+    fil(10, "   con el equipo ya recuperado", `COUNTIFS(${RB("Derivado_Recuperacion")},"SI",${RB("Equipo_Recuperado")},"Sí")`, "Según lo que marcó el ejecutivo en la visita");
+    tit(12, "Visitas por grupo de ejecutivo");
+    ["Ejecutivo","Base asignada","Visitas registradas","Comercios visitados","Visitas con contacto"].forEach((h, i) => { const x = put(13, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; x.alignment = { wrapText:true, vertical:"middle" }; });
+    const ejs = [...new Set(base.filter(c => c.correo).map(c => ejDe(c.correo).nombre))].sort();
+    ejs.forEach((e, i) => { const r = 14 + i; put(r, 1, e);
+      put(r, 2, { formula:`COUNTIF(${RB("Ejecutivo")},A${r})` }, { bold:true }); put(r, 3, { formula:`COUNTIF(${RV("Ejecutivo")},A${r})` }, { bold:true });
+      put(r, 4, { formula:`COUNTIFS(${RB("Ejecutivo")},A${r},${RB("Visitado")},"SI")` }, { bold:true }); put(r, 5, { formula:`COUNTIFS(${RV("Ejecutivo")},A${r},${RV("Con_Quien")},"<>Nadie")` }, { bold:true }); });
+    const rt = 14 + ejs.length; put(rt, 1, "Total", { bold:true }); ["B","C","D","E"].forEach((L, i) => put(rt, i + 2, { formula:`SUM(${L}14:${L}${rt - 1})` }, { bold:true }));
+    const r0 = rt + 2; tit(r0, "KPIs adicionales · feedback de comercios"); put(r0, 3, "Una visita o un comercio puede tener más de un tipo", { size:9, italic:true, color:{ argb:GR } });
+    ["Tipo de feedback (texto de BBVA)","Comercios","Visitas"].forEach((h, i) => { const x = put(r0 + 1, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:NA } }; });
+    TIPOS.forEach((t, i) => { const r = r0 + 2 + i; put(r, 1, t + (t === FB_NINGUNO ? "  (opción agregada por Stratis)" : "")); put(r, 2, { formula:`SUM(${RB(t)})` }, { bold:true }); put(r, 3, { formula:`SUM(${RV(t)})` }, { bold:true }); });
+    const rf = r0 + 2 + TIPOS.length;
+    fil(rf, "Visitas con contacto sin tipo de BBVA", `COUNTIFS(${RV("Con_Quien")},"<>Nadie",${RV("Feedback")},"")`, "Comentario sin detalle, o solo motivos fuera de la lista de BBVA");
+    put(rf + 2, 1, "Fuente del feedback: «Ejecutivo» = lo marcó en el celular (desde el 24/09); «Inferido del comentario» = visitas anteriores, clasificadas por Stratis leyendo el comentario.", { size:9, italic:true, color:{ argb:GR } });
+    if (!S.base.some(c => c.dias_trx)) put(rf + 3, 1, "Reactivación en 0: todavía no se cargó la data de transacciones de BBVA del periodo. Se actualiza sola al cargarla.", { size:9, italic:true, color:{ argb:GR } });
+    k.getColumn(1).width = 62; [2,3,4,5].forEach(i => k.getColumn(i).width = 14); k.getRow(13).height = 30;
+    // Diccionario
+    const dc = wb.addWorksheet("Diccionario"); dc.views = [{ showGridLines:false }];
+    dc.addRow(["Hoja","Columna","Qué significa"]).eachCell(c => { c.font = { name:"Arial", bold:true, color:{ argb:"FFFFFFFF" } }; c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; });
+    [["Base","Customer_ID","Llave. Texto de 8 dígitos con ceros a la izquierda. Una fila por comercio de la base del periodo."],
+     ["Base","Nombre_Comercial … Terminales","Datos del comercio según la base de BBVA, con las correcciones de dirección hechas en campo."],
+     ["Base","Ejecutivo","Ejecutivo asignado al comercio en el periodo (grupo de 225)."],
+     ["Base","Visitado","SI si tiene al menos una visita válida y registrada dentro del plazo (la que cuenta para el indicador)."],
+     ["Base","Visitas_Registradas / Validas / Con_Contacto","Visitas no anuladas; las que cuentan; las que hablaron con dueño o tercero."],
+     ["Base","Ultimo_*","Resultado y comentario de la visita más reciente."],
+     ["Base","Dias_Con_Trx / Reactivado","Días distintos con transacciones después de la primera visita válida; Reactivado = SI con 2 días o más."],
+     ["Base","Derivado_Recuperacion / Equipo_Recuperado","SI si en alguna visita el comercio desistió del producto; el estado del equipo (Sí / No / Pendiente) es el que marcó el ejecutivo."],
+     ["Base","Feedback y columnas por tipo","Unión de los tipos de todas las visitas del comercio; 1 = el comercio lo mencionó. Si mencionó algún problema, no se marca «Sin observaciones»."],
+     ["Visitas","Una fila por visita","Fecha y hora de la visita (Lima), resultado, comentario, plazo y feedback de esa visita."],
+     ["Visitas","Registrada_a_Tiempo","NO si llegó después del siguiente día hábil: se ve, pero no cuenta para el indicador."],
+     ["Ambas","Fuente_Feedback","Ejecutivo (marcado en el celular) o Inferido del comentario (visitas anteriores al 24/09)."],
+     ["Ambas","Fuera_de_la_Lista_BBVA","Motivos que el comercio mencionó y que ningún tipo de BBVA recoge (competencia, tasa, comisión, etc.)."]]
+      .forEach(f => dc.addRow(f).eachCell(c => { c.font = { name:"Arial", size:10 }; c.alignment = { wrapText:true, vertical:"top" }; }));
+    dc.getColumn(1).width = 10; dc.getColumn(2).width = 40; dc.getColumn(3).width = 100;
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast(`Base para BBVA descargada: ${filasB.length} comercios y ${filasV.length} visitas.`);
+  } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
+  S._bajandoBase = false;
+}
+
+/* =========================================================================
    Eventos
    ========================================================================= */
 document.addEventListener("click", ev => {
@@ -1620,8 +1736,9 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
+  if (t.hasAttribute("data-base-bbva")){ baseBBVA(); return; }
   if (t.hasAttribute("data-fb-csv")){ csvFeedback(); return; }
   if (t.hasAttribute("data-fb-tipo")){ S.fbTipo = S.fbTipo === t.dataset.fbTipo ? "" : t.dataset.fbTipo; pintar(); return; }
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
