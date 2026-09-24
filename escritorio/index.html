@@ -379,8 +379,8 @@ table.datos tr.err td{background:var(--rojo-t)}
 .lbl-dist{pointer-events:none;text-align:center;white-space:nowrap;transform:translate(-50%,-50%);line-height:1.15}
 .lbl-dist b{display:block;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--ink);text-shadow:0 0 3px var(--tarjeta),0 0 3px var(--tarjeta),0 0 2px var(--tarjeta)}
 .lbl-dist span{display:block;font-size:11.5px;font-weight:800;color:var(--ink);text-shadow:0 0 3px var(--tarjeta),0 0 3px var(--tarjeta),0 0 2px var(--tarjeta)}
-.mapa-dist.lejano .lbl-dist b{display:none}
-.mapa-dist.muy-lejano .lbl-dist{display:none}
+.lbl-dist.oculta{display:none}
+.lbl-dist.solo-valor b{display:none}
 .md-ejs td,.md-ejs th{padding:7px 6px}
 .md-ejs th{letter-spacing:.04em}
 .md-ejs .ej small{display:block;font-size:11px;color:var(--muted)}
@@ -402,7 +402,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "eb5da1";
+const BUILD = "146234";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1381,9 +1381,10 @@ function montarMapaDistritos(el){
     if (tiene) capa.on("click", () => { S.mDist = S.mDist === g.clave ? null : g.clave; S.mEnfocar = S.mDist; pintar(); });
     capas.push([g, capa, o, tiene]); if (tiene) asign.push(capa);
   });
+  const etqs = [];
   capas.filter(x => x[3]).forEach(([g, capa, o]) => { if (S.mDist === g.clave) capa.bringToFront();
     const c = capa.getBounds().getCenter(); const v = valorMet(o, k === "ej" ? "cob" : k);
-    L.marker(c, { interactive:false, keyboard:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<b>${esc(g.nombre)}</b><span>${fmtMet(v, k === "ej" ? "cob" : k)}</span>` }) }).addTo(m); });
+    etqs.push([capa, L.marker(c, { interactive:false, keyboard:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<b>${esc(g.nombre)}</b><span>${fmtMet(v, k === "ej" ? "cob" : k)}</span>` }) }).addTo(m)]); });
   if (S.mPuntos !== false){
     S.act.forEach(v => { if (v.lat == null || v.estado_anul === "anulada" || (S.mEj && S.mEj !== "todos" && v.correo !== S.mEj)) return;
       const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return;
@@ -1405,7 +1406,10 @@ function montarMapaDistritos(el){
       m.fitBounds([[q(la, .02), q(lo, .02)], [q(la, .98), q(lo, .98)]], { padding:[30,30], animate:false }); }
     else if (asign.length) m.fitBounds(L.featureGroup(asign).getBounds(), { padding:[20,20], animate:false });
   }
-  const zoomClase = () => { el.classList.toggle("lejano", m.getZoom() < 11.5); el.classList.toggle("muy-lejano", m.getZoom() < 10.75); };
+  // cada etiqueta se muestra según el tamaño del distrito en pantalla: nombre y valor, solo valor, o nada
+  const zoomClase = () => etqs.forEach(([capa, mk]) => { const b = capa.getBounds(), a = m.latLngToLayerPoint(b.getNorthWest()), z = m.latLngToLayerPoint(b.getSouthEast());
+    const w = Math.min(z.x - a.x, (z.y - a.y) * 1.6), e = mk.getElement(); if (!e) return;
+    e.classList.toggle("oculta", w < 34); e.classList.toggle("solo-valor", w >= 34 && w < 78); });
   m.on("moveend zoomend", () => { S.mVista = { c:m.getCenter(), z:m.getZoom() }; zoomClase(); });
   zoomClase();
   S._mapa = m;
