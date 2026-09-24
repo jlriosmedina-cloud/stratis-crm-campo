@@ -325,7 +325,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 .btn.cargando-btn{opacity:.6;pointer-events:none}
 .ver-mas{font-size:12px;color:var(--muted);padding:8px 12px;text-align:center}
 </style>
-<style>table.cola td.sn{white-space:normal;max-width:150px} table.cola td.sn .senal{white-space:nowrap}</style>
+<style>table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }</style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -340,7 +340,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "232dd5";
+const BUILD = "1ac7a8";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -580,7 +580,15 @@ function pintar(){
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
   if (S._mapa){ try { S._mapa.remove(); } catch(e){} S._mapa = null; }
+  const ae = document.activeElement, foco = ae && ae.id && c.contains(ae) ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
+  const campos = {}; ["mSel","mNota","qTraza"].forEach(id => { const el = document.getElementById(id); if (el) campos[id] = el.value; });
+  const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
+  const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "equipo" ? vistaEquipo() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
+  Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
+  scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
+  if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
+  S._pinto = { vista:S.vista, sel:S.sel, tab:S.tab };
   despuesDePintar();
 }
 function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); }
@@ -669,16 +677,15 @@ function vistaValidacion(){
       </div>
       ${S.marcadas.size ? `<div class="barra" style="background:var(--azul-t)"><b class="num">${S.marcadas.size} seleccionadas</b><span class="lbl">en bloque solo se validan las que no tienen señales</span><div class="der"><button class="btn v" id="valBloque">${ICON.ok} Validar ${[...S.marcadas].filter(id => { const v = S.act.find(x=>x.id===id); return v && senales(v).length===0; }).length} sin señales</button><button class="btn" id="limpiarSel">Quitar selección</button></div></div>` : ""}
       <div class="tabla-wrap">
-      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Ubicación</th><th>Señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
+      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Ubicación y señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
         ${lista.slice(0, 400).map(v => { const e = ejDe(v.correo), sn = senales(v); return `
         <tr class="f ${S.sel===v.id?"sel":""} ${S.nuevas.has(v.id)?"nueva":""}" data-sel="${v.id}">
           <td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>
           <td class="num"><b>${hh(v.visitado_en)}</b>${esHoy(v) ? "" : `<br><small style="color:var(--muted)">${dd(v.visitado_en)}</small>`}</td>
-          <td><span class="ej">${AVATAR(e)}${esc(nombreCorto(e.nombre))}</span></td>
-          <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(v.distrito || "sin distrito")} · ${esc(v.customer_id)}</small></td>
+          <td title="${esc(e.nombre)}"><span class="ej">${AVATAR(e)}<span class="ej-n">${esc(nombreCorto(e.nombre))}</span></span></td>
+          <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(v.customer_id)} · ${esc(v.distrito || "sin distrito")}</small></td>
           <td class="res">${resumenRes(v)}</td>
-          <td><span class="dist ${claseDist(v)} num"><i></i>${mDist(v.distancia_m)}${v.precision_m != null ? `<small>±${Math.round(v.precision_m)} m</small>` : ""}</span></td>
-          <td class="sn">${sn.length ? sn.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("") : `<span style="color:var(--muted);font-size:11.5px">ninguna</span>`}</td>
+          <td class="sn"><span class="dist ${claseDist(v)} num"><i></i>${mDist(v.distancia_m)}${v.precision_m != null ? `<small>±${Math.round(v.precision_m)} m</small>` : ""}</span>${(() => { const o = sn.filter(([, t]) => !/^A \d|del comercio$/.test(t)); return o.length ? `<div class="sn-l">${o.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("")}</div>` : ""; })()}</td>
           ${S.filtro === "todos" ? `<td>${pill(v)}</td>` : ""}
         </tr>`; }).join("")}
       </tbody></table>${lista.length > 400 ? `<div class="ver-mas">Se muestran 400 de ${lista.length}. Afina el filtro.</div>` : ""}` : `<div class="vacio">No hay visitas con ese filtro.${S.filtro === "pend" ? " La cola está al día." : ""}</div>`}
@@ -1188,7 +1195,8 @@ document.addEventListener("click", async ev => {
     return;
   }
   if (t.hasAttribute("data-cancelar")){ S.accion = null; pintar(); return; }
-  if (t.dataset.confirmar){ const id = S.sel; const m = $("#mSel").value, n = $("#mNota").value.trim(); const tipo = t.dataset.confirmar; const ok = await accion(id, tipo, m, n); if (ok){ toast(tipo === "obs" ? "Observada. El ejecutivo la ve en revisión." : "Anulada. Ya no cuenta."); if (S.filtro === "pend") siguientePendiente(id); pintar(); } return; }
+  if (t.dataset.confirmar){ const id = S.sel; const m = $("#mSel").value, n = $("#mNota").value.trim(); const tipo = t.dataset.confirmar;
+    if ((m === "Otro" && n.length < 5) || (tipo === "obs" && n.length === 0 && m === "Otro")){ toast("Con el motivo «Otro» escribe en la nota qué hay que revisar."); $("#mNota").focus(); return; } const ok = await accion(id, tipo, m, n); if (ok){ toast(tipo === "obs" ? "Observada. El ejecutivo la ve en revisión." : "Anulada. Ya no cuenta."); if (S.filtro === "pend") siguientePendiente(id); pintar(); } return; }
   if (t.id === "valBloque"){ let n = 0; for (const id of [...S.marcadas]){ const v = S.act.find(x=>x.id===id); if (v && estadoDe(v) === "pend" && senales(v).length === 0){ const r = await sb.rpc("v2_validar_visita", { p_visita_id:id, p_estado:"validada" }); if (!r.error) n++; } } S.marcadas.clear(); await cargarActividad(true); toast(`${n} visitas validadas en bloque.`); pintar(); return; }
   if (t.id === "limpiarSel"){ S.marcadas.clear(); pintar(); return; }
   if (t.dataset.tab){ S.tab = t.dataset.tab; pintar(); return; }
