@@ -340,7 +340,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "a4b01c";
+const BUILD = "232dd5";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -426,7 +426,7 @@ function senales(v){
   if (v.precision_m != null && Number(v.precision_m) > REGLA.precision) s.push(["", `GPS ±${Math.round(v.precision_m)} m`]);
   const h = horaLima(v.visitado_en); if (h < REGLA.jornadaIni || h >= REGLA.jornadaFin) s.push(["r","Fuera de jornada"]);
   if (repetidaHoy(v)) s.push(["","Repetida hoy"]);
-  if (v.motivo === "Dirección errada") s.push(["i","Dirección errada"]);
+  if (v.motivo === "Dirección errada" || v.direccion_ok === false) s.push(["i","Dirección no es correcta"]);
   if (v.resultado_editado_en) s.push(["i","Resultado corregido"]);
   if (v.comentario_editado_en) s.push(["i","Comentario corregido"]);
   if (v.estado_anul === "pendiente") s.push(["r","Pide anulación"]);
@@ -782,6 +782,8 @@ function ficha(v){
           <div><small>Qué pasó</small><b>${esc(v.que)}</b></div>
           <div><small>Decisión del comercio</small><b>${esc(v.decision || "—")}</b></div>
           <div><small>Reagenda · equipo</small><b>${v.fecha_reagenda ? fISO(v.fecha_reagenda) : "—"} · ${esc(v.equipo || "—")}</b></div>
+          <div><small>¿La dirección de la base es correcta?</small><b style="color:${v.direccion_ok === false ? "var(--rojo-txt)" : v.direccion_ok === true ? "var(--verde-txt)" : "inherit"}">${v.direccion_ok === true ? "Sí, según el ejecutivo" : v.direccion_ok === false ? "No, según el ejecutivo" : "No se preguntó (registro anterior al 24/09)"}</b></div>
+          <div><small>Distancia al comercio al registrar</small><b>${mDist(v.distancia_m)}</b></div>
         </div>
       </div>
       <div><h3>Comentario del ejecutivo</h3><div class="coment">${esc(v.comentario) || "<i>sin comentario</i>"}${v.editado_en ? `<div class="ed">Corregido el ${ddhh(v.editado_en)}. El texto anterior está en la bitácora.</div>` : ""}</div></div>
