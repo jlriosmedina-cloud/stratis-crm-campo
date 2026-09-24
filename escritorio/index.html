@@ -394,8 +394,21 @@ table.datos tr.err td{background:var(--rojo-t)}
 .fb-tag.ninguno{background:var(--verde-t)}
 .fbv{padding:6px 14px 12px;display:grid;gap:10px}
 .fbv-g{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:6px 0 4px}
-.fbv-fila{display:grid;grid-template-columns:minmax(220px,38%) 1fr 92px;align-items:center;gap:12px;padding:4px 0;font-size:12.5px}
+.fbv-fila{width:100%;border:0;background:none;text-align:left;cursor:pointer;border-radius:6px;display:grid;grid-template-columns:minmax(220px,38%) 1fr 92px;align-items:center;gap:12px;padding:4px 0;font-size:12.5px}
 .fbv-fila:hover{background:var(--hover)}
+.fbv-fila.on{background:var(--azul-t);box-shadow:inset 0 0 0 1px var(--s4)}
+.fbv-fila:focus-visible{outline:2px solid var(--s4);outline-offset:1px}
+.fb-dos{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px}
+@media (max-width:1250px){.fb-dos{grid-template-columns:1fr}}
+.fb-dos .fbv-fila{grid-template-columns:minmax(180px,48%) 1fr 84px}
+.fb-tag.fuera{background:var(--ambar-t)}
+.fb-fuente{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--suelo);color:var(--muted);margin-bottom:6px}
+.fbv-cab .fb-fuente{margin-bottom:0}
+.fb-fuente.ejecutivo{background:var(--verde-t);color:var(--ink)}
+.fb-fuente.inferido{background:var(--azul-t);color:var(--ink)}
+.fb-sub{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:8px 0 4px}
+.fb-crit{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4}
+table.datos tr.fuera td{background:var(--hover)}
 .fbv-t{color:var(--ink)}
 .fbv-barra{height:14px;background:var(--sin);border-radius:4px;overflow:hidden}
 .fbv-barra i{display:block;height:100%;background:var(--s4);border-radius:0 4px 4px 0;min-width:0}
@@ -421,7 +434,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "5a98a7";
+const BUILD = "c7b9ed";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -551,7 +564,7 @@ async function cargar(){
     S.periodo = p.data || null;
     const us = await sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("activo", true).order("nombre");
     S.ejecutivos = (us.data || []).filter(x => x.rol === "Ejecutivo").map((x, i) => ({ correo:x.correo, nombre:x.nombre_corto || x.nombre, ini:iniciales(x.nombre_corto || x.nombre), color:COLORES[i % COLORES.length] }));
-    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance()]);
+    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido()]);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar();
   if (!S.error) escuchar();
@@ -675,7 +688,7 @@ function pintar(){
   const T = { validacion:["Validación de gestiones","La visita cuenta desde que se registra. Si la observas, el ejecutivo la ve «en revisión» y puede corregirla; si la anulas, deja de contar."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
-              feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo, en los tipos que definió BBVA. Se marca desde el 24/09/2026; las visitas anteriores no lo tienen."],
+              feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo, en los tipos que definió BBVA: marcado por el ejecutivo desde el 24/09 e inferido del comentario en las visitas anteriores."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
               cargas:["Cargas masivas","Transacciones diarias o acumuladas del mes por comercio. Se valida fila por fila antes de escribir."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
@@ -1451,12 +1464,33 @@ function montarMapaDistritos(el){
 /* =========================================================================
    Feedback de la visita
    ========================================================================= */
+// Feedback inferido por Stratis leyendo el comentario (tabla v2_feedback_inferido, solo escritorio).
+async function cargarFbInferido(){
+  const r = await sb.from("v2_feedback_inferido").select("visita_id,tipos,fuera_de_lista,confianza,criterio");
+  if (r && r.error){ S.fbInfErr = r.error.message; return; }
+  S.fbInf = {}; ((r && r.data) || []).forEach(x => { S.fbInf[x.visita_id] = x; });
+}
+// Qué feedback cuenta para una visita: lo que marcó el ejecutivo; si no marcó nada, lo inferido del comentario.
+function fbDe(v){
+  if (v.con === "Nadie") return null;
+  const inf = (S.fbInf || {})[v.id];
+  if ((v.feedback || []).length) return { fuente:"ejecutivo", tipos:v.feedback, fuera:[], nota:v.feedback_nota || "", inf };
+  if (inf) return { fuente:"inferido", tipos:inf.tipos || [], fuera:inf.fuera_de_lista || [], confianza:inf.confianza, criterio:inf.criterio, inf };
+  return { fuente:null, tipos:[], fuera:[] };
+}
+const tagsFb = (l, cls) => l.map(t => `<span class="fb-tag ${cls || ""} ${t === FB_NINGUNO ? "ninguno" : ""}">${esc(t)}</span>`).join("");
+const FUENTE_TXT = { ejecutivo:"Marcado por el ejecutivo", inferido:"Inferido por Stratis del comentario" };
 function fichaFeedback(v){
-  const fb = v.feedback || [];
-  if (v.con === "Nadie") return `<div class="muted" style="font-size:12.5px">No aplica: no hubo contacto con el comercio.</div>`;
-  if (!fb.length) return `<div class="muted" style="font-size:12.5px">Sin feedback${iso(v.visitado_en) < "2026-09-24" ? " (registro anterior al 24/09, cuando se agregó el campo)" : ""}.</div>`;
-  return `<div class="fb-tags">${fb.map(t => `<span class="fb-tag ${t === FB_NINGUNO ? "ninguno" : ""}">${esc(t)}</span>`).join("")}</div>
-    ${v.feedback_nota ? `<div class="coment" style="margin-top:8px"><small class="muted" style="display:block;font-size:11px;margin-bottom:2px">Feedback adicional del ejecutivo</small>${esc(v.feedback_nota)}</div>` : ""}`;
+  const f = fbDe(v);
+  if (!f) return `<div class="muted" style="font-size:12.5px">No aplica: no hubo contacto con el comercio.</div>`;
+  if (!f.fuente) return `<div class="muted" style="font-size:12.5px">Sin feedback todavía.</div>`;
+  let h = `<div class="fb-fuente ${f.fuente}">${FUENTE_TXT[f.fuente]}${f.confianza ? ` · confianza ${esc(f.confianza.toLowerCase())}` : ""}</div>`;
+  h += f.tipos.length ? `<div class="fb-tags">${tagsFb(f.tipos)}</div>` : (f.fuera.length ? "" : `<div class="muted" style="font-size:12.5px">El comentario no dice qué opina el comercio del POS.</div>`);
+  if (f.fuera.length) h += `<div class="fb-sub">Fuera de la lista de BBVA</div><div class="fb-tags">${tagsFb(f.fuera, "fuera")}</div>`;
+  if (f.criterio) h += `<div class="fb-crit">${esc(f.criterio)}</div>`;
+  if (f.nota) h += `<div class="coment" style="margin-top:8px"><small class="muted" style="display:block;font-size:11px;margin-bottom:2px">Feedback adicional del ejecutivo</small>${esc(f.nota)}</div>`;
+  if (f.fuente === "ejecutivo" && f.inf && f.inf.tipos.length) h += `<div class="fb-crit">Antes, Stratis lo había inferido del comentario como: ${esc(f.inf.tipos.join(" · "))}</div>`;
+  return h;
 }
 function semanasPeriodo(){
   const out = []; let cur = null;
@@ -1464,70 +1498,96 @@ function semanasPeriodo(){
     if (!cur || cur.k !== k){ cur = { k, ini:d.iso, fin:d.iso }; out.push(cur); } else cur.fin = d.iso; });
   return out;
 }
+// Visitas con contacto del filtro, cada una con su feedback resuelto según la fuente elegida
 function visitasFeedback(){
-  const sem = S.fbSemana ? semanasPeriodo().find(w => w.k === S.fbSemana) : null;
+  const sem = S.fbSemana ? semanasPeriodo().find(w => w.k === S.fbSemana) : null, fuente = S.fbFuente || "todas";
   return S.act.filter(v => v.estado_anul !== "anulada" && v.con !== "Nadie"
     && (!S.fbEj || v.correo === S.fbEj)
-    && (!sem || (iso(v.visitado_en) >= sem.ini && iso(v.visitado_en) <= sem.fin)));
+    && (!sem || (iso(v.visitado_en) >= sem.ini && iso(v.visitado_en) <= sem.fin)))
+    .map(v => { let f = fbDe(v);
+      if (fuente === "ejecutivo" && f.fuente !== "ejecutivo") f = { fuente:null, tipos:[], fuera:[] };
+      if (fuente === "inferido"){ const i = f.inf; f = i ? { fuente:"inferido", tipos:i.tipos || [], fuera:i.fuera_de_lista || [], confianza:i.confianza, criterio:i.criterio, inf:i } : { fuente:null, tipos:[], fuera:[] }; }
+      return { v, f }; });
 }
+const FUERA_LISTA = ["Usa POS o pasarela de la competencia", "Pide una tasa más baja", "Falla del POS sin detalle", "Sus clientes no quieren pagar la comisión", "Obtuvo el POS por un préstamo", "Desconoce tener el POS", "Pide asesoría para configurar sus equipos"];
 function csvFeedback(){
   const q = x => `"${String(x == null ? "" : x).replace(/"/g, '""')}"`;
-  const filas = visitasFeedback().filter(v => (v.feedback || []).length).sort((a, b) => a.visitado_en < b.visitado_en ? -1 : 1);
-  const cab = ["Fecha","Hora","Ejecutivo","Customer ID","Comercio","Distrito","Con quién habló","Qué pasó","Decisión","Feedback","Feedback adicional"];
-  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(v => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", (v.feedback || []).join(" | "), v.feedback_nota || ""].map(q).join(";"))).join("\r\n");
+  const filas = visitasFeedback().filter(o => o.f.fuente && tipoCoincide(o)).sort((a, b) => a.v.visitado_en < b.v.visitado_en ? -1 : 1);
+  const cab = ["Fecha","Hora","Ejecutivo","Customer ID","Comercio","Distrito","Con quién habló","Qué pasó","Decisión","Feedback (tipos BBVA)","Fuera de la lista de BBVA","Fuente","Confianza","Comentario del ejecutivo","Feedback adicional"];
+  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(({ v, f }) => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", f.tipos.join(" | "), f.fuera.join(" | "), FUENTE_TXT[f.fuente], f.confianza || "", (v.comentario || "").replace(/\s+/g, " "), f.nota || ""].map(q).join(";"))).join("\r\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type:"text/csv;charset=utf-8" }));
   a.download = `feedback_visitas_${S.periodo ? S.periodo.id : ""}${S.fbSemana ? "_semana_" + S.fbSemana : ""}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   toast(`Se descargó el CSV con ${filas.length} visita${filas.length === 1 ? "" : "s"}.`);
 }
+// Filtro por tipo (clic en una barra): "t:<tipo>", "f:<fuera de la lista>", "sd" (sin detalle)
+function tipoCoincide(o){
+  const k = S.fbTipo; if (!k) return true;
+  if (k === "sd") return o.f.fuente && !o.f.tipos.length && !o.f.fuera.length;
+  if (k.startsWith("t:")) return o.f.tipos.includes(k.slice(2));
+  if (k.startsWith("f:")) return o.f.fuera.includes(k.slice(2));
+  return true;
+}
 function vistaFeedback(){
-  const vs = visitasFeedback(), con = vs.filter(v => (v.feedback || []).length);
-  const ninguno = con.filter(v => v.feedback.includes(FB_NINGUNO)).length, problema = con.length - ninguno;
-  const notas = con.filter(v => v.feedback_nota);
-  const cuenta = t => con.filter(v => v.feedback.includes(t)).length;
-  const tipos = FEEDBACK.flatMap(([g, items]) => items.map(t => ({ g, t, n:cuenta(t) })));
-  const max = Math.max(1, ...tipos.map(x => x.n));
+  const vs = visitasFeedback(), con = vs.filter(o => o.f.fuente);
+  const conTipo = con.filter(o => o.f.tipos.length);
+  const ninguno = conTipo.filter(o => o.f.tipos.includes(FB_NINGUNO)).length;
+  const problema = conTipo.filter(o => o.f.tipos.some(t => t !== FB_NINGUNO)).length;
+  const sinDetalle = con.filter(o => !o.f.tipos.length && !o.f.fuera.length).length;
+  const nEj = con.filter(o => o.f.fuente === "ejecutivo").length, nInf = con.length - nEj;
+  const cuenta = t => con.filter(o => o.f.tipos.includes(t)).length;
+  const cuentaF = t => con.filter(o => o.f.fuera.includes(t)).length;
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+  const base = vs.length;
+  const todos = [FB_NINGUNO].concat(...FEEDBACK.map(g => g[1]));
+  const max = Math.max(1, ...todos.map(cuenta), ...FUERA_LISTA.map(cuentaF), sinDetalle);
+  const fila = (k, t, n) => `<button class="fbv-fila ${S.fbTipo === k ? "on" : ""}" data-fb-tipo="${esc(k)}" title="${esc(t)}: ${n} visita${n === 1 ? "" : "s"} · ${pct(n, base)} % de las visitas con contacto · clic para ver los comentarios"><span class="fbv-t">${esc(t)}</span><span class="fbv-barra"><i style="width:${(n / max * 100).toFixed(1)}%"></i></span><span class="fbv-n num">${n}<small> · ${pct(n, base)} %</small></span></button>`;
+  const barras = `<div class="fbv-grupo"><div class="fbv-g">Sin observaciones</div>${fila("t:" + FB_NINGUNO, FB_NINGUNO, cuenta(FB_NINGUNO))}</div>`
+    + FEEDBACK.map(([g, items]) => `<div class="fbv-grupo"><div class="fbv-g">${esc(g)}</div>${items.map(t => fila("t:" + t, t, cuenta(t))).join("")}</div>`).join("");
+  const barrasFuera = FUERA_LISTA.map(t => fila("f:" + t, t, cuentaF(t))).join("") + fila("sd", "El comentario no dice qué opina del POS", sinDetalle);
   const ejs = S.ejecutivos.filter(e => !S.fbEj || e.correo === S.fbEj);
-  const porEj = (t, c) => con.filter(v => v.correo === c && v.feedback.includes(t)).length;
-  const dist = {}; con.forEach(v => { if (v.feedback.includes(FB_NINGUNO)) return; const d = v.distrito || "Sin distrito"; const o = dist[d] ||= { n:0, tipos:{} }; o.n++; v.feedback.forEach(t => o.tipos[t] = (o.tipos[t] || 0) + 1); });
-  const topDist = Object.entries(dist).sort((a, b) => b[1].n - a[1].n).slice(0, 10);
-  const barras = FEEDBACK.map(([g, items]) => `<div class="fbv-grupo"><div class="fbv-g">${esc(g)}</div>${items.map(t => { const n = cuenta(t);
-      return `<div class="fbv-fila" title="${esc(t)}: ${n} visita${n === 1 ? "" : "s"} · ${pct(n, con.length)} % de las visitas con feedback"><span class="fbv-t">${esc(t)}</span><span class="fbv-barra"><i style="width:${(n / max * 100).toFixed(1)}%"></i></span><span class="fbv-n num">${n}<small> · ${pct(n, con.length)} %</small></span></div>`; }).join("")}</div>`).join("");
+  const porEj = (pred, c) => con.filter(o => o.v.correo === c && pred(o)).length;
+  const lista = con.filter(tipoCoincide).sort((a, b) => a.v.visitado_en < b.v.visitado_en ? 1 : -1);
+  const etTipo = !S.fbTipo ? "todas las visitas con feedback" : S.fbTipo === "sd" ? "comentarios sin detalle" : S.fbTipo.slice(2);
   return `
   <div class="barra-filtros" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
     <select class="sel" id="fbSemana" aria-label="Semana"><option value="">Todo el periodo</option>${semanasPeriodo().map(w => `<option value="${w.k}" ${S.fbSemana === w.k ? "selected" : ""}>Semana del ${fISO(w.ini)} al ${fISO(w.fin)}</option>`).join("")}</select>
     <select class="sel" id="fbEj" aria-label="Ejecutivo"><option value="">Todos los ejecutivos</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.fbEj === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select>
+    <select class="sel" id="fbFuente" aria-label="Fuente"><option value="todas" ${(S.fbFuente || "todas") === "todas" ? "selected" : ""}>Ejecutivo e inferido del comentario</option><option value="ejecutivo" ${S.fbFuente === "ejecutivo" ? "selected" : ""}>Solo lo que marcó el ejecutivo</option><option value="inferido" ${S.fbFuente === "inferido" ? "selected" : ""}>Solo lo inferido del comentario</option></select>
     <button class="btn" data-fb-csv style="margin-left:auto">Descargar CSV para BBVA</button>
   </div>
+  ${S.fbInfErr ? `<div class="aviso warn" style="margin-bottom:12px">No se pudo leer el feedback inferido: ${esc(S.fbInfErr)}</div>` : ""}
   <div class="resumen">
-    <div class="tile acc"><div class="k">Visitas con feedback</div><div class="v num">${con.length}<small> / ${vs.length}</small></div><div class="d">${pct(con.length, vs.length)} % de las visitas con contacto · las anteriores al 24/09 no lo tienen</div></div>
-    <div class="tile ${problema ? "warn" : ""}"><div class="k">Con algún problema</div><div class="v num">${problema}</div><div class="d">${pct(problema, con.length)} % de las visitas con feedback</div></div>
-    <div class="tile ok"><div class="k">Sin observaciones</div><div class="v num">${ninguno}</div><div class="d">${pct(ninguno, con.length)} % de las visitas con feedback</div></div>
-    <div class="tile"><div class="k">Con nota escrita</div><div class="v num">${notas.length}</div><div class="d">feedback adicional del ejecutivo (opcional)</div></div>
+    <div class="tile acc"><div class="k">Visitas con feedback</div><div class="v num">${con.length}<small> / ${base}</small></div><div class="d">${pct(con.length, base)} % de las visitas con contacto · ${nEj} marcadas por el ejecutivo, ${nInf} inferidas del comentario</div></div>
+    <div class="tile ${problema ? "warn" : ""}"><div class="k">Con algún problema</div><div class="v num">${problema}</div><div class="d">${pct(problema, base)} % de las visitas con contacto · algún tipo de BBVA distinto de «Sin observaciones»</div></div>
+    <div class="tile ok"><div class="k">Sin observaciones</div><div class="v num">${ninguno}</div><div class="d">${pct(ninguno, base)} % de las visitas con contacto</div></div>
+    <div class="tile ${sinDetalle ? "bad" : ""}"><div class="k">Comentario sin detalle</div><div class="v num">${sinDetalle}</div><div class="d">${pct(sinDetalle, base)} % · no dice qué opina el comercio del POS</div></div>
   </div>
-  ${con.length ? `
-  <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Qué dijo el comercio</b><span class="lbl">visitas que marcaron cada tipo · una visita puede marcar varios, así que los porcentajes no suman 100</span></div>
-    <div class="fbv">${barras}</div>
+  <div class="aviso" style="margin-bottom:14px">Desde el 24/09 el ejecutivo marca el feedback en el celular. Las visitas anteriores se clasificaron leyendo su comentario (Stratis): cuentan igual, pero se ven como <b>inferidas</b>. Si el ejecutivo marca una visita, manda lo que marcó. Haz clic en una barra para ver los comentarios de ese tipo.</div>
+  <div class="fb-dos">
+    <div class="panel">
+      <div class="barra"><b>Tipos de BBVA</b><span class="lbl">visitas con cada tipo · una visita puede tener varios, así que no suman 100 %</span></div>
+      <div class="fbv">${barras}</div>
+    </div>
+    <div class="panel">
+      <div class="barra"><b>Fuera de la lista de BBVA</b><span class="lbl">lo que dijo el comercio y ningún tipo recoge · sale de los comentarios</span></div>
+      <div class="fbv">${barrasFuera}</div>
+    </div>
   </div>
-  <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Por ejecutivo</b><span class="lbl">visitas que marcaron cada tipo</span></div>
-    <div style="overflow-x:auto"><table class="datos"><thead><tr><th>Tipo</th>${ejs.map(e => `<th class="n"><span class="ej" style="justify-content:flex-end">${AVATAR(e)}${esc(nombreCorto(e.nombre))}</span></th>`).join("")}<th class="n">Total</th></tr></thead><tbody>
-      ${[FB_NINGUNO].concat(...FEEDBACK.map(g => g[1])).map(t => `<tr><td>${esc(t)}</td>${ejs.map(e => { const n = porEj(t, e.correo); return `<td class="n num ${n ? "" : "muted"}">${n || "·"}</td>`; }).join("")}<td class="n num"><b>${cuenta(t)}</b></td></tr>`).join("")}
-      <tr class="total"><td><b>Visitas con feedback</b></td>${ejs.map(e => `<td class="n num"><b>${con.filter(v => v.correo === e.correo).length}</b><span class="muted"> / ${vs.filter(v => v.correo === e.correo).length}</span></td>`).join("")}<td class="n num"><b>${con.length}</b><span class="muted"> / ${vs.length}</span></td></tr>
-    </tbody></table></div>
-  </div>
-  <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Distritos con más reportes</b><span class="lbl">visitas con algún problema (sin contar «Sin observaciones») y el tipo más repetido</span></div>
-    ${topDist.length ? `<div style="overflow-x:auto"><table class="datos"><thead><tr><th>Distrito</th><th class="n">Visitas con problema</th><th>Lo más repetido</th></tr></thead><tbody>
-      ${topDist.map(([d, o]) => { const [t, n] = Object.entries(o.tipos).sort((a, b) => b[1] - a[1])[0]; return `<tr><td>${esc(d)}</td><td class="n num">${o.n}</td><td>${esc(t)} <span class="muted">· ${n}</span></td></tr>`; }).join("")}
-    </tbody></table></div>` : `<div class="atajos">Todavía no hay visitas con problemas en este filtro.</div>`}
+  <div class="panel" style="margin:16px 0">
+    <div class="barra"><b>Comentarios · ${esc(etTipo)}</b><span class="lbl">${lista.length} visita${lista.length === 1 ? "" : "s"}</span>${S.fbTipo ? `<button class="btn q" data-fb-tipo="" style="margin-left:auto">Ver todos</button>` : ""}</div>
+    ${lista.length ? `<div class="fbv-notas">${lista.slice(0, 80).map(({ v, f }) => `<div class="fbv-nota"><div class="fbv-cab"><span class="num">${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</span><span class="ej">${AVATAR(ejDe(v.correo))}${esc(nombreCorto(ejDe(v.correo).nombre))}</span><b>${esc(v.comercio)}</b><span class="muted">${esc(v.distrito || "")}</span><span class="fb-fuente ${f.fuente}">${f.fuente === "ejecutivo" ? "ejecutivo" : "inferido" + (f.confianza ? " · " + esc(f.confianza.toLowerCase()) : "")}</span><button class="btn q" data-ir-traza="${v.id}">Ver</button></div>
+      ${f.tipos.length || f.fuera.length ? `<div class="fb-tags">${tagsFb(f.tipos)}${tagsFb(f.fuera, "fuera")}</div>` : ""}
+      <div class="fbv-txt">«${esc(v.comentario || "")}»</div>${f.nota ? `<div class="fbv-txt"><b>Feedback adicional:</b> ${esc(f.nota)}</div>` : ""}${f.criterio ? `<div class="fb-crit">${esc(f.criterio)}</div>` : ""}</div>`).join("")}</div>` : `<div class="atajos" style="padding:14px">No hay visitas con este tipo en el filtro.</div>`}
   </div>
   <div class="panel">
-    <div class="barra"><b>Feedback adicional escrito por el ejecutivo</b><span class="lbl">${notas.length ? `las ${Math.min(40, notas.length)} más recientes` : "todavía no hay notas"}</span></div>
-    ${notas.length ? `<div class="fbv-notas">${notas.slice(0, 40).map(v => `<div class="fbv-nota"><div class="fbv-cab"><span class="num">${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</span><span class="ej">${AVATAR(ejDe(v.correo))}${esc(nombreCorto(ejDe(v.correo).nombre))}</span><b>${esc(v.comercio)}</b><span class="muted">${esc(v.distrito || "")}</span><button class="btn q" data-ir-traza="${v.id}">Ver</button></div>
-      <div class="fb-tags">${v.feedback.map(t => `<span class="fb-tag ${t === FB_NINGUNO ? "ninguno" : ""}">${esc(t)}</span>`).join("")}</div><div class="fbv-txt">${esc(v.feedback_nota)}</div></div>`).join("")}</div>` : ""}
-  </div>` : `<div class="panel"><div class="atajos" style="padding:18px">Todavía no hay visitas con feedback${S.fbSemana || S.fbEj ? " en este filtro" : ""}. Aparecen aquí apenas los ejecutivos registren visitas con la versión nueva del celular.</div></div>`}`;
+    <div class="barra"><b>Por ejecutivo</b><span class="lbl">visitas con contacto que tienen cada tipo</span></div>
+    <div style="overflow-x:auto"><table class="datos"><thead><tr><th>Tipo</th>${ejs.map(e => `<th class="n"><span class="ej" style="justify-content:flex-end">${AVATAR(e)}${esc(nombreCorto(e.nombre))}</span></th>`).join("")}<th class="n">Total</th></tr></thead><tbody>
+      ${todos.map(t => `<tr><td>${esc(t)}</td>${ejs.map(e => { const n = porEj(o => o.f.tipos.includes(t), e.correo); return `<td class="n num ${n ? "" : "muted"}">${n || "·"}</td>`; }).join("")}<td class="n num"><b>${cuenta(t)}</b></td></tr>`).join("")}
+      ${FUERA_LISTA.map(t => `<tr class="fuera"><td>${esc(t)} <span class="muted">(fuera de la lista)</span></td>${ejs.map(e => { const n = porEj(o => o.f.fuera.includes(t), e.correo); return `<td class="n num ${n ? "" : "muted"}">${n || "·"}</td>`; }).join("")}<td class="n num"><b>${cuentaF(t)}</b></td></tr>`).join("")}
+      <tr><td>Comentario sin detalle</td>${ejs.map(e => { const n = porEj(o => !o.f.tipos.length && !o.f.fuera.length, e.correo); return `<td class="n num ${n ? "" : "muted"}">${n || "·"}</td>`; }).join("")}<td class="n num"><b>${sinDetalle}</b></td></tr>
+      <tr class="total"><td><b>Visitas con contacto</b></td>${ejs.map(e => `<td class="n num"><b>${vs.filter(o => o.v.correo === e.correo).length}</b></td>`).join("")}<td class="n num"><b>${base}</b></td></tr>
+    </tbody></table></div>
+  </div>`;
 }
 
 function vistaIndicadores(){
@@ -1560,11 +1620,12 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-fb-csv")){ csvFeedback(); return; }
+  if (t.hasAttribute("data-fb-tipo")){ S.fbTipo = S.fbTipo === t.dataset.fbTipo ? "" : t.dataset.fbTipo; pintar(); return; }
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
-  if (t.hasAttribute("data-refrescar")){ S.bit = {}; await cargarActividad(); await cargarBase(); toast("Actualizado."); pintar(); return; }
+  if (t.hasAttribute("data-refrescar")){ S.bit = {}; await cargarActividad(); await cargarBase(); await cargarFbInferido(); toast("Actualizado."); pintar(); return; }
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
   if (t.id === "btnTema"){ cambiarTema(); return; }
   if (t.dataset.mmet){ S.mMet = t.dataset.mmet; pintar(); return; }
@@ -1603,6 +1664,7 @@ document.addEventListener("change", ev => {
   if (t.id === "mEj"){ S.mEj = t.value; S.mDist = null; S.mVista = null; pintar(); }
   if (t.id === "fbSemana"){ S.fbSemana = t.value; pintar(); }
   if (t.id === "fbEj"){ S.fbEj = t.value; pintar(); }
+  if (t.id === "fbFuente"){ S.fbFuente = t.value; pintar(); }
   if (t.id === "mRango"){ S.mRango = t.value; pintar(); }
   if (t.id === "mPuntos"){ S.mPuntos = t.checked; pintar(); }
   if (t.id === "fSenal"){ S.soloSenal = t.checked; S.sel = null; pintar(); }
