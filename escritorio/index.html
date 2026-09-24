@@ -168,6 +168,7 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .leaflet-tooltip.etq{font-family:inherit;font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--tarjeta);color:var(--ink);border:1px solid var(--linea);box-shadow:0 2px 6px rgba(0,0,0,.15)}
 .leaflet-tooltip.etq::before{display:none}
 .leaflet-container{font-family:inherit}
+:root[data-theme="dark"] .mapa-real .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
 .leaflet-control-attribution{font-size:9px}
 .mapa .pie{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--linea);background:var(--tarjeta);flex-wrap:wrap;gap:6px}
 .linea-t{display:flex;flex-direction:column;gap:0}
@@ -339,7 +340,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "ce71a7";
+const BUILD = "a4b01c";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -721,10 +722,9 @@ function montarMapa(el){
   const css = getComputedStyle(document.documentElement);
   const color = k => css.getPropertyValue(k).trim();
   const colVis = { ok:color("--verde"), med:color("--ambar"), mal:color("--rojo"), no:color("--muted") }[claseDist(v)];
-  const oscuro = temaActual() === "dark";
   const m = L.map(el, { zoomControl:true, attributionControl:true, scrollWheelZoom:false });
   m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${oscuro ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, { maxZoom:20, subdomains:"abcd", attribution:'&copy; OpenStreetMap &copy; CARTO' }).addTo(m);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
   const pts = [];
   const vis = [v.lat, v.lng]; pts.push(vis);
   L.circle(vis, { radius:Math.max(3, Number(v.precision_m) || 3), color:colVis, weight:1, fillColor:colVis, fillOpacity:.12 }).addTo(m);
@@ -732,7 +732,7 @@ function montarMapa(el){
     const ref = [r.lat, r.lng]; pts.push(ref);
     L.polyline([vis, ref], { color:colVis, weight:2, dashArray:"5 5" }).addTo(m);
     L.circleMarker(ref, { radius:8, color:"#fff", weight:2, fillColor:color("--navy-2") || "#232C86", fillOpacity:1 }).addTo(m)
-      .bindTooltip(`Comercio · ${esc(v.comercio)}`, { permanent:true, direction:"bottom", offset:[0,8], className:"etq" });
+      .bindTooltip("Comercio", { permanent:true, direction:"bottom", offset:[0,8], className:"etq" });
   }
   if (v.geo_lat != null && r && v2m(v.geo_lat, v.geo_lng, r.lat, r.lng) > 15 && v2m(v.geo_lat, v.geo_lng, v.lat, v.lng) > 15){
     const act = [v.geo_lat, v.geo_lng]; pts.push(act);
@@ -740,7 +740,7 @@ function montarMapa(el){
   }
   L.circleMarker(vis, { radius:7, color:"#fff", weight:2, fillColor:colVis, fillOpacity:1 }).addTo(m)
     .bindTooltip(`Visita ${hh(v.visitado_en)} · ${mDist(v.distancia_m)}`, { permanent:true, direction:"top", offset:[0,-8], className:"etq" });
-  if (pts.length > 1 && v2m(pts[0][0], pts[0][1], pts[1][0], pts[1][1]) > 25) m.fitBounds(pts, { padding:[36, 36], maxZoom:18 });
+  if (pts.length > 1 && v2m(pts[0][0], pts[0][1], pts[1][0], pts[1][1]) > 25) m.fitBounds(pts, { padding:[36, 36], maxZoom:19 });
   else m.setView(vis, 18);
   S._mapa = m;
 }
