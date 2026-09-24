@@ -323,7 +323,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "4993d3";
+const BUILD = "186680";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -683,7 +683,6 @@ function vistaFicha(c){
           <dt>Distrito</dt><dd>${esc(c.distrito)}</dd>
           <dt>Provincia · Depto.</dt><dd>${esc(c.provincia)} · ${esc(c.departamento)}</dd>
           <dt>Zona</dt><dd>${esc(c.zona)}</dd>
-          ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
           ${c.terminales ? `<dt>Terminales POS</dt><dd>${c.terminales}</dd>` : ""}
           ${S.admin ? `<dt>Ejecutivo</dt><dd>${esc(c.correo)}</dd>` : ""}
         </dl>
@@ -912,7 +911,7 @@ function tarjetaSunat(c){
     <div class="eyebrow">Segunda dirección · SUNAT</div>
     <h2>${esc(c.sunat_direccion)}</h2>
     <div class="nota">Es el domicilio que el titular declara ante SUNAT${dist ? " · " + dist : ""}. Si en la dirección de arriba no está el comercio, prueba acá.</div>
-    ${c.sunat_estado ? `<div class="aprox" style="margin-top:8px">En SUNAT este RUC figura en ${esc(c.sunat_estado.toLowerCase())}</div>` : ""}
+    ${c.sunat_estado ? `<div class="aprox" style="margin-top:8px">En SUNAT este comercio figura en ${esc(c.sunat_estado.toLowerCase())}</div>` : ""}
     ${c.sunat_lat != null ? `<div class="nav2">
         <a class="btn btn-sec" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${c.sunat_lat},${c.sunat_lng}" target="_blank" rel="noopener">${ICON.pin} Ir con Google Maps</a>
         <a class="btn btn-waze" href="https://waze.com/ul?ll=${c.sunat_lat},${c.sunat_lng}&navigate=yes" target="_blank" rel="noopener">${ICON.pin} Waze</a>
