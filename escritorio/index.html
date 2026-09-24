@@ -15,6 +15,10 @@
   --rail:#0C1137; --rail-txt:#C9CFEE; --rail-on:#FFFFFF; --rail-line:rgba(255,255,255,.1);
   --sombra:0 6px 18px rgba(12,17,55,.08); --foco:#3B43FB;
   --verde-txt:#07785F; --ambar-txt:#8A5A12; --rojo-txt:#A82E43; --azul-txt:#2A31C9;
+  /* un color por ejecutivo (validado: daltonismo y contraste sobre la tarjeta) */
+  --ej1:#B8388F; --ej2:#3B43FB; --ej3:#E8622A; --ej4:#0A9E7E; --ej5:#B7791F; --ej6:#D6455D;
+  /* rampa secuencial del mapa: claro = poco, oscuro = mucho */
+  --s0:#E3EDFB; --s1:#b7d3f6; --s2:#86b6ef; --s3:#5598e7; --s4:#2a78d6; --s5:#1c5cab; --sin:#E6E9F1;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){ color-scheme:dark;
@@ -22,6 +26,8 @@
     --azul-t:#1E2760; --naranja-t:#4A2616; --verde-t:#0F3A31; --rojo-t:#4A1E29; --ambar-t:#3E2E10;
     --rail:#070A1C; --rail-txt:#AEB6DC; --sombra:0 6px 18px rgba(0,0,0,.35);
     --verde-txt:#5FE3C1; --ambar-txt:#F0C674; --rojo-txt:#FF8FA3; --azul-txt:#9FA6FF; --navy-2:#9FA6FF;
+    --ej1:#DB5CA6; --ej2:#6F7BFF; --ej3:#E36A2E; --ej4:#14A98A; --ej5:#F0C674; --ej6:#FF8FA3;
+    --s0:#26356A; --s1:#104281; --s2:#1c5cab; --s3:#2a78d6; --s4:#5598e7; --s5:#9ec5f4; --sin:#1B2248;
   }
 }
 :root[data-theme="dark"]{ color-scheme:dark;
@@ -29,6 +35,8 @@
   --azul-t:#1E2760; --naranja-t:#4A2616; --verde-t:#0F3A31; --rojo-t:#4A1E29; --ambar-t:#3E2E10;
   --rail:#070A1C; --rail-txt:#AEB6DC; --sombra:0 6px 18px rgba(0,0,0,.35);
   --verde-txt:#5FE3C1; --ambar-txt:#F0C674; --rojo-txt:#FF8FA3; --azul-txt:#9FA6FF; --navy-2:#9FA6FF;
+  --ej1:#DB5CA6; --ej2:#6F7BFF; --ej3:#E36A2E; --ej4:#14A98A; --ej5:#F0C674; --ej6:#FF8FA3;
+  --s0:#26356A; --s1:#104281; --s2:#1c5cab; --s3:#2a78d6; --s4:#5598e7; --s5:#9ec5f4; --sin:#1B2248;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -226,6 +234,9 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .leyenda-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .leyenda-ej i.meta{width:16px;height:0;border-top:2px dashed var(--naranja);border-radius:0;vertical-align:3px}
 .leyenda-ej span:first-child{color:var(--naranja);font-weight:700}
+.graf-ej{display:block}
+.graf-ej:hover g.b path{opacity:.4} .graf-ej g.b:hover path{opacity:1} .graf-ej g.b path{transition:opacity .12s}
+@media (prefers-reduced-motion: reduce){.graf-ej g.b path{transition:none}}
 table.matriz th.dia,table.matriz td.dia{text-align:center;padding:6px 3px;min-width:46px}
 table.matriz th.dia{font-size:10px;line-height:1.3}
 table.matriz th.dia.hoy{color:var(--naranja)}
@@ -325,7 +336,58 @@ table.datos tr.err td{background:var(--rojo-t)}
 .btn.cargando-btn{opacity:.6;pointer-events:none}
 .ver-mas{font-size:12px;color:var(--muted);padding:8px 12px;text-align:center}
 </style>
-<style>table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }</style>
+<style>table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }
+/* ---------- Mapa de distritos ---------- */
+.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 390px;min-height:600px}
+.mapa-dist-col{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--linea)}
+.mapa-dist{height:600px;width:100%;background:var(--suelo)}
+:root[data-theme="dark"] .mapa-dist .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9)}
+.md-leyenda{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-top:1px solid var(--linea);font-size:12px}
+.md-leyenda b{color:var(--ink)}
+.md-leyenda .leyenda-ej span:first-child{color:inherit;font-weight:400}
+.md-leyenda .leyenda-ej i{width:14px;height:10px;border-radius:2px}
+.md-leyenda .leyenda-ej i.pto{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 1.5px var(--tarjeta)}
+.md-lado{min-width:0;display:flex;flex-direction:column;max-height:690px;overflow:auto}
+.md-cuerpo{padding:12px;display:flex;flex-direction:column;gap:10px}
+.md-cuerpo h3{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
+.md-ej{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ink)}
+.md-kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.md-kpi div{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:1px}
+.md-kpi small{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.md-kpi b{font-size:22px;color:var(--ink);line-height:1.2}
+.md-kpi em{font-style:normal;font-size:11.5px;color:var(--muted)}
+.hb{display:grid;grid-template-columns:120px 1fr 30px;align-items:center;gap:8px;font-size:12px;color:var(--texto)}
+.hb span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb i{display:block;height:8px;background:var(--suelo);border-radius:99px;overflow:hidden}
+.hb u{display:block;height:100%;background:var(--s4);border-radius:99px}
+.hb b{text-align:right;color:var(--ink)}
+.md-ult{display:flex;flex-direction:column}
+.md-ult button{display:flex;gap:8px;align-items:flex-start;text-align:left;padding:7px 4px;border:0;border-bottom:1px solid var(--linea);background:none;color:var(--texto);cursor:pointer;font:inherit;font-size:12px}
+.md-ult button:hover{background:var(--hover)}
+.md-ult b{display:block;color:var(--ink);font-size:12.5px}
+.md-ult small{color:var(--muted)}
+.md-tabla tbody tr{cursor:pointer}
+.md-tabla tbody tr:hover td{background:var(--hover)}
+.md-tabla tbody tr.on td{background:var(--azul-t)}
+.md-tabla .ej{display:inline-flex}
+.cob{display:inline-flex;align-items:center;gap:8px}
+.cob i{display:inline-block;width:60px;height:6px;background:var(--suelo);border-radius:99px;overflow:hidden}
+.cob u{display:block;height:100%;background:var(--s4)}
+.leaflet-tooltip.etq-mapa{font-family:inherit;font-size:12px;line-height:1.45;padding:7px 10px;border-radius:9px;background:var(--tarjeta);color:var(--texto);border:1px solid var(--linea);box-shadow:var(--sombra)}
+.leaflet-tooltip.etq-mapa b{color:var(--ink)}
+.leaflet-tooltip.etq-mapa::before{display:none}
+.lbl-dist{pointer-events:none;text-align:center;white-space:nowrap;transform:translate(-50%,-50%);line-height:1.15}
+.lbl-dist b{display:block;font-size:10px;font-weight:700;letter-spacing:.02em;color:var(--ink);text-shadow:0 0 3px var(--tarjeta),0 0 3px var(--tarjeta),0 0 2px var(--tarjeta)}
+.lbl-dist span{display:block;font-size:11.5px;font-weight:800;color:var(--ink);text-shadow:0 0 3px var(--tarjeta),0 0 3px var(--tarjeta),0 0 2px var(--tarjeta)}
+.mapa-dist.lejano .lbl-dist b{display:none}
+.mapa-dist.muy-lejano .lbl-dist{display:none}
+.md-ejs td,.md-ejs th{padding:7px 6px}
+.md-ejs th{letter-spacing:.04em}
+.md-ejs .ej small{display:block;font-size:11px;color:var(--muted)}
+:root[data-theme="dark"] .chip.on{background:var(--azul);border-color:var(--azul)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .chip.on{background:var(--azul);border-color:var(--azul)}}
+@media (max-width:1300px){.mapa-dist-wrap{grid-template-columns:1fr}.mapa-dist-col{border-right:0;border-bottom:1px solid var(--linea)}.md-lado{max-height:none}}
+</style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -340,14 +402,16 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "a6f9b1";
+const BUILD = "eb5da1";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
 const REGLA = { cerca:150, lejos:500, precision:60, jornadaIni:8, jornadaFin:20, retrasoMin:30, comentarioMin:12, ritmoMin:8 };
 const OBS_MOTIVOS = ["Visita lejos del comercio","GPS impreciso","Comentario insuficiente","Comercio repetido en el día","Hora fuera de jornada","El resultado no coincide con el comentario","Otro"];
 const ANU_MOTIVOS = ["Comercio equivocado","Visita duplicada","Registro de prueba","No hubo visita presencial","Otro"];
-const COLORES = ["#8B5CF6","#3B43FB","#F86F35","#0BBC96","#B7791F","#D6455D"];
+const COLORES = ["var(--ej1)","var(--ej2)","var(--ej3)","var(--ej4)","var(--ej5)","var(--ej6)"];
+// color real (para Leaflet, que no entiende var())
+const colorCss = v => { const m = /^var\((--[\w-]+)\)$/.exec(v || ""); return m ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() : v; };
 
 /* ---------- utilidades ---------- */
 const $ = s => document.querySelector(s);
@@ -378,6 +442,7 @@ const ICON = {
   cola:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   aud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M11 8v3l2 2"/></svg>',
   carga:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+  mapa:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3L3 6v15l6-3 6 3 6-3V3l-6 3-6-3z"/><path d="M9 3v15"/><path d="M15 6v15"/></svg>',
   ind:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>',
   ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
   lupa:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
@@ -554,6 +619,7 @@ function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textC
 const VISTAS = [
   ["validacion","Validación", ICON.cola, () => S.act.filter(v => estadoDe(v) === "pend").length],
   ["equipo","Por ejecutivo", ICON.equipo, null],
+  ["mapa","Mapa de distritos", ICON.mapa, null],
   ["auditoria","Auditoría", ICON.aud, null],
   ["cargas","Cargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
@@ -578,24 +644,25 @@ function pintar(){
   const c = $("#contenido");
   const T = { validacion:["Validación de gestiones","La visita cuenta desde que se registra. Si la observas, el ejecutivo la ve «en revisión» y puede corregirla; si la anulas, deja de contar."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
+              mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
               cargas:["Cargas masivas","Transacciones diarias o acumuladas del mes por comercio. Se valida fila por fila antes de escribir."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
-  if (S._mapa){ try { S._mapa.remove(); } catch(e){} S._mapa = null; }
+  if (S._mapa){ try { S._mapa.off(); S._mapa.stop && S._mapa.stop(); S._mapa.remove(); } catch(e){} S._mapa = null; }
   const ae = document.activeElement, foco = ae && ae.id && c.contains(ae) ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const campos = {}; ["mSel","mNota","qTraza"].forEach(id => { const el = document.getElementById(id); if (el) campos[id] = el.value; });
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
-  c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "equipo" ? vistaEquipo() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
+  c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
   S._pinto = { vista:S.vista, sel:S.sel, tab:S.tab };
   despuesDePintar();
 }
-function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); }
+function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) montarMapaDistritos(md); }
 function cascaron(){
   return `<div class="app">
   <aside class="rail">
@@ -869,21 +936,27 @@ function vistaEquipo(){
     const tip = o ? `${n} comercios · ${o.n} registros · de ${hh(o.h1)} a ${hh(o.h2)}${o.pend ? ` · ${o.pend} por validar` : ""}${o.obs ? ` · ${o.obs} observadas` : ""}${o.tarde ? ` · ${o.tarde} fuera de plazo (no cuentan)` : ""}` : "sin visitas";
     return `<td class="dia ${k}${d.habil ? "" : " finde"}${d.iso === hoy ? " hoy" : ""}"><button data-ir-dia="${d.iso}" data-ir-ej="${esc(correo)}" title="${esc(tip)}" ${o ? "" : "disabled"}>${n || "·"}${o && o.pend ? `<i class="pd" aria-label="por validar"></i>` : ""}</button></td>`;
   };
-  // gráfico: comercios por día, apilado por ejecutivo, con la meta diaria del equipo
-  const W = 920, Hc = 190, pl = 34, pr = 12, pt = 16, pb = 34;
+  // gráfico: comercios por día, una barra por ejecutivo (lado a lado) contra su meta diaria
   const tot = dias.map(d => filas.reduce((a,f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0), 0));
-  const ymax = Math.max(metaDiaEq, ...tot, 1) * 1.15;
-  const bw = Math.min(46, (W - pl - pr) / Math.max(1, dias.length) * .62), step = (W - pl - pr) / Math.max(1, dias.length);
+  const nEj = Math.max(1, filas.length), pl = 34, pr = 12, pt = 18, pb = 50, Hc = 250;
+  const gw = Math.max(92, nEj * 20 + 28), W = Math.max(920, pl + pr + dias.length * gw), step = (W - pl - pr) / Math.max(1, dias.length);
+  const bw = Math.min(30, (step * .74 - (nEj - 1) * 3) / nEj);
+  const vmax = Math.max(metaDia, ...filas.flatMap(f => dias.map(d => f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0)), 1);
+  const ymax = Math.ceil(vmax * 1.18 / 4) * 4;
   const y = n => pt + (Hc - pt - pb) * (1 - n / ymax);
-  const barras = dias.map((d, i) => { let acc = 0; const x = pl + step * i + (step - bw) / 2;
-    const segs = filas.map(f => { const n = f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0; if (!n) return ""; const y1 = y(acc + n), y0 = y(acc); acc += n;
-      return `<rect x="${x.toFixed(1)}" y="${y1.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, y0 - y1 - 1.5).toFixed(1)}" rx="2" fill="${f.e.color}"><title>${esc(f.e.nombre)} · ${n} comercios el ${fISO(d.iso)}</title></rect>`; }).join("");
-    return `${segs}${tot[i] ? `<text x="${(x + bw/2).toFixed(1)}" y="${(y(tot[i]) - 5).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">${tot[i]}</text>` : ""}
-      <text x="${(x + bw/2).toFixed(1)}" y="${Hc - 18}" text-anchor="middle" font-size="10.5" fill="${d.iso === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d.iso === hoy ? 700 : 400}">${fISO(d.iso)}</text>
-      <text x="${(x + bw/2).toFixed(1)}" y="${Hc - 5}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${DOW[d.dow]}</text>`; }).join("");
-  const grafico = `<svg viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios visitados por día y por ejecutivo">
-    <line x1="${pl}" y1="${y(0)}" x2="${W - pr}" y2="${y(0)}" stroke="var(--linea)"/>
-    <line x1="${pl}" y1="${y(metaDiaEq).toFixed(1)}" x2="${W - pr}" y2="${y(metaDiaEq).toFixed(1)}" stroke="var(--naranja)" stroke-width="1.5" stroke-dasharray="6 4"/>
+  const ticks = []; for (let t = 0; t <= ymax; t += ymax > 24 ? 8 : 4) ticks.push(t);
+  const rejilla = ticks.map(t => `<line x1="${pl}" y1="${y(t).toFixed(1)}" x2="${W - pr}" y2="${y(t).toFixed(1)}" stroke="var(--linea)" stroke-width="1" ${t ? 'stroke-dasharray="2 4"' : ""}/><text x="${pl - 8}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${t}</text>`).join("");
+  const barras = dias.map((d, i) => { const x0 = pl + step * i + (step - (nEj * bw + (nEj - 1) * 3)) / 2, cx = pl + step * i + step / 2;
+    const bs = filas.map((f, k) => { const o = f.porDia[d.iso], n = o ? o.com.size : 0, x = x0 + k * (bw + 3);
+      const tip = `${f.e.nombre} · ${fISO(d.iso)}: ${n} comercio${n === 1 ? "" : "s"}${o ? ` · ${o.n} registro${o.n === 1 ? "" : "s"}` : ""} · meta ${Math.round(metaDia)}`;
+      const h = n ? Math.max(2, y(0) - y(n)) : 0;
+      return `<g class="b"><rect x="${(x - 1).toFixed(1)}" y="${pt}" width="${(bw + 2).toFixed(1)}" height="${(y(0) - pt).toFixed(1)}" fill="transparent"><title>${esc(tip)}</title></rect>${n ? `<path d="M${x.toFixed(1)},${y(0).toFixed(1)} v${(-h + 4).toFixed(1)} q0,-4 4,-4 h${(bw - 8).toFixed(1)} q4,0 4,4 v${(h - 4).toFixed(1)} z" fill="${f.e.color}" pointer-events="none"/>` : ""}${n && bw >= 11 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(n) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)" pointer-events="none">${n}</text>` : ""}</g>`; }).join("");
+    return `${bs}<text x="${cx.toFixed(1)}" y="${Hc - 32}" text-anchor="middle" font-size="11" fill="${d.iso === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d.iso === hoy ? 700 : 400}">${fISO(d.iso)} ${DOW[d.dow]}</text>
+      <text x="${cx.toFixed(1)}" y="${Hc - 16}" text-anchor="middle" font-size="10" fill="var(--muted)">equipo ${tot[i]} / ${Math.round(metaDiaEq)}</text>`; }).join("");
+  const grafico = `<svg class="graf-ej" viewBox="0 0 ${W} ${Hc}"${W > 920 ? ` width="${W}" style="width:${W}px;max-width:none"` : ""} role="img" aria-label="Comercios visitados por día, una barra por ejecutivo, con la meta diaria de ${Math.round(metaDia)}">
+    ${rejilla}
+    <line x1="${pl}" y1="${y(metaDia).toFixed(1)}" x2="${W - pr}" y2="${y(metaDia).toFixed(1)}" stroke="var(--naranja)" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="${W - pr}" y="${(y(metaDia) - 6).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" fill="var(--naranja)">meta ${Math.round(metaDia)} por ejecutivo</text>
     ${barras}</svg>`;
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   return `
@@ -894,8 +967,8 @@ function vistaEquipo(){
     <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${necEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Comercios visitados por día</b><span class="lbl">cada color es un ejecutivo · solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio cuenta una vez por día</span>
-      <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria del equipo · ${Math.round(metaDiaEq)}</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
+    <div class="barra"><b>Comercios visitados por día y por ejecutivo</b><span class="lbl">solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio cuenta una vez por día · pasa el mouse por una barra para ver el detalle</span>
+      <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria · ${Math.round(metaDia)} por ejecutivo</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
     <div style="padding:6px 12px 2px;overflow-x:auto">${grafico}</div>
   </div>
   <div class="panel">
@@ -1157,6 +1230,188 @@ async function cargarFilas(){
 /* =========================================================================
    4 · Indicadores
    ========================================================================= */
+/* =========================================================================
+   Mapa de distritos (Lima Metropolitana y Callao)
+   Límites: OpenStreetMap (ODbL), guardados en v2_geo_distritos.
+   ========================================================================= */
+const MET = [
+  ["ej",  "Ejecutivo asignado", "El color es el ejecutivo que tiene los comercios del distrito."],
+  ["cob", "Cobertura",          "Comercios asignados que ya tienen una visita que cuenta (con ubicación, no anulada, a tiempo)."],
+  ["efe", "Efectividad",        "Visitas en las que el ejecutivo habló con alguien (dueño, encargado o tercero)."],
+  ["vis", "Comercios visitados","Comercios distintos con una visita que cuenta."],
+  ["reg", "Visitas registradas","Todas las visitas no anuladas, incluidas las repetidas y las sin contacto."],
+  ["reu", "Reuniones",          "Visitas con reunión concretada."],
+  ["con", "Realizará consumos", "Visitas en las que el comercio dijo que volverá a usar el POS."],
+  ["rea", "Reactivados",        "Comercios con transacciones en dos días distintos después de la visita (data de BBVA)."],
+];
+const esPct = k => k === "cob" || k === "efe";
+async function cargarGeo(){
+  if (S.geo || S._geoCargando) return; S._geoCargando = true; S.geoErr = "";
+  const { data, error } = await sb.from("v2_geo_distritos").select("clave,nombre,provincia,geometria");
+  S._geoCargando = false;
+  if (error) S.geoErr = error.message; else S.geo = data || [];
+  pintar();
+}
+function rangoMapa(){
+  const h = hoyISO();
+  if (S.mRango === "hoy") return [h, h];
+  if (S.mRango === "semana"){ const d = new Date(h + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() || 7) - 1)); return [d.toISOString().slice(0,10), h]; }
+  return null;
+}
+function statsDistritos(){
+  const ej = S.mEj || "todos", r = rangoMapa(), m = {};
+  const get = k => m[k] ||= { clave:k, asig:0, rea:0, porEj:{}, vis:new Set(), reg:0, efe:0, reu:0, con:0, lejos:0, tarde:0, quien:{}, que:{}, ultimas:[] };
+  S.base.forEach(c => { if (!c.distrito || !c.correo || (ej !== "todos" && c.correo !== ej)) return;
+    const o = get(c.distrito); o.asig++; o.porEj[c.correo] = (o.porEj[c.correo] || 0) + 1; if (c.estado === "rea") o.rea++; });
+  S.act.forEach(v => { if (v.estado_anul === "anulada" || (ej !== "todos" && v.correo !== ej)) return;
+    const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return;
+    const o = get(v.distrito || "SIN DISTRITO"); o.reg++;
+    if (v.con !== "Nadie") o.efe++; if (v.que === "Reunión concretada") o.reu++; if (v.decision === "Realizará consumos") o.con++;
+    if (v.distancia_m == null || v.distancia_m > REGLA.lejos) o.lejos++; if (v.fuera_plazo) o.tarde++;
+    if (v.lat != null && !v.fuera_plazo) o.vis.add(v.customer_id);
+    o.quien[v.con] = (o.quien[v.con] || 0) + 1; o.que[v.que] = (o.que[v.que] || 0) + 1; o.ultimas.push(v); });
+  Object.values(m).forEach(o => { o.nvis = o.vis.size; o.cob = o.asig ? o.nvis / o.asig : null; o.pefe = o.reg ? o.efe / o.reg : null;
+    o.ejs = Object.entries(o.porEj).sort((a, b) => b[1] - a[1]).map(x => x[0]); o.ej = o.ejs[0] || null;
+    o.ultimas.sort((a, b) => D(b.visitado_en) - D(a.visitado_en)); });
+  return m;
+}
+const valorMet = (o, k) => !o ? null : k === "cob" ? o.cob : k === "efe" ? o.pefe : k === "vis" ? o.nvis : k === "reg" ? o.reg : k === "reu" ? o.reu : k === "con" ? o.con : k === "rea" ? o.rea : null;
+const fmtMet = (v, k) => v == null ? "—" : esPct(k) ? Math.round(v * 100) + " %" : String(v);
+// cinco clases: porcentajes en tramos de 20 %; conteos en quintos del máximo. Cero tiene su propio tono.
+function clasesMet(st, k){
+  if (esPct(k)) return { tramos:[[0,.2],[.2,.4],[.4,.6],[.6,.8],[.8,1.0001]], paso:v => v == null ? null : v <= 0 ? 0 : Math.min(5, Math.floor(v * 5) + 1), etq:i => ["0 %","1–19 %","20–39 %","40–59 %","60–79 %","80–100 %"][i] };
+  const mx = Math.max(1, ...Object.values(st).filter(o => o.asig).map(o => valorMet(o, k) || 0));
+  const lim = [1,2,3,4,5].map(i => Math.max(i, Math.ceil(mx * i / 5)));
+  const paso = v => v == null ? null : v <= 0 ? 0 : 1 + lim.findIndex(l => v <= l);
+  const etq = i => { if (i === 0) return "0"; const a = i === 1 ? 1 : lim[i-2] + 1, b = lim[i-1]; return a >= b ? String(b) : `${a}–${b}`; };
+  return { paso, etq, lim };
+}
+function vistaMapa(){
+  if (!S.geo && !S.geoErr) cargarGeo();
+  const k = S.mMet || "ej", st = statsDistritos(), cl = k === "ej" ? null : clasesMet(st, k);
+  const asignados = Object.values(st).filter(o => o.asig).sort((a, b) => (valorMet(b, k === "ej" ? "cob" : k) ?? -1) - (valorMet(a, k === "ej" ? "cob" : k) ?? -1) || b.asig - a.asig);
+  const sel = S.mDist && st[S.mDist] ? st[S.mDist] : null;
+  const nomDist = c => { const g = (S.geo || []).find(x => x.clave === c); return g ? g.nombre : c.charAt(0) + c.slice(1).toLowerCase(); };
+  const r = rangoMapa();
+  const leyenda = k === "ej"
+    ? S.ejecutivos.map(e => `<span><i style="background:${e.color}"></i>${esc(nombreCorto(e.nombre))}</span>`).join("") + `<span><i style="background:transparent;border:1px solid var(--muted)"></i>sin comercios asignados</span>`
+    : [0,1,2,3,4,5].map(i => `<span><i style="background:var(--s${i})"></i>${cl.etq(i)}</span>`).join("") + `<span><i style="background:transparent;border:1px solid var(--muted)"></i>sin comercios asignados</span>`;
+  const barraH = (obj, orden) => { const tot = Object.values(obj).reduce((a, b) => a + b, 0) || 1; const ks = (orden || Object.keys(obj)).filter(x => obj[x]);
+    return ks.length ? ks.map(x => `<div class="hb"><span>${esc(x)}</span><i><u style="width:${Math.round(obj[x] / tot * 100)}%"></u></i><b class="num">${obj[x]}</b></div>`).join("") : `<div class="muted" style="font-size:12px">Sin visitas en el rango.</div>`; };
+  const lateral = sel ? `
+    <div class="barra"><b>${esc(nomDist(sel.clave))}</b><div class="der"><button class="btn q" data-mdist="">Quitar selección</button></div></div>
+    <div class="md-cuerpo">
+      <div class="md-ej">${sel.ejs.map(c => `<span class="ej">${AVATAR(ejDe(c))}${esc(ejDe(c).nombre)} · ${sel.porEj[c]} comercios</span>`).join("") || `<span class="muted">Sin comercios asignados${S.mEj && S.mEj !== "todos" ? " a este ejecutivo" : ""}</span>`}</div>
+      <div class="md-kpi">
+        <div><small>Cobertura</small><b class="num">${fmtMet(sel.cob, "cob")}</b><em>${sel.nvis} de ${sel.asig} comercios</em></div>
+        <div><small>Efectividad</small><b class="num">${fmtMet(sel.pefe, "efe")}</b><em>${sel.efe} de ${sel.reg} visitas con contacto</em></div>
+        <div><small>Reuniones</small><b class="num">${sel.reu}</b><em>${sel.con} realizará${sel.con === 1 ? "" : "n"} consumos</em></div>
+        <div><small>Reactivados</small><b class="num">${sel.rea}</b><em>según la data de BBVA</em></div>
+      </div>
+      ${sel.lejos || sel.tarde ? `<div class="aviso warn" style="margin:0">${[sel.lejos ? `${sel.lejos} visita${sel.lejos === 1 ? "" : "s"} lejos del comercio o sin GPS` : "", sel.tarde ? `${sel.tarde} fuera de plazo` : ""].filter(Boolean).join(" · ")}</div>` : ""}
+      <h3>Con quién habló</h3>${barraH(sel.quien, ["Dueño","Encargado","Tercero","Nadie"])}
+      <h3>Qué pasó</h3>${barraH(sel.que)}
+      <h3>Últimas visitas</h3>
+      <div class="md-ult">${sel.ultimas.slice(0, 8).map(v => `<button data-ir-cola="${v.id}"><span class="ej">${AVATAR(ejDe(v.correo))}</span><span><b>${esc(v.comercio)}</b><small>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)} · ${esc(v.con)} · ${esc(v.que)}</small></span></button>`).join("") || `<div class="muted" style="font-size:12px">Sin visitas en el rango.</div>`}</div>
+    </div>`
+  : `
+    <div class="barra"><b>Por ejecutivo</b><span class="lbl">haz clic en un distrito para ver su detalle</span></div>
+    <div class="md-cuerpo">
+      <table class="datos md-ejs"><thead><tr><th>Ejecutivo</th><th class="n">Comercios</th><th class="n">Cobertura</th><th class="n">Efectividad</th></tr></thead><tbody>
+      ${S.ejecutivos.filter(e => !S.mEj || S.mEj === "todos" || e.correo === S.mEj).map(e => { const ds = asignados.filter(o => o.porEj[e.correo]); const a = ds.reduce((x, o) => x + o.porEj[e.correo], 0);
+          const vs = S.act.filter(v => v.correo === e.correo && v.estado_anul !== "anulada" && (!r || (iso(v.visitado_en) >= r[0] && iso(v.visitado_en) <= r[1])));
+          const nv = new Set(vs.filter(v => v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size, ef = vs.filter(v => v.con !== "Nadie").length;
+          return `<tr><td><span class="ej">${AVATAR(e)}<span>${esc(nombreCorto(e.nombre))}<small>${ds.length} distrito${ds.length === 1 ? "" : "s"}</small></span></span></td><td class="n num">${a}</td><td class="n num">${a ? Math.round(nv / a * 100) : 0} %</td><td class="n num">${vs.length ? Math.round(ef / vs.length * 100) + " %" : "—"}</td></tr>`; }).join("")}
+      </tbody></table>
+      <div class="muted" style="font-size:12px;line-height:1.5">Cada distrito lo trabaja un solo ejecutivo. La cobertura cuenta comercios distintos con una visita que cuenta; la efectividad, visitas en las que habló con alguien.</div>
+    </div>`;
+  const filasTabla = asignados.map(o => `<tr class="${S.mDist === o.clave ? "on" : ""}" data-mdist="${esc(o.clave)}">
+      <td><b>${esc(nomDist(o.clave))}</b></td>
+      <td>${o.ejs.map(c => `<span class="ej">${AVATAR(ejDe(c))}${esc(nombreCorto(ejDe(c).nombre))}</span>`).join(" ")}</td>
+      <td class="n num">${o.asig}</td><td class="n num">${o.nvis}</td>
+      <td class="n num"><span class="cob"><i><u style="width:${Math.round((o.cob || 0) * 100)}%"></u></i>${fmtMet(o.cob, "cob")}</span></td>
+      <td class="n num">${o.reg}</td><td class="n num">${fmtMet(o.pefe, "efe")}</td><td class="n num">${o.reu}</td><td class="n num">${o.con}</td><td class="n num">${o.rea}</td>
+      <td class="n num ${o.lejos ? "warn" : ""}">${o.lejos}</td></tr>`).join("");
+  return `
+  <div class="panel" style="margin-bottom:16px">
+    <div class="barra">
+      <div class="chips" role="tablist" aria-label="Qué pintar en el mapa">${MET.map(([c, t, d]) => `<button class="chip ${k === c ? "on" : ""}" data-mmet="${c}" title="${esc(d)}">${t}</button>`).join("")}</div>
+      <div class="der">
+        <select class="sel" id="mEj" aria-label="Ejecutivo"><option value="todos">Todos los ejecutivos</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.mEj === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select>
+        <select class="sel" id="mRango" aria-label="Rango"><option value="periodo">Todo el periodo</option><option value="semana" ${S.mRango === "semana" ? "selected" : ""}>Esta semana</option><option value="hoy" ${S.mRango === "hoy" ? "selected" : ""}>Hoy</option></select>
+        <label class="lbl"><input type="checkbox" id="mPuntos" ${S.mPuntos !== false ? "checked" : ""}> Puntos de visita</label>
+      </div>
+    </div>
+    <div class="mapa-dist-wrap">
+      <div class="mapa-dist-col">
+        ${S.geoErr ? `<div class="vacio" style="padding:30px">No se pudieron cargar los límites de los distritos: ${esc(S.geoErr)}</div>` : !S.geo ? `<div class="vacio" style="padding:30px"><span class="spin"></span> Cargando el mapa…</div>` : `<div id="mapaDist" class="mapa-dist"></div>`}
+        <div class="md-leyenda"><b>${esc(MET.find(x => x[0] === k)[1])}</b><span class="muted">${esc(MET.find(x => x[0] === k)[2])}${k === "rea" ? "" : r ? ` Rango: ${S.mRango === "hoy" ? "hoy" : "esta semana"}.` : ""}</span><div class="leyenda-ej">${leyenda}${S.mPuntos !== false ? `<span><i class="pto"></i>visita (color del ejecutivo)</span>` : ""}</div></div>
+      </div>
+      <div class="md-lado">${lateral}</div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="barra"><b>Distritos con comercios asignados</b><span class="lbl">${asignados.length} distritos · ordenados por ${k === "ej" ? "cobertura" : esc(MET.find(x => x[0] === k)[1].toLowerCase())} · clic en una fila para verla en el mapa</span></div>
+    <div style="overflow-x:auto"><table class="datos md-tabla"><thead><tr><th>Distrito</th><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Visitas</th><th class="n">Efectividad</th><th class="n">Reuniones</th><th class="n">Realizará<br>consumos</th><th class="n">Reactivados</th><th class="n">Lejos o<br>sin GPS</th></tr></thead>
+    <tbody>${filasTabla}</tbody></table></div>
+    <div class="atajos">Límites de distritos: © colaboradores de OpenStreetMap (ODbL). Los reactivados se cuentan en todo el periodo; lo demás, en el rango elegido.</div>
+  </div>`;
+}
+function montarMapaDistritos(el){
+  if (!window.L || !S.geo){ return; }
+  const k = S.mMet || "ej", st = statsDistritos(), cl = k === "ej" ? null : clasesMet(st, k), r = rangoMapa();
+  const oscuro = temaActual() === "dark", borde = colorCss("var(--tarjeta)"), tinta = colorCss("var(--ink)");
+  const m = L.map(el, { zoomControl:true, scrollWheelZoom:true, zoomSnap:.25, preferCanvas:false });
+  m.setView(S.mVista ? S.mVista.c : [-12.06, -77.03], S.mVista ? S.mVista.z : 11);
+  m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:oscuro ? .55 : .5, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
+  const capas = [], asign = [];
+  S.geo.forEach(g => {
+    const o = st[g.clave], tiene = !!(o && o.asig), selec = S.mDist === g.clave;
+    const fill = !tiene ? colorCss("var(--sin)") : k === "ej" ? colorCss(ejDe(o.ej).color) : colorCss(`var(--s${cl.paso(valorMet(o, k)) ?? 0})`);
+    const estilo = tiene ? { color:selec ? tinta : borde, weight:selec ? 3 : 1.5, fillColor:fill, fillOpacity:k === "ej" ? (oscuro ? .78 : .6) : .85 }
+                         : { color:colorCss("var(--muted)"), weight:.8, opacity:.55, fillColor:fill, fillOpacity:.06 };
+    const capa = L.geoJSON({ type:"Feature", geometry:g.geometria }, { style:estilo }).addTo(m);
+    const v = valorMet(o, k === "ej" ? "cob" : k);
+    capa.bindTooltip(tiene
+      ? `<b>${esc(g.nombre)}</b><br>${esc(o.ejs.map(c => ejDe(c).nombre).join(", "))}<br>${o.nvis} de ${o.asig} comercios visitados (${fmtMet(o.cob, "cob")})<br>${o.reg} visitas · efectividad ${fmtMet(o.pefe, "efe")}${k !== "ej" && k !== "cob" && k !== "efe" ? `<br>${esc(MET.find(x => x[0] === k)[1])}: <b>${fmtMet(v, k)}</b>` : ""}`
+      : `<b>${esc(g.nombre)}</b><br>Sin comercios asignados`, { sticky:true, className:"etq-mapa", direction:"top", offset:[0,-6] });
+    capa.on("mouseover", () => { if (!selec) capa.setStyle({ weight:2.5, color:tinta }); });
+    capa.on("mouseout", () => { if (!selec) capa.setStyle({ weight:estilo.weight, color:estilo.color }); });
+    if (tiene) capa.on("click", () => { S.mDist = S.mDist === g.clave ? null : g.clave; S.mEnfocar = S.mDist; pintar(); });
+    capas.push([g, capa, o, tiene]); if (tiene) asign.push(capa);
+  });
+  capas.filter(x => x[3]).forEach(([g, capa, o]) => { if (S.mDist === g.clave) capa.bringToFront();
+    const c = capa.getBounds().getCenter(); const v = valorMet(o, k === "ej" ? "cob" : k);
+    L.marker(c, { interactive:false, keyboard:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<b>${esc(g.nombre)}</b><span>${fmtMet(v, k === "ej" ? "cob" : k)}</span>` }) }).addTo(m); });
+  if (S.mPuntos !== false){
+    S.act.forEach(v => { if (v.lat == null || v.estado_anul === "anulada" || (S.mEj && S.mEj !== "todos" && v.correo !== S.mEj)) return;
+      const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return;
+      L.circleMarker([v.lat, v.lng], { radius:4, color:borde, weight:1.5, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 })
+        .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(d)} ${hh(v.visitado_en)}<br>${esc(v.con)} · ${esc(v.que)}${v.distancia_m != null ? ` · a ${mDist(v.distancia_m)}` : ""}`, { className:"etq-mapa", direction:"top", offset:[0,-4] })
+        .on("click", () => { S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; S.ej = "todos"; S.sel = v.id; pintar(); })
+        .addTo(m); });
+  }
+  const selCapa = capas.find(x => x[0].clave === S.mEnfocar);
+  if (selCapa){ m.fitBounds(selCapa[1].getBounds(), { padding:[40,40], maxZoom:14, animate:false }); S.mEnfocar = null; }
+  else if (S.mVista) m.setView(S.mVista.c, S.mVista.z, { animate:false });
+  else {
+    // encuadre inicial: donde están los comercios (sin dejar que un distrito enorme como Lurigancho aleje todo)
+    const ej = S.mEj && S.mEj !== "todos" ? S.mEj : null;
+    const pts = S.base.filter(c => c.geo_lat != null && (!ej || c.correo === ej)).map(c => [c.geo_lat, c.geo_lng])
+      .concat(S.act.filter(v => v.lat != null && (!ej || v.correo === ej)).map(v => [v.lat, v.lng]));
+    if (pts.length >= 3){ const q = (a, f) => a[Math.min(a.length - 1, Math.max(0, Math.floor(a.length * f)))];
+      const la = pts.map(p => p[0]).sort((a, b) => a - b), lo = pts.map(p => p[1]).sort((a, b) => a - b);
+      m.fitBounds([[q(la, .02), q(lo, .02)], [q(la, .98), q(lo, .98)]], { padding:[30,30], animate:false }); }
+    else if (asign.length) m.fitBounds(L.featureGroup(asign).getBounds(), { padding:[20,20], animate:false });
+  }
+  const zoomClase = () => { el.classList.toggle("lejano", m.getZoom() < 11.5); el.classList.toggle("muy-lejano", m.getZoom() < 10.75); };
+  m.on("moveend zoomend", () => { S.mVista = { c:m.getCenter(), z:m.getZoom() }; zoomClase(); });
+  zoomClase();
+  S._mapa = m;
+  if (S.mScroll){ S.mScroll = false; (el.closest(".panel") || el).scrollIntoView({ block:"start", behavior:"auto" }); }
+}
+
 function vistaIndicadores(){
   if (!S.avance && !S.avanceErr){ cargarAvance(); return `<div class="cargando"><span class="spin"></span>Calculando…</div>`; }
   if (S.avanceErr) return `<div class="aviso mal">${esc(S.avanceErr)}</div>`;
@@ -1187,12 +1442,14 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-ir-dia],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
   if (t.hasAttribute("data-refrescar")){ S.bit = {}; await cargarActividad(); await cargarBase(); toast("Actualizado."); pintar(); return; }
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
   if (t.id === "btnTema"){ cambiarTema(); return; }
+  if (t.dataset.mmet){ S.mMet = t.dataset.mmet; pintar(); return; }
+  if (t.hasAttribute("data-mdist")){ const c = t.dataset.mdist || null; S.mDist = c && S.mDist === c && t.tagName === "TR" ? null : c; S.mEnfocar = S.mDist; S.mScroll = t.tagName === "TR" && !!S.mDist; if (!c) S.mVista = null; pintar(); return; }
   if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; S.ej = t.dataset.irEj || "todos"; S.sel = null; S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
   if (t.dataset.vista){ S.vista = t.dataset.vista; if (t.dataset.tab) S.tab = t.dataset.tab; S.accion = null; try { history.replaceState(null, "", "#" + S.vista); } catch(e){} pintar(); return; }
   if (t.dataset.filtro){ S.filtro = t.dataset.filtro; S.sel = null; S.accion = null; pintar(); return; }
@@ -1224,6 +1481,9 @@ document.addEventListener("change", ev => {
   const t = ev.target;
   if (t.id === "fEj"){ S.ej = t.value; S.sel = null; pintar(); }
   if (t.id === "fDia"){ S.dia = t.value; S.sel = null; pintar(); }
+  if (t.id === "mEj"){ S.mEj = t.value; S.mDist = null; S.mVista = null; pintar(); }
+  if (t.id === "mRango"){ S.mRango = t.value; pintar(); }
+  if (t.id === "mPuntos"){ S.mPuntos = t.checked; pintar(); }
   if (t.id === "fSenal"){ S.soloSenal = t.checked; S.sel = null; pintar(); }
   if (t.dataset.marca){ if (t.checked) S.marcadas.add(t.dataset.marca); else S.marcadas.delete(t.dataset.marca); pintar(); }
   if (t.id === "archivo" && t.files[0]) leerArchivo(t.files[0]);
@@ -1245,7 +1505,7 @@ document.addEventListener("keydown", ev => {
 
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["validacion","equipo","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["validacion","equipo","mapa","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
