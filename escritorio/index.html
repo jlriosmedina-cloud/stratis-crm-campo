@@ -340,7 +340,7 @@ table.datos tr.err td{background:var(--rojo-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "be4c50";
+const BUILD = "a6f9b1";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -449,15 +449,18 @@ async function cargar(){
     ]);
     if (u.error) throw u.error;
     if (!u.data || !u.data.activo) throw new Error("Tu usuario no está activo en el CRM.");
-    S.yo = u.data; S.admin = ["Analista","Manager"].includes(u.data.rol);
-    if (!S.admin) throw new Error("Esta vista es solo para el analista y el manager. En el celular tienes tu CRM de campo.");
+    // Quién entra lo decide la base (tabla v2_acceso_escritorio), no el rol: por ahora, solo Jose.
+    const acc = await sb.rpc("v2_puede_escritorio");
+    if (acc.error) throw acc.error;
+    if (acc.data !== true){ S.denegado = true; await sb.auth.signOut().catch(() => {}); S.sesion = null; throw new Error("La vista de escritorio todavía no está habilitada para tu usuario. Tu CRM de campo sigue en el celular, igual que siempre."); }
+    S.yo = u.data; S.admin = true;
     S.periodo = p.data || null;
     const us = await sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("activo", true).order("nombre");
     S.ejecutivos = (us.data || []).filter(x => x.rol === "Ejecutivo").map((x, i) => ({ correo:x.correo, nombre:x.nombre_corto || x.nombre, ini:iniciales(x.nombre_corto || x.nombre), color:COLORES[i % COLORES.length] }));
     await Promise.all([cargarActividad(true), cargarBase(), cargarAvance()]);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar();
-  escuchar();
+  if (!S.error) escuchar();
 }
 async function cargarActividad(silencio){
   if (S._actCargando) return; S._actCargando = true;
@@ -562,9 +565,9 @@ function pintarNav(){
 }
 function pintar(){
   const app = $("#app");
-  if (!S.sesion){ app.innerHTML = vistaLogin(); return; }
+  if (!S.sesion && !S.denegado){ app.innerHTML = vistaLogin(); return; }
   if (S.cargando){ app.innerHTML = `<div class="cargando"><span class="spin"></span>Cargando el CRM…</div>`; return; }
-  if (S.error){ app.innerHTML = `<div class="login"><div class="caja"><div class="marca">STRATIS</div><h1>No se pudo entrar</h1><p>${esc(S.error)}</p><button class="btn" data-salir>${ICON.salir} Salir</button></div></div>`; return; }
+  if (S.error){ app.innerHTML = `<div class="login"><div class="caja"><div class="marca">STRATIS</div><h1>${S.denegado ? "Esta vista no es para tu usuario" : "No se pudo entrar"}</h1><p>${esc(S.error)}</p>${S.denegado ? `<a class="btn p" href="../" style="text-decoration:none">Ir al CRM de campo</a><button class="btn" data-otro-usuario style="margin-top:8px">Entrar con otro usuario</button>` : `<button class="btn" data-salir>${ICON.salir} Salir</button>`}</div></div>`; return; }
   if (!app.querySelector(".rail")) app.innerHTML = cascaron();
   pintarNav();
   $("#vivoTxt").textContent = S.pausa ? "Actualización en pausa" : textoVivo();
@@ -1172,6 +1175,10 @@ function vistaIndicadores(){
 /* =========================================================================
    Eventos
    ========================================================================= */
+document.addEventListener("click", ev => {
+  if (!ev.target.closest("[data-otro-usuario]")) return;
+  S.denegado = false; S.error = ""; S.sesion = null; pintar();
+});
 document.addEventListener("submit", async ev => {
   if (ev.target.id !== "fLogin") return; ev.preventDefault();
   const b = $("#bEntrar"); b.disabled = true; b.textContent = "Entrando…"; $("#lErr").innerHTML = "";
