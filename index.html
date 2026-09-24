@@ -88,6 +88,7 @@ button{cursor:pointer}
 .chip.on .cuenta{background:rgba(255,255,255,.22);color:#fff}
 .panel-filtros{display:grid;gap:8px;padding:10px 0 2px;margin:8px 16px 0;border-top:1px solid var(--linea)}
 .panel-filtros .filtros{padding:0}
+.panel-filtros > *{min-width:0}
 .filtros{display:flex;gap:8px;padding:8px 16px 0}
 .filtros select{flex:1;min-width:0;border:1px solid var(--linea);background:var(--tarjeta);border-radius:10px;padding:9px 10px;font-size:13px}
 .lista{display:flex;flex-direction:column;gap:10px;padding:12px 16px}
@@ -280,7 +281,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "5a1300";
+const BUILD = "371c5a";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 const ESTADOS = {
@@ -360,7 +361,14 @@ async function cargar(){
     S.yo = u.data; S.admin = ["Analista","Manager"].includes(u.data.rol);
     S.periodo = p.data || null; S.base = b.data || [];
   } catch(e){ S.error = e.message || String(e); }
-  S.cargando = false; pintar(); vaciarCola();
+  S.cargando = false; pintar(); vaciarCola(); cargarRevisiones();
+}
+async function cargarRevisiones(){
+  if (S.admin || !S.periodo || !S.rev || !S.rev.en_revision){ S.revVisitas = []; return; }
+  const hoy = new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
+  const { data } = await sb.rpc("v2_actividad", { p_desde:S.periodo.ini, p_hasta:hoy });
+  S.revVisitas = (data || []).filter(v => v.validacion === "observada" && v.estado_anul !== "anulada");
+  S._mantenerScroll = true; pintar();
 }
 async function historial(cid){
   const { data } = await sb.rpc("v2_visitas_de", { p_customer_id: cid });
@@ -380,7 +388,7 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.`); recargarBase(); }
 }
-async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones")]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; }
+async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones")]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
 async function cargarActividad(){
   if (S._actCargando) return;
   S._actCargando = true; S.actErr = "";
@@ -467,7 +475,10 @@ function vistaInicio(){
   const m = metricas();
   const rs = rutas();
   const hayRutas = S.base.some(c => c.ruta);
-  const rutaHoy = hayRutas ? (rs.find(r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)))) || rs[0]) : null;
+  const pendiente = r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)));
+  const ultima = S.base.filter(c => c.ultima_visita && esMio(c)).sort((a,b) => String(b.ultima_visita).localeCompare(String(a.ultima_visita)))[0];
+  const rutaUltima = ultima ? rs.find(r => r.cs.includes(ultima)) : null;
+  const rutaHoy = hayRutas ? ((rutaUltima && pendiente(rutaUltima) ? rutaUltima : null) || rs.find(pendiente) || rs[0]) : null;
   const mios = S.base.filter(esMio).sort((a,b) => String(b.ultima_visita||"").localeCompare(String(a.ultima_visita||"")));
   const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
@@ -482,7 +493,8 @@ function vistaInicio(){
       </div>
     </div>
     <div class="cuerpo">
-      ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Ábrelas desde «Visitados» para ver el motivo y corregirlas dentro del plazo.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button></div>` : ""}
+      ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
+        ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
       ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} ${S.cola.length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal.</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
       ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
@@ -749,7 +761,7 @@ function panelCorreccion(v){
   if (r.que === "Reunión concretada") h += `<div class="paso"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
-  if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" value="${esc(r.fechaNueva || "")}"></div>`;
+  if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
   h += `<div class="paso"><span class="eyebrow">Comentario</span><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea></div>`;
   if (r.error) h += `<div class="falta">${esc(r.error)}</div>`;
   h += `<div class="nav2"><button class="btn btn-lin" data-corr-cancelar>Cancelar</button>
@@ -911,14 +923,15 @@ function vistaActividad(){
       </div>`).join("")}</div>` : ""}
     <div class="card">
       <div class="eyebrow">${cuentan.length} ${cuentan.length === 1 ? "visita que cuenta" : "visitas que cuentan"}</div>
-      <h2>${[...porEjec.entries()].map(([n,c]) => esc(n) + " " + c).join(" · ")}</h2>
+      ${S.admin ? `<h2>${[...porEjec.entries()].map(([n,c]) => esc(n) + " " + c).join(" · ")}</h2>` : ""}
       ${sinUbi || lejos ? `<div class="nota" style="margin-top:6px">${[sinUbi ? sinUbi + " sin ubicación" : "", lejos ? lejos + " a más de 1 km del punto que tenemos del comercio" : "", anuladas ? anuladas + (anuladas === 1 ? " anulada, que ya no cuenta" : " anuladas, que ya no cuentan") : ""].filter(Boolean).join(" · ")}.</div>` : `<div class="nota" style="margin-top:6px">Todas con ubicación${anuladas ? ", " + anuladas + (anuladas === 1 ? " anulada" : " anuladas") : ""}.</div>`}
     </div>
     ${grupos.map(g => `<div class="card">
       <div class="eyebrow">${esc(g.d)}</div>
       ${g.vs.map(v => `<div class="act${v.estado_anul === "anulada" ? " anulada" : ""}">
         <div class="h"><b>${esc(v.comercio)}</b><span>${horaCorta(v.visitado_en)}</span></div>
-        ${ANUL[v.estado_anul] ? `<div style="margin-top:4px"><span class="pill ${ANUL[v.estado_anul].c}">${ANUL[v.estado_anul].t}</span></div>` : ""}
+        ${(() => { const e = ANUL[v.estado_anul] || (v.validacion === "observada" ? { t:"En revisión", c:"e-uno" } : v.validacion === "validada" ? { t:"Validada", c:"e-rea" } : null); return e ? `<div style="margin-top:4px"><span class="pill ${e.c}">${e.t}</span></div>` : ""; })()}
+        ${v.estado_anul !== "anulada" && v.validacion === "observada" ? `<div class="revision"><b>En revisión:</b> ${esc(v.validacion_motivo || "")}${v.validacion_nota ? "<br>" + esc(v.validacion_nota) : ""}</div>` : ""}
         <div class="q">${esc(v.que)}${v.motivo ? " (" + esc(v.motivo.toLowerCase()) + ")" : ""}${v.decision ? " · " + esc(v.decision) : ""}${S.admin ? " · " + esc(v.ejecutivo) : ""}</div>
         <div class="c">${esc([v.distrito, v.direccion].filter(Boolean).join(" · "))}</div>
         ${v.comentario ? `<div class="c">${esc(v.comentario)}</div>` : ""}
@@ -985,7 +998,7 @@ function tarjetaParametros(a){
 
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id){
-  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, intento:false, enviando:false };
+  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
 }
 function pedirGPS(){
@@ -1018,7 +1031,7 @@ function hojaRegistro(){
   if (r.que === "Reunión concretada") pasos += `<div class="paso"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
       ${r.decision==="Realizará consumos" ? `<div class="explica" style="margin-top:8px">Todavía no es una reactivación: cuenta cuando la data de BBVA muestre transacciones en dos días distintos después de hoy.</div>` : ""}</div>`;
   if (r.decision === "Desiste del producto") pasos += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
-  if (r.que === "Reagendada") pasos += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" value="${esc(r.fechaNueva)}"></div>`;
+  if (r.que === "Reagendada") pasos += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
   const dirAuto = r.con === "Nadie" && r.motivo === "Dirección errada";
   if (c && !dirAuto) pasos += `<div class="paso"><span class="eyebrow">¿La dirección es correcta?</span>
       <div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)}</small>` : ""}</div>
@@ -1055,18 +1068,27 @@ function faltantes(){
   if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
   if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
+  if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push("una fecha de regreso desde hoy");
   if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push("si la dirección es correcta");
   if (r.comentario.trim().length < 5) f.push("el comentario");
   return f;
 }
+const formularioConDatos = r => !!(r && (r.con || r.dirOk || (r.comentario || "").trim() || r.fechaNueva));
+function cerrarRegistro(){
+  const r = S.reg; if (!r) return;
+  if (r.enviando) return;
+  if (formularioConDatos(r) && !confirm("¿Descartar lo que llevas escrito de esta visita?")) return;
+  S.reg = null; pintar();
+}
 async function guardarVisita(){
   const r = S.reg;
+  if (!r || r.enviando) return;
   if (faltantes().length){ r.intento = true; S._mantenerScroll = true; return pintar(); }
   if (r.gps !== "ok" && !confirm("La visita no tiene ubicación y no va a contar. ¿Guardarla igual?")) return;
   const c = S.base.find(x => x.customer_id === r.id); const nueva = !(c && c.visitas > 0);
   const v = { p_customer_id:r.id, p_visitado_en:r.hora.toISOString(), p_lat:r.lat, p_lng:r.lng, p_precision:r.precision,
     p_con:r.con, p_motivo:r.con==="Nadie"?r.motivo:null, p_que:r.con==="Nadie"?"Sin éxito":r.que, p_decision:r.que==="Reunión concretada"?r.decision:null,
-    p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:r.que==="Reagendada"?r.fechaNueva:null, p_comentario:r.comentario.trim(), p_cliente_uid:uid(),
+    p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:r.que==="Reagendada"?r.fechaNueva:null, p_comentario:r.comentario.trim(), p_cliente_uid:r.uid,
     p_direccion_ok: r.con === "Nadie" && r.motivo === "Dirección errada" ? false : r.dirOk === "si" ? true : r.dirOk === "no" ? false : null };
   r.enviando = true; S._mantenerScroll = true; pintar();
   try {
@@ -1154,9 +1176,9 @@ function enlazar(){
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
     const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value; };
     const fn = $("#fechaNueva"); if (fn) fn.onchange = () => { S.reg.fechaNueva = fn.value; };
-    p.querySelectorAll("[data-cancelar]").forEach(b => b.onclick = () => { S.reg = null; pintar(); });
+    p.querySelectorAll("[data-cancelar]").forEach(b => b.onclick = cerrarRegistro);
     p.querySelectorAll("[data-guardar-visita]").forEach(b => b.onclick = guardarVisita);
-    const velo = p.querySelector("[data-cerrar-velo]"); if (velo) velo.onclick = e => { if (e.target === velo){ S.reg = null; pintar(); } };
+    const velo = p.querySelector("[data-cerrar-velo]"); if (velo) velo.onclick = e => { if (e.target === velo && !formularioConDatos(S.reg)){ S.reg = null; pintar(); } };
   }
 }
 window.addEventListener("online", vaciarCola);
