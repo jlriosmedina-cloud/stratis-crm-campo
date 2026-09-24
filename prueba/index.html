@@ -296,10 +296,14 @@ textarea.campo{min-height:78px;resize:vertical}
 .fb-grupo{padding:6px 0 2px}
 .fb-grupo + .fb-grupo{border-top:1px solid var(--linea)}
 .fb-grupo small{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 14px 2px}
-.fb-op{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:9px 14px;border:0;background:none;font-size:14px;font-weight:500;color:var(--ink);text-align:left;line-height:1.35}
+.fb-op{width:100%;display:flex;align-items:center;gap:12px;min-height:44px;padding:9px 14px;border:0;background:none;font-size:14px;font-weight:500;color:var(--ink);text-align:left;line-height:1.35}
 .fb-op:active{background:var(--suelo)}
 .fb-op.on{background:var(--naranja-t);color:#c4531f;font-weight:700}
-.fb-op svg{flex:none}
+.fb-caja{flex:none;width:22px;height:22px;border:2px solid var(--linea);border-radius:6px;display:grid;place-items:center;background:var(--tarjeta)}
+.fb-op.on .fb-caja{border-color:var(--naranja);background:var(--naranja);color:#fff}
+.fb-primero{padding-top:2px}
+.fb-pie{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px 4px;border-top:1px solid var(--linea);background:var(--tarjeta);font-size:12.5px;color:var(--muted)}
+.fb-pie .btn{padding:8px 18px;font-size:13.5px}
 @media (prefers-reduced-motion: reduce){.fb-sel svg{transition:none}}
 .fb-label{display:block;margin:12px 0 6px;font-size:12.5px;font-weight:700;color:var(--ink)}
 .fb-label span{font-weight:400;color:var(--muted)}
@@ -319,7 +323,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "aeab7b";
+const BUILD = "4993d3";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -779,7 +783,7 @@ function abrirCorreccion(id){
   S.corr = { id, con:v.con || null, motivo:v.motivo || null, que:v.que || null, decision:v.decision || null,
              equipo:v.equipo || null, fechaNueva:v.fecha_reagenda || "", comentario:v.comentario || "",
              limite:v.limite_edicion || null, enviando:false, error:"",
-             cid:v.customer_id, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
+             cid:v.customer_id, feedback:(v.feedback || []).slice(), feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
   S._mantenerScroll = true; pintar();
 }
 function pasoUbicacionCorreccion(r){
@@ -814,6 +818,7 @@ function faltaCorreccion(){
   if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
   if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
+  if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
   if ((r.comentario || "").trim().length < 5) f.push("el comentario");
   return f;
 }
@@ -834,7 +839,9 @@ async function guardarCorreccion(){
     p_decision:r.que === "Reunión concretada" ? r.decision : null,
     p_equipo:r.decision === "Desiste del producto" ? r.equipo : null,
     p_fecha_reagenda:r.que === "Reagendada" ? r.fechaNueva : null,
-    p_comentario:(r.comentario || "").trim() });
+    p_comentario:(r.comentario || "").trim(),
+    p_feedback:r.con !== "Nadie" ? (r.feedback || []) : null,
+    p_feedback_nota:r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null });
   if (error){ r.enviando = false; r.error = error.message || String(error); S._mantenerScroll = true; return pintar(); }
   const ficha = S.ficha;
   S.corr = null; S.avance = null;
@@ -856,6 +863,7 @@ function panelCorreccion(v){
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
+  if (r.con && r.con !== "Nadie") h += pasoFeedback(r, "cfb");
   h += pasoUbicacionCorreccion(r);
   h += `<div class="paso"><span class="eyebrow">Comentario</span><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea></div>`;
   if (r.error) h += `<div class="falta">${esc(r.error)}</div>`;
@@ -1197,19 +1205,37 @@ function faltantesPasos(){
   if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
   return f;
 }
-function pasoFeedback(r){
-  const elegido = (r.feedback || [])[0] || "", abierto = !!r.fbAbierto;
+// Desplegable de feedback, compartido por el registro (px="fb") y la corrección (px="cfb").
+// Se puede marcar más de una opción; «Sin observaciones del comercio» va primero y sola.
+function pasoFeedback(r, px = "fb"){
+  const sel = r.feedback || [], abierto = !!r.fbAbierto;
   const chev = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const check = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const op = t => `<button type="button" class="fb-op ${elegido === t ? "on" : ""}" role="option" aria-selected="${elegido === t}" data-fb="${esc(t)}"><span>${esc(t)}</span>${elegido === t ? check : ""}</button>`;
+  const tick = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const op = t => { const on = sel.includes(t);
+    return `<button type="button" class="fb-op ${on ? "on" : ""}" role="option" aria-selected="${on}" data-${px}="${esc(t)}"><span class="fb-caja">${on ? tick : ""}</span><span>${esc(t)}</span></button>`; };
+  const resumen = sel.length ? sel.map(esc).join(" · ") : "Elige lo que dijo el comercio";
   return `<div class="paso" data-paso="feedback"><span class="eyebrow">Feedback de la visita <em class="fb-oblig">(obligatorio)</em></span>
-    <button type="button" class="fb-sel ${abierto ? "abierto" : ""} ${elegido ? "elegido" : ""}" data-fb-toggle aria-expanded="${abierto}" aria-haspopup="listbox">
-      <span>${elegido ? esc(elegido) : "Elige lo que dijo el comercio"}</span>${chev}</button>
-    ${abierto ? `<div class="fb-lista" role="listbox" aria-label="Feedback de la visita">
+    <button type="button" class="fb-sel ${abierto ? "abierto" : ""} ${sel.length ? "elegido" : ""}" data-${px}-toggle aria-expanded="${abierto}" aria-haspopup="listbox">
+      <span>${resumen}</span>${chev}</button>
+    ${abierto ? `<div class="fb-lista" role="listbox" aria-multiselectable="true" aria-label="Feedback de la visita">
+      <div class="fb-grupo fb-primero">${op(FB_NINGUNO)}</div>
       ${FEEDBACK.map(([g, items]) => `<div class="fb-grupo"><small>${esc(g)}</small>${items.map(op).join("")}</div>`).join("")}
-      <div class="fb-grupo">${op(FB_NINGUNO)}</div></div>` : ""}
-    <label class="fb-label" for="fbNota">Feedback adicional <span>(opcional)</span></label>
-    <textarea class="campo" id="fbNota" rows="2" maxlength="300" placeholder="Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces.">${esc(r.feedbackNota || "")}</textarea></div>`;
+      <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}
+    <label class="fb-label" for="${px}Nota">Feedback adicional <span>(opcional)</span></label>
+    <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces.">${esc(r.feedbackNota || "")}</textarea></div>`;
+}
+function alternarFeedback(r, t){
+  let l = r.feedback || [];
+  if (t === FB_NINGUNO) l = l.includes(t) ? [] : [t];
+  else { l = l.filter(x => x !== FB_NINGUNO); l = l.includes(t) ? l.filter(x => x !== t) : l.concat(t); }
+  const orden = [FB_NINGUNO].concat(...FEEDBACK.map(g => g[1]));
+  r.feedback = orden.filter(x => l.includes(x));
+}
+function enlazarFeedback(p, r, px){
+  if (!r) return;
+  p.querySelectorAll(`[data-${px}-toggle]`).forEach(b => b.onclick = () => { r.fbAbierto = !r.fbAbierto; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll(`[data-${px}]`).forEach(b => b.onclick = () => { alternarFeedback(r, b.dataset[px]); S._mantenerScroll = true; pintar(); });
+  const n = $("#" + px + "Nota"); if (n) n.oninput = () => { r.feedbackNota = n.value; };
 }
 function faltantes(){
   const r = S.reg, f = [];
@@ -1306,10 +1332,11 @@ function enlazar(){
   p.querySelectorAll("[data-corr-enviar]").forEach(b => b.onclick = guardarCorreccion);
   if (S.corr){
     p.querySelectorAll("[data-cop]").forEach(b => b.onclick = () => { const r = S.corr, k = b.dataset.cop; r[k] = b.dataset.val;
-      if (k === "con"){ r.motivo = null; r.que = null; r.decision = null; r.equipo = null; }
+      if (k === "con"){ r.motivo = null; r.que = null; r.decision = null; r.equipo = null; if (b.dataset.val === "Nadie"){ r.feedback = []; r.feedbackNota = ""; r.fbAbierto = false; } }
       if (k === "que"){ r.decision = null; r.equipo = null; }
       if (k === "decision") r.equipo = null;
       S._mantenerScroll = true; pintar(); });
+    enlazarFeedback(p, S.corr, "cfb");
     const cc = $("#corrComent"); if (cc) cc.oninput = () => { S.corr.comentario = cc.value; };
     p.querySelectorAll("[data-corr-gps]").forEach(b => b.onclick = tomarGPSCorreccion);
     const crr = $("#corrReemplazar"); if (crr) crr.onchange = () => { S.corr.reemplazar = crr.checked; };
@@ -1338,9 +1365,7 @@ function enlazar(){
     p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.dirOk = null; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-cambiar-comercio]").forEach(b => b.onclick = () => { S.reg.id = null; S.reg.busca = ""; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
-    p.querySelectorAll("[data-fb-toggle]").forEach(b => b.onclick = () => { S.reg.fbAbierto = !S.reg.fbAbierto; S._mantenerScroll = true; pintar(); });
-    p.querySelectorAll("[data-fb]").forEach(b => b.onclick = () => { S.reg.feedback = [b.dataset.fb]; S.reg.fbAbierto = false; S._mantenerScroll = true; pintar(); });
-    const fbn = $("#fbNota"); if (fbn) fbn.oninput = () => { S.reg.feedbackNota = fbn.value; };
+    enlazarFeedback(p, S.reg, "fb");
     const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value;
       // si estaba marcado como faltante, se desmarca apenas alcanza el mínimo (sin repintar, para no perder el foco)
       const paso = cm.closest(".paso"); if (paso && S.reg.intento && cm.value.trim().length >= 5 && paso.classList.contains("falta-paso")){ paso.classList.remove("falta-paso"); paso.querySelector(".falta-etq")?.remove(); } };
