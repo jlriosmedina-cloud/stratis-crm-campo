@@ -434,7 +434,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "29b75b";
+const BUILD = "7e3f19";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -970,7 +970,7 @@ function vistaEquipo(){
     const restantes = Math.max(1, H.total - H.antes);
     return { e, porDia, com, reg:vs.length,
       val: vs.filter(v => estadoDe(v) === "val").length, pend: vs.filter(v => estadoDe(v) === "pend").length, obs: vs.filter(v => estadoDe(v) === "obs").length, anu: todas.length - vs.length,
-      contacto: vs.filter(v => v.con !== "Nadie").length, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
+      contacto: vs.filter(v => v.con !== "Nadie").length, comContacto: new Set(vs.filter(v => v.con !== "Nadie" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
       lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length, tarde: vs.filter(v => v.fuera_plazo).length,
       ritmo: H.hastaHoy ? com / H.hastaHoy : 0, necesario: Math.max(0, metaEj - com) / restantes, esperado: metaDia * H.hastaHoy };
   });
@@ -1020,7 +1020,7 @@ function vistaEquipo(){
   <div class="panel">
     <div class="barra"><b>Por ejecutivo y por día</b><span class="lbl">verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: a más de la mitad · rojo: menos de la mitad · el punto naranja marca visitas por validar</span></div>
     <div style="overflow-x:auto"><table class="datos matriz">
-      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
+      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Visitas con<br>contacto</th><th class="n">Comercios con<br>contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
       <tbody>${filas.map(f => `<tr>
         <td><button class="ej-btn" data-ir-dia="periodo" data-ir-ej="${esc(f.e.correo)}"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></button></td>
         ${dias.map(d => celda(f.porDia[d.iso], d, f.e.correo)).join("")}
@@ -1028,6 +1028,7 @@ function vistaEquipo(){
         <td class="n num ${f.ritmo >= metaDia ? "ok" : "warn"}">${f.ritmo.toFixed(1).replace(".", ",")}</td>
         <td class="n num ${f.necesario > metaDia ? "mal" : ""}">${f.necesario.toFixed(1).replace(".", ",")}</td>
         <td class="n num">${f.contacto}<span class="muted"> / ${f.reg}</span></td>
+        <td class="n num">${f.comContacto}<span class="muted"> / ${f.com}</span></td>
         <td class="n num">${f.reunion}</td>
         <td class="n num">${f.consumos}</td>
         <td class="n num ${f.lejos ? "warn" : ""}">${f.lejos}</td>
@@ -1036,10 +1037,10 @@ function vistaEquipo(){
       </tr>`).join("")}
       <tr class="total"><td><b>Equipo</b></td>${dias.map((d, i) => `<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${tot[i] || "·"}</b></td>`).join("")}
         <td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${ritmoEq.toFixed(1).replace(".", ",")}</td><td class="n num">${necEq.toFixed(1).replace(".", ",")}</td>
-        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
+        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
         <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
       </tbody></table></div>
-    <div class="atajos">Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
+    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra 160). Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
   </div>`;
 }
 
