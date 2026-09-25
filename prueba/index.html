@@ -321,6 +321,15 @@ textarea.campo{min-height:78px;resize:vertical}
 .hist .fb-hist{padding:7px 10px;border-top:0;font-size:12.5px}
 .hist .fb-hist b{color:#c4531f}
 .hist .fb-hist.si b{color:#0a7e65}
+/* Aviso de versión nueva (no se puede cerrar) */
+.av-velo{position:fixed;inset:0;z-index:200;background:rgba(12,17,55,.62);display:grid;place-items:center;padding:24px;animation:avEntra .18s ease-out}
+.av-caja{width:100%;max-width:340px;background:var(--tarjeta);border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.35);display:grid;gap:10px;justify-items:center}
+.av-ico{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:var(--naranja-t);color:var(--naranja)}
+.av-caja h2{margin:4px 0 0;font-size:18px;font-weight:800;color:var(--ink);line-height:1.25}
+.av-caja p{margin:0;font-size:14px;line-height:1.45;color:var(--texto)}
+.av-caja .btn{width:100%;margin-top:8px;min-height:48px;font-size:15.5px}
+@keyframes avEntra{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.av-velo{animation:none}}
 </style>
 
 </head><body>
@@ -335,7 +344,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "850fe3";
+const BUILD = "6c6674";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -1421,6 +1430,45 @@ function enlazar(){
   }
 }
 window.addEventListener("online", vaciarCola);
+
+/* ---------- aviso de versión nueva ----------
+   Revisa cada 5 min y cada vez que el ejecutivo vuelve a la app si hay un build publicado distinto al que tiene abierto.
+   Si lo hay, muestra un aviso que no se puede cerrar con un solo botón «Actualizar», pero nunca mientras hay un formulario
+   a medias (registro, corrección, pedido de anulación o corrección de datos): espera a que lo guarde o lo cancele.
+   Las visitas sin enviar viven en localStorage (cola), así que recargar no pierde nada. */
+const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando);
+async function revisarVersion(){
+  if (S.versionNueva) return mostrarAvisoVersion();
+  try {
+    const t = await fetch(location.pathname + "?v=" + Date.now(), { cache:"no-store" }).then(r => r.ok ? r.text() : "");
+    const m = t.match(/BUILD = "([a-f0-9]+)"/);
+    if (m && m[1] !== BUILD){ S.versionNueva = m[1]; mostrarAvisoVersion(); }
+  } catch(e){}
+}
+function mostrarAvisoVersion(){
+  const hay = document.getElementById("avisoVersion");
+  if (!S.versionNueva || ocupadoParaActualizar()){ if (hay) hay.remove(); return; }
+  if (hay) return;
+  document.body.insertAdjacentHTML("beforeend", `<div id="avisoVersion" class="av-velo" role="alertdialog" aria-modal="true" aria-labelledby="avTit" aria-describedby="avTxt">
+    <div class="av-caja"><div class="av-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg></div>
+    <h2 id="avTit">Hay una versión nueva del CRM</h2>
+    <p id="avTxt">Toca «Actualizar» para seguir registrando con la versión nueva. Tu sesión y las visitas guardadas en el celular se mantienen.</p>
+    <button type="button" class="btn btn-pri" data-actualizar-app>Actualizar</button></div></div>`);
+  const b = document.querySelector("[data-actualizar-app]");
+  b.onclick = () => { b.disabled = true; b.textContent = "Actualizando…"; guardarCola();
+    // URL única: el celular no puede servir la copia vieja que tenga guardada
+    location.replace(location.pathname + "?v=" + S.versionNueva + "." + Date.now() + location.hash); };
+  setTimeout(() => b.focus(), 50);
+}
+// Después de cada pintado: si había una versión nueva esperando a que termine un formulario, se muestra ahora.
+{ const pintarSinAviso = pintar; pintar = function(){ const r = pintarSinAviso.apply(this, arguments); if (S.versionNueva) mostrarAvisoVersion(); return r; }; }
+// Limpia el ?v= de la dirección después de actualizar
+try { if (/[?&]v=/.test(location.search)) history.replaceState(null, "", location.pathname + location.hash); } catch(e){}
+setTimeout(revisarVersion, 15000);
+setInterval(revisarVersion, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") revisarVersion(); });
+window.addEventListener("online", revisarVersion);
+
 (async () => {
   const { data } = await sb.auth.getSession();
   S.sesion = data.session;
