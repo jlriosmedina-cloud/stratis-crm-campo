@@ -330,6 +330,18 @@ textarea.campo{min-height:78px;resize:vertical}
 .av-caja .btn{width:100%;margin-top:8px;min-height:48px;font-size:15.5px}
 @keyframes avEntra{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){.av-velo{animation:none}}
+/* Otras direcciones del mismo RUC */
+.card.dir-extra{border:1.5px solid var(--naranja-t)}
+.dx{padding:10px 0;border-top:1px solid var(--linea)}
+.dx:first-of-type{border-top:0;padding-top:2px}
+.dx-cab{display:flex;gap:10px;align-items:flex-start}
+.dx-cab b{display:block;font-size:14px;line-height:1.35;color:var(--ink)}
+.dx-cab small{display:block;margin-top:2px;font-size:12px;color:var(--muted)}
+.dx-n{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--naranja-t);color:#c4531f;font-size:12px;font-weight:800;margin-top:1px}
+.dx-zona{color:#079477;font-weight:700} .dx-fuera{color:var(--ambar);font-weight:700}
+.dx .nav2{margin-top:8px}
+.dx-aviso{margin-top:-6px;text-align:center;font-size:12.5px;color:var(--texto)}
+.lnk-dx{border:0;background:none;padding:0;font:inherit;color:#c4531f;font-weight:700;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 </style>
 
 </head><body>
@@ -344,7 +356,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "6c6674";
+const BUILD = "0685ca";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -719,7 +731,9 @@ function vistaFicha(c){
         <a class="btn btn-waze" href="${urlWaze(c)}" target="_blank" rel="noopener">${ICON.pin} Waze</a>
       </div>
       ${c.geo_calidad ? `<div class="aprox" style="text-align:center;margin-top:-6px">${esc(CALIDAD[c.geo_calidad] || "")}</div>` : ""}
+      ${dirsExtra(c).length ? `<div class="dx-aviso">Este comercio tiene ${dirsExtra(c).length === 1 ? "1 dirección más" : dirsExtra(c).length + " direcciones más"} en BBVA · <button type="button" class="lnk-dx" data-ir-extra>verlas</button></div>` : ""}
       ${tarjetaSunat(c)}
+      <div id="dirExtra">${tarjetaDirsExtra(c)}</div>
       ${S.admin ? "" : `<button class="btn btn-pri btn-full" data-registrar="${esc(c.customer_id)}">Registrar visita</button>`}
       <div class="card">
         <div class="fila-ent"><h2>Datos del comercio</h2><button class="btn btn-lin" style="padding:8px 12px;font-size:13px" data-editar="${esc(c.customer_id)}">${editando ? "Cancelar" : "Corregir datos"}</button></div>
@@ -929,6 +943,40 @@ const selloFresco = (cuando, cargando, attr) => `<div class="fresco">
   <span>${cargando ? "Actualizando…" : cuando ? "Actualizado a las " + horaCorta(cuando) : ""}</span>
   <button class="btn btn-lin mini" ${attr} ${cargando ? "disabled" : ""}>Actualizar</button></div>`;
 
+/* ---------- Otras direcciones del mismo RUC (BBVA) ----------
+   v2_mi_base las entrega ya ordenadas: mismo distrito, luego la zona del comercio, luego fuera de zona.
+   Waze navega a un solo destino, así que cada dirección tiene su botón; la ruta por todas va en Google Maps. */
+const normDir = t => String(t || "").split("·")[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+  .replace(/\b(AV|JR|CAL|CALLE|PROL|URB|NRO|GRAL|GENERAL)\b\.?/g, " ").replace(/[^A-Z0-9]+/g, " ").trim();
+const sunatVisible = c => !!c.sunat_direccion && (c.sunat_metros == null || c.sunat_metros >= 300);
+function dirsExtra(c){
+  const l = Array.isArray(c.dir_extra) ? c.dir_extra : [];
+  const ks = sunatVisible(c) ? normDir(c.sunat_direccion) : null;   // la tarjeta SUNAT ya la muestra
+  return l.filter(d => d && d.direccion && normDir(d.direccion) !== ks);
+}
+const destinoExtra = d => [String(d.direccion).split("·")[0].trim(), d.distrito, "Lima"].filter(Boolean).join(", ");
+const urlGoogleExtra = d => "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destinoExtra(d));
+const urlWazeExtra = d => "https://waze.com/ul?navigate=yes&q=" + encodeURIComponent(destinoExtra(d));
+// Ruta en Google Maps: la dirección del comercio y luego las otras, en el orden de prioridad (máx. 3 paradas intermedias en el celular)
+function urlRutaExtra(c, l){
+  const pts = [tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c)].concat(l.map(destinoExtra)).slice(0, 4);
+  const dest = pts[pts.length - 1], way = pts.slice(0, -1);
+  return "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(dest) + (way.length ? "&waypoints=" + encodeURIComponent(way.join("|")) : "");
+}
+function tarjetaDirsExtra(c){
+  const l = dirsExtra(c); if (!l.length) return "";
+  const enZona = l.filter(d => d.en_zona).length;
+  return `<div class="card dir-extra">
+    <div class="eyebrow">Otras direcciones de este comercio · BBVA</div>
+    <div class="nota" style="margin:4px 0 10px">BBVA tiene este mismo comercio registrado también en ${l.length === 1 ? "esta dirección" : "estas " + l.length + " direcciones"}. Si no lo encuentras arriba, prueba acá${enZona && enZona < l.length ? "; primero las de tu zona" : ""}.</div>
+    ${l.map((d, i) => `<div class="dx">
+      <div class="dx-cab"><span class="dx-n">${i + 1}</span><div><b>${esc(d.direccion)}</b><small>${esc(d.distrito)} · <span class="${d.en_zona ? "dx-zona" : "dx-fuera"}">${d.en_zona ? "En tu zona" : "Fuera de tu zona"}</span></small></div></div>
+      <div class="nav2"><a class="btn btn-sec" href="${urlGoogleExtra(d)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a><a class="btn btn-waze" href="${urlWazeExtra(d)}" target="_blank" rel="noopener">${ICON.pin} Waze</a></div>
+    </div>`).join("")}
+    ${l.length ? `<a class="btn btn-lin btn-full" style="margin-top:10px" href="${urlRutaExtra(c, l)}" target="_blank" rel="noopener">${ICON.pin} Ruta por ${l.length === 1 ? "las dos direcciones" : "todas las direcciones"} en Google Maps</a>
+    <div class="nota" style="margin-top:6px;text-align:center">Waze lleva a una dirección a la vez; la ruta con varias paradas se abre en Google Maps.</div>` : ""}
+  </div>`;
+}
 function tarjetaSunat(c){
   if (!c.sunat_direccion) return "";
   const lejos = c.sunat_metros == null || c.sunat_metros >= 300;
@@ -1375,6 +1423,7 @@ function enlazar(){
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; S.corr = null; pintar(); });
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; S.filtroVisita = "todos"; S.masFiltros = true; pintar(); });
   p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
+  p.querySelectorAll("[data-ir-extra]").forEach(b => b.onclick = () => { const t = document.getElementById("dirExtra"); if (t) t.scrollIntoView({ behavior:"smooth", block:"start" }); });
   p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.corr = null; pintar(); });
   p.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => { S.masFiltros = !S.masFiltros; pintar(); });
   p.querySelectorAll("[data-limpiar]").forEach(b => b.onclick = () => {
