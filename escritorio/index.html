@@ -419,6 +419,16 @@ table.datos tr.fuera td{background:var(--hover)}
 .fbv-cab{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px}
 .fbv-cab .btn{margin-left:auto}
 .fbv-txt{font-size:13px;color:var(--texto);line-height:1.45}
+
+/* Descarga de la base para BBVA y aviso de versión */
+.descarga-bbva{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;margin-bottom:18px;border-left:0}
+.descarga-bbva .db-txt{display:grid;gap:4px;font-size:12.5px;color:var(--texto);max-width:880px}
+.descarga-bbva .db-txt b:first-child{font-size:14px;color:var(--ink)}
+.descarga-bbva small{color:var(--muted)}
+.descarga-bbva .btn{white-space:nowrap;display:inline-flex;align-items:center;gap:8px;padding:10px 16px}
+.descarga-bbva .btn svg{width:16px;height:16px;transform:rotate(180deg)}
+.barra-sec{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:0 0 10px}
+.aviso-version{position:fixed;right:18px;bottom:18px;z-index:9999;background:var(--tarjeta);color:var(--ink);border:1px solid var(--linea);box-shadow:0 8px 24px rgba(12,17,55,.18);border-radius:12px;padding:12px 14px;font-size:13px;display:flex;align-items:center;gap:12px}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -434,7 +444,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "ce8a66";
+const BUILD = "3ad15f";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -621,6 +631,17 @@ function escuchar(){
   } catch(e){}
   setInterval(() => { if (!S.pausa && document.visibilityState === "visible") cargarActividad(true); }, 30000);
   setInterval(() => { const el = $("#vivoTxt"); if (el && !S.pausa) el.textContent = textoVivo(); }, 5000);
+  setInterval(revisarVersion, 5 * 60000); setTimeout(revisarVersion, 60000);
+}
+// Si se publicó una versión nueva del escritorio, avisa para recargar (una pestaña abierta de ayer no la toma sola).
+async function revisarVersion(){
+  try {
+    const t = await fetch(location.pathname + "?v=" + Date.now(), { cache:"no-store" }).then(r => r.ok ? r.text() : "");
+    const m = t.match(/BUILD = "([a-f0-9]+)"/);
+    if (m && m[1] !== BUILD && !document.getElementById("avisoVersion")){
+      document.body.insertAdjacentHTML("beforeend", `<div id="avisoVersion" class="aviso-version" role="status">Hay una versión nueva del CRM de escritorio. <button class="btn p" onclick="location.reload()">Recargar</button></div>`);
+    }
+  } catch(e){}
 }
 function textoVivo(){
   if (!S.ultimaRecep) return "En vivo · sin visitas todavía";
@@ -661,7 +682,7 @@ const VISTAS = [
   ["mapa","Mapa de distritos", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
   ["auditoria","Auditoría", ICON.aud, null],
-  ["cargas","Cargas", ICON.carga, null],
+  ["cargas","Cargas y descargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
 ];
 function pintarNav(){
@@ -687,7 +708,7 @@ function pintar(){
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo, en los tipos que definió BBVA: marcado por el ejecutivo desde el 24/09 e inferido del comentario en las visitas anteriores."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
-              cargas:["Cargas masivas","Transacciones diarias o acumuladas del mes por comercio. Se valida fila por fila antes de escribir."],
+              cargas:["Cargas y descargas","Descarga la base del periodo para BBVA y carga la data de transacciones que BBVA envía de vuelta."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
@@ -1160,7 +1181,15 @@ function vistaCargas(){
   if (!S.cargas.length && !S._cargasPedidas){ S._cargasPedidas = true; cargarCargas(); }
   const c = S.carga, tp = TIPOS[c.tipo];
   const paso = c.hecho ? 3 : c.filas ? 2 : 1;
+  const per = S.periodo;
   return `
+  <div class="panel descarga-bbva">
+    <div class="db-txt"><b>Base para BBVA · periodo ${esc(per ? per.id : "")}${per ? ` · del ${fISO(per.ini)} al ${fISO(per.fin)}` : ""}</b>
+      <span>Excel con los datos al momento de descargar: <b>KPIs</b> (universo, visitas por ejecutivo, reactivación, recuperados y feedback) · <b>Base</b> (una fila por Customer ID con sus indicadores) · <b>Visitas</b> (una fila por visita) · <b>Diccionario</b>. La llave es el Customer ID de 8 dígitos.</span>
+      ${S._ultimaBase ? `<small>Última descarga en esta sesión: ${esc(S._ultimaBase)}</small>` : ""}</div>
+    <button class="btn p" data-base-bbva>${ICON.carga} Descargar base para BBVA</button>
+  </div>
+  <div class="barra-sec">Cargar transacciones de BBVA</div>
   <div class="pasos"><span class="${paso>1?"ok":"on"}"><i>1</i> Elegir el formato y subir el archivo</span>› <span class="${paso===2?"on":paso>2?"ok":""}"><i>2</i> Revisar la validación</span>› <span class="${paso===3?"on":""}"><i>3</i> Cargar y ver el efecto</span></div>
   <div class="tipos">${Object.entries(TIPOS).map(([k,t]) => `<button class="tipo ${c.tipo===k?"on":""}" data-tipo="${k}"><span class="ico">${ICON.carga}</span><span><b>${t.t}</b><small>${t.d}</small></span></button>`).join("")}</div>
   ${paso === 1 ? `
@@ -1711,6 +1740,7 @@ async function baseBBVA(){
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    S._ultimaBase = `${ddhh(new Date())} · ${filasB.length} comercios · ${filasV.length} visitas`; if (S.vista === "cargas") pintar();
     toast(`Base para BBVA descargada: ${filasB.length} comercios y ${filasV.length} visitas.`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
