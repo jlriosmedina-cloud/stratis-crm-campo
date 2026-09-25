@@ -308,7 +308,19 @@ textarea.campo{min-height:78px;resize:vertical}
 .fb-label{display:block;margin:12px 0 6px;font-size:12.5px;font-weight:700;color:var(--ink)}
 .fb-label span{font-weight:400;color:var(--muted)}
 .fb-hist{margin-top:6px;font-size:12.5px;color:var(--texto);background:var(--naranja-t);border-radius:10px;padding:7px 10px;line-height:1.4}
+.fb-hist.si{background:var(--verde-t)}
+.fb-hist.si b{color:#0a7e65}
+.fb-sel.si.elegido{border-color:#0BBC96;background:var(--verde-t)}
+.fb-op.si.on{background:var(--verde-t);color:#0a7e65}
+.fb-op.si.on .fb-caja{border-color:#0BBC96;background:#0BBC96}
 .fb-hist b{color:#c4531f}
+.hist .fb-lista{padding:4px 0 6px;border-top:0;font-size:14px}
+.hist .fb-grupo{padding:6px 0 2px;border-top:0}
+.hist .fb-grupo + .fb-grupo{border-top:1px solid var(--linea)}
+.hist .fb-pie{padding:10px 14px 4px;border-top:1px solid var(--linea);font-size:12.5px}
+.hist .fb-hist{padding:7px 10px;border-top:0;font-size:12.5px}
+.hist .fb-hist b{color:#c4531f}
+.hist .fb-hist.si b{color:#0a7e65}
 </style>
 
 </head><body>
@@ -323,7 +335,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "186680";
+const BUILD = "850fe3";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -369,8 +381,12 @@ const FEEDBACK = [
   ["Funcionamiento del POS", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta"]],
   ["Condiciones comerciales", ["POS no cuenta con la tarifa acordada", "POS problema con abonos"]],
   ["Atención", ["Soporte no ayudó al comercio"]],
+  ["Competencia y tasa", ["Usa POS o pasarela de la competencia", "Pide una tasa más baja"]],
 ];
 const FB_NINGUNO = "Sin observaciones del comercio";
+// «Por qué sí»: se pregunta cuando el comercio realizará consumos (validado por Jose, 25/09/2026)
+const MOTIVOS_SI = ["Ya lo usaba y seguirá usándolo", "Se resolvió su problema con el POS", "Beneficios o promociones de BBVA",
+  "Sus clientes le piden pagar con tarjeta", "La tasa y las condiciones le convienen", "La asesoría del ejecutivo (aprendió a usarlo o lo configuró)"];
 const diaLima = t => new Date(t).toLocaleDateString("en-CA", { timeZone:"America/Lima" });
 // plazo para que la visita cuente: siguiente día hábil (lun–vie), sin pasar del fin del periodo.
 // Es un aviso: el servidor decide con su calendario de feriados.
@@ -782,7 +798,7 @@ function abrirCorreccion(id){
   S.corr = { id, con:v.con || null, motivo:v.motivo || null, que:v.que || null, decision:v.decision || null,
              equipo:v.equipo || null, fechaNueva:v.fecha_reagenda || "", comentario:v.comentario || "",
              limite:v.limite_edicion || null, enviando:false, error:"",
-             cid:v.customer_id, feedback:(v.feedback || []).slice(), feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
+             cid:v.customer_id, feedback:(v.feedback || []).slice(), motivosSi:(v.motivos_si || []).slice(), msiAbierto:false, feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
   S._mantenerScroll = true; pintar();
 }
 function pasoUbicacionCorreccion(r){
@@ -817,6 +833,7 @@ function faltaCorreccion(){
   if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
   if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
+  if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push("qué lo convenció");
   if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
   if ((r.comentario || "").trim().length < 5) f.push("el comentario");
   return f;
@@ -840,7 +857,8 @@ async function guardarCorreccion(){
     p_fecha_reagenda:r.que === "Reagendada" ? r.fechaNueva : null,
     p_comentario:(r.comentario || "").trim(),
     p_feedback:r.con !== "Nadie" ? (r.feedback || []) : null,
-    p_feedback_nota:r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null });
+    p_feedback_nota:r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null,
+    p_motivos_si:r.decision === "Realizará consumos" ? (r.motivosSi || []) : null });
   if (error){ r.enviando = false; r.error = error.message || String(error); S._mantenerScroll = true; return pintar(); }
   const ficha = S.ficha;
   S.corr = null; S.avance = null;
@@ -862,6 +880,7 @@ function panelCorreccion(v){
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
+  if (r.decision === "Realizará consumos") h += pasoMotivosSi(r, "cmsi");
   if (r.con && r.con !== "Nadie") h += pasoFeedback(r, "cfb");
   h += pasoUbicacionCorreccion(r);
   h += `<div class="paso"><span class="eyebrow">Comentario</span><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea></div>`;
@@ -889,6 +908,7 @@ function lineaVisita(v){
     <span>${enc}</span>
     ${S.admin && v.ejecutivo ? `<br><span class="nota">Registró ${esc(v.ejecutivo)}</span>` : ""}
     <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}${(v.editado_en || v.comentario_editado_en) ? " <i>(corregido)</i>" : ""}</span>
+    ${(v.motivos_si || []).length ? `<div class="fb-hist si"><b>Qué lo convenció:</b> ${v.motivos_si.map(esc).join(" · ")}</div>` : ""}
     ${(v.feedback || []).length ? `<div class="fb-hist"><b>Feedback:</b> ${v.feedback.map(esc).join(" · ")}${v.feedback_nota ? `<br><i>${esc(v.feedback_nota)}</i>` : ""}</div>` : ""}
     ${v.direccion_ok === false ? `<br><span class="nota" style="color:var(--rojo)">Dirección de la base: no es correcta</span>` : v.direccion_ok === true ? `<br><span class="nota">Dirección de la base: correcta</span>` : ""}
     ${v.anul_motivo ? `<br><span class="nota">Motivo: ${esc(v.anul_motivo)}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}</span>` : ""}
@@ -1111,7 +1131,7 @@ function tarjetaParametros(a){
 
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id){
-  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, feedback:[], feedbackNota:"", fbAbierto:false, intento:false, enviando:false, uid:uid() };
+  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, feedback:[], feedbackNota:"", fbAbierto:false, motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
 }
 // Pide una ubicación nueva (nunca una guardada) y, si el celular no contesta en 20 s —pasa cuando se
@@ -1158,6 +1178,7 @@ function hojaRegistro(){
       ${r.decision==="Realizará consumos" ? `<div class="explica" style="margin-top:8px">Todavía no es una reactivación: cuenta cuando la data de BBVA muestre transacciones en dos días distintos después de hoy.</div>` : ""}</div>`;
   if (r.decision === "Desiste del producto") pasos += `<div class="paso" data-paso="equipo"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") pasos += `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
+  if (r.decision === "Realizará consumos") pasos += pasoMotivosSi(r);
   if (r.con && r.con !== "Nadie") pasos += pasoFeedback(r);
   const dirAuto = r.con === "Nadie" && r.motivo === "Dirección errada";
   if (c && !dirAuto) pasos += `<div class="paso" data-paso="dir"><span class="eyebrow">¿La dirección es correcta?</span>
@@ -1199,6 +1220,7 @@ function faltantesPasos(){
   if (r.decision === "Desiste del producto" && !r.equipo) f.push(["equipo","si se recuperó el equipo"]);
   if (r.que === "Reagendada" && !r.fechaNueva) f.push(["fecha","la fecha en que vuelves"]);
   if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push(["fecha","una fecha de regreso desde hoy"]);
+  if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push(["motivosSi","qué lo convenció"]);
   if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push(["feedback","el feedback de la visita"]);
   if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push(["dir","si la dirección es correcta"]);
   if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
@@ -1222,6 +1244,26 @@ function pasoFeedback(r, px = "fb"){
       <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}
     <label class="fb-label" for="${px}Nota">Feedback adicional <span>(opcional)</span></label>
     <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces.">${esc(r.feedbackNota || "")}</textarea></div>`;
+}
+// Desplegable «¿Qué lo convenció?» (registro px="msi", corrección px="cmsi"); varias opciones, obligatorio.
+function pasoMotivosSi(r, px = "msi"){
+  const sel = r.motivosSi || [], abierto = !!r.msiAbierto;
+  const chev = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const tick = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const op = t => { const on = sel.includes(t);
+    return `<button type="button" class="fb-op si ${on ? "on" : ""}" role="option" aria-selected="${on}" data-${px}="${esc(t)}"><span class="fb-caja">${on ? tick : ""}</span><span>${esc(t)}</span></button>`; };
+  return `<div class="paso" data-paso="motivosSi"><span class="eyebrow">¿Qué lo convenció? <em class="fb-oblig">(obligatorio)</em></span>
+    <button type="button" class="fb-sel si ${abierto ? "abierto" : ""} ${sel.length ? "elegido" : ""}" data-${px}-toggle aria-expanded="${abierto}" aria-haspopup="listbox">
+      <span>${sel.length ? sel.map(esc).join(" · ") : "Elige por qué va a usar el POS"}</span>${chev}</button>
+    ${abierto ? `<div class="fb-lista si" role="listbox" aria-multiselectable="true" aria-label="Qué lo convenció">
+      <div class="fb-grupo fb-primero">${MOTIVOS_SI.map(op).join("")}</div>
+      <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}</div>`;
+}
+function enlazarMotivosSi(p, r, px){
+  if (!r) return;
+  p.querySelectorAll(`[data-${px}-toggle]`).forEach(b => b.onclick = () => { r.msiAbierto = !r.msiAbierto; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll(`[data-${px}]`).forEach(b => b.onclick = () => { const t = b.dataset[px], l = r.motivosSi || [];
+    r.motivosSi = MOTIVOS_SI.filter(x => x === t ? !l.includes(t) : l.includes(x)); S._mantenerScroll = true; pintar(); });
 }
 function alternarFeedback(r, t){
   let l = r.feedback || [];
@@ -1247,6 +1289,7 @@ function faltantes(){
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
   if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
   if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push("una fecha de regreso desde hoy");
+  if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push("qué lo convenció");
   if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
   if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push("si la dirección es correcta");
   if (r.comentario.trim().length < 5) f.push("el comentario");
@@ -1275,7 +1318,8 @@ async function guardarVisita(){
     p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:r.que==="Reagendada"?r.fechaNueva:null, p_comentario:r.comentario.trim(), p_cliente_uid:r.uid,
     p_direccion_ok: r.con === "Nadie" && r.motivo === "Dirección errada" ? false : r.dirOk === "si" ? true : r.dirOk === "no" ? false : null,
     p_feedback: r.con !== "Nadie" && (r.feedback || []).length ? r.feedback : null,
-    p_feedback_nota: r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null };
+    p_feedback_nota: r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null,
+    p_motivos_si: r.decision === "Realizará consumos" && (r.motivosSi || []).length ? r.motivosSi : null };
   r.enviando = true; S._mantenerScroll = true; pintar();
   try {
     await enviar(v);
@@ -1336,6 +1380,7 @@ function enlazar(){
       if (k === "decision") r.equipo = null;
       S._mantenerScroll = true; pintar(); });
     enlazarFeedback(p, S.corr, "cfb");
+    enlazarMotivosSi(p, S.corr, "cmsi");
     const cc = $("#corrComent"); if (cc) cc.oninput = () => { S.corr.comentario = cc.value; };
     p.querySelectorAll("[data-corr-gps]").forEach(b => b.onclick = tomarGPSCorreccion);
     const crr = $("#corrReemplazar"); if (crr) crr.onchange = () => { S.corr.reemplazar = crr.checked; };
@@ -1365,6 +1410,7 @@ function enlazar(){
     p.querySelectorAll("[data-cambiar-comercio]").forEach(b => b.onclick = () => { S.reg.id = null; S.reg.busca = ""; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
     enlazarFeedback(p, S.reg, "fb");
+    enlazarMotivosSi(p, S.reg, "msi");
     const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value;
       // si estaba marcado como faltante, se desmarca apenas alcanza el mínimo (sin repintar, para no perder el foco)
       const paso = cm.closest(".paso"); if (paso && S.reg.intento && cm.value.trim().length >= 5 && paso.classList.contains("falta-paso")){ paso.classList.remove("falta-paso"); paso.querySelector(".falta-etq")?.remove(); } };
