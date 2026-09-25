@@ -480,7 +480,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "307e04";
+const BUILD = "b3c1e5";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -677,7 +677,7 @@ async function revisarVersion(){
     const t = await fetch(location.pathname + "?v=" + Date.now(), { cache:"no-store" }).then(r => r.ok ? r.text() : "");
     const m = t.match(/BUILD = "([a-f0-9]+)"/);
     if (m && m[1] !== BUILD && !document.getElementById("avisoVersion")){
-      document.body.insertAdjacentHTML("beforeend", `<div id="avisoVersion" class="aviso-version" role="status">Hay una versión nueva del CRM de escritorio. <button class="btn p" onclick="location.reload()">Recargar</button></div>`);
+      document.body.insertAdjacentHTML("beforeend", `<div id="avisoVersion" class="aviso-version" role="status">Hay una versión nueva del CRM de escritorio. <button class="btn p" onclick="location.replace(location.pathname + '?v=${m[1]}.' + Date.now() + location.hash)">Recargar</button></div>`);
     }
   } catch(e){}
 }
