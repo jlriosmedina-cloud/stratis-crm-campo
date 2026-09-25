@@ -434,7 +434,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "7e3f19";
+const BUILD = "ce8a66";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -447,7 +447,7 @@ const FEEDBACK = [
   ["Condiciones comerciales", ["POS no cuenta con la tarifa acordada", "POS problema con abonos"]],
   ["Atención", ["Soporte no ayudó al comercio"]],
 ];
-const OBS_MOTIVOS = ["Visita lejos del comercio","GPS impreciso","Comentario insuficiente","Comercio repetido en el día","Hora fuera de jornada","El resultado no coincide con el comentario","Otro"];
+const OBS_MOTIVOS = ["Comentario insuficiente","Comercio repetido en el día","Hora fuera de jornada","El resultado no coincide con el comentario","Otro"];
 const ANU_MOTIVOS = ["Comercio equivocado","Visita duplicada","Registro de prueba","No hubo visita presencial","Otro"];
 const COLORES = ["var(--ej1)","var(--ej2)","var(--ej3)","var(--ej4)","var(--ej5)","var(--ej6)"];
 // color real (para Leaflet, que no entiende var())
@@ -474,7 +474,7 @@ const num = n => Number(n || 0).toLocaleString("es-PE");
 
 /* ---------- estado ---------- */
 const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, error:"",
-  vista:"validacion", filtro:"pend", ej:"todos", dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
+  vista:"validacion", filtro:"todos", ej:"todos", dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
   act:[], actEn:null, base:[], baseMap:{}, ejecutivos:[], bit:{}, trx:{}, nuevas:new Set(), pausa:false, ultimaRecep:null,
   tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"" };
 
@@ -526,14 +526,11 @@ const resumenRes = v => { const l2 = `${v.que}${v.decision ? " · " + v.decision
 function repetidaHoy(v){ const d = iso(v.visitado_en); return S.act.some(x => x.id !== v.id && x.customer_id === v.customer_id && x.correo === v.correo && iso(x.visitado_en) === d && x.estado_anul !== "anulada"); }
 function senales(v){
   const s = [];
-  if (v.distancia_m == null) s.push(["r", v.lat == null ? "Sin GPS" : "Comercio sin punto"]);
-  else if (v.distancia_m > REGLA.lejos) s.push(["r", `A ${mDist(v.distancia_m)} del comercio`]);
-  else if (v.distancia_m > REGLA.cerca) s.push(["", `A ${v.distancia_m} m`]);
-  if (v.precision_m != null && Number(v.precision_m) > REGLA.precision) s.push(["", `GPS ±${Math.round(v.precision_m)} m`]);
+  // Desde el 25/09 no se valida la dirección ni la distancia: la visita vale como la registra el ejecutivo.
+  if (v.lat == null) s.push(["r", "Sin GPS"]);
   const h = horaLima(v.visitado_en); if (h < REGLA.jornadaIni || h >= REGLA.jornadaFin) s.push(["r","Fuera de jornada"]);
   if (repetidaHoy(v)) s.push(["","Repetida hoy"]);
-  if (v.motivo === "Dirección errada" || v.direccion_ok === false) s.push(["i","Dirección no es correcta"]);
-  if (v.ubicacion_editada_en) s.push(["r","Ubicación actualizada después"]);
+  if (v.ubicacion_editada_en) s.push(["i","Ubicación actualizada después"]);
   if (v.resultado_editado_en) s.push(["i","Resultado corregido"]);
   if (v.comentario_editado_en) s.push(["i","Comentario corregido"]);
   if (v.fuera_plazo && v.estado_anul !== "anulada") s.push(["r", `Fuera de plazo (tenía hasta el ${fISO(v.plazo_hasta)})`]);
@@ -641,7 +638,7 @@ async function accion(id, tipo, motivo, nota){
     let r;
     if (tipo === "val") r = await sb.rpc("v2_validar_visita", { p_visita_id:id, p_estado:"validada", p_nota:nota || null });
     else if (tipo === "obs") r = await sb.rpc("v2_validar_visita", { p_visita_id:id, p_estado:"observada", p_motivo:motivo, p_nota:nota || null });
-    else if (tipo === "cola") r = await sb.rpc("v2_validar_visita", { p_visita_id:id, p_estado:"pendiente", p_nota:nota || null });
+    else if (tipo === "cola") r = await sb.rpc("v2_validar_visita", { p_visita_id:id, p_estado:"validada", p_nota:nota || null });
     else if (tipo === "anu") r = v && v.estado_anul === "pendiente" ? await sb.rpc("v2_resolver_anulacion", { p_visita_id:id, p_aprobar:true, p_nota:[motivo, nota].filter(Boolean).join(" · ") }) : await sb.rpc("v2_anular_visita", { p_visita_id:id, p_motivo:motivo, p_nota:nota || null });
     else if (tipo === "rest") r = await sb.rpc("v2_restituir_visita", { p_visita_id:id, p_nota:nota || null });
     else if (tipo === "rech") r = await sb.rpc("v2_resolver_anulacion", { p_visita_id:id, p_aprobar:false, p_nota:nota || null });
@@ -659,7 +656,7 @@ async function accion(id, tipo, motivo, nota){
    ========================================================================= */
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
 const VISTAS = [
-  ["validacion","Validación", ICON.cola, () => S.act.filter(v => estadoDe(v) === "pend").length],
+  ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length],
   ["equipo","Por ejecutivo", ICON.equipo, null],
   ["mapa","Mapa de distritos", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
@@ -685,7 +682,7 @@ function pintar(){
   $("#ahora").textContent = S.actEn ? hh(S.actEn) : "—";
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   const c = $("#contenido");
-  const T = { validacion:["Validación de gestiones","La visita cuenta desde que se registra. Si la observas, el ejecutivo la ve «en revisión» y puede corregirla; si la anulas, deja de contar."],
+  const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo, en los tipos que definió BBVA: marcado por el ejecutivo desde el 24/09 e inferido del comentario en las visitas anteriores."],
@@ -759,9 +756,8 @@ function filtradas(){
 }
 function vistaValidacion(){
   const hoy = S.act.filter(esHoy);
-  const pend = S.act.filter(v => estadoDe(v) === "pend");
-  const conSenal = pend.filter(v => senales(v).length);
-  const lejos = hoy.filter(v => v.estado_anul !== "anulada" && (v.distancia_m == null || v.distancia_m > REGLA.lejos)).length;
+  const obs = S.act.filter(v => estadoDe(v) === "obs");
+  const sinGps = hoy.filter(v => v.estado_anul !== "anulada" && v.lat == null).length;
   const pedidos = S.act.filter(v => v.estado_anul === "pendiente").length;
   const validas = S.act.filter(v => estadoDe(v) === "val").length, cuentan = S.act.filter(v => v.estado_anul !== "anulada").length;
   const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size;
@@ -774,16 +770,16 @@ function vistaValidacion(){
   return `
   <div class="resumen">
     <div class="tile"><div class="k">Visitas hoy</div><div class="v num">${hoy.length}</div><div class="d">${S.ejecutivos.map(e => `${esc(e.ini)} ${hoy.filter(v => v.correo === e.correo).length}`).join(" · ") || "sin ejecutivos"}</div></div>
-    <div class="tile acc"><div class="k">Por validar</div><div class="v num">${pend.length}</div><div class="d">${conSenal.length} con alguna señal</div></div>
-    <div class="tile ${lejos ? "bad" : "ok"}"><div class="k">Lejos o sin GPS</div><div class="v num">${lejos}</div><div class="d">hoy, a más de ${REGLA.lejos} m del comercio</div></div>
+    <div class="tile ${obs.length ? "warn" : ""}"><div class="k">Observadas</div><div class="v num">${obs.length}</div><div class="d">el ejecutivo las ve «en revisión»</div></div>
+    <div class="tile ${sinGps ? "bad" : "ok"}"><div class="k">Sin GPS hoy</div><div class="v num">${sinGps}</div><div class="d">sin ubicación no cuentan como visita</div></div>
     <div class="tile ${pedidos ? "warn" : ""}"><div class="k">Pedidos de anulación</div><div class="v num">${pedidos}</div><div class="d">esperan tu decisión</div></div>
-    <div class="tile"><div class="k">Validadas en el periodo</div><div class="v num">${validas}<small> / ${cuentan}</small></div><div class="d">${comerciosVis} comercios visitados · meta ${metaEq}</div></div>
+    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${comerciosVis}<small> / ${metaEq}</small></div><div class="d">${cuentan} visitas en el periodo · ${validas} validadas</div></div>
   </div>
   <div class="split">
     <div class="panel">
       <div class="barra">
         <div class="chips">
-          ${[["pend","Por validar"],["obs","Observadas"],["val","Validadas"],["anu","Anuladas"],["todos","Todas"]].map(([k,t]) => `<button class="chip ${S.filtro===k?"on":""}" data-filtro="${k}">${t}<span class="c num">${cnt(k)}</span></button>`).join("")}
+          ${[["todos","Todas"],["obs","Observadas"],["anu","Anuladas"]].concat(cnt("pend") ? [["pend","Por validar"]] : []).map(([k,t]) => `<button class="chip ${S.filtro===k?"on":""}" data-filtro="${k}">${t}<span class="c num">${cnt(k)}</span></button>`).join("")}
         </div>
         <div class="der">
           <select class="sel" id="fEj"><option value="todos">Todos los ejecutivos</option>${S.ejecutivos.map(e=>`<option value="${esc(e.correo)}" ${S.ej===e.correo?"selected":""}>${esc(e.nombre)}</option>`).join("")}</select>
@@ -793,7 +789,7 @@ function vistaValidacion(){
       </div>
       ${S.marcadas.size ? `<div class="barra" style="background:var(--azul-t)"><b class="num">${S.marcadas.size} seleccionadas</b><span class="lbl">en bloque solo se validan las que no tienen señales</span><div class="der"><button class="btn v" id="valBloque">${ICON.ok} Validar ${[...S.marcadas].filter(id => { const v = S.act.find(x=>x.id===id); return v && senales(v).length===0; }).length} sin señales</button><button class="btn" id="limpiarSel">Quitar selección</button></div></div>` : ""}
       <div class="tabla-wrap">
-      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Ubicación y señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
+      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
         ${lista.slice(0, 400).map(v => { const e = ejDe(v.correo), sn = senales(v); return `
         <tr class="f ${S.sel===v.id?"sel":""} ${S.nuevas.has(v.id)?"nueva":""}" data-sel="${v.id}">
           <td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>
@@ -801,7 +797,7 @@ function vistaValidacion(){
           <td title="${esc(e.nombre)}"><span class="ej">${AVATAR(e)}<span class="ej-n">${esc(nombreCorto(e.nombre))}</span></span></td>
           <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(v.customer_id)} · ${esc(v.distrito || "sin distrito")}</small></td>
           <td class="res">${resumenRes(v)}</td>
-          <td class="sn"><span class="dist ${claseDist(v)} num"><i></i>${mDist(v.distancia_m)}${v.precision_m != null ? `<small>±${Math.round(v.precision_m)} m</small>` : ""}</span>${(() => { const o = sn.filter(([, t]) => !/^A \d|del comercio$/.test(t)); return o.length ? `<div class="sn-l">${o.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("")}</div>` : ""; })()}</td>
+          <td class="sn">${sn.length ? `<div class="sn-l" style="margin-top:0">${sn.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("")}</div>` : `<span class="muted" style="font-size:12px">—</span>`}</td>
           ${S.filtro === "todos" ? `<td>${pill(v)}</td>` : ""}
         </tr>`; }).join("")}
       </tbody></table>${lista.length > 400 ? `<div class="ver-mas">Se muestran 400 de ${lista.length}. Afina el filtro.</div>` : ""}` : `<div class="vacio">No hay visitas con ese filtro.${S.filtro === "pend" ? " La cola está al día." : ""}</div>`}
@@ -821,7 +817,7 @@ const CAL_TXT = { numero:"dirección con número", calle:"dirección a nivel de 
 const gmaps = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 function mapa(v){
   const r = puntoRef(v);
-  const regla = `<span>Hasta ${REGLA.cerca} m se valida sin mirar; de ${REGLA.cerca} a ${REGLA.lejos} m se revisa; más de ${REGLA.lejos} m se observa.</span>`;
+  const regla = `<span>Referencia: la dirección no se valida; la visita vale como la registró el ejecutivo.</span>`;
   if (v.lat == null) return `<div class="mapa"><div class="vacio" style="padding:22px">La visita llegó sin ubicación. No se puede comparar con el punto del comercio.</div>${r ? `<div class="pie"><span></span><a href="${gmaps(r.lat, r.lng)}" target="_blank" rel="noopener">Ver el comercio en Google Maps ↗</a></div>` : ""}</div>`;
   const col = claseDist(v);
   const actualDistinto = v.geo_lat != null && r && v2m(v.geo_lat, v.geo_lng, r.lat, r.lng) > 15 && v2m(v.geo_lat, v.geo_lng, v.lat, v.lng) > 15;
@@ -893,7 +889,7 @@ function ficha(v){
     <div class="cuerpo">
       ${v.estado_anul === "pendiente" ? `<div class="aviso warn"><b>${esc(nomDe(v.anul_pedida_por))} pide anular esta visita</b> (${ddhh(v.anul_pedida_en)}): «${esc(v.anul_motivo || "")}». Si la anulas, deja de contar; si rechazas el pedido, sigue contando.</div>` : ""}
       ${k === "obs" ? `<div class="aviso warn"><b>Observada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}: ${esc(v.validacion_motivo || "")}. ${esc(v.validacion_nota || "")} El ejecutivo la ve «en revisión» en su celular${v.puede_editar ? ` y puede corregirla hasta el ${fISO(v.limite_edicion)}` : "; su plazo de corrección ya venció"}. Sigue contando hasta que decidas.</div>` : ""}
-      ${k === "val" ? `<div class="aviso ok"><b>Validada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>` : ""}
+      ${k === "val" ? (v.validacion_por === "automática" || !v.validacion_por ? `<div class="aviso ok"><b>Aceptada</b> como la registró el ejecutivo.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>` : `<div class="aviso ok"><b>Validada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>`) : ""}
       ${k === "anu" ? `<div class="aviso mal"><b>Anulada</b>: ${esc(v.anul_motivo || "")}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}. No cuenta.</div>` : ""}
       ${k === "pend" && v.validacion_nota ? `<div class="aviso">${esc(v.validacion_nota)}</div>` : ""}
       ${v.fuera_plazo && k !== "anu" ? `<div class="aviso mal"><b>Fuera de plazo</b>: la visita es del ${fISO(iso(v.visitado_en))} y llegó el ${ddhh(v.recibido_en)}; tenía hasta el ${fISO(v.plazo_hasta)}. Queda en el historial pero <b>no cuenta</b> como comercio visitado ni abre reactivación, aunque la valides.</div>` : ""}
@@ -908,7 +904,7 @@ function ficha(v){
           <div><small>Decisión del comercio</small><b>${esc(v.decision || "—")}</b></div>
           <div><small>Reagenda · equipo</small><b>${v.fecha_reagenda ? fISO(v.fecha_reagenda) : "—"} · ${esc(v.equipo || "—")}</b></div>
           <div><small>¿La dirección de la base es correcta?</small><b style="color:${v.direccion_ok === false ? "var(--rojo-txt)" : v.direccion_ok === true ? "var(--verde-txt)" : "inherit"}">${v.direccion_ok === true ? "Sí, según el ejecutivo" : v.direccion_ok === false ? "No, según el ejecutivo" : "No se preguntó (registro anterior al 24/09)"}</b></div>
-          <div><small>Distancia al comercio al registrar</small><b>${mDist(v.distancia_m)}</b></div>
+          
         </div>
       </div>
       <div><h3>Comentario del ejecutivo</h3><div class="coment">${esc(v.comentario) || "<i>sin comentario</i>"}${v.editado_en ? `<div class="ed">Corregido el ${ddhh(v.editado_en)}. El texto anterior está en la bitácora.</div>` : ""}</div></div>
@@ -1020,7 +1016,7 @@ function vistaEquipo(){
   <div class="panel">
     <div class="barra"><b>Por ejecutivo y por día</b><span class="lbl">verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: a más de la mitad · rojo: menos de la mitad · el punto naranja marca visitas por validar</span></div>
     <div style="overflow-x:auto"><table class="datos matriz">
-      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Visitas con<br>contacto</th><th class="n">Comercios con<br>contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Lejos o<br>sin GPS</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
+      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Visitas con<br>contacto</th><th class="n">Comercios con<br>contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
       <tbody>${filas.map(f => `<tr>
         <td><button class="ej-btn" data-ir-dia="periodo" data-ir-ej="${esc(f.e.correo)}"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></button></td>
         ${dias.map(d => celda(f.porDia[d.iso], d, f.e.correo)).join("")}
@@ -1031,13 +1027,12 @@ function vistaEquipo(){
         <td class="n num">${f.comContacto}<span class="muted"> / ${f.com}</span></td>
         <td class="n num">${f.reunion}</td>
         <td class="n num">${f.consumos}</td>
-        <td class="n num ${f.lejos ? "warn" : ""}">${f.lejos}</td>
         <td class="n num ${f.tarde ? "mal" : ""}">${f.tarde}</td>
         <td><span class="mini-estados"><span class="pill val">${f.val}</span><span class="pill pend">${f.pend}</span>${f.obs ? `<span class="pill obs">${f.obs}</span>` : ""}${f.anu ? `<span class="pill anu">${f.anu}</span>` : ""}</span></td>
       </tr>`).join("")}
       <tr class="total"><td><b>Equipo</b></td>${dias.map((d, i) => `<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${tot[i] || "·"}</b></td>`).join("")}
         <td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${ritmoEq.toFixed(1).replace(".", ",")}</td><td class="n num">${necEq.toFixed(1).replace(".", ",")}</td>
-        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.lejos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
+        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
         <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
       </tbody></table></div>
     <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra 160). Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
