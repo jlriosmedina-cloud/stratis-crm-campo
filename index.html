@@ -356,7 +356,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "0685ca";
+const BUILD = "b2ae69";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -635,7 +635,7 @@ function filtrar(omitir){
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
     if (S.filtroDueno === "mios" && !esMio(c)) return false;
     if (S.filtroDueno === "libres" && c.correo) return false;
-    if (q && !(String(c.customer_id).includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
+    if (q && !(String(c.customer_id).includes(q) || String(c.ruc || "").includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
     return true;
   });
 }
@@ -662,7 +662,7 @@ function vistaBase(){
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
     <div class="barra"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>
-      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por customer ID o razón social" value="${esc(S.q)}" autocomplete="off"></label></div>
+      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por customer ID, RUC o razón social" value="${esc(S.q)}" autocomplete="off"></label></div>
     <div class="barra-filtros">
       <div class="chips">${chip("por","Por visitar",nPor)}${chip("vis","Visitados",nVis)}${chip("todos","Todos")}</div>
       <button class="chip fijo ${S.masFiltros||extras?"on":""}" data-mas aria-label="Más filtros" title="Más filtros">${ICON.filtro}${extras ? ` <span class="cuenta">${extras}</span>` : ""}</button>
@@ -714,6 +714,7 @@ function vistaFicha(c){
         ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
+          ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
           <dt>Dirección</dt><dd>${esc(dirDe(c))}</dd>
           ${refDe(c) ? `<dt>Referencia</dt><dd>${esc(refDe(c))}</dd>` : ""}
           ${c.contacto ? `<dt>Contacto</dt><dd>${esc(c.contacto)}</dd>` : ""}
@@ -1212,7 +1213,7 @@ function hojaRegistro(){
   const r = S.reg, c = r.id ? S.base.find(x => x.customer_id === r.id) : null;
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-op="${campo}" data-val="${val}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   const q = r.busca.trim().toLowerCase();
-  const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
+  const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.ruc || "").includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
   const yaCuenta = c && c.visitas_validas > 0, sinContar = c && c.visitas > 0 && !yaCuenta;
   const ultTxt = c && c.ultima_visita ? `${diaLima(c.ultima_visita) === diaLima(Date.now()) ? "hoy" : "el " + fechaCorta(c.ultima_visita)} a las ${horaCorta(c.ultima_visita)}${c.ultima_que ? " (" + esc(c.ultima_que.toLowerCase()) + ")" : ""}` : "";
   let pasos = `<div class="paso" data-paso="comercio"><span class="eyebrow">Comercio</span>${c
@@ -1220,7 +1221,7 @@ function hojaRegistro(){
        ${yaCuenta ? `<div class="ya-cuenta"><b>Este comercio ya cuenta en tus 160.</b> Lo visitaste ${ultTxt}. Esta visita se guarda como seguimiento y <b>no suma otra</b>.
           <span>¿Estás en otro negocio? Búscalo en tu base para que sí sume.</span><button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div>`
         : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus 160.</div>` : ""}`
-    : `<input class="campo" id="busca" type="search" placeholder="Customer ID o razón social" value="${esc(r.busca)}" autocomplete="off">
+    : `<input class="campo" id="busca" type="search" placeholder="Customer ID, RUC o razón social" value="${esc(r.busca)}" autocomplete="off">
        <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
   const gpsTxt = r.gps === "buscando" ? "Tomando ubicación…" : r.gps === "ok" ? `Ubicación tomada ±${r.precision} m` : "Sin ubicación";
   pasos += `<div class="paso" data-paso="gps"><span class="eyebrow">Se toma solo</span><div class="sello">
