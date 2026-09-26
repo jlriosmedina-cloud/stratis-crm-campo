@@ -358,7 +358,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "71d49a";
+const BUILD = "3a1e80";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -936,7 +936,7 @@ function lineaVisita(v){
     <br><span class="nota">${esc(v.con)} · ${esc(v.comentario)}${(v.editado_en || v.comentario_editado_en) ? " <i>(corregido)</i>" : ""}</span>
     ${(v.motivos_si || []).length ? `<div class="fb-hist si"><b>Qué lo convenció:</b> ${v.motivos_si.map(esc).join(" · ")}</div>` : ""}
     ${(v.feedback || []).length ? `<div class="fb-hist"><b>Feedback:</b> ${v.feedback.map(esc).join(" · ")}${v.feedback_nota ? `<br><i>${esc(v.feedback_nota)}</i>` : ""}</div>` : ""}
-    ${v.direccion_ok === false ? `<br><span class="nota" style="color:var(--rojo)">Dirección de la base: no es correcta</span>` : v.direccion_ok === true ? `<br><span class="nota">Dirección de la base: correcta</span>` : ""}
+    ${v.direccion_ok === false ? `<br><span class="nota" style="color:var(--rojo)">Dirección de la base: no es correcta${v.comercio_ubicado === true ? " · comercio ubicado en otra dirección" : v.comercio_ubicado === false ? " · comercio no ubicado" : ""}</span>` : v.direccion_ok === true ? `<br><span class="nota">Dirección de la base: correcta</span>` : ""}
     ${v.anul_motivo ? `<br><span class="nota">Motivo: ${esc(v.anul_motivo)}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}</span>` : ""}
     <div class="ubi-fila">${ubi}</div>
     ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
@@ -1197,7 +1197,7 @@ function tarjetaParametros(a){
 
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id){
-  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, feedback:[], feedbackNota:"", fbAbierto:false, motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
+  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, ubicado:null, feedback:[], feedbackNota:"", fbAbierto:false, motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
 }
 // Pide una ubicación nueva (nunca una guardada) y, si el celular no contesta en 20 s —pasa cuando se
@@ -1250,8 +1250,13 @@ function hojaRegistro(){
   if (c && !dirAuto) pasos += `<div class="paso" data-paso="dir"><span class="eyebrow">¿La dirección es correcta?</span>
       <div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)}</small>` : ""}</div>
       <div class="opciones c2">${op("dirOk","si","Sí, es correcta","","verde")}${op("dirOk","no","No, está en otro lugar","","rojo")}</div>
-      ${r.dirOk === "no" ? `<div class="explica" style="margin-top:8px">${r.con && r.con !== "Nadie" ? "Tu ubicación de ahora queda como la del comercio. En el comentario cuenta dónde está realmente (calle, número, referencia)." : "Tu ubicación no se usa como la del comercio. En el comentario cuenta qué encontraste en la dirección."}</div>` : ""}</div>`;
-  const phComent = r.dirOk === "no" ? "Ej.: el local se mudó a la Av. Próceres 1450, frente al mercado. El dueño usa POS de otro banco." : "Ej.: el dueño usa el POS de otro banco; lo va a activar esta semana. Puedes dictarlo con el micrófono del teclado.";
+      </div>`;
+  // Si la dirección de la base no es correcta (o el motivo fue «Dirección errada»), el ejecutivo marca si ubicó
+  // el comercio. Solo marca: no escribe la nueva dirección (pedido de Jose, 25/09).
+  if (c && preguntaUbicado(r)) pasos += `<div class="paso" data-paso="ubicado"><span class="eyebrow">¿Ubicaste el comercio?</span>
+      <div class="opciones c2">${op("ubicado","si","Sí, está en otra dirección","","verde")}${op("ubicado","no","No lo encontré","","rojo")}</div>
+      <div class="explica" style="margin-top:8px">${r.ubicado === "si" ? "Tu ubicación de ahora queda como la del comercio (si la señal es de ±60 m o menos). Registra la visita estando en el comercio. No hace falta escribir la dirección." : r.ubicado === "no" ? "Tu ubicación no se usa como la del comercio. La visita cuenta igual." : "Solo márcalo; no hace falta escribir la nueva dirección."}</div></div>`;
+  const phComent = r.ubicado === "si" ? "Ej.: el local se mudó a otra cuadra; el dueño usa el POS de otro banco." : r.ubicado === "no" ? "Ej.: en la dirección hay otro negocio y los vecinos no lo conocen." : "Ej.: el dueño usa el POS de otro banco; lo va a activar esta semana. Puedes dictarlo con el micrófono del teclado.";
   pasos += `<div class="paso" data-paso="coment"><span class="eyebrow">Comentario · qué dijo el comercio</span><textarea class="campo" id="coment" placeholder="${esc(phComent)}">${esc(r.comentario)}</textarea></div>`;
   const faltan = faltantes();
   if (r.intento){ const fp = faltantesPasos(); const porPaso = {}; fp.forEach(([k, t]) => { (porPaso[k] ||= []).push(t); });
@@ -1289,6 +1294,7 @@ function faltantesPasos(){
   if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push(["motivosSi","qué lo convenció"]);
   if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push(["feedback","el feedback de la visita"]);
   if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push(["dir","si la dirección es correcta"]);
+  if (preguntaUbicado(r) && !r.ubicado) f.push(["ubicado","si ubicaste el comercio"]);
   if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
   return f;
 }
@@ -1358,10 +1364,13 @@ function faltantes(){
   if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push("qué lo convenció");
   if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
   if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push("si la dirección es correcta");
+  if (preguntaUbicado(r) && !r.ubicado) f.push("si ubicaste el comercio");
   if (r.comentario.trim().length < 5) f.push("el comentario");
   return f;
 }
-const formularioConDatos = r => !!(r && (r.con || r.dirOk || (r.comentario || "").trim() || r.fechaNueva));
+const formularioConDatos = r => !!(r && (r.con || r.dirOk || r.ubicado || (r.comentario || "").trim() || r.fechaNueva));
+// La pregunta «¿Ubicaste el comercio?» aparece cuando la dirección de la base no es correcta.
+const preguntaUbicado = r => !!(r && r.id && ((r.con === "Nadie" && r.motivo === "Dirección errada") || r.dirOk === "no"));
 function cerrarRegistro(){
   const r = S.reg; if (!r) return;
   if (r.enviando) return;
@@ -1385,7 +1394,8 @@ async function guardarVisita(){
     p_direccion_ok: r.con === "Nadie" && r.motivo === "Dirección errada" ? false : r.dirOk === "si" ? true : r.dirOk === "no" ? false : null,
     p_feedback: r.con !== "Nadie" && (r.feedback || []).length ? r.feedback : null,
     p_feedback_nota: r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null,
-    p_motivos_si: r.decision === "Realizará consumos" && (r.motivosSi || []).length ? r.motivosSi : null };
+    p_motivos_si: r.decision === "Realizará consumos" && (r.motivosSi || []).length ? r.motivosSi : null,
+    p_comercio_ubicado: preguntaUbicado(r) ? (r.ubicado === "si" ? true : r.ubicado === "no" ? false : null) : null };
   r.enviando = true; S._mantenerScroll = true; pintar();
   try {
     await enviar(v);
@@ -1471,9 +1481,10 @@ function enlazar(){
       if (k === "con"){ r.motivo = null; r.que = null; r.decision = null; r.equipo = null; if (b.dataset.val === "Nadie"){ r.feedback = []; r.feedbackNota = ""; r.fbAbierto = false; } }
       if (k === "que"){ r.decision = null; r.equipo = null; }
       if (k === "decision") r.equipo = null;
+      if (!preguntaUbicado(r)) r.ubicado = null;
       S._mantenerScroll = true; pintar(); });
     const bs = $("#busca"); if (bs){ bs.oninput = () => { S.reg.busca = bs.value; S._mantenerScroll = true; const pos = bs.selectionStart; pintar(); const n = $("#busca"); n.focus(); n.setSelectionRange(pos,pos); }; }
-    p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.dirOk = null; S._mantenerScroll = true; pintar(); });
+    p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.dirOk = null; S.reg.ubicado = null; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-cambiar-comercio]").forEach(b => b.onclick = () => { S.reg.id = null; S.reg.busca = ""; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
     enlazarFeedback(p, S.reg, "fb");
