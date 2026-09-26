@@ -156,6 +156,12 @@ nav.abajo .fab svg{width:26px;height:26px}
 .opciones{display:grid;gap:8px}
 .opciones.c3{grid-template-columns:repeat(3,1fr)}
 .opciones.c2{grid-template-columns:1fr 1fr}
+.opciones.c1{grid-template-columns:1fr}
+.opciones.modos .op{align-items:flex-start;text-align:left;padding:12px 14px;min-height:0;font-size:14px}
+.sub-paso{margin-top:14px;padding-top:12px;border-top:1px dashed var(--linea)}
+.sub-paso .eyebrow{display:block;margin-bottom:8px}
+.fb-op.fijo{opacity:.85;cursor:default}
+.fb-op small{font-weight:500;color:var(--muted);font-size:11.5px}
 .op{border:1.5px solid var(--linea);background:var(--tarjeta);border-radius:14px;padding:13px 8px;font-weight:700;font-size:13.5px;color:var(--ink);display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;min-height:56px;justify-content:center}
 .op small{font-weight:500;font-size:11.5px;color:var(--muted)}
 .op.on{border-color:var(--azul);background:var(--azul-t);color:var(--azul)}
@@ -313,6 +319,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .btn.grabando{animation:latido 1.2s ease-in-out infinite}
 @keyframes latido{50%{box-shadow:0 0 0 6px var(--naranja-t)}}
 @media (prefers-reduced-motion: reduce){.btn.grabando{animation:none}}
+.coment-cab{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.coment-cab .eyebrow{margin:0}
+.btn.btn-dictar{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:40px;padding:8px 14px;font-size:13.5px}
 .reg-btns{display:grid;gap:8px}
 .reg-btns .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .escuchando{display:flex;align-items:center;gap:10px;margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--naranja-t);color:var(--ink);font-size:13px;font-weight:600;line-height:1.4}
@@ -380,7 +389,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "e45eb0";
+const BUILD = "fa3f2d";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -424,7 +433,7 @@ function guardarCola(){ try { localStorage.setItem("stratis-v2-cola", JSON.strin
 // Árbol de feedback (26/09/2026): rama → detalle → qué ofreciste. Igual que v2_feedback_tipos y v2_feedback_acciones.
 const FEEDBACK = [
   ["Competencia y otros medios de cobro", ["Usa POS de otra marca", "Cobra con Yape o Plin para no pagar comisión", "Solo acepta efectivo"]],
-  ["Tasa y abonos", ["Pide una tasa más baja", "POS no cuenta con la tarifa acordada", "POS problema con abonos"]],
+  ["Tasa y abonos", ["Pide una tasa más baja", "POS no cuenta con la tarifa acordada", "POS problema con abonos", "Los abonos le llegan con demora"]],
   ["Equipo y contómetros", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta", "No tiene contómetros o le quedan pocos"]],
   ["Uso del POS", ["Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos"]],
   ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde"]],
@@ -440,7 +449,8 @@ const ACCIONES = [
   ["Validé el estado del equipo", ["Equipo y contómetros"]],
   ["Descarté errores en sitio (reinicio, chip, batería)", ["Equipo y contómetros"]],
   ["Solicité reposición de contómetros", ["Equipo y contómetros"]],
-  ["Solicité cambio de equipo", ["Equipo y contómetros"]],
+  ["Solicité cambio de equipo (sin costo)", ["Equipo y contómetros"]],
+  ["Solicité cambio de equipo (con costo)", ["Equipo y contómetros"]],
   ["Capacitación en el momento", ["Equipo y contómetros","Uso del POS"]],
   ["Capacitación programada", ["Uso del POS"]],
   ["Llamé a soporte", ["Equipo y contómetros","Atención y soporte"]],
@@ -455,11 +465,84 @@ const COMPETIDORES = ["Niubiz", "Izipay", "Culqi", "Mercado Pago", "Otro"];
 const PREFIERE_POR = ["Tasa", "Abono más rápido", "Equipo o señal", "Costumbre o atención"];
 const NO_NECESITA_POR = ["Pocas ventas con tarjeta", "Negocio cerrado o por cerrar", "Otro motivo"];
 const FB_OTRA_MARCA = "Usa POS de otra marca", FB_NO_NECESITA = "No necesitaba los POS", FB_CONTOMETROS = "No tiene contómetros o le quedan pocos";
+const FB_DEMORA = "Los abonos le llegan con demora", BANCOS_ABONO = ["BBVA", "Otro banco"];
 const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0];
 // ramas marcadas, en el orden del árbol
 const ramasDe = fb => FEEDBACK.map(g => g[0]).filter(g => (fb || []).some(t => ramaDe(t) === g));
-const extVacio = () => ({ competidores:[], competidor_otro:"", tasa_competidor:"", prefiere_por:[], no_necesita_por:null });
+const extVacio = () => ({ competidores:[], competidor_otro:"", tasa_competidor:"", prefiere_por:[], no_necesita_por:null, dias_demora_abono:"", banco_abono:null });
 const FB_NINGUNO = "Sin observaciones del comercio";
+/* «¿Cómo fue la visita?» (26/09, simplificación pedida por Jose). Una sola primera pregunta que llena sola
+   con quién, qué pasó, motivo y dirección, para que no haya combinaciones ambiguas. */
+const FB_DEC = "No se encontraba la persona que tomaba decisiones", ACC_REAG = "Reagendé con quien decide";
+const MODOS = [
+  ["hable", "Hablé con el dueño o el encargado", "Te dio su posición sobre el POS"],
+  ["volver", "No estaba quien decide · quedamos en volver", "Anotas la fecha en que vuelves"],
+  ["sin", "No estaba quien decide · sin compromiso", "No te dieron información ni una fecha"],
+  ["nadie", "No hubo contacto", "Local cerrado o nadie atendió"],
+  ["noesta", "El comercio no está en esta dirección", "Otro negocio, una vivienda o nadie lo conoce"]];
+// el modo que cuenta: si el comercio no estaba en la dirección pero lo encontró, vale lo que pasó en el nuevo lugar
+function modoEfectivo(r){
+  if (!r) return null;
+  if (r.modo === "noesta") return r.ubicado === "si" ? (r.modo2 || null) : r.ubicado === "no" ? "noesta" : null;
+  return r.modo || null;
+}
+// modo a partir de lo guardado (corrección, IA)
+function modoDesde(v){
+  const out = { modo:null, modo2:null, conQuien:null, ubicado:null };
+  if (v.con === "Nadie"){
+    if (v.motivo === "Dirección errada"){ out.modo = "noesta"; out.ubicado = "no"; }
+    else { out.modo = "nadie"; out.motivo = v.motivo === "No estaba" ? "No atendió" : v.motivo; }
+    return out;
+  }
+  const base = v.que === "Reunión concretada" ? "hable" : v.que === "Reagendada" ? "volver" : v.que === "Sin éxito" ? "sin" : null;
+  if (base === "hable") out.conQuien = v.con || null;
+  out.modo = base;
+  return out;
+}
+// Llena con, qué pasó, motivo y dirección según el modo, y deja el feedback coherente:
+// si no estaba quien decide, «No se encontraba la persona que tomaba decisiones» queda marcado (y, si quedó volver,
+// «Reagendé con quien decide»); si habló con el dueño o encargado, esa opción no aplica.
+function aplicarModo(r, corr){
+  const m = modoEfectivo(r);
+  if (!corr){ r.dirOk = r.modo === "noesta" ? "no" : r.modo ? "si" : null; if (r.modo !== "noesta"){ r.ubicado = null; r.modo2 = null; } }
+  if (m === "hable"){ r.con = r.conQuien || null; r.que = "Reunión concretada"; r.motivo = null; }
+  else if (m === "volver"){ r.con = "Tercero"; r.que = "Reagendada"; r.motivo = null; }
+  else if (m === "sin"){ r.con = "Tercero"; r.que = "Sin éxito"; r.motivo = null; }
+  else if (m === "nadie"){ r.con = "Nadie"; r.que = null; if (!["Cerrado","No atendió"].includes(r.motivo)) r.motivo = null; }
+  else if (m === "noesta"){ r.con = "Nadie"; r.que = null; r.motivo = "Dirección errada"; }
+  else { r.con = null; r.que = null; r.motivo = null; }
+  if (m !== "hable"){ r.decision = null; r.equipo = null; r.motivosSi = []; }
+  if (m !== "volver") r.fechaNueva = "";
+  if (!["hable","volver","sin"].includes(m)){ r.feedback = []; r.fbAcc = []; r.fbExt = extVacio(); r.feedbackNota = ""; r.fbAbierto = false; return; }
+  let fb = (r.feedback || []).filter(t => m === "hable" ? t !== FB_DEC : t !== FB_NINGUNO);
+  if (m !== "hable" && !fb.includes(FB_DEC)) fb = fb.concat(FB_DEC);
+  r.feedback = [FB_NINGUNO].concat(...FEEDBACK.map(g => g[1])).filter(x => fb.includes(x));
+  r.fbAcc = (r.fbAcc || []).filter(a => a !== ACC_REAG || m === "volver");
+  if (m === "volver" && !r.fbAcc.includes(ACC_REAG)) r.fbAcc = r.fbAcc.concat(ACC_REAG);
+  podarArbol(r);
+}
+function pasoModo(r, attr, corr, c){
+  const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-${attr}="${campo}" data-val="${esc(val)}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
+  const tonoDe = k => k === "hable" ? "verde" : k === "nadie" || k === "noesta" ? "rojo" : "";
+  const quien = `<div class="sub-paso"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c2">${op("conQuien","Dueño","Dueño")}${op("conQuien","Tercero","Encargado o administrador")}</div></div>`;
+  let h = `<div class="paso" data-paso="modo"><span class="eyebrow">¿Cómo fue la visita?</span>
+    ${c ? `<div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)} · dirección de la base</small>` : ""}</div>` : ""}
+    <div class="opciones c1 modos">${MODOS.map(([k, t, sub]) => op("modo", k, t, sub, tonoDe(k))).join("")}</div>`;
+  if (r.modo === "hable") h += quien;
+  if (r.modo === "nadie") h += `<div class="sub-paso"><span class="eyebrow">¿Qué encontraste?</span><div class="opciones c2">${op("motivo","Cerrado","Local cerrado","","rojo")}${op("motivo","No atendió","Nadie atendió","","rojo")}</div>
+    <div class="explica" style="margin-top:8px">Cuenta como visita, porque estuviste en el comercio.</div></div>`;
+  if (r.modo === "noesta" && corr) h += `<div class="explica" style="margin-top:8px">Queda como dirección errada: no encontraste el comercio.</div>`;
+  if (r.modo === "noesta" && !corr){
+    h += `<div class="sub-paso"><span class="eyebrow">¿Lo encontraste en otro lugar?</span><div class="opciones c2">${op("ubicado","si","Sí, lo encontré","cerca o en otro local","verde")}${op("ubicado","no","No lo encontré","","rojo")}</div>
+      <div class="explica" style="margin-top:8px">${r.ubicado === "si" ? "Registra la visita estando en el comercio: tu ubicación de ahora queda como la suya. No hace falta escribir la dirección." : r.ubicado === "no" ? "La visita cuenta igual. Cuenta en el comentario qué hay en la dirección." : "Solo márcalo; no hace falta escribir la nueva dirección."}</div></div>`;
+    if (r.ubicado === "si"){
+      h += `<div class="sub-paso"><span class="eyebrow">¿Cómo fue la visita ahí?</span><div class="opciones c1 modos">${MODOS.slice(0, 3).map(([k, t, sub]) => op("modo2", k, t, sub, tonoDe(k))).join("")}</div></div>`;
+      if (r.modo2 === "hable") h += quien;
+    }
+  }
+  return h + `</div>`;
+}
+
 // «Por qué sí»: se pregunta cuando el comercio realizará consumos (validado por Jose, 25/09/2026)
 const MOTIVOS_SI = ["Ya lo usaba y seguirá usándolo", "Se resolvió su problema con el POS", "Beneficios o promociones de BBVA",
   "Sus clientes le piden pagar con tarjeta", "La tasa y las condiciones le convienen", "La asesoría del ejecutivo (aprendió a usarlo o lo configuró)"];
@@ -880,7 +963,9 @@ function abrirCorreccion(id){
   S.corr = { id, con:v.con || null, motivo:v.motivo || null, que:v.que || null, decision:v.decision || null,
              equipo:v.equipo || null, fechaNueva:v.fecha_reagenda || "", comentario:v.comentario || "",
              limite:v.limite_edicion || null, enviando:false, error:"",
-             cid:v.customer_id, feedback:(v.feedback || []).slice(), fbAcc:(v.fb_acciones || []).slice(), fbExt:Object.assign(extVacio(), JSON.parse(JSON.stringify(v.fb_extra || {})), { tasa_competidor: v.fb_extra && v.fb_extra.tasa_competidor != null ? String(v.fb_extra.tasa_competidor).replace(".", ",") : "" }), motivosSi:(v.motivos_si || []).slice(), msiAbierto:false, feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
+             cid:v.customer_id, feedback:(v.feedback || []).slice(), fbAcc:(v.fb_acciones || []).slice(), fbExt:Object.assign(extVacio(), JSON.parse(JSON.stringify(v.fb_extra || {})), { tasa_competidor: v.fb_extra && v.fb_extra.tasa_competidor != null ? String(v.fb_extra.tasa_competidor).replace(".", ",") : "", dias_demora_abono: v.fb_extra && v.fb_extra.dias_demora_abono != null ? String(v.fb_extra.dias_demora_abono) : "" }), motivosSi:(v.motivos_si || []).slice(), msiAbierto:false, feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
+  Object.assign(S.corr, modoDesde(v));
+  if (S.corr.modo === "nadie") S.corr.motivo = modoDesde(v).motivo;
   S._mantenerScroll = true; pintar();
 }
 function pasoUbicacionCorreccion(r){
@@ -909,15 +994,15 @@ function tomarGPSCorreccion(){
 }
 function faltaCorreccion(){
   const r = S.corr, f = [];
-  if (!r.con) f.push("con quién hablaste");
-  if (r.con === "Nadie" && !r.motivo) f.push("el motivo");
-  if (r.con && r.con !== "Nadie" && !r.que) f.push("qué pasó");
+  if (!r.modo) f.push("cómo fue la visita");
+  if (r.modo === "nadie" && !r.motivo) f.push("qué encontraste (cerrado o nadie atendió)");
+  if (r.modo === "hable" && !r.conQuien) f.push("con quién hablaste");
   if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
   if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
   if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push("qué lo convenció");
-  if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
-  if (r.con && r.con !== "Nadie") f.push(...faltaArbol(r));
+  if (["hable","volver","sin"].includes(modoEfectivo(r)) && !(r.feedback || []).length) f.push("el feedback de la visita");
+  if (["hable","volver","sin"].includes(modoEfectivo(r))) f.push(...faltaArbol(r));
   if ((r.comentario || "").trim().length < 5) f.push("el comentario");
   return f;
 }
@@ -957,17 +1042,16 @@ function panelCorreccion(v){
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-cop="${campo}" data-val="${esc(val)}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   let h = `<div class="acc-panel"><b>Corregir lo que registré</b>
     <div class="nota">La fecha y la hora no se tocan: son el sello de la visita.${r.limite ? " Puedes corregirla hasta el " + fISO(r.limite) + "." : ""}</div>
-    <div class="paso"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
-  if (r.con === "Nadie") h += `<div class="paso"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div></div>`;
-  if (r.con && r.con !== "Nadie") h += `<div class="paso"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c3">${op("que","Reunión concretada","Reunión concretada","","verde")}${op("que","Reagendada","Reagendada")}${op("que","Sin éxito","Sin éxito","","rojo")}</div></div>`;
+`;
+  h += pasoModo(r, "cop", true, null);
   if (r.que === "Reunión concretada") h += `<div class="paso"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
   if (r.decision === "Realizará consumos") h += pasoMotivosSi(r, "cmsi");
-  if (r.con && r.con !== "Nadie") h += pasoFeedback(r, "cfb");
+  if (["hable","volver","sin"].includes(modoEfectivo(r))) h += pasoFeedback(r, "cfb");
   h += pasoUbicacionCorreccion(r);
-  h += `<div class="paso"><span class="eyebrow">Comentario</span><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea></div>`;
+  h += `<div class="paso"><div class="coment-cab"><span class="eyebrow">Comentario</span>${botonDictarCampo("corrComent")}</div><textarea class="campo" id="corrComent" rows="3" placeholder="Qué dijo el comercio">${esc(r.comentario)}</textarea>${avisoDictado("corrComent")}</div>`;
   if (r.error) h += `<div class="falta">${esc(r.error)}</div>`;
   h += `<div class="nav2"><button class="btn btn-lin" data-corr-cancelar>Cancelar</button>
     <button class="btn btn-pri" data-corr-enviar ${r.enviando?"disabled":""}>${r.enviando?"Guardando…":"Guardar la corrección"}</button></div></div>`;
@@ -1255,7 +1339,7 @@ function tarjetaParametros(a){
 
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id, dictar){
-  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, ubicado:null, feedback:[], feedbackNota:"", fbAbierto:false, fbAcc:[], fbExt:extVacio(), voz:"", dictando:false, ia:null, iaCargando:false, iaError:"", motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
+  S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), modo:null, modo2:null, conQuien:null, con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, ubicado:null, feedback:[], feedbackNota:"", fbAbierto:false, fbAcc:[], fbExt:extVacio(), voz:"", dictando:false, ia:null, iaCargando:false, iaError:"", motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
   if (dictar){
     if (ReconVoz) alternarDictado();   // mismo toque: el navegador permite abrir el micrófono
@@ -1284,7 +1368,8 @@ function hojaRegistro(){
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-op="${campo}" data-val="${val}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   const q = r.busca.trim().toLowerCase();
   const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.ruc || "").includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
-  const yaCuenta = c && c.visitas_validas > 0, sinContar = c && c.visitas > 0 && !yaCuenta;
+  const hoyV = c ? visitaDeHoy(c) : null;
+  const yaCuenta = c && c.visitas_validas > 0 && !hoyV, sinContar = c && c.visitas > 0 && !yaCuenta && !hoyV;
   const ultTxt = c && c.ultima_visita ? `${diaLima(c.ultima_visita) === diaLima(Date.now()) ? "hoy" : "el " + fechaCorta(c.ultima_visita)} a las ${horaCorta(c.ultima_visita)}${c.ultima_que ? " (" + esc(c.ultima_que.toLowerCase()) + ")" : ""}` : "";
   let pasos = `<div class="paso" data-paso="comercio"><span class="eyebrow">Comercio</span>${c
     ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}${c.correo ? "" : " · libre: pasa a tu base al guardar"}</small></div><button data-cambiar-comercio>Cambiar</button></div>
@@ -1293,34 +1378,28 @@ function hojaRegistro(){
         : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus 160.</div>` : ""}`
     : `<input class="campo" id="busca" type="search" placeholder="Customer ID, RUC o razón social" value="${esc(r.busca)}" autocomplete="off">
        <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
+  if (hoyV) return `<div class="velo" data-cerrar-velo><div class="hoja" role="dialog" aria-label="Registrar visita">
+    <header><div class="asa"></div><div class="fila-ent"><h2>Registrar visita</h2><button class="btn btn-lin" style="padding:6px 12px;font-size:13px" data-cancelar>Cancelar</button></div></header>
+    <div class="scroll">${pasos}<div class="paso"><div class="ya-cuenta"><b>Ya registraste este comercio hoy${hoyV.hora ? " a las " + hoyV.hora : ""}</b><br>
+      Un comercio lleva una sola visita por día. Si volviste o quieres cambiar algo, corrige esa visita: puedes cambiar lo que pasó, el comentario y la ubicación.
+      ${hoyV.enCola ? "<span>Esa visita está guardada en el celular esperando señal; se envía sola.</span>" : `<button class="btn btn-pri" data-corregir-hoy="${esc(c.customer_id)}">Corregir la visita de hoy</button>`}
+      <button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div></div></div>
+  </div></div>`;
   const gpsTxt = r.gps === "buscando" ? "Tomando ubicación…" : r.gps === "ok" ? `Ubicación tomada ±${r.precision} m` : "Sin ubicación";
   pasos += `<div class="paso" data-paso="gps"><span class="eyebrow">Se toma solo</span><div class="sello">
       <span class="${r.gps==="ok"?"":"esperando"}">${ICON.pin} ${gpsTxt}</span><span>${ICON.reloj} ${fechaCorta(r.hora)} · ${horaCorta(r.hora)}</span></div>
       ${distanciaRegistro(r, c)}
       ${r.gps === "error" ? `<div class="explica" style="margin-top:8px;color:var(--rojo)">No se pudo tomar la ubicación${r.gpsError ? ": " + esc(r.gpsError) : "."} Sin ubicación la visita no cuenta. <button class="btn btn-sec" style="padding:6px 10px;font-size:12.5px;margin-top:6px" data-gps>Intentar otra vez</button></div>` : ""}</div>`;
   if (r.id && VOZ_IA) pasos += pasoVoz(r);
-  pasos += `<div class="paso" data-paso="con"><span class="eyebrow">¿Con quién hablaste?</span><div class="opciones c3">${op("con","Dueño","Dueño")}${op("con","Tercero","Tercero","encargado, cajero")}${op("con","Nadie","Nadie")}</div></div>`;
-  if (r.con === "Nadie") pasos += `<div class="paso" data-paso="motivo"><span class="eyebrow">¿Por qué no hubo contacto?</span><div class="opciones c2">${["Cerrado","No estaba","No atendió","Dirección errada"].map(m => op("motivo",m,m,"","rojo")).join("")}</div>
-      <div class="explica" style="margin-top:8px">Queda como visita sin éxito. Igual cuenta como visita, porque estuviste en el comercio.</div></div>`;
-  if (r.con && r.con !== "Nadie") pasos += `<div class="paso" data-paso="que"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c3">${op("que","Reunión concretada","Reunión concretada","","verde")}${op("que","Reagendada","Reagendada")}${op("que","Sin éxito","Sin éxito","","rojo")}</div></div>`;
+  pasos += pasoModo(r, "op", false, c);
   if (r.que === "Reunión concretada") pasos += `<div class="paso" data-paso="decision"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
       ${r.decision==="Realizará consumos" ? `<div class="explica" style="margin-top:8px">Todavía no es una reactivación: cuenta cuando la data de BBVA muestre transacciones en dos días distintos después de hoy.</div>` : ""}</div>`;
   if (r.decision === "Desiste del producto") pasos += `<div class="paso" data-paso="equipo"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
   if (r.que === "Reagendada") pasos += `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
   if (r.decision === "Realizará consumos") pasos += pasoMotivosSi(r);
-  if (r.con && r.con !== "Nadie") pasos += pasoFeedback(r);
-  const dirAuto = r.con === "Nadie" && r.motivo === "Dirección errada";
-  if (c && !dirAuto) pasos += `<div class="paso" data-paso="dir"><span class="eyebrow">¿La dirección es correcta?</span>
-      <div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)}</small>` : ""}</div>
-      <div class="opciones c2">${op("dirOk","si","Sí, es correcta","","verde")}${op("dirOk","no","No, está en otro lugar","","rojo")}</div>
-      </div>`;
-  // Si la dirección de la base no es correcta (o el motivo fue «Dirección errada»), el ejecutivo marca si ubicó
-  // el comercio. Solo marca: no escribe la nueva dirección (pedido de Jose, 25/09).
-  if (c && preguntaUbicado(r)) pasos += `<div class="paso" data-paso="ubicado"><span class="eyebrow">¿Ubicaste el comercio?</span>
-      <div class="opciones c2">${op("ubicado","si","Sí, está en otra dirección","","verde")}${op("ubicado","no","No lo encontré","","rojo")}</div>
-      <div class="explica" style="margin-top:8px">${r.ubicado === "si" ? "Tu ubicación de ahora queda como la del comercio (si la señal es de ±60 m o menos). Registra la visita estando en el comercio. No hace falta escribir la dirección." : r.ubicado === "no" ? "Tu ubicación no se usa como la del comercio. La visita cuenta igual." : "Solo márcalo; no hace falta escribir la nueva dirección."}</div></div>`;
+  if (["hable","volver","sin"].includes(modoEfectivo(r))) pasos += pasoFeedback(r);
   const phComent = r.ubicado === "si" ? "Ej.: el local se mudó a otra cuadra; el dueño usa el POS de otro banco." : r.ubicado === "no" ? "Ej.: en la dirección hay otro negocio y los vecinos no lo conocen." : "Ej.: el dueño usa el POS de otro banco; lo va a activar esta semana. Puedes dictarlo con el micrófono del teclado.";
-  pasos += `<div class="paso" data-paso="coment"><span class="eyebrow">Comentario · qué dijo el comercio</span><textarea class="campo" id="coment" placeholder="${esc(phComent)}">${esc(r.comentario)}</textarea></div>`;
+  pasos += `<div class="paso" data-paso="coment"><div class="coment-cab"><span class="eyebrow">Comentario · qué dijo el comercio</span>${botonDictarCampo("coment")}</div><textarea class="campo" id="coment" placeholder="${esc(phComent)}">${esc(r.comentario)}</textarea>${avisoDictado("coment")}</div>`;
   const faltan = faltantes();
   if (r.intento){ const fp = faltantesPasos(); const porPaso = {}; fp.forEach(([k, t]) => { (porPaso[k] ||= []).push(t); });
     pasos = pasos.replace(/<div class="paso" data-paso="(\w+)">/g, (m, k) => porPaso[k] ? `<div class="paso falta-paso" data-paso="${k}"><span class="falta-etq">Falta: ${porPaso[k].join(", ")}</span>` : m); }
@@ -1329,6 +1408,24 @@ function hojaRegistro(){
     <div class="scroll">${pasos}</div>
     <footer>${r.intento && faltan.length ? `<div class="falta-caja" role="alert"><b>No se guardó todavía.</b> ${faltan.length === 1 ? "Te falta 1 dato" : "Te faltan " + faltan.length + " datos"}: ${faltan.join(", ")}. Están marcados en rojo arriba.</div>` : ""}${r.error ? `<div class="falta-caja" role="alert"><b>No se guardó:</b> ${esc(r.error)}<br><span>Revisa y toca «Guardar visita» otra vez. Si sigue fallando, avísale al analista.</span></div>` : ""}${yaCuenta && !(r.intento && faltan.length) ? `<div class="nota-seg">Se guarda como seguimiento: no suma a las 160.</div>` : ""}<button class="btn btn-pri btn-full" data-guardar-visita ${r.enviando?"disabled":""}>${r.enviando ? "Guardando…" : "Guardar visita"}</button></footer>
   </div></div>`;
+}
+// ¿Ya hay una visita de este comercio hoy (enviada o esperando señal)?
+function visitaDeHoy(c){
+  const hoy = diaLima(Date.now());
+  const q = (S.cola || []).find(v => v.p_customer_id === c.customer_id && diaLima(v.p_visitado_en) === hoy);
+  if (q) return { enCola:true, hora:horaCorta(q.p_visitado_en) };
+  if (c.ultima_visita && diaLima(c.ultima_visita) === hoy) return { enCola:false, hora:horaCorta(c.ultima_visita) };
+  return null;
+}
+async function corregirVisitaDeHoy(cid){
+  const hoy = diaLima(Date.now());
+  S.reg = null; S.ficha = cid; S.corr = null; pintar();
+  await historial(cid);
+  const v = (S.hist[cid] || []).find(x => diaLima(x.visitado_en) === hoy && x.estado_anul !== "anulada" && x.es_mia !== false);
+  if (!v) return avisar("No encontré la visita de hoy en tu historial. Revisa el historial del comercio.", 6000);
+  if (v.puede_editar === false) return avisar("Esa visita ya no se puede corregir. Pídele al analista que la revise.", 6000);
+  abrirCorreccion(v.id);
+  setTimeout(() => { const el = document.querySelector(".acc-panel"); if (el) el.scrollIntoView({ block:"start" }); }, 50);
 }
 function metrosEntre(a1, o1, a2, o2){ if ([a1,o1,a2,o2].some(x => x == null)) return null; const dy = (a1-a2)*111320, dx = (o1-o2)*111320*Math.cos((a1+a2)/2*Math.PI/180); return Math.round(Math.sqrt(dx*dx+dy*dy)); }
 function distanciaRegistro(r, c){
@@ -1339,7 +1436,7 @@ function distanciaRegistro(r, c){
   const tono = d <= 150 ? "cerca" : d <= 500 ? "medio" : "lejos";
   const txt = d < 1000 ? `${d} m` : `${(d/1000).toFixed(1).replace(".", ",")} km`;
   const aprox = c.geo_calidad === "distrito" ? " El punto que tenemos es aproximado (solo el distrito)." : c.geo_calidad === "calle" ? " El punto que tenemos es a nivel de calle." : "";
-  const ayuda = tono === "cerca" ? "Estás en el comercio." : tono === "medio" ? "Estás cerca, pero no en la puerta." : "Estás lejos del punto que tenemos. Si el comercio está aquí, marca que la dirección no es correcta.";
+  const ayuda = tono === "cerca" ? "Estás en el comercio." : tono === "medio" ? "Estás cerca, pero no en la puerta." : "Estás lejos del punto que tenemos. Si el comercio está aquí, elige «El comercio no está en esta dirección» y luego «Sí, lo encontré».";
   return `<div class="dist-reg ${tono}"><b>A ${txt} del comercio</b><span>${ayuda}${aprox}</span></div>`;
 }
 // cada faltante sabe a qué paso del formulario pertenece, para marcarlo y llevar al ejecutivo hasta ahí
@@ -1347,18 +1444,20 @@ function faltantesPasos(){
   const r = S.reg, f = [];
   if (!r.id) f.push(["comercio","elegir el comercio"]);
   if (r.gps === "buscando") f.push(["gps","esperar la ubicación"]);
-  if (!r.con) f.push(["con","con quién hablaste"]);
-  if (r.con === "Nadie" && !r.motivo) f.push(["motivo","el motivo"]);
-  if (r.con && r.con !== "Nadie" && !r.que) f.push(["que","qué pasó"]);
+  if (r.id && visitaDeHoy(S.base.find(x => x.customer_id === r.id) || {})) f.push(["comercio","corregir la visita de hoy en vez de registrar otra"]);
+  if (!r.modo) f.push(["modo","cómo fue la visita"]);
+  if (r.modo === "nadie" && !r.motivo) f.push(["modo","qué encontraste (cerrado o nadie atendió)"]);
+  if (r.modo === "noesta" && !r.ubicado) f.push(["modo","si encontraste el comercio en otro lugar"]);
+  if (r.modo === "noesta" && r.ubicado === "si" && !r.modo2) f.push(["modo","cómo fue la visita en el nuevo lugar"]);
+  if (modoEfectivo(r) === "hable" && !r.conQuien) f.push(["modo","con quién hablaste"]);
   if (r.que === "Reunión concretada" && !r.decision) f.push(["decision","qué decidió"]);
   if (r.decision === "Desiste del producto" && !r.equipo) f.push(["equipo","si se recuperó el equipo"]);
   if (r.que === "Reagendada" && !r.fechaNueva) f.push(["fecha","la fecha en que vuelves"]);
   if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push(["fecha","una fecha de regreso desde hoy"]);
   if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push(["motivosSi","qué lo convenció"]);
-  if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push(["feedback","el feedback de la visita"]);
-  if (r.con && r.con !== "Nadie") faltaArbol(r).forEach(t => f.push(["feedback", t]));
-  if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push(["dir","si la dirección es correcta"]);
-  if (preguntaUbicado(r) && !r.ubicado) f.push(["ubicado","si ubicaste el comercio"]);
+  const conContacto = ["hable","volver","sin"].includes(modoEfectivo(r));
+  if (conContacto && !(r.feedback || []).length) f.push(["feedback","el feedback de la visita"]);
+  if (conContacto) faltaArbol(r).forEach(t => f.push(["feedback", t]));
   if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
   return f;
 }
@@ -1368,15 +1467,18 @@ function pasoFeedback(r, px = "fb"){
   const sel = r.feedback || [], abierto = !!r.fbAbierto;
   const chev = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const tick = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const m = modoEfectivo(r), fijo = t => (m === "volver" || m === "sin") && t === FB_DEC;
+  const visible = t => !(m === "hable" && t === FB_DEC) && !((m === "volver" || m === "sin") && t === FB_NINGUNO);
   const op = t => { const on = sel.includes(t);
-    return `<button type="button" class="fb-op ${on ? "on" : ""}" role="option" aria-selected="${on}" data-${px}="${esc(t)}"><span class="fb-caja">${on ? tick : ""}</span><span>${esc(t)}</span></button>`; };
+    return `<button type="button" class="fb-op ${on ? "on" : ""} ${fijo(t) ? "fijo" : ""}" role="option" aria-selected="${on}" ${fijo(t) ? 'aria-disabled="true"' : ""} data-${px}="${esc(t)}"><span class="fb-caja">${on ? tick : ""}</span><span>${esc(t)}${fijo(t) ? " <small>(por lo que marcaste arriba)</small>" : ""}</span></button>`; };
   const resumen = sel.length ? sel.map(esc).join(" · ") : "Elige lo que dijo el comercio";
   return `<div class="paso" data-paso="feedback"><span class="eyebrow">Feedback de la visita <em class="fb-oblig">(obligatorio)</em></span>
+    ${m === "volver" || m === "sin" ? `<div class="explica" style="margin-bottom:8px">Ya quedó marcado «No se encontraba la persona que tomaba decisiones». Agrega lo demás que dijo el comercio, si dijo algo.</div>` : ""}
     <button type="button" class="fb-sel ${abierto ? "abierto" : ""} ${sel.length ? "elegido" : ""}" data-${px}-toggle aria-expanded="${abierto}" aria-haspopup="listbox">
       <span>${resumen}</span>${chev}</button>
     ${abierto ? `<div class="fb-lista" role="listbox" aria-multiselectable="true" aria-label="Feedback de la visita">
-      <div class="fb-grupo fb-primero">${op(FB_NINGUNO)}</div>
-      ${FEEDBACK.map(([g, items]) => `<div class="fb-grupo"><small>${esc(g)}</small>${items.map(op).join("")}</div>`).join("")}
+      ${visible(FB_NINGUNO) ? `<div class="fb-grupo fb-primero">${op(FB_NINGUNO)}</div>` : ""}
+      ${FEEDBACK.map(([g, items]) => `<div class="fb-grupo"><small>${esc(g)}</small>${items.filter(visible).map(op).join("")}</div>`).join("")}
       <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}
     ${abierto ? "" : bloqueArbol(r, px)}
     <label class="fb-label" for="${px}Nota">Feedback adicional <span>${(r.fbAcc || []).includes("Otra acción") ? "(cuenta la otra acción)" : "(opcional)"}</span></label>
@@ -1463,6 +1565,56 @@ function aplicarIA(r, p, modelo){
   r.ubicado = preguntaUbicado(r) && p.comercio_ubicado != null ? (p.comercio_ubicado ? "si" : "no") : (preguntaUbicado(r) ? r.ubicado : null);
   if (!(r.comentario || "").trim()) r.comentario = (r.voz || "").trim().slice(0, 2000);
   r.ia = { modelo, en:new Date().toISOString(), propuesta:p, marcados:n };
+  Object.assign(r, modoDesde({ con:r.con, que:r.que, motivo:r.motivo }));
+  if (p.comercio_ubicado === true && p.con && p.con !== "Nadie"){ r.modo2 = r.modo; r.modo = "noesta"; r.ubicado = "si"; }
+  aplicarModo(r);
+}
+/* ---------- Dictar el comentario (26/09, sin costo) ----------
+   Usa el reconocimiento de voz del navegador (Chrome/Android, Safari/iPhone): no pasa por la IA ni por
+   Supabase, así que no cuesta nada. El texto se suma a lo que ya estaba escrito y se puede corregir a mano.
+   Si el navegador no lo tiene, no aparece el botón y queda el micrófono del teclado. */
+function botonDictarCampo(id){
+  if (!ReconVoz) return "";
+  const on = !!(S._dict && S._dict.id === id);
+  return `<button type="button" class="btn ${on ? "btn-pri grabando" : "btn-sec"} btn-dictar" data-dictar-campo="${id}" aria-pressed="${on}">${ICON.mic} ${on ? "Terminar" : "Dictar"}</button>`;
+}
+function avisoDictado(id){
+  const d = S._dict;
+  if (d && d.id === id) return `<div class="escuchando" role="status"><i></i>Escuchando… habla y toca «Terminar» cuando acabes. Luego puedes corregir el texto.</div>`;
+  if (S._dictError && S._dictError.id === id) return `<div class="falta" style="margin-top:6px">${esc(S._dictError.msg)}</div>`;
+  return "";
+}
+function dictarCampo(id){
+  if (!ReconVoz) return;
+  if (S._dict){ const d = S._dict; d.parar = true; try { d.rec.stop(); } catch(e){} if (d.id === id) return; }
+  if (!$("#" + id)) return;
+  const d = { id, parar:false, cortes:0 }; S._dict = d; S._dictError = null;
+  try { escucharCampo(d); } catch(e){ S._dict = null; S._dictError = { id, msg:"No se pudo abrir el micrófono. Usa el micrófono del teclado." }; }
+  S._mantenerScroll = true; pintar();
+}
+function escucharCampo(d){
+  const rec = new ReconVoz(); rec.lang = "es-PE"; rec.continuous = true; rec.interimResults = true;
+  const ta0 = $("#" + d.id), base = ta0 ? ta0.value.replace(/\s+$/, "") : ""; let final = "", fallo = null;
+  rec.onresult = e => { let inter = ""; d.cortes = 0;
+    for (let i = e.resultIndex; i < e.results.length; i++){ const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t + " "; else inter += t; }
+    const ta = $("#" + d.id); if (!ta){ d.parar = true; try { rec.stop(); } catch(x){} return; }
+    ta.value = base + (base ? (/[.!?…,;:]$/.test(base) ? " " : ". ") : "") + (final + inter).trim(); ta.dispatchEvent(new Event("input", { bubbles:true })); };
+  rec.onerror = e => { fallo = e.error;
+    if (e.error === "not-allowed" || e.error === "service-not-allowed"){ d.parar = true; d.msg = "El celular no dio permiso al micrófono. Actívalo para esta página o usa el micrófono del teclado."; }
+    else if (e.error === "audio-capture"){ d.parar = true; d.msg = "No se encontró el micrófono. Usa el micrófono del teclado."; }
+    else if (e.error === "network"){ d.parar = true; d.msg = "El dictado necesita internet. Escribe el comentario o usa el micrófono del teclado."; } };
+  rec.onend = () => {
+    if (S._dict !== d) return;
+    // pausa o silencio: seguir escuchando (hasta 3 cortes seguidos sin voz)
+    if (!d.parar && d.cortes < 3 && $("#" + d.id)){ d.cortes += fallo === "no-speech" ? 1 : 0; try { escucharCampo(d); return; } catch(e){} }
+    S._dict = null;
+    const ta = $("#" + d.id);
+    if (d.msg) S._dictError = { id:d.id, msg:d.msg };
+    else if (ta && !ta.value.trim() && fallo === "no-speech") S._dictError = { id:d.id, msg:"No se escuchó nada. Toca «Dictar» y habla más cerca del celular." };
+    if (ta){ ta.value = ta.value.trim(); ta.dispatchEvent(new Event("input", { bubbles:true })); }
+    S._mantenerScroll = true; pintar();
+  };
+  rec.start(); d.rec = rec;
 }
 // Debajo del feedback: competidor, por qué no lo necesita y «Qué ofreciste» por cada rama marcada.
 function bloqueArbol(r, px){
@@ -1476,12 +1628,20 @@ function bloqueArbol(r, px){
       <input class="campo" id="${px}Tasa" inputmode="decimal" maxlength="5" placeholder="Ej.: 2,5" value="${esc(e.tasa_competidor || "")}" style="max-width:140px">
       <span class="fb-label">¿Por qué lo prefiere? <span>(opcional)</span></span>
       <div class="ac-chips">${PREFIERE_POR.map(c => chip("pref", c, e.prefiere_por.includes(c))).join("")}</div></div>`;
+  if (fb.includes(FB_DEMORA)) h += `<div class="fb-sub"><b>Demora de los abonos</b> <span class="fb-opc">(opcional)</span>
+      <label class="fb-label" for="${px}Dias">¿Cuántos días demora? <span>(días desde la venta)</span></label>
+      <input class="campo" id="${px}Dias" inputmode="numeric" maxlength="2" placeholder="Ej.: 3" value="${esc(e.dias_demora_abono || "")}" style="max-width:140px">
+      <span class="fb-label">¿En qué banco le abonan?</span>
+      <div class="ac-chips">${BANCOS_ABONO.map(c => chip("banco", c, e.banco_abono === c)).join("")}</div></div>`;
   if (fb.includes(FB_NO_NECESITA)) h += `<div class="fb-sub"><b>¿Por qué no lo necesita?</b> <span class="fb-opc">(opcional)</span>
       <div class="ac-chips">${NO_NECESITA_POR.map(c => chip("nn", c, e.no_necesita_por === c)).join("")}</div></div>`;
   ramasDe(fb).forEach(g => {
-    const lista = ACCIONES.filter(a => a[1].includes(g)).map(a => a[0]);
+    const mm = modoEfectivo(r);
+    const lista = ACCIONES.filter(a => a[1].includes(g)).map(a => a[0]).filter(a => a !== ACC_REAG || mm === "volver");
+    if (g === "Decisión y necesidad" && mm === "sin" && fb.filter(t => ramaDe(t) === g).every(t => t === FB_DEC)) return;   // sin compromiso: no se pregunta qué ofreciste
     const n = lista.filter(a => acc.includes(a)).length;
     h += `<div class="fb-sub ofrec ${n ? "hecho" : ""}"><b>Qué ofreciste · ${esc(RAMAS_CORTAS[g] || g)}</b> <em class="fb-oblig">(obligatorio, puedes marcar varias)</em>
+      ${lista.includes(ACC_REAG) ? `<div class="explica" style="margin:6px 0 2px">«Reagendé con quien decide» queda marcado porque quedaste en volver.</div>` : ""}
       ${g === "Equipo y contómetros" && fb.includes(FB_CONTOMETROS) ? `<div class="explica" style="margin:6px 0 2px">La reposición de contómetros demora unos 3 días útiles.</div>` : ""}
       <div class="ac-chips">${lista.map(a => chip("acc", a, acc.includes(a))).join("")}</div></div>`;
   });
@@ -1493,6 +1653,7 @@ function podarArbol(r){
   r.fbAcc = (r.fbAcc || []).filter(a => (ACCIONES.find(x => x[0] === a) || [,[]])[1].some(g => ramas.includes(g)));
   if (!(r.feedback || []).includes(FB_OTRA_MARCA)){ e.competidores = []; e.competidor_otro = ""; e.tasa_competidor = ""; e.prefiere_por = []; }
   if (!(r.feedback || []).includes(FB_NO_NECESITA)) e.no_necesita_por = null;
+  if (!(r.feedback || []).includes(FB_DEMORA)){ e.dias_demora_abono = ""; e.banco_abono = null; }
   r.fbExt = e;
 }
 // Faltantes del árbol (para el registro y la corrección)
@@ -1502,7 +1663,12 @@ function faltaArbol(r){
   if (e.competidores.includes("Otro") && !(e.competidor_otro || "").trim()) f.push("el nombre del otro POS");
   const t = (e.tasa_competidor || "").trim().replace(",", ".");
   if (t && !(Number(t) > 0 && Number(t) <= 15)) f.push("una tasa entre 0 y 15 %");
-  ramasDe(fb).forEach(g => { if (!ACCIONES.some(a => a[1].includes(g) && acc.includes(a[0]))) f.push("qué ofreciste (" + (RAMAS_CORTAS[g] || g).toLowerCase() + ")"); });
+  const dd = String(e.dias_demora_abono || "").trim();
+  if (fb.includes(FB_DEMORA) && dd && !(/^\d+$/.test(dd) && Number(dd) >= 1 && Number(dd) <= 60)) f.push("los días de demora (un número entre 1 y 60)");
+  const mm = modoEfectivo(r);
+  ramasDe(fb).forEach(g => {
+    if (g === "Decisión y necesidad" && mm === "sin" && fb.filter(t => ramaDe(t) === g).every(t => t === FB_DEC)) return;
+    if (!ACCIONES.some(a => a[1].includes(g) && acc.includes(a[0]))) f.push("qué ofreciste (" + (RAMAS_CORTAS[g] || g).toLowerCase() + ")"); });
   if (acc.includes("Otra acción") && !(r.feedbackNota || "").trim()) f.push("cuál fue la otra acción, en el feedback adicional");
   return f;
 }
@@ -1515,6 +1681,8 @@ function payloadArbol(r){
   if ((e.tasa_competidor || "").trim()) x.tasa_competidor = e.tasa_competidor.trim();
   if (e.prefiere_por.length) x.prefiere_por = e.prefiere_por;
   if (e.no_necesita_por) x.no_necesita_por = e.no_necesita_por;
+  if (String(e.dias_demora_abono || "").trim()) x.dias_demora_abono = String(e.dias_demora_abono).trim();
+  if (e.banco_abono) x.banco_abono = e.banco_abono;
   return { p_fb_acciones:(r.fbAcc || []).length ? r.fbAcc : null, p_fb_extra:Object.keys(x).length ? x : null };
 }
 function textoExtra(x){
@@ -1523,6 +1691,7 @@ function textoExtra(x){
   const p = [];
   if (comp.length) p.push("POS de " + comp.join(", ") + (x.tasa_competidor != null ? " a " + String(x.tasa_competidor).replace(".", ",") + " %" : "") + ((x.prefiere_por || []).length ? " · lo prefiere por " + x.prefiere_por.join(", ").toLowerCase() : ""));
   if (x.no_necesita_por) p.push("No lo necesita: " + x.no_necesita_por.toLowerCase());
+  if (x.dias_demora_abono != null || x.banco_abono) p.push("Demora del abono" + (x.dias_demora_abono != null ? ": " + x.dias_demora_abono + " día" + (Number(x.dias_demora_abono) === 1 ? "" : "s") : "") + (x.banco_abono ? " · le abonan en " + (x.banco_abono === "BBVA" ? "BBVA" : "otro banco") : ""));
   return p.length ? "<br>" + p.map(esc).join("<br>") : "";
 }
 function alternarLista(l, v){ return l.includes(v) ? l.filter(x => x !== v) : l.concat(v); }
@@ -1547,6 +1716,9 @@ function enlazarMotivosSi(p, r, px){
     r.motivosSi = MOTIVOS_SI.filter(x => x === t ? !l.includes(t) : l.includes(x)); S._mantenerScroll = true; pintar(); });
 }
 function alternarFeedback(r, t){
+  const m = modoEfectivo(r);
+  if ((m === "volver" || m === "sin") && (t === FB_DEC || t === FB_NINGUNO)) return;   // lo fija «¿Cómo fue la visita?»
+  if (m === "hable" && t === FB_DEC) return;
   let l = r.feedback || [];
   if (t === FB_NINGUNO) l = l.includes(t) ? [] : [t];
   else { l = l.filter(x => x !== FB_NINGUNO); l = l.includes(t) ? l.filter(x => x !== t) : l.concat(t); }
@@ -1561,35 +1733,19 @@ function enlazarFeedback(p, r, px){
   const n = $("#" + px + "Nota"); if (n) n.oninput = () => { r.feedbackNota = n.value; };
   if (!r.fbExt) r.fbExt = extVacio(); if (!r.fbAcc) r.fbAcc = [];
   const e = r.fbExt, re = () => { S._mantenerScroll = true; pintar(); };
-  p.querySelectorAll(`[data-${px}-acc]`).forEach(b => b.onclick = () => { const v = b.dataset[px + "Acc"]; r.fbAcc = ACCIONES.map(a => a[0]).filter(a => a === v ? !r.fbAcc.includes(v) : r.fbAcc.includes(a)); re(); });
+  p.querySelectorAll(`[data-${px}-acc]`).forEach(b => b.onclick = () => { const v = b.dataset[px + "Acc"]; if (v === ACC_REAG) return; r.fbAcc = ACCIONES.map(a => a[0]).filter(a => a === v ? !r.fbAcc.includes(v) : r.fbAcc.includes(a)); re(); });
   p.querySelectorAll(`[data-${px}-comp]`).forEach(b => b.onclick = () => { e.competidores = COMPETIDORES.filter(c => alternarLista(e.competidores, b.dataset[px + "Comp"]).includes(c)); if (!e.competidores.includes("Otro")) e.competidor_otro = ""; re(); });
   p.querySelectorAll(`[data-${px}-pref]`).forEach(b => b.onclick = () => { e.prefiere_por = PREFIERE_POR.filter(c => alternarLista(e.prefiere_por, b.dataset[px + "Pref"]).includes(c)); re(); });
   p.querySelectorAll(`[data-${px}-nn]`).forEach(b => b.onclick = () => { e.no_necesita_por = e.no_necesita_por === b.dataset[px + "Nn"] ? null : b.dataset[px + "Nn"]; re(); });
   const o = $("#" + px + "Otro"); if (o) o.oninput = () => { e.competidor_otro = o.value; };
   const t = $("#" + px + "Tasa"); if (t) t.oninput = () => { e.tasa_competidor = t.value; };
+  p.querySelectorAll(`[data-${px}-banco]`).forEach(b => b.onclick = () => { e.banco_abono = e.banco_abono === b.dataset[px + "Banco"] ? null : b.dataset[px + "Banco"]; re(); });
+  const dd = $("#" + px + "Dias"); if (dd) dd.oninput = () => { dd.value = dd.value.replace(/\D/g, "").slice(0, 2); e.dias_demora_abono = dd.value; };
 }
-function faltantes(){
-  const r = S.reg, f = [];
-  if (!r.id) f.push("elegir el comercio");
-  if (r.gps === "buscando") f.push("esperar la ubicación");
-  if (!r.con) f.push("con quién hablaste");
-  if (r.con === "Nadie" && !r.motivo) f.push("el motivo");
-  if (r.con && r.con !== "Nadie" && !r.que) f.push("qué pasó");
-  if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
-  if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
-  if (r.que === "Reagendada" && !r.fechaNueva) f.push("la fecha en que vuelves");
-  if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push("una fecha de regreso desde hoy");
-  if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push("qué lo convenció");
-  if (r.con && r.con !== "Nadie" && !(r.feedback || []).length) f.push("el feedback de la visita");
-  if (r.con && r.con !== "Nadie") f.push(...faltaArbol(r));
-  if (r.id && !r.dirOk && !(r.con === "Nadie" && r.motivo === "Dirección errada")) f.push("si la dirección es correcta");
-  if (preguntaUbicado(r) && !r.ubicado) f.push("si ubicaste el comercio");
-  if (r.comentario.trim().length < 5) f.push("el comentario");
-  return f;
-}
-const formularioConDatos = r => !!(r && (r.con || r.dirOk || r.ubicado || (r.comentario || "").trim() || (r.voz || "").trim() || r.fechaNueva));
+function faltantes(){ return faltantesPasos().map(x => x[1]); }
+const formularioConDatos = r => !!(r && (r.modo || r.con || r.ubicado || (r.comentario || "").trim() || (r.voz || "").trim() || r.fechaNueva));
 // La pregunta «¿Ubicaste el comercio?» aparece cuando la dirección de la base no es correcta.
-const preguntaUbicado = r => !!(r && r.id && ((r.con === "Nadie" && r.motivo === "Dirección errada") || r.dirOk === "no"));
+const preguntaUbicado = r => !!(r && r.id && r.modo === "noesta");
 function cerrarRegistro(){
   const r = S.reg; if (!r) return;
   if (r.enviando) return;
@@ -1639,6 +1795,7 @@ async function guardarVisita(){
 /* ---------------- eventos ---------------- */
 function enlazar(){
   const p = $("#pantalla");
+  p.querySelectorAll("[data-dictar-campo]").forEach(b => b.onclick = () => dictarCampo(b.dataset.dictarCampo));
   const f = $("#fIngreso"); if (f) f.onsubmit = async ev => { ev.preventDefault(); S.error = "";
     const { data, error } = await sb.auth.signInWithPassword({ email:$("#lCorreo").value.trim().toLowerCase(), password:$("#lClave").value });
     if (error){ S.error = /Invalid/i.test(error.message) ? "Correo o clave incorrectos." : error.message; return pintar(); }
@@ -1672,12 +1829,13 @@ function enlazar(){
   p.querySelectorAll("[data-limpiar]").forEach(b => b.onclick = () => {
     S.filtroEstado = "todos"; S.filtroDistrito = ""; S.filtroRuta = ""; S.filtroEjecutivo = ""; S.filtroDueno = "todos"; pintar(); });
   p.querySelectorAll("[data-corr]").forEach(b => b.onclick = () => abrirCorreccion(b.dataset.corr));
+  p.querySelectorAll("[data-corregir-hoy]").forEach(b => b.onclick = () => corregirVisitaDeHoy(b.dataset.corregirHoy));
   p.querySelectorAll("[data-corr-cancelar]").forEach(b => b.onclick = () => { S.corr = null; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-corr-enviar]").forEach(b => b.onclick = guardarCorreccion);
   if (S.corr){
     p.querySelectorAll("[data-cop]").forEach(b => b.onclick = () => { const r = S.corr, k = b.dataset.cop; r[k] = b.dataset.val;
-      if (k === "con"){ r.motivo = null; r.que = null; r.decision = null; r.equipo = null; if (b.dataset.val === "Nadie"){ r.feedback = []; r.feedbackNota = ""; r.fbAbierto = false; r.fbAcc = []; r.fbExt = extVacio(); } }
-      if (k === "que"){ r.decision = null; r.equipo = null; }
+      if (k === "modo"){ r.conQuien = null; if (r.modo !== "nadie") r.motivo = null; if (r.modo === "noesta") r.ubicado = "no"; }
+      if (["modo","conQuien","motivo"].includes(k)) aplicarModo(r, true);
       if (k === "decision") r.equipo = null;
       S._mantenerScroll = true; pintar(); });
     enlazarFeedback(p, S.corr, "cfb");
@@ -1703,13 +1861,14 @@ function enlazar(){
   const fe = $("#fEjec"); if (fe) fe.onchange = () => { S.filtroEjecutivo = fe.value; pintar(); };
   if (S.reg){
     p.querySelectorAll("[data-op]").forEach(b => b.onclick = () => { const r = S.reg, k = b.dataset.op; r[k] = b.dataset.val;
-      if (k === "con"){ r.motivo = null; r.que = null; r.decision = null; r.equipo = null; if (b.dataset.val === "Nadie"){ r.feedback = []; r.feedbackNota = ""; r.fbAbierto = false; r.fbAcc = []; r.fbExt = extVacio(); } }
-      if (k === "que"){ r.decision = null; r.equipo = null; }
+      if (k === "modo"){ r.conQuien = null; r.modo2 = null; r.ubicado = null; if (r.modo !== "nadie") r.motivo = null; }
+      if (k === "ubicado" && r.ubicado === "no"){ r.modo2 = null; r.conQuien = null; }
+      if (k === "modo2") r.conQuien = null;
+      if (["modo","modo2","ubicado","conQuien","motivo"].includes(k)) aplicarModo(r);
       if (k === "decision") r.equipo = null;
-      if (!preguntaUbicado(r)) r.ubicado = null;
       S._mantenerScroll = true; pintar(); });
     const bs = $("#busca"); if (bs){ bs.oninput = () => { S.reg.busca = bs.value; S._mantenerScroll = true; const pos = bs.selectionStart; pintar(); const n = $("#busca"); n.focus(); n.setSelectionRange(pos,pos); }; }
-    p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.dirOk = null; S.reg.ubicado = null; S._mantenerScroll = true; pintar(); });
+    p.querySelectorAll("[data-elegir]").forEach(b => b.onclick = () => { S.reg.id = b.dataset.elegir; S.reg.ubicado = null; S.reg.modo2 = null; aplicarModo(S.reg); S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-cambiar-comercio]").forEach(b => b.onclick = () => { S.reg.id = null; S.reg.busca = ""; S._mantenerScroll = true; pintar(); });
     p.querySelectorAll("[data-gps]").forEach(b => b.onclick = pedirGPS);
     p.querySelectorAll("[data-dictar]").forEach(b => b.onclick = alternarDictado);
