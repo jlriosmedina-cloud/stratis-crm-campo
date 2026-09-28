@@ -21,3 +21,9 @@ v2/qa/                  pruebas con datos inventados
 - [ ] **Scripts de ubicación y rutas** (Photon/OpenStreetMap, k-means con capacidad) para los ~2250 leads de Lima que faltan.
   - Están descritos en los docs del proyecto `crm-v2-direcciones-y-rutas-geo.md` y `crm-v2-verificacion-maps-900-leads.md`.
   - Los archivos con datos de comercios se leen desde el OneDrive y no se suben.
+- [x] **Tanda 1 de la revisión del 27/09** (`supabase/migrations/20260928100000_permisos_y_reglas_de_visita.sql`): permisos sin `anon`, administradores solo leen visitas y bitácora, reglas de registrar y corregir, y reactivación solo con contacto. Pruebas en `v2/qa/servidor.mjs`.
+- [ ] **Antes de cargar leads sin ejecutivo, `v2_mi_base` no debe mostrar comercios libres a los ejecutivos.** Hoy los muestra (`a.correo is null`) y no hay ninguno cargado.
+- [ ] **Quitar `anon` de las funciones del CRM v1**, cuando Jose confirme si alguien la sigue usando.
+- [ ] **Tanda 2 (escritorio):** señales de los hallazgos 3, 5, 6, 7, 9 y 12.
+- [ ] **Tanda 3 (celular):** hallazgos 5, 6, 7, 8 y 9 en un solo cambio, después de revisar los números de la semana. Incluye separar «habló con quien decide» de «solo con un trabajador».
+- [ ] **Hallazgo 13:** metas 160/40 fijas en el celular; leerlas de `v2_avance`.

@@ -4,12 +4,15 @@
   "type": "module",
   "description": "Pruebas mínimas del CRM v2 con datos inventados (nunca reales)",
   "scripts": {
-    "test": "node celular.mjs && node escritorio.mjs"
+    "test": "node celular.mjs && node escritorio.mjs && node servidor.mjs"
   },
   "dependencies": {
-    "playwright": "^1.47.0",
     "exceljs": "4.4.0",
     "jszip": "3.10.1",
-    "leaflet": "1.9.4"
+    "leaflet": "1.9.4",
+    "playwright": "^1.47.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }

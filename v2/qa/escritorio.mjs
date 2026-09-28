@@ -1,6 +1,6 @@
 // Prueba del escritorio: carga sin errores, «Cómo fue la visita», señal «Revisar marcación»
 // y la base para BBVA con sus 4 tablas dinámicas. Datos inventados.
-// Uso: node v2/qa/escritorio.mjs   (antes: python3 v2/build.py y npm install en v2/qa)
+// Uso: node v2/qa/escritorio.mjs   (antes: python v2/build.py y npm install en v2/qa)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima } from './comun.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

@@ -7,9 +7,9 @@ Fuente por app, en v2/<app>/:
   app.js       la aplicación; lleva la línea  const BUILD = "{{BUILD}}";
 
 Uso:
-  python3 v2/build.py            -> v2/dist/celular/index.html y v2/dist/escritorio/index.html
-  python3 v2/build.py --voz      -> además v2/dist/celular/index_voz.html (dictado con IA, NO se publica)
-  python3 v2/build.py --publicar -> copia lo armado a index.html (celular) y escritorio/index.html en la raíz del repo
+  python v2/build.py            -> v2/dist/celular/index.html y v2/dist/escritorio/index.html
+  python v2/build.py --voz      -> además v2/dist/celular/index_voz.html (dictado con IA, NO se publica)
+  python v2/build.py --publicar -> copia lo armado a index.html (celular) y escritorio/index.html en la raíz del repo
 
 Funciona igual en Windows, Mac y Linux (UTF-8 y saltos de línea LF; ver .gitattributes).
 

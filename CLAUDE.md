@@ -19,15 +19,19 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
 ## Cómo se trabaja
 
 - **Editar** `v2/<app>/app.js`, `estilos.css` o `shell.html`. Nunca editar a mano `index.html` ni `escritorio/index.html`.
-- **Armar** con `python3 v2/build.py`, que genera `v2/dist/`. BUILD es un hash del contenido, y el celular avisa «versión nueva» cuando cambia.
+- **Armar** con `python v2/build.py` (en Windows también `py v2/build.py`), que genera `v2/dist/`. BUILD es un hash del contenido, y el celular avisa «versión nueva» cuando cambia.
 - **Probar** antes de publicar con `cd v2/qa && npm test` (la primera vez: `npm install` y `npx playwright install chromium`). Las pruebas usan solo datos inventados. Tienen que pasar en claro y en oscuro y sin errores de consola:
   - Playwright con Chromium, con el cliente de Supabase simulado.
+  - Las reglas del servidor, en un Postgres local (PGlite) con la foto del esquema y las migraciones nuevas (`servidor.mjs`).
   - Casos mínimos:
     - registrar una visita con cada una de las 5 opciones de «¿Cómo fue la visita?»;
     - corregir la visita de hoy;
     - descargar la base para BBVA con sus 4 tablas dinámicas.
-- **Publicar** con `python3 v2/build.py --publicar`, luego commit y push. **Solo con el OK explícito de Jose, cada vez.**
+- **Publicar** con `python v2/build.py --publicar`, luego commit y push. **Solo con el OK explícito de Jose, cada vez.**
 - **Cambios en la base:** una migración en `supabase/migrations/` con nombre descriptivo. Aplicarla solo con el OK de Jose. Si cambia una función que usa el celular, se aplica el mismo día en que se publica la app.
+  - Desde el 28/09 las funciones nuevas que crea `postgres` nacen sin EXECUTE para `anon` ni `PUBLIC` (privilegios por defecto); `authenticated` y `service_role` sí lo reciben. Una función que deba usarse sin sesión necesita su `grant` explícito, y hay que justificarlo.
+  - Las funciones que escriben datos son `security definer` y dejan su línea en `v2_bitacora_visita`. Las apps no escriben directo en las tablas: los Managers y Analistas solo pueden leer `v2_visitas` y `v2_bitacora_visita`.
+  - **Antes de cargar leads sin ejecutivo, `v2_mi_base` no debe mostrar comercios libres a los ejecutivos.**
 
 ## Reglas que no se rompen
 

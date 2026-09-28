@@ -1,14 +1,23 @@
-// Prueba del celular: las 5 opciones de «¿Cómo fue la visita?» y el bloqueo de la segunda visita del día.
-// Uso: node v2/qa/celular.mjs   (antes: python3 v2/build.py)
+// Prueba del celular: las 5 opciones de «¿Cómo fue la visita?», el bloqueo de la segunda visita del día
+// y la corrección de la visita de hoy.
+// Uso: node v2/qa/celular.mjs   (antes: python v2/build.py)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima, mananaLima } from './comun.mjs';
 import assert from 'node:assert/strict';
 
 const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagendé con quien decide', SINOBS = 'Sin observaciones del comercio';
-const BASE = [1, 2, 3, 4, 5].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: new Date(Date.now() - 3600e3).toISOString() })]);
+const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
+const BASE = [1, 2, 3, 4, 5].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO })]);
+// La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
+const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
+  correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre_corto, con: 'Dueño', motivo: null, que: 'Reunión concretada', decision: 'Aún no decide',
+  equipo: null, fecha_reagenda: null, comentario: 'Comentario de prueba de la visita de hoy', lat: -12.0931, lng: -77.0465, precision_m: 12, distancia_m: 10,
+  estado_anul: 'activa', puede_editar: true, limite_edicion: mananaLima(), es_mia: true, validacion: 'validada', direccion_ok: true,
+  fuera_plazo: false, feedback: [SINOBS], fb_acciones: null, fb_extra: null, motivos_si: null };
 const FX = {
   sesion: { user: { email: EJECUTIVO.correo }, access_token: 'prueba' },
   tablas: { usuarios: EJECUTIVO, v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' } },
-  rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_registrar_visita: () => 'id-prueba' }
+  rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_registrar_visita: () => 'id-prueba',
+         v2_visitas_de: [VISITA_HOY], v2_editar_resultado: null }
 };
 
 const CASOS = [
@@ -53,6 +62,26 @@ for (const tema of ['light', 'dark']) {
     assert.ok(await p.locator('[data-corregir-hoy]').count() > 0, 'no aparece «Corregir la visita de hoy»');
     console.log(`ok  ${tema} · bloqueo de la segunda visita del día`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · bloqueo: ${e.message}`); }
+  // Corregir la visita de hoy a «quedamos en volver»: va por v2_editar_resultado, nunca por v2_registrar_visita
+  try {
+    const antes = await p.evaluate(() => window.__llamadas.length);
+    await p.click('[data-corregir-hoy]'); await p.waitForTimeout(600);
+    await p.click('[data-cop=modo][data-val=volver]'); await p.waitForTimeout(100);
+    await p.fill('#corrFecha', mananaLima()); await p.dispatchEvent('#corrFecha', 'change');
+    await p.click('[data-corr-enviar]'); await p.waitForTimeout(700);
+    const llam = await p.evaluate(n => window.__llamadas.slice(n), antes);
+    const ed = llam.find(x => x[0] === 'v2_editar_resultado');
+    if (!ed) { const falta = await p.locator('.acc-panel .falta').innerText().catch(() => ''); throw new Error('no llamó a v2_editar_resultado: ' + falta); }
+    const v = ed[1];
+    assert.equal(v.p_visita_id, VISITA_HOY.id);
+    assert.equal(v.p_con, 'Tercero'); assert.equal(v.p_que, 'Reagendada'); assert.equal(v.p_fecha_reagenda, mananaLima());
+    assert.equal(v.p_decision, null);
+    assert.ok((v.p_feedback || []).includes(DEC), 'falta «' + DEC + '»');
+    assert.ok(!(v.p_feedback || []).includes(SINOBS), '«' + SINOBS + '» no se combina con quedamos en volver');
+    assert.ok((v.p_fb_acciones || []).includes(REAG), 'falta «' + REAG + '»');
+    assert.ok(!llam.some(x => x[0] === 'v2_registrar_visita'), 'llamó a v2_registrar_visita');
+    console.log(`ok  ${tema} · corregir la visita de hoy a «quedamos en volver»`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · corrección: ${e.message}`); }
   if (errs.length) { fallas++; console.log(`MAL ${tema} · errores de consola:`, errs); }
   await b.close();
 }
