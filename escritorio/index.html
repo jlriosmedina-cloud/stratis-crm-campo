@@ -482,7 +482,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "2558f3";
+const BUILD = "2334ab";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -559,7 +559,7 @@ const num = n => Number(n || 0).toLocaleString("es-PE");
 const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, error:"",
   vista:"validacion", filtro:"todos", ej:"todos", dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
   act:[], actEn:null, base:[], baseMap:{}, ejecutivos:[], bit:{}, trx:{}, nuevas:new Set(), pausa:false, ultimaRecep:null,
-  tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"" };
+  tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"", retenidas:[] };
 
 const ICON = {
   pq:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M4 12h6M4 18h9"/><path d="M16 8l2 2 4-4"/><path d="M16 15l5 5M21 15l-5 5"/></svg>',
@@ -666,7 +666,7 @@ async function cargar(){
     S.periodo = p.data || null;
     const us = await sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("activo", true).order("nombre");
     S.ejecutivos = (us.data || []).filter(x => x.rol === "Ejecutivo").map((x, i) => ({ correo:x.correo, nombre:x.nombre_corto || x.nombre, ini:iniciales(x.nombre_corto || x.nombre), color:COLORES[i % COLORES.length] }));
-    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido()]);
+    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), cargarRetenidas()]);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar();
   if (!S.error) escuchar();
@@ -674,7 +674,7 @@ async function cargar(){
 async function cargarActividad(silencio){
   if (S._actCargando) return; S._actCargando = true;
   const desde = (S.periodo && S.periodo.ini) || ayerISO();
-  const { data, error } = await sb.rpc("v2_actividad", { p_desde: desde, p_hasta: hoyISO() });
+  const [{ data, error }] = await Promise.all([sb.rpc("v2_actividad", { p_desde: desde, p_hasta: hoyISO() }), cargarRetenidas()]);
   S._actCargando = false;
   if (error){ if (!silencio) toast("No se pudo actualizar: " + error.message); return; }
   const firma = JSON.stringify(data || []);
@@ -694,6 +694,11 @@ async function cargarActividad(silencio){
   // se invalidan las bitácoras cargadas, por si hubo cambios
   if (!silencio) S.bit = {};
   pintar();
+}
+// Visitas retenidas en los celulares: el servidor las rechazó y el ejecutivo no puede corregirlas. Decide Jose.
+async function cargarRetenidas(){
+  const { data, error } = await sb.rpc("v2_retenidas");
+  if (!error) S.retenidas = data || [];
 }
 async function cargarBase(){
   const { data } = await sb.rpc("v2_mi_base");
@@ -772,7 +777,7 @@ async function accion(id, tipo, motivo, nota){
    ========================================================================= */
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
 const VISTAS = [
-  ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length],
+  ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["equipo","Por ejecutivo", ICON.equipo, null],
   ["mapa","Mapa de distritos", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
@@ -872,6 +877,17 @@ function filtradas(){
     return true;
   });
 }
+function panelRetenidas(){
+  const l = S.retenidas || [];
+  if (!l.length) return "";
+  return `<div class="panel" style="margin-bottom:14px;border-color:var(--rojo)"><div class="barra"><b>${l.length === 1 ? "Una visita retenida" : l.length + " visitas retenidas"} en el celular</b><span class="lbl">El servidor las rechazó y todavía no están registradas. El ejecutivo puede corregirlas y reenviarlas; si la descartas, su celular la quita al sincronizar.</span></div>
+    <div class="tabla-wrap"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Visita</th><th>Qué respondió el servidor</th><th class="n">Intentos</th><th class="n">Días retenida</th><th></th></tr></thead><tbody>
+    ${l.map(r => `<tr><td>${esc(r.ejecutivo || r.correo)}</td><td>${esc(r.comercio || "—")}<br><small class="muted">ID ${esc(r.customer_id || "—")}</small></td>
+      <td>${r.visitado_en ? ddhh(r.visitado_en) : "—"}<br><small class="muted">${esc(r.payload && r.payload.p_con === "Nadie" ? "No hubo contacto" : r.payload && r.payload.p_que || "")}</small></td>
+      <td>${esc(r.mensaje)}</td><td class="n num">${r.intentos}</td><td class="n num">${Math.max(0, Math.floor((Date.now() - new Date(r.reportada_en || Date.now())) / 86400000))}</td>
+      <td><button class="btn" data-descartar-ret="${esc(r.cliente_uid)}">Descartar</button></td></tr>`).join("")}
+    </tbody></table></div></div>`;
+}
 function vistaValidacion(){
   const hoy = S.act.filter(esHoy);
   const obs = S.act.filter(v => estadoDe(v) === "obs");
@@ -885,7 +901,7 @@ function vistaValidacion(){
   if (!S.sel && lista.length) S.sel = lista[0].id;
   const sel = S.act.find(v => v.id === S.sel);
   const metaEq = 160 * Math.max(1, S.ejecutivos.length);
-  return `
+  return `${panelRetenidas()}
   <div class="resumen">
     <div class="tile"><div class="k">Visitas hoy</div><div class="v num">${hoy.length}</div><div class="d">${S.ejecutivos.map(e => `${esc(e.ini)} ${hoy.filter(v => v.correo === e.correo).length}`).join(" · ") || "sin ejecutivos"}</div></div>
     <div class="tile ${obs.length ? "warn" : ""}"><div class="k">Observadas</div><div class="v num">${obs.length}</div><div class="d">el ejecutivo las ve «en revisión»</div></div>
@@ -2208,8 +2224,16 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
+  if (t.hasAttribute("data-descartar-ret")){
+    const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
+    const nota = prompt(`¿Descartar la visita retenida de ${r.ejecutivo || r.correo} en ${r.comercio || "ID " + r.customer_id}? Su celular la quita al sincronizar.\n\nNota (opcional):`, "");
+    if (nota === null) return;
+    const { error } = await sb.rpc("v2_descartar_retenida", { p_cliente_uid: uid, p_nota: nota.trim() || null });
+    if (error){ toast("No se descartó: " + error.message); return; }
+    await cargarRetenidas(); toast("Descartada. El celular la quita al sincronizar."); pintar(); return;
+  }
   if (t.hasAttribute("data-pq-csv")){ csvPq(); return; }
   if (t.hasAttribute("data-pq-alc")){ S.pqAlcance = t.dataset.pqAlc; if ((S.pqSel || "").startsWith("no:")) S.pqSel = ""; pintar(); return; }
   if (t.hasAttribute("data-pq")){ S.pqSel = S.pqSel === t.dataset.pq ? "" : t.dataset.pq; pintar(); if (S.pqSel) document.querySelector(".pq-lista-ancla")?.scrollIntoView({ behavior:"smooth", block:"start" }); return; }

@@ -93,8 +93,13 @@ for (const tema of ['light', 'dark']) {
     assert.equal(cola.length, 1, 'sin señal no quedó en la cola');
     const uid = cola[0].p_cliente_uid, hora = cola[0].p_visitado_en;
     // vuelve la señal y el servidor la rechaza
-    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Mensaje de prueba del servidor' }); });
+    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Mensaje de prueba del servidor' }); window.__FX.rpc.v2_reportar_retenida = () => 'pendiente'; });
+    const antesRep = await p.evaluate(() => window.__llamadas.length);
     await p.evaluate(() => vaciarCola()); await p.waitForTimeout(600);
+    const rep = (await p.evaluate(n => window.__llamadas.slice(n), antesRep)).find(x => x[0] === 'v2_reportar_retenida');
+    assert.ok(rep, 'no avisó al analista');
+    assert.equal(rep[1].p_cliente_uid, uid); assert.equal(rep[1].p_mensaje, 'Mensaje de prueba del servidor');
+    assert.ok(!('_rechazo' in rep[1].p_payload) && rep[1].p_payload.p_cliente_uid === uid, 'el aviso no lleva la visita limpia');
     cola = await p.evaluate(() => S.cola);
     assert.equal(cola.length, 1, 'la visita rechazada salió de la cola');
     assert.equal(cola[0]._rechazo.msg, 'Mensaje de prueba del servidor');
@@ -102,6 +107,7 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.toast = null; S.ficha = null; S.corr = null; S.vista = 'inicio'; pintar(); });
     assert.ok(await p.locator('text=Pendiente de revisar').count() > 0, 'no aparece «Pendiente de revisar»');
     assert.ok(await p.locator('text=Mensaje de prueba del servidor').count() > 0, 'no aparece el mensaje del servidor');
+    assert.ok(await p.locator('text=Tu analista ya fue avisado').count() > 0, 'no dice que el analista fue avisado');
     if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/cola-pendiente-${tema}.png`, fullPage: false });
     // «Enviar ahora» no la reintenta sola
     const n0 = await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_visita').length);
@@ -112,6 +118,17 @@ for (const tema of ['light', 'dark']) {
     assert.ok(await p.locator('.hoja >> text=Mensaje de prueba del servidor').count() > 0, 'la hoja no muestra el mensaje del servidor');
     assert.equal(await p.locator('text=Ya registraste este comercio hoy').count(), 0, 'la hoja la bloquea como segunda visita del día');
     if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/cola-corregir-${tema}.png`, fullPage: false });
+    // el servidor vuelve a rechazarla: la cola guarda lo que el ejecutivo corrigió, no la versión original
+    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Segundo rechazo de prueba' }); });
+    await p.click('[data-op=motivo][data-val="No atendió"]');
+    await p.fill('#coment', 'Comentario corregido para la cola'); await p.dispatchEvent('#coment', 'input');
+    await p.click('[data-guardar-visita]'); await p.waitForTimeout(600);
+    cola = await p.evaluate(() => S.cola);
+    assert.equal(cola.length, 1, 'el segundo rechazo sacó la visita de la cola');
+    assert.equal(cola[0].p_motivo, 'No atendió', 'la cola no guardó lo corregido');
+    assert.equal(cola[0].p_comentario, 'Comentario corregido para la cola');
+    assert.equal(cola[0]._rechazo.msg, 'Segundo rechazo de prueba');
+    assert.equal(cola[0].p_cliente_uid, uid); assert.equal(cola[0].p_visitado_en, hora);
     await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => 'id-prueba'; });
     const antes = await p.evaluate(() => window.__llamadas.length);
     await p.click('[data-guardar-visita]'); await p.waitForTimeout(700);
@@ -119,11 +136,26 @@ for (const tema of ['light', 'dark']) {
     assert.ok(reg, 'no se reenvió');
     assert.equal(reg[1].p_cliente_uid, uid, 'cambió el identificador de la visita');
     assert.equal(reg[1].p_visitado_en, hora, 'cambió la hora de la visita');
-    assert.equal(reg[1].p_motivo, 'Cerrado');
+    assert.equal(reg[1].p_motivo, 'No atendió');
     assert.ok(!('_rechazo' in reg[1]), 'mandó al servidor la marca interna de la cola');
     assert.equal((await p.evaluate(() => S.cola)).length, 0, 'la visita reenviada sigue en la cola');
     console.log(`ok  ${tema} · cola: rechazada queda pendiente de revisar y se reenvía corregida`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · cola: ${e.message}`); }
+  // Cola: Jose descarta una retenida desde su escritorio y el celular la quita al sincronizar
+  try {
+    await p.evaluate(() => {
+      S.cola = [{ p_customer_id: '00000007', p_visitado_en: new Date(Date.now() - 86400e3).toISOString(), p_con: 'Nadie', p_motivo: 'Cerrado', p_que: 'Sin éxito', p_comentario: 'Comentario de prueba retenida',
+                  p_cliente_uid: 'uid-descartada-prueba', p_lat: -12.0931, p_lng: -77.0465, p_precision: 12, _rechazo: { msg: 'El periodo cerró el 30/09', en: new Date().toISOString(), avisada: true } }];
+      guardarCola(); window.__FX.rpc.v2_mis_retenidas = [{ cliente_uid: 'uid-descartada-prueba', estado: 'descartada', resuelta_en: new Date().toISOString(), nota: null }];
+      S.vista = 'inicio'; pintar(); });
+    assert.ok(await p.locator('text=Pendiente de revisar').count() > 0, 'no aparece la retenida');
+    await p.evaluate(() => vaciarCola()); await p.waitForTimeout(500);
+    assert.equal((await p.evaluate(() => S.cola)).length, 0, 'la descartada sigue en el celular');
+    assert.deepEqual(await p.evaluate(() => JSON.parse(localStorage.getItem('stratis-v2-cola'))), [], 'la descartada sigue guardada');
+    assert.ok(await p.locator('text=El analista descartó').count() > 0, 'no avisa que el analista la descartó');
+    assert.equal(await p.locator('text=Pendiente de revisar').count(), 0);
+    console.log(`ok  ${tema} · cola: la retenida que descarta el analista sale del celular`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · cola descartada: ${e.message}`); }
   if (errs.length) { fallas++; console.log(`MAL ${tema} · errores de consola:`, errs); }
   await b.close();
 }

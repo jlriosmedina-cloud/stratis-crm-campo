@@ -22,8 +22,9 @@ create function auth.jwt() returns jsonb language sql stable as $$ select coales
 create function auth.role() returns text language sql stable as $$ select auth.jwt()->>'role' $$;
 create function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
 create function private.es_supervision() returns boolean language sql stable as $$ select false $$;
-alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;`);
-// (la última línea replica el privilegio por defecto que Supabase tiene en public)
+alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;`);
+// (las dos últimas líneas replican los privilegios por defecto que Supabase tiene en public)
 // La foto está ordenada por tipo de objeto; se carga con las funciones antes que las tablas que las usan por defecto.
 const L = fs.readFileSync(path.join(MIG, FOTO), 'utf8').split('\n');
 const inicio = t => L.findIndex(l => l.startsWith('-- =====================') && l.includes(t));
@@ -276,6 +277,50 @@ caso('una visita sin nada observado no deja datos_observados ni bitácora', asyn
   const v = await visita(id);
   assert.equal(v.datos_observados, null); assert.deepEqual(v.fb_extra, { competidores: ['Izipay'], tasa_competidor: 2.8 });
   assert.equal((await bitacora(id)).length, 0);
+});
+caso('retenidas: el ejecutivo avisa, Jose la ve y la descarta, y el celular se entera', async () => {
+  const uid = 'uid-retenida-1', payload = { p_customer_id: '00000005', p_visitado_en: new Date().toISOString(), p_con: 'Nadie', p_motivo: 'Cerrado', p_cliente_uid: uid };
+  const visitasAntes = (await db.query('select count(*)::int n from v2_visitas')).rows[0].n;
+  await falla(como(null, `select public.v2_reportar_retenida($1, $2::jsonb, 'x')`, [uid, JSON.stringify(payload)]), /permission denied/);
+  assert.equal((await como(EJ, `select public.v2_reportar_retenida($1, $2::jsonb, 'El periodo cerró el 30/09')  e`, [uid, JSON.stringify(payload)])).rows[0].e, 'pendiente');
+  assert.equal((await db.query('select count(*)::int n from v2_visitas')).rows[0].n, visitasAntes, 'avisar una retenida cambió las visitas');
+  // otro ejecutivo no puede tocarla ni verla; el ejecutivo no puede descartarla ni escribir directo en la tabla
+  await falla(como(OTRO, `select public.v2_reportar_retenida($1, $2::jsonb, 'x')`, [uid, JSON.stringify(payload)]), /otro ejecutivo/);
+  assert.equal((await como(OTRO, 'select * from v2_visitas_retenidas')).rows.length, 0);
+  await falla(como(EJ, `select public.v2_descartar_retenida($1)`, [uid]), /Solo el analista/);
+  await falla(como(EJ, `insert into v2_visitas_retenidas(cliente_uid, correo, payload, mensaje) values ('uid-directo', $1, '{}', 'x')`, [EJ]), /row-level security/);
+  // el Manager sin acceso al escritorio no la ve; Jose (Analista con acceso) sí
+  assert.equal((await como(MAN, 'select * from public.v2_retenidas()')).rows.length, 0);
+  let r = (await como(ANA, 'select * from public.v2_retenidas()')).rows;
+  assert.equal(r.length, 1); assert.equal(r[0].mensaje, 'El periodo cerró el 30/09'); assert.equal(r[0].comercio, 'COMERCIO DE PRUEBA 5 SAC');
+  // un nuevo intento actualiza lo último que corrigió el ejecutivo
+  await como(EJ, `select public.v2_reportar_retenida($1, $2::jsonb, 'Segundo intento')`, [uid, JSON.stringify({ ...payload, p_motivo: 'No atendió' })]);
+  r = (await como(ANA, 'select * from public.v2_retenidas()')).rows;
+  assert.equal(r[0].intentos, 2); assert.equal(r[0].payload.p_motivo, 'No atendió'); assert.equal(r[0].mensaje, 'Segundo intento');
+  // Jose la descarta
+  await como(ANA, `select public.v2_descartar_retenida($1, 'Periodo cerrado, no se recupera')`, [uid]);
+  assert.equal((await como(ANA, 'select * from public.v2_retenidas()')).rows.length, 0);
+  const m = (await como(EJ, 'select * from public.v2_mis_retenidas()')).rows.find(x => x.cliente_uid === uid);
+  assert.equal(m.estado, 'descartada'); assert.equal(m.nota, 'Periodo cerrado, no se recupera');
+  const fila = (await db.query('select resuelta_por from v2_visitas_retenidas where cliente_uid = $1', [uid])).rows[0];
+  assert.equal(fila.resuelta_por, ANA);
+  // una descartada no se reabre con otro aviso
+  await como(EJ, `select public.v2_reportar_retenida($1, $2::jsonb, 'Tercer intento')`, [uid, JSON.stringify(payload)]);
+  assert.equal((await como(EJ, 'select * from public.v2_mis_retenidas()')).rows.find(x => x.cliente_uid === uid).estado, 'descartada');
+  // si igual entró al servidor (el ejecutivo la reenvió justo antes), manda «registrada»
+  await visitaPasada('00000005', 4, 'Nadie').then(id => db.query('update v2_visitas set cliente_uid = $1 where id = $2', [uid, id]));
+  assert.equal((await como(EJ, 'select * from public.v2_mis_retenidas()')).rows.find(x => x.cliente_uid === uid).estado, 'registrada');
+  // un aviso demasiado grande se rechaza (la visita sigue en el celular)
+  await falla(como(EJ, `select public.v2_reportar_retenida('uid-grande', $1::jsonb, 'x')`, [JSON.stringify({ p_comentario: 'x'.repeat(70000) })]), /demasiado grandes/);
+});
+caso('retenidas: si el ejecutivo la corrige y entra al servidor, se resuelve sola', async () => {
+  const uid = 'uid-retenida-2';
+  await como(EJ, `select public.v2_reportar_retenida($1, $2::jsonb, 'Mensaje de prueba')`, [uid, JSON.stringify({ p_customer_id: '00000008', p_cliente_uid: uid })]);
+  assert.equal((await como(ANA, 'select * from public.v2_retenidas()')).rows.filter(x => x.cliente_uid === uid).length, 1);
+  await visitaPasada('00000008', 3, 'Nadie').then(id => db.query('update v2_visitas set cliente_uid = $1 where id = $2', [uid, id]));
+  assert.equal((await como(ANA, 'select * from public.v2_retenidas()')).rows.filter(x => x.cliente_uid === uid).length, 0, 'Jose sigue viendo una visita que ya entró');
+  assert.equal((await como(EJ, 'select * from public.v2_mis_retenidas()')).rows.find(x => x.cliente_uid === uid).estado, 'registrada');
+  await falla(como(ANA, `select public.v2_descartar_retenida($1)`, [uid]), /ya entró al servidor/);
 });
 caso('las funciones nuevas nacen cerradas para anon y PUBLIC, y abiertas para authenticated', async () => {
   await db.exec(`create function public.v2_funcion_de_prueba() returns int language sql as $$ select 1 $$`);

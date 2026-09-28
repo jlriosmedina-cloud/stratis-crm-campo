@@ -1,5 +1,5 @@
-// Prueba del escritorio: carga sin errores, «Cómo fue la visita», señal «Revisar marcación»
-// y la base para BBVA con sus 4 tablas dinámicas. Datos inventados.
+// Prueba del escritorio: carga sin errores, «Cómo fue la visita», señal «Revisar marcación»,
+// visitas retenidas en el celular y la base para BBVA con sus 4 tablas dinámicas. Datos inventados.
 // Uso: node v2/qa/escritorio.mjs   (antes: python v2/build.py y npm install en v2/qa)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima } from './comun.mjs';
 import assert from 'node:assert/strict';
@@ -30,7 +30,10 @@ const ACT = [
 const FX = {
   sesion: { user: { email: ANALISTA.correo }, access_token: 'prueba' },
   tablas: { usuarios: [ANALISTA, EJECUTIVO], v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }, v2_cargas: [], v2_bitacora_visita: [], v2_transacciones: [], v2_feedback_inferido: [] },
-  rpc: { v2_puede_escritorio: true, v2_actividad: ACT, v2_mi_base: BASE, v2_avance: [] }
+  rpc: { v2_puede_escritorio: true, v2_actividad: ACT, v2_mi_base: BASE, v2_avance: [],
+         v2_retenidas: [{ cliente_uid: 'uid-retenida-prueba', correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre_corto, customer_id: '00000007', comercio: 'Comercio Prueba 7',
+           visitado_en: `${hoy}T15:30:00Z`, mensaje: 'El periodo cerró el 30/09: ya no se reciben visitas de ese periodo.', intentos: 2, payload: { p_con: 'Nadie', p_motivo: 'Cerrado' } }],
+         v2_descartar_retenida: null }
 };
 
 let fallas = 0;
@@ -55,6 +58,20 @@ await prueba('lista con «Cómo fue la visita»', async () => {
 await prueba('señal «Revisar marcación» solo en la visita contradictoria', async () => {
   const n = await p.evaluate(() => S.act.filter(v => revisarMarcacion(v)).map(v => v.customer_id));
   assert.deepEqual(n, ['00000006']);
+});
+await prueba('visitas retenidas: se ven con el mensaje y Jose las descarta', async () => {
+  await p.evaluate(() => { S.vista = 'validacion'; pintar(); }); await p.waitForTimeout(300);
+  assert.ok(await p.locator('text=Una visita retenida').count() > 0, 'no aparece el panel');
+  assert.ok(await p.locator('text=El periodo cerró el 30/09').count() > 0, 'no aparece el mensaje del servidor');
+  if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/escritorio-retenidas.png` });
+  p.once('dialog', d => d.accept('Periodo cerrado, no se recupera'));
+  const antes = await p.evaluate(() => window.__llamadas.length);
+  await p.evaluate(() => { window.__FX.rpc.v2_retenidas = []; });
+  await p.click('[data-descartar-ret="uid-retenida-prueba"]'); await p.waitForTimeout(500);
+  const d = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_descartar_retenida');
+  assert.ok(d, 'no llamó a v2_descartar_retenida');
+  assert.deepEqual(d[1], { p_cliente_uid: 'uid-retenida-prueba', p_nota: 'Periodo cerrado, no se recupera' });
+  assert.equal(await p.locator('text=Una visita retenida').count(), 0, 'el panel no se actualizó');
 });
 await prueba('base para BBVA con 4 tablas dinámicas', async () => {
   await p.evaluate(() => { S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);

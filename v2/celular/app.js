@@ -235,19 +235,49 @@ async function historial(cid){
   const { data } = await sb.rpc("v2_visitas_de", { p_customer_id: cid });
   S.hist[cid] = data || []; S._mantenerScroll = true; pintar();
 }
+// Solo los argumentos de la función: la cola guarda además la marca del rechazo
+const soloArgs = v => Object.fromEntries(Object.entries(v).filter(([k]) => k.startsWith("p_")));
 async function enviar(v){
-  const args = Object.fromEntries(Object.entries(v).filter(([k]) => k.startsWith("p_")));
-  const { error } = await sb.rpc("v2_registrar_visita", args);
+  const { error } = await sb.rpc("v2_registrar_visita", soloArgs(v));
   if (error) throw error;
 }
 // Regla n.º 1: una visita que el servidor rechaza no se borra del celular. Queda «pendiente de revisar»
 // con el mensaje del servidor, hasta que el ejecutivo la corrija y la reenvíe.
-function marcarRechazo(uidV, msg){
-  const v = S.cola.find(x => x.p_cliente_uid === uidV);
-  if (v){ v._rechazo = { msg: msg || "error desconocido", en: new Date().toISOString() }; guardarCola(); }
+// Si llega «nueva» (lo que el ejecutivo corrigió), reemplaza a lo que estaba en la cola.
+function marcarRechazo(uidV, msg, nueva){
+  const i = S.cola.findIndex(x => x.p_cliente_uid === uidV); if (i < 0) return;
+  if (nueva) S.cola[i] = Object.assign({}, nueva);
+  S.cola[i]._rechazo = { msg: msg || "error desconocido", en: new Date().toISOString() }; guardarCola();
+  reportarRetenida(S.cola[i]);
+}
+// El analista se entera de cada visita retenida y decide; si la descarta, el celular la quita al sincronizar.
+async function reportarRetenida(v){
+  try {
+    const { data, error } = await sb.rpc("v2_reportar_retenida", { p_cliente_uid:v.p_cliente_uid, p_payload:soloArgs(v), p_mensaje:v._rechazo.msg });
+    if (error) return;
+    const x = S.cola.find(y => y.p_cliente_uid === v.p_cliente_uid);
+    if (x && x._rechazo){ x._rechazo.avisada = true; guardarCola(); }
+    if (data === "registrada" || data === "descartada") sincronizarRetenidas();
+  } catch(e){}
+}
+async function sincronizarRetenidas(){
+  const rech = S.cola.filter(v => v._rechazo);
+  if (!rech.length || !navigator.onLine) return;
+  for (const v of rech.filter(v => !v._rechazo.avisada)) await reportarRetenida(v);
+  try {
+    const { data, error } = await sb.rpc("v2_mis_retenidas");
+    if (error || !data) return;
+    const fin = new Map(data.filter(r => r.estado === "descartada" || r.estado === "registrada").map(r => [r.cliente_uid, r.estado]));
+    const desc = S.cola.filter(v => v._rechazo && fin.get(v.p_cliente_uid) === "descartada").length;
+    const antes = S.cola.length;
+    S.cola = S.cola.filter(v => !(v._rechazo && fin.has(v.p_cliente_uid)));
+    if (S.cola.length !== antes){ guardarCola(); S._mantenerScroll = true; pintar(); }
+    if (desc) avisar(`El analista descartó ${desc === 1 ? "una visita que no se podía registrar" : desc + " visitas que no se podían registrar"}. Ya no ${desc === 1 ? "está" : "están"} en tu celular.`, 7000);
+  } catch(e){}
 }
 async function vaciarCola(){
   if (!S.cola.length || !navigator.onLine) return;
+  await sincronizarRetenidas();
   const pend = S.cola.filter(v => !v._rechazo); let ok = 0, tarde = 0, rech = 0; const hoy = diaLima(Date.now());
   for (const v of pend){
     try { await enviar(v); S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); ok++; if (plazoDe(v.p_visitado_en) < hoy) tarde++; }
@@ -972,10 +1002,10 @@ function colaRechazadas(){
   const uno = l.length === 1;
   return `<div class="card" style="border:1.5px solid var(--rojo)"><div class="eyebrow" style="color:var(--rojo)">Pendiente de revisar</div>
     <h2>${uno ? "Una visita no se pudo registrar" : l.length + " visitas no se pudieron registrar"}</h2>
-    <div class="nota">${uno ? "Sigue guardada" : "Siguen guardadas"} en este celular con su hora y ubicación. ${uno ? "Corrígela y reenvíala" : "Corrígelas y reenvíalas"}: no se borran solas.</div>
+    <div class="nota">${uno ? "Sigue guardada" : "Siguen guardadas"} en este celular con su hora y ubicación. ${uno ? "Corrígela y reenvíala" : "Corrígelas y reenvíalas"}: no se borran solas. Si no se puede corregir, tu analista la ve y decide.</div>
     ${l.map(v => { const c = S.base.find(x => x.customer_id === v.p_customer_id);
       return `<div class="parada" style="display:block"><span class="t"><b>${esc(c ? nombreDe(c) : "ID " + v.p_customer_id)}</b><small>${fechaCorta(v.p_visitado_en)} · ${horaCorta(v.p_visitado_en)}</small></span>
-        <div class="revision fuera"><b>El servidor respondió:</b> ${esc(v._rechazo.msg)}</div>
+        <div class="revision fuera"><b>El servidor respondió:</b> ${esc(v._rechazo.msg)}${v._rechazo.avisada ? "<br><small>Tu analista ya fue avisado.</small>" : ""}</div>
         <button class="btn btn-pri btn-full" data-corregir-cola="${esc(v.p_cliente_uid)}">Corregir y reenviar</button></div>`; }).join("")}</div>`;
 }
 // Abre la hoja de registro con lo que quedó en la cola: misma hora, misma ubicación y mismo identificador,
@@ -1448,7 +1478,7 @@ async function guardarVisita(){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
       S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); S.cola.push(v); guardarCola(); S.reg = null;
       avisar(`Sin señal: la visita quedó guardada en el celular con su hora y ubicación. Se envía sola cuando vuelva la conexión; para que cuente tiene que llegar a más tardar el ${fISO(plazoDe(v.p_visitado_en))}.`, 7000);
-    } else { r.enviando = false; if (r.desdeCola) marcarRechazo(v.p_cliente_uid, e.message);
+    } else { r.enviando = false; if (r.desdeCola) marcarRechazo(v.p_cliente_uid, e.message, v);
       if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); avisar("No se guardó: " + esc(e.message), 7000); }
       else { r.error = e.message || "error desconocido"; S._mantenerScroll = true; pintar(); try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch(x){} } }
   }
@@ -1549,6 +1579,8 @@ function enlazar(){
   }
 }
 window.addEventListener("online", vaciarCola);
+// al volver a la app: si el analista descartó alguna retenida, se quita
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.sesion) sincronizarRetenidas(); });
 
 /* ---------- aviso de versión nueva ----------
    Revisa cada 5 min y cada vez que el ejecutivo vuelve a la app si hay un build publicado distinto al que tiene abierto.
