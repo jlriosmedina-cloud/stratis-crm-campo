@@ -1,0 +1,14 @@
+# salida del build
+v2/dist/
+# datos: nunca en el repositorio (van al OneDrive corporativo)
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.bundle
+datos/
+v2/qa/fixtures/
+.env
+.env.*
+node_modules/
+__pycache__/
