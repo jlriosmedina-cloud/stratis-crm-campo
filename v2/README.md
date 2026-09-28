@@ -22,6 +22,9 @@ v2/qa/                  pruebas con datos inventados
   - Están descritos en los docs del proyecto `crm-v2-direcciones-y-rutas-geo.md` y `crm-v2-verificacion-maps-900-leads.md`.
   - Los archivos con datos de comercios se leen desde el OneDrive y no se suben.
 - [x] **Tanda 1 de la revisión del 27/09** (`supabase/migrations/20260928100000_permisos_y_reglas_de_visita.sql`): permisos sin `anon`, administradores solo leen visitas y bitácora, reglas de registrar y corregir, y reactivación solo con contacto. Pruebas en `v2/qa/servidor.mjs`.
+- [x] **Regla n.º 1: la calidad avisa, no bloquea** (`supabase/migrations/20260928110000_calidad_avisa_no_bloquea.sql`): registrar una visita ya no la rechaza por calidad; lo que no calzó queda en `v2_visitas.datos_observados` y `fecha_lejana`, con su línea en la bitácora.
+- [ ] **Señales del escritorio para `datos_observados` y `fecha_lejana`:** «Fecha de volver lejana», «Hora del celular corregida» y «Datos fuera de la lista» (tanda 2).
+- [ ] **Cola del celular:** una visita rechazada por el servidor queda «pendiente de revisar» con el mensaje y un botón para corregirla y reenviarla. Lista y probada, espera el OK de Jose para publicarse.
 - [ ] **Antes de cargar leads sin ejecutivo, `v2_mi_base` no debe mostrar comercios libres a los ejecutivos.** Hoy los muestra (`a.correo is null`) y no hay ninguno cargado.
 - [ ] **Quitar `anon` de las funciones del CRM v1**, cuando Jose confirme si alguien la sigue usando.
 - [ ] **Tanda 2 (escritorio):** señales de los hallazgos 3, 5, 6, 7, 9 y 12.

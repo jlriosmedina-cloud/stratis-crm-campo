@@ -1,5 +1,7 @@
 # CRM de campo Stratis · campaña BBVA Adquirencia
 
+> **Regla n.º 1 · El medidor de visitas no se toca.** Una visita cuenta esté o no abierto el comercio y haya o no contacto. Ninguna regla de calidad puede impedir que se guarde una visita ni descartarla de la cola del celular. Las reglas de calidad **avisan** (señal en el escritorio de Jose), **no bloquean**. Solo se rechaza por seguridad (usuario, comercio de otro ejecutivo), por el plazo del periodo o por un error de captura evidente (fecha de volver anterior a la visita).
+
 Instrucciones para Claude Code en este repositorio. Responde siempre en español, con tono cálido y a detalle. El usuario es **Jose**, que se escribe sin tilde.
 
 ## Qué es

@@ -2,6 +2,7 @@
 // migraciones posteriores y revisa permisos y reglas con usuarios y comercios inventados (nunca reales).
 // Uso: node v2/qa/servidor.mjs            (con todas las migraciones)
 //      node v2/qa/servidor.mjs --sin-nuevas   (solo la foto: sirve para ver qué pruebas fallarían sin la migración)
+//      node v2/qa/servidor.mjs --hasta=20260928100000_permisos_y_reglas_de_visita.sql   (solo hasta esa migración)
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,7 +35,8 @@ for (const t of ['SECUENCIAS', 'FUNCIONES', 'TABLAS', 'RESTRICCIONES', 'LLAVES',
 await db.exec(`grant usage on schema public, auth, private to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;
 grant all on all sequences in schema public to anon, authenticated, service_role;`);
-if (!SIN_NUEVAS) for (const f of fs.readdirSync(MIG).filter(f => f.endsWith('.sql') && f > FOTO).sort()) await db.exec(fs.readFileSync(path.join(MIG, f), 'utf8'));
+const HASTA = (process.argv.find(a => a.startsWith('--hasta=')) || '').slice(8);
+if (!SIN_NUEVAS) for (const f of fs.readdirSync(MIG).filter(f => f.endsWith('.sql') && f > FOTO && (!HASTA || f <= HASTA)).sort()) await db.exec(fs.readFileSync(path.join(MIG, f), 'utf8'));
 
 // ---------- datos inventados ----------
 const EJ = 'ejecutivo.prueba@ejemplo.com', OTRO = 'otro.prueba@ejemplo.com', MAN = 'manager.prueba@ejemplo.com', ANA = 'analista.prueba@ejemplo.com', INA = 'inactivo.prueba@ejemplo.com';
@@ -49,12 +51,15 @@ insert into usuarios(correo, nombre, nombre_corto, rol, activo) values
 insert into v2_acceso_escritorio(correo) values ('${ANA}');
 insert into v2_periodos(id, ini, fin) values ('2099-01', '${hoy}'::date - 40, '${hoy}'::date + 40);
 insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad)
-  select lpad(i::text, 8, '0'), 'COMERCIO DE PRUEBA ' || i || ' SAC', -12.09 + i * 0.0001, -77.04, 'numero' from generate_series(1, 12) i;
+  select lpad(i::text, 8, '0'), 'COMERCIO DE PRUEBA ' || i || ' SAC', -12.09 + i * 0.0001, -77.04, 'numero' from generate_series(1, 20) i;
 insert into v2_asignaciones(periodo, customer_id, correo)
-  select '2099-01', lpad(i::text, 8, '0'), case when i = 12 then null when i = 11 then '${OTRO}' else '${EJ}' end from generate_series(1, 12) i;
+  select '2099-01', lpad(i::text, 8, '0'), case when i = 12 then null when i = 11 then '${OTRO}' else '${EJ}' end from generate_series(1, 20) i;
 insert into v2_feedback_tipos(texto, grupo, orden) values
   ('Sin observaciones del comercio', 'Sin observaciones', 0), ('No se encontraba la persona que tomaba decisiones', 'Decisión y necesidad', 10);
-insert into v2_feedback_acciones(texto, ramas, orden) values ('Reagendé con quien decide', array['Decisión y necesidad'], 10);
+insert into v2_feedback_tipos(texto, grupo, orden) values ('Usa POS de otra marca', 'Competencia', 20), ('Los abonos le llegan con demora', 'Abonos', 30);
+insert into v2_feedback_acciones(texto, ramas, orden) values ('Reagendé con quien decide', array['Decisión y necesidad'], 10),
+  ('Ofrecí evaluar una mejora de tasa', array['Competencia'], 20), ('Expliqué los plazos de abono', array['Abonos'], 30);
+insert into v2_motivo_si_tipos(texto, orden) values ('Sus clientes le piden pagar con tarjeta', 10);
 `);
 
 // ---------- ejecutar como un usuario ----------
@@ -75,10 +80,13 @@ async function visitaPasada(cid, dias, con, extra = {}){
   return r.rows[0].id;
 }
 // Registrar desde el celular (mismos argumentos que envía la app)
-const registrar = (correo, a) => como(correo, `select public.v2_registrar_visita(p_customer_id => $1, p_visitado_en => now(), p_lat => -12.09, p_lng => -77.04, p_precision => 10,
+const registrar = (correo, a) => como(correo, `select public.v2_registrar_visita(p_customer_id => $1, p_visitado_en => coalesce($10::timestamptz, now()), p_lat => -12.09, p_lng => -77.04, p_precision => 10,
     p_con => $2, p_motivo => $3, p_que => $4, p_decision => $5, p_equipo => null, p_fecha_reagenda => $6::date, p_comentario => 'Comentario de prueba', p_cliente_uid => $7,
-    p_direccion_ok => $8, p_feedback => $9::text[]) id`,
-  [a.cid, a.con, a.motivo ?? null, a.que ?? 'Sin éxito', a.decision ?? null, a.fecha ?? null, 'uid-' + Math.random(), a.dok ?? null, a.feedback ?? null]).then(r => r.rows[0].id);
+    p_direccion_ok => $8, p_feedback => $9::text[], p_fb_acciones => $11::text[], p_fb_extra => $12::jsonb, p_motivos_si => $13::text[],
+    p_feedback_nota => $14, p_comentario_voz => $15, p_comercio_ubicado => $16, p_direccion_nueva => $17) id`,
+  [a.cid, a.con, a.motivo ?? null, a.que ?? 'Sin éxito', a.decision ?? null, a.fecha ?? null, 'uid-' + Math.random(), a.dok ?? null, a.feedback ?? null,
+   a.visitado ?? null, a.acciones ?? null, a.extra ? JSON.stringify(a.extra) : null, a.msi ?? null, a.nota ?? null, a.voz ?? null, a.ubi ?? null, a.dnu ?? null]).then(r => r.rows[0].id);
+const bitacora = async id => (await db.query(`select por, antes, despues from v2_bitacora_visita where visita_id = $1 order by en, antes`, [id])).rows;
 const editar = (correo, id, a) => como(correo, `select public.v2_editar_resultado($1, $2, $3, $4, $5, null, $6::date, $7, $8::text[], null, null, $9::text[], null)`,
   [id, a.con, a.motivo ?? null, a.que ?? 'Sin éxito', a.decision ?? null, a.fecha ?? null, a.comentario ?? 'Comentario de prueba corregido', a.feedback ?? null, a.acciones ?? null]);
 
@@ -100,7 +108,7 @@ caso('un usuario inactivo no ve comercios (ni los libres)', async () => {
 });
 caso('el ejecutivo ve su base y los libres, no la de otro', async () => {
   const ids = (await como(EJ, 'select customer_id from public.v2_mi_base()')).rows.map(x => x.customer_id);
-  assert.ok(ids.includes('00000012'), 'falta el libre'); assert.ok(!ids.includes('00000011'), 've la base de otro ejecutivo'); assert.equal(ids.length, 11);
+  assert.ok(ids.includes('00000012'), 'falta el libre'); assert.ok(!ids.includes('00000011'), 've la base de otro ejecutivo'); assert.equal(ids.length, 19);
 });
 caso('el Manager ve todo, pero no puede editar ni borrar visitas ni la bitácora directamente', async () => {
   const id = await visitaPasada('00000010', 1, 'Tercero');
@@ -133,26 +141,37 @@ caso('corregir una visita observada la deja por validar (no validada sola)', asy
   const b = (await db.query(`select despues from v2_bitacora_visita where visita_id = $1 and accion = 'revision'`, [hoyId])).rows;
   assert.ok(b.some(x => /pendiente/.test(x.despues)), 'la bitácora no dice pendiente');
 });
-caso('registrar: «No estaba» ya no se acepta', async () => {
-  await falla(registrar(EJ, { cid: '00000002', con: 'Nadie', motivo: 'No estaba' }), /Elige por qué no hubo contacto/);
-  const id = await registrar(EJ, { cid: '00000002', con: 'Nadie', motivo: 'Cerrado' });
-  assert.equal((await visita(id)).motivo, 'Cerrado');
+caso('registrar: «No estaba» no rechaza la visita: se guarda como «No atendió» con línea en la bitácora', async () => {
+  const id = await registrar(EJ, { cid: '00000002', con: 'Nadie', motivo: 'No estaba' });
+  const v = await visita(id); assert.equal(v.con, 'Nadie'); assert.equal(v.motivo, 'No atendió');
+  const b = (await db.query(`select por, antes, despues from v2_bitacora_visita where visita_id = $1`, [id])).rows;
+  assert.equal(b.length, 1, 'falta la línea en la bitácora'); assert.match(b[0].antes, /No estaba/); assert.match(b[0].despues, /No atendió/);
+  const otra = await registrar(OTRO, { cid: '00000011', con: 'Nadie', motivo: 'Cerrado' });
+  assert.equal((await visita(otra)).motivo, 'Cerrado');
+  assert.equal((await db.query(`select count(*)::int n from v2_bitacora_visita where visita_id = $1`, [otra])).rows[0].n, 0, 'dejó bitácora en una visita normal');
 });
-caso('registrar: la fecha de volver va hasta 10 días hábiles', async () => {
+caso('registrar: la fecha de volver lejana no rechaza la visita: se guarda y queda marcada', async () => {
   const tope = await habil(hoy, 10), pasado = (await db.query(`select ($1::date + 1)::text d`, [tope])).rows[0].d;
-  await falla(registrar(EJ, { cid: '00000003', con: 'Tercero', que: 'Reagendada', fecha: pasado }), /hasta el .*anota la real en el comentario/);
-  const id = await registrar(EJ, { cid: '00000003', con: 'Tercero', que: 'Reagendada', fecha: tope });
-  assert.equal((await visita(id)).fecha_reagenda.toISOString().slice(0, 10), tope);
+  const id = await registrar(EJ, { cid: '00000003', con: 'Tercero', que: 'Reagendada', fecha: pasado });
+  let v = await visita(id); assert.equal(v.fecha_reagenda.toISOString().slice(0, 10), pasado); assert.equal(v.fecha_lejana, true);
+  const id2 = await registrar(EJ, { cid: '00000012', con: 'Tercero', que: 'Reagendada', fecha: tope });
+  v = await visita(id2); assert.equal(v.fecha_lejana, false, 'marcó como lejana una fecha dentro del tope');
+  const act = (await como(ANA, 'select id, fecha_lejana from public.v2_actividad($1::date, $1::date)', [hoy])).rows;
+  assert.equal(act.find(x => x.id === id)?.fecha_lejana, true, 'v2_actividad no devuelve fecha_lejana');
+  await falla(registrar(EJ, { cid: '00000007', con: 'Tercero', que: 'Reagendada', fecha: await diaMas(-1) }), /anterior a la visita/);
 });
-caso('corregir: la fecha de volver no puede ser anterior a la visita ni pasar el tope', async () => {
+caso('corregir: la fecha anterior a la visita se rechaza; la lejana se guarda marcada', async () => {
   const id = await registrar(EJ, { cid: '00000004', con: 'Tercero', que: 'Sin éxito', feedback: ['No se encontraba la persona que tomaba decisiones'] });
   const fb = ['No se encontraba la persona que tomaba decisiones'];
   await falla(editar(EJ, id, { con: 'Tercero', que: 'Reagendada', fecha: await diaMas(-1), feedback: fb }), /anterior a la visita/);
   const tope = await habil(hoy, 10), pasado = (await db.query(`select ($1::date + 1)::text d`, [tope])).rows[0].d;
-  await falla(editar(EJ, id, { con: 'Tercero', que: 'Reagendada', fecha: pasado, feedback: fb }), /hasta el/);
+  await editar(EJ, id, { con: 'Tercero', que: 'Reagendada', fecha: pasado, feedback: fb });
+  let v = await visita(id); assert.equal(v.que, 'Reagendada'); assert.equal(v.fecha_lejana, true); assert.ok(v.fb_acciones.includes('Reagendé con quien decide'));
   await editar(EJ, id, { con: 'Tercero', que: 'Reagendada', fecha: await diaMas(1), feedback: fb });
-  const v = await visita(id);
-  assert.equal(v.que, 'Reagendada'); assert.ok(v.fb_acciones.includes('Reagendé con quien decide'));
+  v = await visita(id); assert.equal(v.fecha_lejana, false, 'la marca no se quitó al corregir la fecha');
+});
+caso('sin sesión (anon) no puede leer v2_actividad', async () => {
+  await falla(como(null, 'select * from public.v2_actividad()'), /permission denied/);
 });
 caso('corregir desde «no está en esta dirección» deja la dirección como correcta', async () => {
   const id = await registrar(EJ, { cid: '00000005', con: 'Nadie', motivo: 'Dirección errada' });
@@ -192,6 +211,72 @@ caso('la reactivación solo cuenta desde una visita válida con contacto', async
   assert.equal(await dt('00000010'), 2);
 });
 
+caso('A: feedback fuera de la lista no rechaza: se guarda lo válido y se anota lo demás', async () => {
+  const id = await registrar(EJ, { cid: '00000013', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide',
+    feedback: ['Usa POS de otra marca', 'Opción que ya no existe'], acciones: ['Ofrecí evaluar una mejora de tasa'] });
+  const v = await visita(id);
+  assert.deepEqual(v.feedback, ['Usa POS de otra marca']); assert.deepEqual(v.fb_acciones, ['Ofrecí evaluar una mejora de tasa']);
+  assert.deepEqual(v.datos_observados, { feedback: ['Opción que ya no existe'] });
+  const b = await bitacora(id); assert.equal(b.length, 1); assert.match(b[0].antes, /Opción que ya no existe/); assert.equal(b[0].por, 'automática');
+});
+caso('A: «Qué ofreciste» fuera de la lista o de otra rama no rechaza: se anota', async () => {
+  const id = await registrar(EJ, { cid: '00000014', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide',
+    feedback: ['Usa POS de otra marca'], acciones: ['Ofrecí evaluar una mejora de tasa', 'Expliqué los plazos de abono', 'Acción inventada'] });
+  const v = await visita(id);
+  assert.deepEqual(v.fb_acciones, ['Ofrecí evaluar una mejora de tasa']);
+  assert.deepEqual(v.datos_observados, { fb_acciones: ['Acción inventada', 'Expliqué los plazos de abono'] });
+  assert.equal((await bitacora(id)).length, 1);
+});
+caso('A: «Qué lo convenció» fuera de la lista no rechaza: se anota', async () => {
+  const id = await registrar(EJ, { cid: '00000015', con: 'Dueño', que: 'Reunión concretada', decision: 'Realizará consumos',
+    feedback: ['Sin observaciones del comercio'], msi: ['Sus clientes le piden pagar con tarjeta', 'Motivo inventado'] });
+  const v = await visita(id);
+  assert.deepEqual(v.motivos_si, ['Sus clientes le piden pagar con tarjeta']); assert.deepEqual(v.datos_observados, { motivos_si: ['Motivo inventado'] });
+});
+caso('A: «Sin observaciones» combinado con otra opción: se queda la otra y se anota', async () => {
+  const id = await registrar(EJ, { cid: '00000016', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide',
+    feedback: ['Sin observaciones del comercio', 'Usa POS de otra marca'], acciones: ['Ofrecí evaluar una mejora de tasa'] });
+  const v = await visita(id);
+  assert.deepEqual(v.feedback, ['Usa POS de otra marca']); assert.deepEqual(v.datos_observados, { sin_observaciones_combinado: true });
+  assert.equal((await bitacora(id)).length, 1);
+});
+caso('B: datos del detalle fuera de rango no rechazan: se guarda lo válido y se anota lo demás', async () => {
+  const id = await registrar(EJ, { cid: '00000017', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide',
+    feedback: ['Usa POS de otra marca', 'Los abonos le llegan con demora'], acciones: ['Ofrecí evaluar una mejora de tasa', 'Expliqué los plazos de abono'],
+    extra: { competidores: ['Niubiz', 'Otro'], competidor_otro: 'X'.repeat(70), tasa_competidor: '25', dias_demora_abono: 'tres', banco_abono: 'BBVA' } });
+  const v = await visita(id);
+  assert.deepEqual(v.fb_extra, { competidores: ['Niubiz', 'Otro'], banco_abono: 'BBVA' });
+  assert.deepEqual(v.datos_observados, { fb_extra: { competidor_otro: 'X'.repeat(70), tasa_competidor: '25', dias_demora_abono: 'tres' } });
+  assert.equal((await bitacora(id)).length, 1);
+});
+caso('C: textos largos no rechazan: se recortan y el texto completo queda en la bitácora', async () => {
+  const nota = 'N'.repeat(350), voz = 'V'.repeat(4100), dnu = 'D'.repeat(250);
+  const id = await registrar(EJ, { cid: '00000018', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: ['Sin observaciones del comercio'],
+    nota, voz, dok: false, ubi: true, dnu });
+  const v = await visita(id);
+  assert.equal(v.feedback_nota.length, 300); assert.equal(v.comentario_voz.length, 4000); assert.equal(v.direccion_nueva.length, 200);
+  assert.equal(v.datos_observados, null);
+  const b = await bitacora(id); assert.equal(b.length, 3);
+  assert.ok(b.some(x => x.antes.includes(nota) && /350 caracteres/.test(x.antes)), 'falta el feedback adicional completo');
+  assert.ok(b.some(x => x.antes.includes(voz)), 'falta el dictado completo'); assert.ok(b.some(x => x.antes.includes(dnu)), 'falta la dirección completa');
+});
+caso('F: hora del celular adelantada no rechaza: se guarda con la hora del servidor y se anota', async () => {
+  const futura = (await db.query(`select (now() + interval '2 hours')::text t`)).rows[0].t;
+  const id = await registrar(EJ, { cid: '00000019', con: 'Nadie', motivo: 'Cerrado', visitado: futura });
+  const v = await visita(id), ahora = Date.now();
+  assert.ok(Math.abs(v.visitado_en.getTime() - ahora) < 60e3, 'no usó la hora del servidor');
+  assert.equal(new Date(v.datos_observados.hora_celular).getTime(), new Date(futura).getTime());
+  const b = await bitacora(id); assert.equal(b.length, 1); assert.match(b[0].antes, /Hora del celular/); assert.match(b[0].despues, /Hora del servidor/);
+  const act = (await como(ANA, 'select id, datos_observados from public.v2_actividad($1::date, $1::date)', [hoy])).rows.find(x => x.id === id);
+  assert.ok(act && act.datos_observados && act.datos_observados.hora_celular, 'v2_actividad no devuelve datos_observados');
+});
+caso('una visita sin nada observado no deja datos_observados ni bitácora', async () => {
+  const id = await registrar(EJ, { cid: '00000020', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide',
+    feedback: ['Usa POS de otra marca'], acciones: ['Ofrecí evaluar una mejora de tasa'], extra: { competidores: ['Izipay'], tasa_competidor: '2,8' } });
+  const v = await visita(id);
+  assert.equal(v.datos_observados, null); assert.deepEqual(v.fb_extra, { competidores: ['Izipay'], tasa_competidor: 2.8 });
+  assert.equal((await bitacora(id)).length, 0);
+});
 caso('las funciones nuevas nacen cerradas para anon y PUBLIC, y abiertas para authenticated', async () => {
   await db.exec(`create function public.v2_funcion_de_prueba() returns int language sql as $$ select 1 $$`);
   const r = (await db.query(`select has_function_privilege('anon', 'public.v2_funcion_de_prueba()', 'EXECUTE') anon,
