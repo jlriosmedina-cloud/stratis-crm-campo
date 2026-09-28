@@ -20,7 +20,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
 
 - **Editar** `v2/<app>/app.js`, `estilos.css` o `shell.html`. Nunca editar a mano `index.html` ni `escritorio/index.html`.
 - **Armar** con `python3 v2/build.py`, que genera `v2/dist/`. BUILD es un hash del contenido, y el celular avisa «versión nueva» cuando cambia.
-- **Probar** antes de publicar, en claro y en oscuro y sin errores de consola:
+- **Probar** antes de publicar con `cd v2/qa && npm test` (la primera vez: `npm install` y `npx playwright install chromium`). Las pruebas usan solo datos inventados. Tienen que pasar en claro y en oscuro y sin errores de consola:
   - Playwright con Chromium, con el cliente de Supabase simulado.
   - Casos mínimos:
     - registrar una visita con cada una de las 5 opciones de «¿Cómo fue la visita?»;

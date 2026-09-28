@@ -1,0 +1,6 @@
+# Saltos de línea LF en todo el repo (evita que Windows cambie los archivos y la versión del build)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.xlsx binary
+*.zip binary
