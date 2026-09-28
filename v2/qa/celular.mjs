@@ -1,12 +1,12 @@
 // Prueba del celular: las 5 opciones de «¿Cómo fue la visita?», el bloqueo de la segunda visita del día
-// y la corrección de la visita de hoy.
+// la corrección de la visita de hoy y la cola: una visita rechazada por el servidor queda «pendiente de revisar».
 // Uso: node v2/qa/celular.mjs   (antes: python v2/build.py)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima, mananaLima } from './comun.mjs';
 import assert from 'node:assert/strict';
 
 const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagendé con quien decide', SINOBS = 'Sin observaciones del comercio';
 const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
-const BASE = [1, 2, 3, 4, 5].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO })]);
+const BASE = [1, 2, 3, 4, 5, 7].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO })]);
 // La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
 const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
   correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre_corto, con: 'Dueño', motivo: null, que: 'Reunión concretada', decision: 'Aún no decide',
@@ -38,7 +38,7 @@ let fallas = 0;
 for (const tema of ['light', 'dark']) {
   const { b, ctx } = await navegador({ tema });
   const p = await ctx.newPage(); const errs = [];
-  p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource/.test(m.text())) errs.push(m.text()); });
+  p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource|URL scheme "file" is not supported/.test(m.text())) errs.push(m.text()); });
   await p.addInitScript(fx => { window.__FX = fx; }, FX);
   await p.goto(urlDist('celular')); await p.waitForTimeout(1200);
   for (const c of CASOS) {
@@ -82,6 +82,48 @@ for (const tema of ['light', 'dark']) {
     assert.ok(!llam.some(x => x[0] === 'v2_registrar_visita'), 'llamó a v2_registrar_visita');
     console.log(`ok  ${tema} · corregir la visita de hoy a «quedamos en volver»`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · corrección: ${e.message}`); }
+  // Cola: sin señal se guarda; si el servidor la rechaza, no sale de la cola; se corrige y se reenvía con el mismo identificador
+  try {
+    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Failed to fetch' }); });
+    await p.evaluate(() => nuevoRegistro('00000007')); await p.waitForTimeout(600);
+    await p.click('[data-op=modo][data-val=nadie]'); await p.click('[data-op=motivo][data-val=Cerrado]');
+    await p.fill('#coment', 'Comentario de prueba para la cola'); await p.dispatchEvent('#coment', 'input');
+    await p.click('[data-guardar-visita]'); await p.waitForTimeout(600);
+    let cola = await p.evaluate(() => S.cola);
+    assert.equal(cola.length, 1, 'sin señal no quedó en la cola');
+    const uid = cola[0].p_cliente_uid, hora = cola[0].p_visitado_en;
+    // vuelve la señal y el servidor la rechaza
+    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Mensaje de prueba del servidor' }); });
+    await p.evaluate(() => vaciarCola()); await p.waitForTimeout(600);
+    cola = await p.evaluate(() => S.cola);
+    assert.equal(cola.length, 1, 'la visita rechazada salió de la cola');
+    assert.equal(cola[0]._rechazo.msg, 'Mensaje de prueba del servidor');
+    assert.deepEqual(await p.evaluate(() => JSON.parse(localStorage.getItem('stratis-v2-cola')).map(v => !!v._rechazo)), [true], 'no quedó guardada en el celular');
+    await p.evaluate(() => { S.toast = null; S.ficha = null; S.corr = null; S.vista = 'inicio'; pintar(); });
+    assert.ok(await p.locator('text=Pendiente de revisar').count() > 0, 'no aparece «Pendiente de revisar»');
+    assert.ok(await p.locator('text=Mensaje de prueba del servidor').count() > 0, 'no aparece el mensaje del servidor');
+    if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/cola-pendiente-${tema}.png`, fullPage: false });
+    // «Enviar ahora» no la reintenta sola
+    const n0 = await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_visita').length);
+    await p.evaluate(() => vaciarCola()); await p.waitForTimeout(300);
+    assert.equal(await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_visita').length), n0, 'reintentó sola una visita pendiente de revisar');
+    // corregir y reenviar
+    await p.click(`[data-corregir-cola="${uid}"]`); await p.waitForTimeout(400);
+    assert.ok(await p.locator('.hoja >> text=Mensaje de prueba del servidor').count() > 0, 'la hoja no muestra el mensaje del servidor');
+    assert.equal(await p.locator('text=Ya registraste este comercio hoy').count(), 0, 'la hoja la bloquea como segunda visita del día');
+    if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/cola-corregir-${tema}.png`, fullPage: false });
+    await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => 'id-prueba'; });
+    const antes = await p.evaluate(() => window.__llamadas.length);
+    await p.click('[data-guardar-visita]'); await p.waitForTimeout(700);
+    const reg = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_registrar_visita');
+    assert.ok(reg, 'no se reenvió');
+    assert.equal(reg[1].p_cliente_uid, uid, 'cambió el identificador de la visita');
+    assert.equal(reg[1].p_visitado_en, hora, 'cambió la hora de la visita');
+    assert.equal(reg[1].p_motivo, 'Cerrado');
+    assert.ok(!('_rechazo' in reg[1]), 'mandó al servidor la marca interna de la cola');
+    assert.equal((await p.evaluate(() => S.cola)).length, 0, 'la visita reenviada sigue en la cola');
+    console.log(`ok  ${tema} · cola: rechazada queda pendiente de revisar y se reenvía corregida`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · cola: ${e.message}`); }
   if (errs.length) { fallas++; console.log(`MAL ${tema} · errores de consola:`, errs); }
   await b.close();
 }

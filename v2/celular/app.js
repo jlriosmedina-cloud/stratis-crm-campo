@@ -236,16 +236,24 @@ async function historial(cid){
   S.hist[cid] = data || []; S._mantenerScroll = true; pintar();
 }
 async function enviar(v){
-  const { error } = await sb.rpc("v2_registrar_visita", v);
+  const args = Object.fromEntries(Object.entries(v).filter(([k]) => k.startsWith("p_")));
+  const { error } = await sb.rpc("v2_registrar_visita", args);
   if (error) throw error;
+}
+// Regla n.º 1: una visita que el servidor rechaza no se borra del celular. Queda «pendiente de revisar»
+// con el mensaje del servidor, hasta que el ejecutivo la corrija y la reenvíe.
+function marcarRechazo(uidV, msg){
+  const v = S.cola.find(x => x.p_cliente_uid === uidV);
+  if (v){ v._rechazo = { msg: msg || "error desconocido", en: new Date().toISOString() }; guardarCola(); }
 }
 async function vaciarCola(){
   if (!S.cola.length || !navigator.onLine) return;
-  const pend = [...S.cola]; let ok = 0, tarde = 0; const hoy = diaLima(Date.now());
+  const pend = S.cola.filter(v => !v._rechazo); let ok = 0, tarde = 0, rech = 0; const hoy = diaLima(Date.now());
   for (const v of pend){
     try { await enviar(v); S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); ok++; if (plazoDe(v.p_visitado_en) < hoy) tarde++; }
-    catch(e){ if (!/fetch|network|Failed/i.test(e.message || "")){ S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); avisar("Una visita guardada sin señal no se pudo registrar: " + e.message, 7000); } }
+    catch(e){ if (!/fetch|network|Failed/i.test(e.message || "")){ marcarRechazo(v.p_cliente_uid, e.message); rech++; } }
   }
+  if (rech) avisar(`${rech === 1 ? "Una visita guardada sin señal no se pudo registrar" : rech + " visitas guardadas sin señal no se pudieron registrar"}. Siguen en el celular como «pendiente de revisar»: corrígela${rech === 1 ? "" : "s"} y reenvíala${rech === 1 ? "" : "s"} desde el inicio.`, 8000);
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.${tarde ? ` ${tarde === 1 ? "Una llegó" : tarde + " llegaron"} fuera de plazo: ${tarde === 1 ? "queda" : "quedan"} en tu historial, pero no ${tarde === 1 ? "cuenta" : "cuentan"} para el bono.` : ""}`, tarde ? 8000 : undefined); recargarBase(); }
 }
@@ -356,8 +364,9 @@ function vistaInicio(){
     <div class="cuerpo">
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
         ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
-      ${S.cola.length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${S.cola.length} ${S.cola.length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = S.cola.map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
-        const uno = venc === 1; return venc ? `<b style="color:var(--rojo)">${uno ? "Una ya pasó su plazo" : venc + " ya pasaron su plazo"}:</b> ${uno ? "se registra, pero no cuenta" : "se registran, pero no cuentan"} para tu bono.` : S.cola.length === 1 ? `Tiene que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llega después, se registra pero no cuenta para tu bono.` : `Tienen que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llegan después, se registran pero no cuentan para tu bono.`; })()}</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
+      ${colaRechazadas()}
+      ${colaEsperando().length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${colaEsperando().length} ${colaEsperando().length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = colaEsperando().map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
+        const uno = venc === 1; return venc ? `<b style="color:var(--rojo)">${uno ? "Una ya pasó su plazo" : venc + " ya pasaron su plazo"}:</b> ${uno ? "se registra, pero no cuenta" : "se registran, pero no cuentan"} para tu bono.` : colaEsperando().length === 1 ? `Tiene que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llega después, se registra pero no cuenta para tu bono.` : `Tienen que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llegan después, se registran pero no cuentan para tu bono.`; })()}</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
       ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
         <div class="nota">Mientras se termina la asignación, cualquier ejecutivo puede visitar un comercio libre. El primero que registra la visita se queda con él y desde ahí aparece solo en su base.</div>
@@ -955,6 +964,39 @@ function tarjetaParametros(a){
     <div class="nota" style="margin-top:8px">Esto sale de la tabla de parámetros del periodo ${esc(a.periodo)}. Cambiarlo ahí cambia el cálculo en todo el CRM.</div></div>`;
 }
 
+/* ---------------- cola: pendientes de revisar ---------------- */
+const colaEsperando = () => (S.cola || []).filter(v => !v._rechazo);
+function colaRechazadas(){
+  const l = (S.cola || []).filter(v => v._rechazo);
+  if (!l.length) return "";
+  const uno = l.length === 1;
+  return `<div class="card" style="border:1.5px solid var(--rojo)"><div class="eyebrow" style="color:var(--rojo)">Pendiente de revisar</div>
+    <h2>${uno ? "Una visita no se pudo registrar" : l.length + " visitas no se pudieron registrar"}</h2>
+    <div class="nota">${uno ? "Sigue guardada" : "Siguen guardadas"} en este celular con su hora y ubicación. ${uno ? "Corrígela y reenvíala" : "Corrígelas y reenvíalas"}: no se borran solas.</div>
+    ${l.map(v => { const c = S.base.find(x => x.customer_id === v.p_customer_id);
+      return `<div class="parada" style="display:block"><span class="t"><b>${esc(c ? nombreDe(c) : "ID " + v.p_customer_id)}</b><small>${fechaCorta(v.p_visitado_en)} · ${horaCorta(v.p_visitado_en)}</small></span>
+        <div class="revision fuera"><b>El servidor respondió:</b> ${esc(v._rechazo.msg)}</div>
+        <button class="btn btn-pri btn-full" data-corregir-cola="${esc(v.p_cliente_uid)}">Corregir y reenviar</button></div>`; }).join("")}</div>`;
+}
+// Abre la hoja de registro con lo que quedó en la cola: misma hora, misma ubicación y mismo identificador,
+// para que el servidor no la cuente dos veces si ya la había recibido.
+function corregirDeCola(uidV){
+  const v = (S.cola || []).find(x => x.p_cliente_uid === uidV); if (!v) return;
+  const m = modoDesde({ con:v.p_con, motivo:v.p_motivo, que:v.p_que });
+  const ext = Object.assign(extVacio(), JSON.parse(JSON.stringify(v.p_fb_extra || {})));
+  ["tasa_competidor", "dias_demora_abono"].forEach(k => { ext[k] = ext[k] == null ? "" : String(ext[k]); });
+  const r = { id:v.p_customer_id, busca:"", gps:v.p_lat != null ? "ok" : "error", gpsError:v.p_lat != null ? "" : "La visita se guardó sin ubicación.",
+    lat:v.p_lat, lng:v.p_lng, precision:v.p_precision, hora:new Date(v.p_visitado_en),
+    modo:m.modo, modo2:null, conQuien:m.conQuien, con:null, motivo:m.motivo || v.p_motivo || null, que:null, decision:v.p_decision || null, equipo:v.p_equipo || null,
+    fechaNueva:v.p_fecha_reagenda || "", comentario:v.p_comentario || "", dirOk:null, ubicado:m.ubicado,
+    feedback:(v.p_feedback || []).slice(), feedbackNota:v.p_feedback_nota || "", fbAbierto:false, fbAcc:(v.p_fb_acciones || []).slice(), fbExt:ext,
+    voz:v.p_comentario_voz || "", dictando:false, ia:null, iaCargando:false, iaError:"", motivosSi:(v.p_motivos_si || []).slice(), msiAbierto:false,
+    intento:true, enviando:false, uid:v.p_cliente_uid, desdeCola:true, error:v._rechazo ? v._rechazo.msg : "" };
+  if (v.p_con !== "Nadie" && v.p_direccion_ok === false && v.p_comercio_ubicado === true){ r.modo2 = r.modo; r.modo = "noesta"; r.ubicado = "si"; }
+  aplicarModo(r, false);
+  S.reg = r; pintar();
+}
+
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id, dictar){
   S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), modo:null, modo2:null, conQuien:null, con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, ubicado:null, feedback:[], feedbackNota:"", fbAbierto:false, fbAcc:[], fbExt:extVacio(), voz:"", dictando:false, ia:null, iaCargando:false, iaError:"", motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
@@ -1000,7 +1042,7 @@ function hojaRegistro(){
     <header><div class="asa"></div><div class="fila-ent"><h2>Registrar visita</h2><button class="btn btn-lin" style="padding:6px 12px;font-size:13px" data-cancelar>Cancelar</button></div></header>
     <div class="scroll">${pasos}<div class="paso"><div class="ya-cuenta"><b>Ya registraste este comercio hoy${hoyV.hora ? " a las " + hoyV.hora : ""}</b><br>
       Un comercio lleva una sola visita por día. Si volviste o quieres cambiar algo, corrige esa visita: puedes cambiar lo que pasó, el comentario y la ubicación.
-      ${hoyV.enCola ? "<span>Esa visita está guardada en el celular esperando señal; se envía sola.</span>" : `<button class="btn btn-pri" data-corregir-hoy="${esc(c.customer_id)}">Corregir la visita de hoy</button>`}
+      ${hoyV.rechazada ? `<span>Esa visita está en el celular como «pendiente de revisar».</span><button class="btn btn-pri" data-corregir-cola="${esc(hoyV.uid)}">Corregir y reenviar</button>` : hoyV.enCola ? "<span>Esa visita está guardada en el celular esperando señal; se envía sola.</span>" : `<button class="btn btn-pri" data-corregir-hoy="${esc(c.customer_id)}">Corregir la visita de hoy</button>`}
       <button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div></div></div>
   </div></div>`;
   const gpsTxt = r.gps === "buscando" ? "Tomando ubicación…" : r.gps === "ok" ? `Ubicación tomada ±${r.precision} m` : "Sin ubicación";
@@ -1030,8 +1072,8 @@ function hojaRegistro(){
 // ¿Ya hay una visita de este comercio hoy (enviada o esperando señal)?
 function visitaDeHoy(c){
   const hoy = diaLima(Date.now());
-  const q = (S.cola || []).find(v => v.p_customer_id === c.customer_id && diaLima(v.p_visitado_en) === hoy);
-  if (q) return { enCola:true, hora:horaCorta(q.p_visitado_en) };
+  const q = (S.cola || []).find(v => v.p_customer_id === c.customer_id && diaLima(v.p_visitado_en) === hoy && !(S.reg && S.reg.uid === v.p_cliente_uid));
+  if (q) return { enCola:true, rechazada:!!q._rechazo, uid:q.p_cliente_uid, hora:horaCorta(q.p_visitado_en) };
   if (c.ultima_visita && diaLima(c.ultima_visita) === hoy) return { enCola:false, hora:horaCorta(c.ultima_visita) };
   return null;
 }
@@ -1397,15 +1439,17 @@ async function guardarVisita(){
   r.enviando = true; S._mantenerScroll = true; pintar();
   try {
     await enviar(v);
+    if (S.cola.some(x => x.p_cliente_uid === v.p_cliente_uid)){ S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); guardarCola(); }
     S.reg = null; delete S.hist[v.p_customer_id];
     await recargarBase();
     const m = metricas();
     avisar(nueva && v.p_lat != null ? `Visita guardada. Llevas <b>${m.visitados} de 160</b> comercios visitados.` : nueva ? "Visita guardada sin ubicación: no suma a las 160." : `Visita guardada como seguimiento. Sigues en <b>${m.visitados} de 160</b>.`);
   } catch(e){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
-      S.cola.push(v); guardarCola(); S.reg = null;
+      S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); S.cola.push(v); guardarCola(); S.reg = null;
       avisar(`Sin señal: la visita quedó guardada en el celular con su hora y ubicación. Se envía sola cuando vuelva la conexión; para que cuente tiene que llegar a más tardar el ${fISO(plazoDe(v.p_visitado_en))}.`, 7000);
-    } else { r.enviando = false; if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); avisar("No se guardó: " + esc(e.message), 7000); }
+    } else { r.enviando = false; if (r.desdeCola) marcarRechazo(v.p_cliente_uid, e.message);
+      if (/otro ejecutivo/.test(e.message || "")){ S.reg = null; recargarBase(); avisar("No se guardó: " + esc(e.message), 7000); }
       else { r.error = e.message || "error desconocido"; S._mantenerScroll = true; pintar(); try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch(x){} } }
   }
 }
@@ -1431,6 +1475,7 @@ function enlazar(){
   const ta = p.querySelector("#accTexto");
   if (ta) ta.oninput = e => { if (S.accion) S.accion.texto = e.target.value; };
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
+  p.querySelectorAll("[data-corregir-cola]").forEach(b => b.onclick = () => corregirDeCola(b.dataset.corregirCola));
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => {
     S.vista = b.dataset.vista; S.ficha = null; S.accion = null; S.corr = null;
     if (b.dataset.filtroVisita) S.filtroVisita = "vis";
