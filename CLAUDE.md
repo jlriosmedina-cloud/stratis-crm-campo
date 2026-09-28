@@ -20,6 +20,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
 
 ## Cómo se trabaja
 
+- **Revisar** antes de pedirle a Jose el OK para aplicar una migración o publicar: corre el revisor (`/revisar` o el subagente `revisor` de `.claude/agents/`) y muestra su informe junto con la propuesta. Si el revisor marca una decisión de negocio, dilo al inicio.
 - **Editar** `v2/<app>/app.js`, `estilos.css` o `shell.html`. Nunca editar a mano `index.html` ni `escritorio/index.html`.
 - **Armar** con `python v2/build.py` (en Windows también `py v2/build.py`), que genera `v2/dist/`. BUILD es un hash del contenido, y el celular avisa «versión nueva» cuando cambia.
 - **Probar** antes de publicar con `cd v2/qa && npm test` (la primera vez: `npm install` y `npx playwright install chromium`). Las pruebas usan solo datos inventados. Tienen que pasar en claro y en oscuro y sin errores de consola:
