@@ -19,7 +19,8 @@ const visita = (i, extra) => Object.assign({
   feedback: ['Sin observaciones del comercio'], fb_acciones: null, fb_extra: null, feedback_nota: null, motivos_si: null
 }, extra);
 const ACT = [
-  visita(1),
+  // 29/09: habló con el encargado y quedaron en volver
+  visita(1, { fecha_reagenda: hoy }),
   visita(2, { que: 'Reagendada', decision: null, fecha_reagenda: hoy, feedback: ['No se encontraba la persona que tomaba decisiones'], fb_acciones: ['Reagendé con quien decide'] }),
   visita(3, { que: 'Sin éxito', decision: null, feedback: ['No se encontraba la persona que tomaba decisiones'] }),
   visita(4, { con: 'Nadie', motivo: 'Cerrado', que: 'Sin éxito', decision: null, feedback: null }),
@@ -52,8 +53,10 @@ const prueba = async (nombre, fn) => { try { await fn(); console.log('ok  ' + no
 await prueba('lista con «Cómo fue la visita»', async () => {
   await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; S.filtro = 'todos'; pintar(); }); await p.waitForTimeout(400);
   const res = (await p.locator('td.res').allInnerTexts()).join(' | ');
-  for (const t of ['Habló con el dueño o encargado', 'No estaba quien decide · quedó en volver', 'No estaba quien decide · sin compromiso', 'No hubo contacto', 'El comercio no está en esta dirección'])
+  for (const t of ['Habló con el dueño o encargado', 'No estaba quien decide · quedó en volver', 'No estaba quien decide · sin compromiso', 'No se pudo hacer la visita', 'El comercio no está en esta dirección'])
     assert.ok(res.includes(t), 'falta: ' + t);
+  assert.ok(res.includes('Cerrado hoy'), '«Cerrado» se lee «Cerrado hoy»');
+  assert.ok(/Encargado · Aún no decide · vuelve el/.test(res), 'no muestra la fecha para volver con el encargado');
 });
 await prueba('señal «Revisar marcación» solo en la visita contradictoria', async () => {
   const n = await p.evaluate(() => S.act.filter(v => revisarMarcacion(v)).map(v => v.customer_id));
@@ -82,6 +85,19 @@ await prueba('base para BBVA con 4 tablas dinámicas', async () => {
   assert.equal(piv.length, 4, 'tablas dinámicas: ' + piv.length);
   const wb = await z.file('xl/workbook.xml').async('string');
   for (const h of ['KPIs', 'Base', 'Visitas', 'Feedback_Detalle', 'Diccionario']) assert.ok(wb.includes(`name="${h}"`), 'falta hoja ' + h);
+  // tipificaciones del 29/09: columnas del feedback nuevo y el diccionario de los motivos
+  const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
+  for (const t of ['No pidió el POS', 'Desconfía de la visita (duda que representemos a BBVA)', 'Solicitó cambio de equipo', 'Le falta una función', 'Zona insegura', 'Comercio_Cerro_Definitivamente'])
+    assert.ok(txt.includes(t), 'falta en el Excel: ' + t);
+  // las columnas de antes no se corren: las del 29/09 van después de la última de antes (Base 49, Visitas 46)
+  const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
+  const cabs = h => xw.getWorksheet(h).getRow(1).values.slice(1).map(String);
+  const NUEVAS = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
+  const cb = cabs('Base'), cv = cabs('Visitas');
+  assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 49, 'Base: la última columna de antes se movió');
+  assert.deepEqual(cb.slice(49), NUEVAS.concat('Comercio_Cerro_Definitivamente'));
+  assert.equal(cv.indexOf('Fuente_Motivos_Si') + 1, 46, 'Visitas: la última columna de antes se movió');
+  assert.deepEqual(cv.slice(46), NUEVAS);
   fs.unlinkSync(f);
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }

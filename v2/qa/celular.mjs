@@ -6,7 +6,10 @@ import assert from 'node:assert/strict';
 
 const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagendé con quien decide', SINOBS = 'Sin observaciones del comercio';
 const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
-const BASE = [1, 2, 3, 4, 5, 7].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO })]);
+const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO }),
+  // quedó en volver con el dueño (29/09): sigue en «Aún no decide», pero entra al filtro «Reagendados»
+  comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() })]);
+const NOPIDIO = 'No pidió el POS';
 // La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
 const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
   correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre_corto, con: 'Dueño', motivo: null, que: 'Reunión concretada', decision: 'Aún no decide',
@@ -23,13 +26,25 @@ const FX = {
 const CASOS = [
   { cid: '00000001', modo: 'hable', pasos: async p => { await p.click('[data-op=conQuien][data-val=Dueño]'); await p.click('[data-op=decision][data-val="Aún no decide"]');
       await p.click('[data-fb-toggle]'); await p.click(`[data-fb="${SINOBS}"]`); await p.click('.fb-pie [data-fb-toggle]'); },
-    ok: v => { assert.equal(v.p_con, 'Dueño'); assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.deepEqual(v.p_feedback, [SINOBS]); } },
+    ok: v => { assert.equal(v.p_con, 'Dueño'); assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.deepEqual(v.p_feedback, [SINOBS]); assert.equal(v.p_fecha_reagenda, null); } },
+  // 29/09: con el dueño se puede anotar la fecha para volver (opcional) y marcar el feedback nuevo
+  { cid: '00000008', modo: 'hable', nombre: 'hable · quedaron en volver con el dueño', pasos: async p => { await p.click('[data-op=conQuien][data-val=Dueño]'); await p.click('[data-op=decision][data-val="Aún no decide"]');
+      await p.fill('#fechaNueva', mananaLima()); await p.dispatchEvent('#fechaNueva', 'change');
+      await p.click('[data-fb-toggle]'); await p.click(`[data-fb="${NOPIDIO}"]`); await p.click('.fb-pie [data-fb-toggle]');
+      await p.click('[data-fb-acc="Mostré los beneficios de cobrar con tarjeta"]'); },
+    ok: v => { assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.equal(v.p_fecha_reagenda, mananaLima());
+      assert.deepEqual(v.p_feedback, [NOPIDIO]); assert.deepEqual(v.p_fb_acciones, ['Mostré los beneficios de cobrar con tarjeta'], 'no debe marcar «' + REAG + '»'); } },
   { cid: '00000002', modo: 'volver', pasos: async p => { await p.fill('#fechaNueva', mananaLima()); await p.dispatchEvent('#fechaNueva', 'input'); await p.dispatchEvent('#fechaNueva', 'change'); },
     ok: v => { assert.equal(v.p_con, 'Tercero'); assert.equal(v.p_que, 'Reagendada'); assert.equal(v.p_fecha_reagenda, mananaLima()); assert.ok(v.p_feedback.includes(DEC)); assert.ok((v.p_fb_acciones || []).includes(REAG)); } },
   { cid: '00000003', modo: 'sin', pasos: async () => {},
     ok: v => { assert.equal(v.p_con, 'Tercero'); assert.equal(v.p_que, 'Sin éxito'); assert.ok(v.p_feedback.includes(DEC)); assert.ok(!(v.p_fb_acciones || []).includes(REAG)); } },
   { cid: '00000004', modo: 'nadie', pasos: async p => { await p.click('[data-op=motivo][data-val=Cerrado]'); },
-    ok: v => { assert.equal(v.p_con, 'Nadie'); assert.equal(v.p_motivo, 'Cerrado'); assert.equal(v.p_feedback, null); } },
+    ok: v => { assert.equal(v.p_con, 'Nadie'); assert.equal(v.p_motivo, 'Cerrado'); assert.equal(v.p_feedback, null); assert.equal(v.p_direccion_ok, true); } },
+  { cid: '00000009', modo: 'nadie', nombre: 'nadie · zona insegura', pasos: async p => { await p.click('[data-op=motivo][data-val="Zona insegura"]'); },
+    ok: v => { assert.equal(v.p_con, 'Nadie'); assert.equal(v.p_motivo, 'Zona insegura'); assert.equal(v.p_direccion_ok, null, 'con zona insegura no se sabe la dirección'); } },
+  { cid: '00000010', modo: 'nadie', nombre: 'nadie · otro motivo', pasos: async p => { await p.click('[data-op=motivo][data-val="Otro motivo"]');
+      assert.ok(await p.locator('text=Cuenta en el comentario qué impidió la visita').count() > 0, 'no pide contarlo en el comentario'); },
+    ok: v => { assert.equal(v.p_motivo, 'Otro motivo'); assert.equal(v.p_direccion_ok, null); } },
   { cid: '00000005', modo: 'noesta', pasos: async p => { await p.click('[data-op=ubicado][data-val=no]'); },
     ok: v => { assert.equal(v.p_con, 'Nadie'); assert.equal(v.p_motivo, 'Dirección errada'); assert.equal(v.p_direccion_ok, false); assert.equal(v.p_comercio_ubicado, false); } }
 ];
@@ -52,9 +67,19 @@ for (const tema of ['light', 'dark']) {
       const llam = await p.evaluate(n => window.__llamadas.slice(n), antes);
       const reg = llam.find(x => x[0] === 'v2_registrar_visita');
       if (!reg) { const falta = await p.locator('.falta-caja').innerText().catch(() => ''); throw new Error('no se envió: ' + falta); }
-      c.ok(reg[1]); console.log(`ok  ${tema} · ${c.modo}`);
-    } catch (e) { fallas++; console.log(`MAL ${tema} · ${c.modo}: ${e.message}`); await p.evaluate(() => { S.reg = null; pintar(); }); }
+      c.ok(reg[1]); console.log(`ok  ${tema} · ${c.nombre || c.modo}`);
+    } catch (e) { fallas++; console.log(`MAL ${tema} · ${c.nombre || c.modo}: ${e.message}`); await p.evaluate(() => { S.reg = null; pintar(); }); }
   }
+  // «Reagendados» incluye al que quedó en volver con el dueño, y la tarjeta muestra la fecha
+  try {
+    const ids = await p.evaluate(() => { S.filtroEstado = 'rag'; S.filtroVisita = 'todos'; const r = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos'; return r; });
+    assert.deepEqual(ids, ['00000011']);
+    const t = await p.evaluate(() => tarjeta(S.base.find(c => c.customer_id === '00000011')));
+    assert.ok(t.includes('Vuelves el'), 'la tarjeta no muestra la fecha para volver');
+    const tc = await p.evaluate(() => tarjeta(Object.assign({}, S.base[0], { estado: 'sin', ultima_motivo: 'Cerró definitivamente', visitas: 1, visitas_validas: 1 })));
+    assert.ok(tc.includes('Cerró definitivamente'), 'la tarjeta no detalla que cerró definitivamente');
+    console.log(`ok  ${tema} · «Reagendados» incluye volver con el dueño`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · filtro Reagendados: ${e.message}`); }
   // Segunda visita del día: la hoja avisa y ofrece corregir la de hoy
   try {
     await p.evaluate(() => nuevoRegistro('00000006')); await p.waitForTimeout(600);

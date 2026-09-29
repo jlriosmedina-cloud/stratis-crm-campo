@@ -36,6 +36,9 @@ for (const t of ['SECUENCIAS', 'FUNCIONES', 'TABLAS', 'RESTRICCIONES', 'LLAVES',
 await db.exec(`grant usage on schema public, auth, private to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;
 grant all on all sequences in schema public to anon, authenticated, service_role;`);
+// Parte del catálogo de feedback que ya existe en la base antes de las migraciones (la del 29/09 ubica ahí las opciones nuevas)
+await db.exec(`insert into v2_feedback_tipos(texto, grupo, orden, bbva) values ('No necesitaba los POS', 'Decisión y necesidad', 100, true),
+  ('POS no enciende', 'Equipo y contómetros', 110, true), ('Le parece complicado usar el POS', 'Uso del POS', 120, false);`);
 const HASTA = (process.argv.find(a => a.startsWith('--hasta=')) || '').slice(8);
 if (!SIN_NUEVAS) for (const f of fs.readdirSync(MIG).filter(f => f.endsWith('.sql') && f > FOTO && (!HASTA || f <= HASTA)).sort()) await db.exec(fs.readFileSync(path.join(MIG, f), 'utf8'));
 
@@ -197,7 +200,7 @@ caso('corregir: «No estaba» se conserva en una visita antigua, pero no se pued
   await editar(EJ, vieja, { con: 'Nadie', motivo: 'No estaba', comentario: 'Comentario antiguo corregido' });
   assert.equal((await visita(vieja)).motivo, 'No estaba');
   const nueva = await registrar(EJ, { cid: '00000008', con: 'Nadie', motivo: 'Cerrado' });
-  await falla(editar(EJ, nueva, { con: 'Nadie', motivo: 'No estaba' }), /Elige por qué no hubo contacto/);
+  await falla(editar(EJ, nueva, { con: 'Nadie', motivo: 'No estaba' }), /Elige por qué no se pudo hacer la visita/);
 });
 caso('la reactivación solo cuenta desde una visita válida con contacto', async () => {
   const trx = async (cid, dias) => { for (const d of dias){ const f = await diaMas(-d); await db.query(`insert into v2_transacciones(fecha_corte, customer_id, mes, formato, trx) values ($1::date, $2, to_char($1::date, 'YYYY-MM'), 'diario', 3)`, [f, cid]); } };
@@ -331,6 +334,71 @@ caso('las funciones nuevas nacen cerradas para anon y PUBLIC, y abiertas para au
   await db.exec('drop function public.v2_funcion_de_prueba()');
   assert.equal(r.anon, false, 'anon puede ejecutarla'); assert.equal(r.publico, false, 'PUBLIC puede ejecutarla'); assert.equal(r.auth, true, 'authenticated no puede ejecutarla');
 });
+// ---------- tipificaciones del 29/09 ----------
+// Comercios nuevos para no chocar con la regla de una visita por comercio y día
+async function nuevoComercio(n){
+  const cid = String(n).padStart(8, '0');
+  await db.query(`insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad) values ($1, 'COMERCIO DE PRUEBA ' || $2 || ' SAC', -12.09, -77.04, 'numero')`, [cid, n]);
+  await db.query(`insert into v2_asignaciones(periodo, customer_id, correo) values ('2099-01', $1, $2)`, [cid, EJ]);
+  return cid;
+}
+caso('«No se pudo hacer la visita»: los motivos nuevos se guardan y cuentan como visita', async () => {
+  const zona = await registrar(EJ, { cid: await nuevoComercio(21), con: 'Nadie', motivo: 'Zona insegura', dok: true });
+  let v = await visita(zona); assert.equal(v.motivo, 'Zona insegura'); assert.equal(v.que, 'Sin éxito'); assert.equal(v.direccion_ok, null, 'con zona insegura no se sabe la dirección');
+  const cerro = await registrar(EJ, { cid: await nuevoComercio(22), con: 'Nadie', motivo: 'Cerró definitivamente', dok: true });
+  assert.equal((await visita(cerro)).direccion_ok, true);
+  const otro = await registrar(EJ, { cid: await nuevoComercio(23), con: 'Nadie', motivo: 'Otro motivo', dok: true });
+  assert.equal((await visita(otro)).direccion_ok, null);
+  const mb = (await como(EJ, `select customer_id, visitas_validas from public.v2_mi_base() where customer_id in ('00000021','00000022','00000023') order by 1`)).rows;
+  assert.deepEqual(mb.map(x => x.visitas_validas), [1, 1, 1], 'los motivos nuevos no cuentan como visita');
+  // corregir entre motivos, y un motivo que no existe se rechaza
+  await editar(EJ, otro, { con: 'Nadie', motivo: 'Cerró definitivamente' });
+  assert.equal((await visita(otro)).motivo, 'Cerró definitivamente');
+  // no pasa a Cancelado: la visita cuenta y el estado lo detalla (decisión de Jose, 29/09)
+  const cer = (await como(EJ, `select estado, ultima_motivo, visitas_validas from public.v2_mi_base() where customer_id = '00000023'`)).rows[0];
+  assert.deepEqual(cer, { estado: 'sin', ultima_motivo: 'Cerró definitivamente', visitas_validas: 1 });
+  await editar(EJ, cerro, { con: 'Nadie', motivo: 'Zona insegura' });
+  v = await visita(cerro); assert.equal(v.motivo, 'Zona insegura'); assert.equal(v.direccion_ok, null);
+  await falla(editar(EJ, zona, { con: 'Nadie', motivo: 'Motivo inventado' }), /Elige por qué no se pudo hacer la visita/);
+});
+caso('con el dueño o el encargado se puede anotar la fecha para volver (opcional)', async () => {
+  const fb = ['Usa POS de otra marca'], acc = ['Ofrecí evaluar una mejora de tasa'];
+  const manana = await diaMas(1);
+  const id = await registrar(EJ, { cid: await nuevoComercio(24), con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', fecha: manana, feedback: fb, acciones: acc });
+  let v = await visita(id);
+  assert.equal(v.fecha_reagenda.toISOString().slice(0, 10), manana); assert.equal(v.fecha_lejana, false);
+  assert.deepEqual(v.feedback, fb, 'no debe agregar «No se encontraba la persona que tomaba decisiones»');
+  assert.deepEqual(v.fb_acciones, acc, 'no debe agregar «Reagendé con quien decide»');
+  let mb = (await como(EJ, `select estado, volver_el::text from public.v2_mi_base() where customer_id = '00000024'`)).rows[0];
+  assert.equal(mb.estado, 'seg', 'el estado no cambia'); assert.equal(mb.volver_el, manana);
+  // sin fecha sigue igual que antes
+  const sin = await registrar(EJ, { cid: await nuevoComercio(25), con: 'Tercero', que: 'Reunión concretada', decision: 'Realizará consumos', feedback: ['Sin observaciones del comercio'] });
+  assert.equal((await visita(sin)).fecha_reagenda, null);
+  // lejana: se guarda marcada; anterior a la visita: se rechaza (error de captura)
+  const tope = await habil(hoy, 10), pasado = (await db.query(`select ($1::date + 1)::text d`, [tope])).rows[0].d;
+  const lej = await registrar(EJ, { cid: await nuevoComercio(26), con: 'Dueño', que: 'Reunión concretada', decision: 'Realizará consumos', fecha: pasado, feedback: fb });
+  assert.equal((await visita(lej)).fecha_lejana, true);
+  await falla(registrar(EJ, { cid: await nuevoComercio(27), con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', fecha: await diaMas(-1), feedback: fb }), /anterior a la visita/);
+  // corregir: se puede quitar la fecha y volver a ponerla; con «Sin éxito» no se guarda
+  await editar(EJ, id, { con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: fb, acciones: acc });
+  assert.equal((await visita(id)).fecha_reagenda, null, 'no quitó la fecha');
+  await editar(EJ, id, { con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', fecha: manana, feedback: fb, acciones: acc });
+  assert.equal((await visita(id)).fecha_reagenda.toISOString().slice(0, 10), manana);
+  await editar(EJ, id, { con: 'Tercero', que: 'Sin éxito', fecha: manana, feedback: ['No se encontraba la persona que tomaba decisiones'] });
+  assert.equal((await visita(id)).fecha_reagenda, null, '«Sin éxito» no lleva fecha');
+});
+caso('las cuatro opciones nuevas de feedback se guardan sin marcarse como fuera de la lista', async () => {
+  const nuevas = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
+  const t = (await db.query(`select texto, grupo, bbva from v2_feedback_tipos where texto = any($1) order by texto`, [nuevas])).rows;
+  assert.equal(t.length, 4, 'faltan opciones en v2_feedback_tipos');
+  assert.ok(t.every(x => x.bbva === false), 'las agregó Stratis, no BBVA');
+  assert.deepEqual(Object.fromEntries(t.map(x => [x.texto, x.grupo])), { 'Desconfía de la visita (duda que representemos a BBVA)': 'Decisión y necesidad',
+    'Le falta una función': 'Uso del POS', 'No pidió el POS': 'Decisión y necesidad', 'Solicitó cambio de equipo': 'Equipo y contómetros' });
+  const id = await registrar(EJ, { cid: await nuevoComercio(28), con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: nuevas });
+  const v = await visita(id);
+  assert.deepEqual(v.feedback.slice().sort(), nuevas.slice().sort()); assert.equal(v.datos_observados, null);
+});
+
 // Estos van al final: sin la migración, el TRUNCATE sí vacía las tablas.
 const TABLAS_APP = `select c.oid::regclass::text t from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') and (c.relname like 'v2\\_%' or c.relname = 'usuarios') order by 1`;

@@ -389,7 +389,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "6645f1";
+const BUILD = "f397f0";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -411,6 +411,9 @@ const ESTADOS = {
   rag:{ t:"Reagendado", c:"e-seg" },
   sin:{ t:"Visitado · sin éxito", c:"e-seg" }
 };
+// «Cerró definitivamente» (29/09): no pasa a Cancelado porque la visita se dio y cuenta; el estado lo detalla.
+const CERRO = { t:"Cerró definitivamente", c:"e-can", ayuda:"En tu última visita el local había cerrado definitivamente. La visita cuenta." };
+const estadoCom = c => c.estado === "sin" && c.ultima_motivo === "Cerró definitivamente" ? CERRO : ESTADOS[c.estado] || ESTADOS.por;
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
   filtroVisita:"todos", masFiltros:false, corr:null, filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", avanceEn:null, act:null, actErr:"", actEn:null, actDia:"hoy", accion:null, cola:leerCola() };
 
@@ -434,10 +437,10 @@ function guardarCola(){ try { localStorage.setItem("stratis-v2-cola", JSON.strin
 const FEEDBACK = [
   ["Competencia y otros medios de cobro", ["Usa POS de otra marca", "Cobra con Yape o Plin para no pagar comisión", "Solo acepta efectivo"]],
   ["Tasa y abonos", ["Pide una tasa más baja", "POS no cuenta con la tarifa acordada", "POS problema con abonos", "Los abonos le llegan con demora"]],
-  ["Equipo y contómetros", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta", "No tiene contómetros o le quedan pocos"]],
-  ["Uso del POS", ["Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos"]],
+  ["Equipo y contómetros", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta", "No tiene contómetros o le quedan pocos", "Solicitó cambio de equipo"]],
+  ["Uso del POS", ["Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Le falta una función"]],
   ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde"]],
-  ["Decisión y necesidad", ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS"]],
+  ["Decisión y necesidad", ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS"]],
 ];
 const RAMAS_CORTAS = { "Competencia y otros medios de cobro":"Competencia", "Tasa y abonos":"Tasa y abonos", "Equipo y contómetros":"Equipo y contómetros", "Uso del POS":"Uso del POS", "Atención y soporte":"Atención y soporte", "Decisión y necesidad":"Decisión y necesidad" };
 const ACCIONES = [
@@ -478,8 +481,14 @@ const MODOS = [
   ["hable", "Hablé con el dueño o el encargado", "Te dio su posición sobre el POS"],
   ["volver", "No estaba quien decide · quedamos en volver", "Anotas la fecha en que vuelves"],
   ["sin", "No estaba quien decide · sin compromiso", "No te dieron información ni una fecha"],
-  ["nadie", "No hubo contacto", "Local cerrado o nadie atendió"],
+  ["nadie", "No se pudo hacer la visita", "Cerrado, nadie atendió, zona insegura u otro motivo"],
   ["noesta", "El comercio no está en esta dirección", "Otro negocio, una vivienda o nadie lo conoce"]];
+// «No se pudo hacer la visita» (29/09, propuesta aprobada por Gabriel): todas cuentan como visita.
+// «Cerrado» se guarda igual que antes y se lee «Cerrado hoy».
+const MOTIVOS_NADIE = [["Cerrado", "Cerrado hoy"], ["Cerró definitivamente", "Cerró definitivamente"], ["No atendió", "Nadie atendió"],
+  ["Zona insegura", "Zona insegura"], ["Otro motivo", "Otro motivo"]];
+// Con zona insegura u otro motivo no se sabe si el local está en la dirección
+const MOTIVOS_SIN_DIRECCION = ["Zona insegura", "Otro motivo"];
 // el modo que cuenta: si el comercio no estaba en la dirección pero lo encontró, vale lo que pasó en el nuevo lugar
 function modoEfectivo(r){
   if (!r) return null;
@@ -508,11 +517,12 @@ function aplicarModo(r, corr){
   if (m === "hable"){ r.con = r.conQuien || null; r.que = "Reunión concretada"; r.motivo = null; }
   else if (m === "volver"){ r.con = "Tercero"; r.que = "Reagendada"; r.motivo = null; }
   else if (m === "sin"){ r.con = "Tercero"; r.que = "Sin éxito"; r.motivo = null; }
-  else if (m === "nadie"){ r.con = "Nadie"; r.que = null; if (!["Cerrado","No atendió"].includes(r.motivo)) r.motivo = null; }
+  else if (m === "nadie"){ r.con = "Nadie"; r.que = null; if (!MOTIVOS_NADIE.some(([v]) => v === r.motivo)) r.motivo = null;
+    if (!corr && MOTIVOS_SIN_DIRECCION.includes(r.motivo)) r.dirOk = null; }
   else if (m === "noesta"){ r.con = "Nadie"; r.que = null; r.motivo = "Dirección errada"; }
   else { r.con = null; r.que = null; r.motivo = null; }
   if (m !== "hable"){ r.decision = null; r.equipo = null; r.motivosSi = []; }
-  if (m !== "volver") r.fechaNueva = "";
+  if (m !== "volver" && m !== "hable") r.fechaNueva = "";
   if (!["hable","volver","sin"].includes(m)){ r.feedback = []; r.fbAcc = []; r.fbExt = extVacio(); r.feedbackNota = ""; r.fbAbierto = false; return; }
   let fb = (r.feedback || []).filter(t => m === "hable" ? t !== FB_DEC : t !== FB_NINGUNO);
   if (m !== "hable" && !fb.includes(FB_DEC)) fb = fb.concat(FB_DEC);
@@ -529,8 +539,8 @@ function pasoModo(r, attr, corr, c){
     ${c ? `<div class="dir-base">${esc(dirDe(c) || "Sin dirección en la base")}${c.distrito ? `<small>${esc(c.distrito)} · dirección de la base</small>` : ""}</div>` : ""}
     <div class="opciones c1 modos">${MODOS.map(([k, t, sub]) => op("modo", k, t, sub, tonoDe(k))).join("")}</div>`;
   if (r.modo === "hable") h += quien;
-  if (r.modo === "nadie") h += `<div class="sub-paso"><span class="eyebrow">¿Qué encontraste?</span><div class="opciones c2">${op("motivo","Cerrado","Local cerrado","","rojo")}${op("motivo","No atendió","Nadie atendió","","rojo")}</div>
-    <div class="explica" style="margin-top:8px">Cuenta como visita, porque estuviste en el comercio.</div></div>`;
+  if (r.modo === "nadie") h += `<div class="sub-paso"><span class="eyebrow">¿Qué pasó?</span><div class="opciones c2">${MOTIVOS_NADIE.map(([v, t]) => op("motivo", v, t, "", "rojo")).join("")}</div>
+    <div class="explica" style="margin-top:8px">${r.motivo === "Otro motivo" ? "Cuenta en el comentario qué impidió la visita. " : ""}Cuenta como visita, porque fuiste al comercio.</div></div>`;
   if (r.modo === "noesta" && corr) h += `<div class="explica" style="margin-top:8px">Queda como dirección errada: no encontraste el comercio.</div>`;
   if (r.modo === "noesta" && !corr){
     h += `<div class="sub-paso"><span class="eyebrow">¿Lo encontraste en otro lugar?</span><div class="opciones c2">${op("ubicado","si","Sí, lo encontré","cerca o en otro local","verde")}${op("ubicado","no","No lo encontré","","rojo")}</div>
@@ -541,6 +551,18 @@ function pasoModo(r, attr, corr, c){
     }
   }
   return h + `</div>`;
+}
+// Fecha para volver: obligatoria si no estaba quien decide y quedaron en volver; opcional si habló con el dueño
+// o el encargado (29/09). attr = "op" (registro) o "cop" (corrección); idCampo = el input de fecha.
+const conFechaVolver = r => r.que === "Reagendada" || r.que === "Reunión concretada";
+function pasoFechaVolver(r, attr, idCampo){
+  const hoy = new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
+  const campo = `<input class="campo" id="${idCampo}" type="date" min="${hoy}" value="${esc(r.fechaNueva || "")}">`;
+  if (r.que === "Reagendada") return `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Cuándo vuelves?</span>${campo}</div>`;
+  if (r.que !== "Reunión concretada" || !r.decision) return "";
+  return `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Quedaron en volver? <em class="fb-oblig">(opcional)</em></span>${campo}
+    ${r.fechaNueva ? `<button class="btn btn-lin mini" style="margin-top:8px" data-${attr}="fechaNueva" data-val="">No quedamos en volver</button>` : ""}
+    <div class="explica" style="margin-top:8px">Si no quedaron en volver, déjalo vacío.</div></div>`;
 }
 
 // «Por qué sí»: se pregunta cuando el comercio realizará consumos (validado por Jose, 25/09/2026)
@@ -558,12 +580,14 @@ function plazoDe(visitadoEn){
 const nombreDe = c => c.nombre_comercial || c.razon_social;
 const dirDe = c => c.direccion_corregida || c.direccion || "";
 const refDe = c => c.referencia || c.referencia_base || "";
+// quedó en volver (reagendada o con el dueño) y la fecha es de hoy en adelante
+const volverPendiente = c => !!c.volver_el && c.volver_el >= new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
 const tieneGeo = c => c.geo_lat != null && c.geo_lng != null && c.geo_calidad !== "distrito";
 const destinoTxt = c => [dirDe(c), c.distrito, "Lima"].filter(Boolean).join(", ");
 const urlGoogle = c => "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
 const urlWaze = c => tieneGeo(c) ? `https://waze.com/ul?ll=${c.geo_lat},${c.geo_lng}&navigate=yes` : "https://waze.com/ul?navigate=yes&q=" + encodeURIComponent(destinoTxt(c));
 function urlRuta(cs){
-  const ps = cs.filter(c => c.estado === "por" || c.estado === "uno" || c.estado === "rag").slice(0, 10);
+  const ps = cs.filter(c => c.estado === "por" || c.estado === "uno" || c.estado === "rag" || volverPendiente(c)).slice(0, 10);
   const lista = (ps.length ? ps : cs.slice(0, 10)).map(c => tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
   if (!lista.length) return "#";
   const dest = lista[lista.length-1], way = lista.slice(0, -1);
@@ -784,11 +808,11 @@ function vistaInicio(){
         <div class="nota">Mientras se termina la asignación, cualquier ejecutivo puede visitar un comercio libre. El primero que registra la visita se queda con él y desde ahí aparece solo en su base.</div>
         <button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base">Buscar un comercio</button></div>` : ""}
       ${!hayRutas && mios.length ? `<div class="card ruta-hoy"><div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Comercios tomados" : "Tus comercios"}</div><h2>Últimos visitados</h2></div><span class="pill e-por">${mios.length}</span></div>
-        <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div></div>` : ""}
+        <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
         <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
-        <div class="paradas">${rutaHoy.cs.slice(0,12).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(dirDe(c))}</small></span><span class="pill ${ESTADOS[c.estado].c}">${ESTADOS[c.estado].t}</span></button>`).join("")}</div>
+        <div class="paradas">${rutaHoy.cs.slice(0,12).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(dirDe(c))}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div>
       </div>` : ""}
       ${volver.length ? `<div class="card"><div class="eyebrow" style="color:var(--ambar)">Vale la pena volver</div><h2>${volver.length} comercio(s) con un solo día de transacción</h2><div class="nota">Un segundo día distinto antes del cierre los convierte en reactivados.</div>
         <div class="paradas">${volver.map(c => `<button class="parada" data-ficha="${c.customer_id}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">1</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(c.distrito)} · ${esc(dirDe(c))}</small></span></button>`).join("")}</div></div>` : ""}
@@ -808,7 +832,8 @@ function filtrar(omitir){
       if (S.filtroVisita === "por" && fueVisitado(c)) return false;
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
     }
-    if (S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
+    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
@@ -819,11 +844,11 @@ function filtrar(omitir){
   });
 }
 function tarjeta(c){
-  const e = ESTADOS[c.estado] || ESTADOS.por;
+  const e = estadoCom(c);
   return `<button class="com" data-ficha="${c.customer_id}">
     <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
     <b>${esc(nombreDe(c))}</b>
-    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
+    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
   </button>`;
 }
 function vistaBase(){
@@ -875,7 +900,7 @@ function vistaRutas(){
 }
 function vistaFicha(c){
   if (!c){ S.ficha = null; return vistaInicio(); }
-  const e = ESTADOS[c.estado] || ESTADOS.por;
+  const e = estadoCom(c);
 
   const editando = S.editando === c.customer_id;
   const h = S.hist[c.customer_id];
@@ -1034,7 +1059,7 @@ function tomarGPSCorreccion(){
 function faltaCorreccion(){
   const r = S.corr, f = [];
   if (!r.modo) f.push("cómo fue la visita");
-  if (r.modo === "nadie" && !r.motivo) f.push("qué encontraste (cerrado o nadie atendió)");
+  if (r.modo === "nadie" && !r.motivo) f.push("qué pasó (por qué no se pudo hacer la visita)");
   if (r.modo === "hable" && !r.conQuien) f.push("con quién hablaste");
   if (r.que === "Reunión concretada" && !r.decision) f.push("qué decidió");
   if (r.decision === "Desiste del producto" && !r.equipo) f.push("si se recuperó el equipo");
@@ -1061,7 +1086,7 @@ async function guardarCorreccion(){
     p_que:r.con === "Nadie" ? "Sin éxito" : r.que,
     p_decision:r.que === "Reunión concretada" ? r.decision : null,
     p_equipo:r.decision === "Desiste del producto" ? r.equipo : null,
-    p_fecha_reagenda:r.que === "Reagendada" ? r.fechaNueva : null,
+    p_fecha_reagenda:conFechaVolver(r) ? (r.fechaNueva || null) : null,
     p_comentario:(r.comentario || "").trim(),
     p_feedback:r.con !== "Nadie" ? (r.feedback || []) : null,
     p_feedback_nota:r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null,
@@ -1086,7 +1111,7 @@ function panelCorreccion(v){
   if (r.que === "Reunión concretada") h += `<div class="paso"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
     <div class="explica" style="margin-top:8px">Aquí no se marca “reactivado”: eso lo confirma la data de BBVA cuando el comercio transacciona en dos días distintos después de tu visita. Lo más cerca que llega tu registro es <b>Realizará consumos</b>.</div></div>`;
   if (r.decision === "Desiste del producto") h += `<div class="paso"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
-  if (r.que === "Reagendada") h += `<div class="paso"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="corrFecha" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva || "")}"></div>`;
+  h += pasoFechaVolver(r, "cop", "corrFecha");
   if (r.decision === "Realizará consumos") h += pasoMotivosSi(r, "cmsi");
   if (["hable","volver","sin"].includes(modoEfectivo(r))) h += pasoFeedback(r, "cfb");
   h += pasoUbicacionCorreccion(r);
@@ -1101,7 +1126,7 @@ function avisoFueraPlazo(v){
   return `<div class="revision fuera"><b>Llegó fuera de plazo:</b> se recibió el ${fechaCorta(v.recibido_en)} y tenía hasta el ${v.plazo_hasta ? fechaCorta(v.plazo_hasta + "T17:00:00Z") : "siguiente día hábil"}. Queda en ${S.admin ? "el" : "tu"} historial, pero no suma a los comercios visitados ni al bono.</div>`;
 }
 function lineaVisita(v){
-  const enc = [esc(v.que), v.motivo ? "(" + esc(v.motivo.toLowerCase()) + ")" : "", v.decision ? "· " + esc(v.decision) : "",
+  const enc = [esc(v.que), v.motivo ? "(" + esc(((MOTIVOS_NADIE.find(m => m[0] === v.motivo) || [])[1] || v.motivo).toLowerCase()) + ")" : "", v.decision ? "· " + esc(v.decision) : "",
                v.equipo ? "· equipo: " + esc(v.equipo) : "", v.fecha_reagenda ? "· vuelve el " + fISO(v.fecha_reagenda) : ""].filter(Boolean).join(" ");
   const ubi = v.lat == null
     ? `<span style="color:var(--rojo);font-weight:600">Sin ubicación</span>`
@@ -1467,7 +1492,7 @@ function hojaRegistro(){
   if (r.que === "Reunión concretada") pasos += `<div class="paso" data-paso="decision"><span class="eyebrow">¿Qué decidió el comercio?</span><div class="opciones c3">${op("decision","Realizará consumos","Realizará consumos","","verde")}${op("decision","Aún no decide","Aún no decide")}${op("decision","Desiste del producto","Desiste del producto","","rojo")}</div>
       ${r.decision==="Realizará consumos" ? `<div class="explica" style="margin-top:8px">Todavía no es una reactivación: cuenta cuando la data de BBVA muestre transacciones en dos días distintos después de hoy.</div>` : ""}</div>`;
   if (r.decision === "Desiste del producto") pasos += `<div class="paso" data-paso="equipo"><span class="eyebrow">¿Se recuperó el equipo?</span><div class="opciones c3">${op("equipo","Sí","Sí","","verde")}${op("equipo","No","No","","rojo")}${op("equipo","Pendiente","Pendiente")}</div></div>`;
-  if (r.que === "Reagendada") pasos += `<div class="paso" data-paso="fecha"><span class="eyebrow">¿Cuándo vuelves?</span><input class="campo" id="fechaNueva" type="date" min="${new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })}" value="${esc(r.fechaNueva)}"></div>`;
+  pasos += pasoFechaVolver(r, "op", "fechaNueva");
   if (r.decision === "Realizará consumos") pasos += pasoMotivosSi(r);
   if (["hable","volver","sin"].includes(modoEfectivo(r))) pasos += pasoFeedback(r);
   const phComent = r.ubicado === "si" ? "Ej.: el local se mudó a otra cuadra; el dueño usa el POS de otro banco." : r.ubicado === "no" ? "Ej.: en la dirección hay otro negocio y los vecinos no lo conocen." : "Ej.: el dueño usa el POS de otro banco; lo va a activar esta semana. Puedes dictarlo con el micrófono del teclado.";
@@ -1518,14 +1543,14 @@ function faltantesPasos(){
   if (r.gps === "buscando") f.push(["gps","esperar la ubicación"]);
   if (r.id && visitaDeHoy(S.base.find(x => x.customer_id === r.id) || {})) f.push(["comercio","corregir la visita de hoy en vez de registrar otra"]);
   if (!r.modo) f.push(["modo","cómo fue la visita"]);
-  if (r.modo === "nadie" && !r.motivo) f.push(["modo","qué encontraste (cerrado o nadie atendió)"]);
+  if (r.modo === "nadie" && !r.motivo) f.push(["modo","qué pasó (por qué no se pudo hacer la visita)"]);
   if (r.modo === "noesta" && !r.ubicado) f.push(["modo","si encontraste el comercio en otro lugar"]);
   if (r.modo === "noesta" && r.ubicado === "si" && !r.modo2) f.push(["modo","cómo fue la visita en el nuevo lugar"]);
   if (modoEfectivo(r) === "hable" && !r.conQuien) f.push(["modo","con quién hablaste"]);
   if (r.que === "Reunión concretada" && !r.decision) f.push(["decision","qué decidió"]);
   if (r.decision === "Desiste del producto" && !r.equipo) f.push(["equipo","si se recuperó el equipo"]);
   if (r.que === "Reagendada" && !r.fechaNueva) f.push(["fecha","la fecha en que vuelves"]);
-  if (r.que === "Reagendada" && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push(["fecha","una fecha de regreso desde hoy"]);
+  if (conFechaVolver(r) && r.fechaNueva && r.fechaNueva < new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" })) f.push(["fecha","una fecha de regreso desde hoy"]);
   if (r.decision === "Realizará consumos" && !(r.motivosSi || []).length) f.push(["motivosSi","qué lo convenció"]);
   const conContacto = ["hable","volver","sin"].includes(modoEfectivo(r));
   if (conContacto && !(r.feedback || []).length) f.push(["feedback","el feedback de la visita"]);
@@ -1839,8 +1864,9 @@ async function guardarVisita(){
   const c = S.base.find(x => x.customer_id === r.id); const nueva = !(c && c.visitas_validas > 0);
   const v = { p_customer_id:r.id, p_visitado_en:r.hora.toISOString(), p_lat:r.lat, p_lng:r.lng, p_precision:r.precision,
     p_con:r.con, p_motivo:r.con==="Nadie"?r.motivo:null, p_que:r.con==="Nadie"?"Sin éxito":r.que, p_decision:r.que==="Reunión concretada"?r.decision:null,
-    p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:r.que==="Reagendada"?r.fechaNueva:null, p_comentario:r.comentario.trim(), p_cliente_uid:r.uid,
-    p_direccion_ok: r.con === "Nadie" && r.motivo === "Dirección errada" ? false : r.dirOk === "si" ? true : r.dirOk === "no" ? false : null,
+    p_equipo:r.decision==="Desiste del producto"?r.equipo:null, p_fecha_reagenda:conFechaVolver(r) ? (r.fechaNueva || null) : null, p_comentario:r.comentario.trim(), p_cliente_uid:r.uid,
+    p_direccion_ok: r.con === "Nadie" && r.motivo === "Dirección errada" ? false : r.con === "Nadie" && MOTIVOS_SIN_DIRECCION.includes(r.motivo) ? null
+      : r.dirOk === "si" ? true : r.dirOk === "no" ? false : null,
     p_feedback: r.con !== "Nadie" && (r.feedback || []).length ? r.feedback : null,
     p_feedback_nota: r.con !== "Nadie" && (r.feedbackNota || "").trim() ? r.feedbackNota.trim() : null,
     p_motivos_si: r.decision === "Realizará consumos" && (r.motivosSi || []).length ? r.motivosSi : null,
@@ -1918,7 +1944,7 @@ function enlazar(){
     const cc = $("#corrComent"); if (cc) cc.oninput = () => { S.corr.comentario = cc.value; };
     p.querySelectorAll("[data-corr-gps]").forEach(b => b.onclick = tomarGPSCorreccion);
     const crr = $("#corrReemplazar"); if (crr) crr.onchange = () => { S.corr.reemplazar = crr.checked; };
-    const cf = $("#corrFecha"); if (cf) cf.onchange = () => { S.corr.fechaNueva = cf.value; };
+    const cf = $("#corrFecha"); if (cf) cf.onchange = () => { S.corr.fechaNueva = cf.value; S._mantenerScroll = true; pintar(); };
   }
   p.querySelectorAll("[data-registrar]").forEach(b => b.onclick = () => nuevoRegistro(b.dataset.registrar || S.ficha));
   p.querySelectorAll("[data-dictar-visita]").forEach(b => b.onclick = () => nuevoRegistro(b.dataset.dictarVisita, true));
@@ -1954,7 +1980,7 @@ function enlazar(){
     const cm = $("#coment"); if (cm) cm.oninput = () => { S.reg.comentario = cm.value;
       // si estaba marcado como faltante, se desmarca apenas alcanza el mínimo (sin repintar, para no perder el foco)
       const paso = cm.closest(".paso"); if (paso && S.reg.intento && cm.value.trim().length >= 5 && paso.classList.contains("falta-paso")){ paso.classList.remove("falta-paso"); paso.querySelector(".falta-etq")?.remove(); } };
-    const fn = $("#fechaNueva"); if (fn) fn.onchange = () => { S.reg.fechaNueva = fn.value; };
+    const fn = $("#fechaNueva"); if (fn) fn.onchange = () => { S.reg.fechaNueva = fn.value; S._mantenerScroll = true; pintar(); };
     p.querySelectorAll("[data-cancelar]").forEach(b => b.onclick = cerrarRegistro);
     p.querySelectorAll("[data-guardar-visita]").forEach(b => b.onclick = guardarVisita);
     const velo = p.querySelector("[data-cerrar-velo]"); if (velo) velo.onclick = e => { if (e.target === velo && !formularioConDatos(S.reg)){ S.reg = null; pintar(); } };

@@ -13,6 +13,7 @@ Se aplican solo con el OK de Jose.
 | `20260928110000_calidad_avisa_no_bloquea.sql` | 27/09/2026, con el OK de Jose | `20260927210956` |
 | `20260928120000_visitas_retenidas.sql` | 27/09/2026, con el OK de Jose | `20260927214009` |
 | `20260928140000_sin_truncate_ni_anon_en_tablas.sql` | 28/09/2026, con el OK de Jose | `20260928195803` |
+| `20260929100000_tipificaciones_de_visita.sql` | 29/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260929100322` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

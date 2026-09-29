@@ -52,17 +52,18 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
 
 | Opción | Se guarda como |
 |---|---|
-| Hablé con el dueño o el encargado | `Reunión concretada` + decisión (Realizará consumos / Aún no decide / Desiste). Con quién: Dueño o Tercero |
+| Hablé con el dueño o el encargado | `Reunión concretada` + decisión (Realizará consumos / Aún no decide / Desiste). Con quién: Dueño o Tercero. Desde el 29/09, fecha para volver opcional en `fecha_reagenda` (sin el feedback «No se encontraba…») |
 | No estaba quien decide · quedamos en volver | `Reagendada` + fecha. Siempre con el feedback «No se encontraba la persona que tomaba decisiones» y la acción «Reagendé con quien decide» |
 | No estaba quien decide · sin compromiso | `Sin éxito` + «No se encontraba…» |
-| No hubo contacto | `Nadie` · Cerrado / No atendió |
+| No se pudo hacer la visita (antes «No hubo contacto») | `Nadie` · Cerrado (se lee «Cerrado hoy») / Cerró definitivamente / No atendió / Zona insegura / Otro motivo. Con Zona insegura u Otro motivo, `direccion_ok` queda sin dato |
 | El comercio no está en esta dirección | `Nadie` · Dirección errada. Si lo encontró en otro lugar, la visita sigue en el mismo registro con `direccion_ok = false` y `comercio_ubicado = true` |
 
 - **Reglas del servidor:**
   - una visita por comercio y día (si hay otra, se corrige la primera);
   - normalización de «Reagendada»;
   - «Reagendé» solo va con «Reagendada».
-- **Resultado:** Éxito (realizará consumos) · En proceso (aún no decide o reagendada) · No éxito · No se encontró · Sin contacto.
+- **Resultado:** Éxito (realizará consumos) · En proceso (aún no decide o reagendada) · No éxito · No se encontró · Sin contacto (todos los motivos de «No se pudo hacer la visita», menos Dirección errada).
+- **Feedback agregado por Stratis el 29/09:** «Desconfía de la visita (duda que representemos a BBVA)» y «No pidió el POS» (Decisión y necesidad), «Solicitó cambio de equipo» (Equipo y contómetros), «Le falta una función» (Uso del POS).
 - **Base para BBVA (Excel del escritorio):** hojas KPIs, 4 tablas dinámicas, Base, Visitas, Feedback_Detalle, Que_Ofrecio_Detalle y Diccionario.
   - `Gestion_Con_Contacto` (SI/NO) y su fecha sirven para el cruce con los volúmenes de BBVA.
   - Las tablas dinámicas se inyectan con JSZip (ExcelJS no las crea).
