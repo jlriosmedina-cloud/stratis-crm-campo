@@ -331,6 +331,56 @@ caso('las funciones nuevas nacen cerradas para anon y PUBLIC, y abiertas para au
   await db.exec('drop function public.v2_funcion_de_prueba()');
   assert.equal(r.anon, false, 'anon puede ejecutarla'); assert.equal(r.publico, false, 'PUBLIC puede ejecutarla'); assert.equal(r.auth, true, 'authenticated no puede ejecutarla');
 });
+// Estos van al final: sin la migración, el TRUNCATE sí vacía las tablas.
+const TABLAS_APP = `select c.oid::regclass::text t from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind in ('r', 'p') and (c.relname like 'v2\\_%' or c.relname = 'usuarios') order by 1`;
+caso('permisos de tablas: anon no tiene nada y authenticated no tiene TRUNCATE, REFERENCES ni TRIGGER', async () => {
+  const mal = (await db.query(`select t, string_agg(p, ',') filter (where has_table_privilege('anon', t, p)) anon,
+      string_agg(p, ',') filter (where p in ('TRUNCATE', 'REFERENCES', 'TRIGGER') and has_table_privilege('authenticated', t, p)) auth,
+      bool_or(p = 'SELECT' and has_table_privilege('authenticated', t, p)) lee
+    from (${TABLAS_APP}) x cross join unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p group by t`)).rows
+    .filter(r => r.anon || r.auth || !r.lee);
+  assert.deepEqual(mal.map(r => `${r.t}: anon=${r.anon} auth=${r.auth} lee=${r.lee}`), []);
+  const seq = (await db.query(`select s.relname from pg_class s join pg_namespace n on n.oid = s.relnamespace where n.nspname = 'public' and s.relkind = 'S'
+    and s.relname like 'v2\\_%' and (has_sequence_privilege('anon', s.oid, 'USAGE') or has_sequence_privilege('authenticated', s.oid, 'UPDATE'))`)).rows;
+  assert.deepEqual(seq, [], 'hay secuencias que anon usa o que authenticated puede mover con setval');
+});
+caso('las lecturas de las apps siguen funcionando con sesión', async () => {
+  assert.equal((await como(EJ, `select correo from usuarios where correo = $1`, [EJ])).rows.length, 1, 'el ejecutivo no lee su usuario');
+  assert.equal((await como(EJ, `select id from v2_periodos where ini <= $1::date and fin >= $1::date`, [hoy])).rows.length, 1, 'el ejecutivo no lee el periodo');
+  assert.ok((await como(EJ, 'select id from v2_visitas')).rows.length > 0, 'el ejecutivo no lee sus visitas (tiempo real)');
+  for (const t of ['usuarios', 'v2_periodos', 'v2_bitacora_visita', 'v2_transacciones', 'v2_cargas', 'v2_geo_distritos', 'v2_feedback_inferido', 'v2_motivo_si_inferido', 'v2_visitas'])
+    await como(ANA, `select * from ${t} limit 1`);
+});
+caso('sin sesión (anon) no lee ni vacía tablas', async () => {
+  for (const t of ['usuarios', 'v2_visitas', 'v2_bitacora_visita', 'v2_feriados', 'v2_parametros', 'v2_visitas_retenidas']){
+    await falla(como(null, `select * from ${t} limit 1`), /permission denied/);
+    await falla(como(null, `truncate ${t} cascade`), /permission denied/);
+  }
+  await falla(como(null, `select setval('v2_bitacora_visita_id_seq', 1)`), /permission denied/);
+});
+caso('nadie con sesión puede vaciar las visitas, las asignaciones ni la bitácora (TRUNCATE salta RLS)', async () => {
+  const cuenta = async () => (await db.query(`select (select count(*) from v2_visitas) + (select count(*) from v2_asignaciones) + (select count(*) from v2_bitacora_visita) n`)).rows[0].n;
+  const antes = await cuenta();
+  for (const u of [EJ, MAN, ANA]) for (const t of ['v2_visitas', 'v2_asignaciones', 'v2_bitacora_visita', 'v2_visitas_retenidas'])
+    await falla(como(u, `truncate ${t} cascade`), /permission denied/);
+  assert.equal(await cuenta(), antes, 'se borraron filas');
+  // tampoco puede regresar el contador de la bitácora (las RPC fallarían por llave duplicada)
+  await falla(como(MAN, `select setval('v2_bitacora_visita_id_seq', 1)`), /permission denied/);
+  const id = await registrar(EJ, { cid: '00000009', con: 'Nadie', motivo: 'No estaba' });
+  assert.equal((await bitacora(id)).length >= 1, true, 'registrar ya no deja su línea en la bitácora');
+});
+caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
+  await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
+  const r = (await db.query(`select has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'SELECT') anon_lee,
+      has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'TRUNCATE') anon_vacia,
+      has_table_privilege('authenticated', 'public.v2_tabla_de_prueba', 'SELECT') auth_lee,
+      has_table_privilege('authenticated', 'public.v2_tabla_de_prueba', 'TRUNCATE') auth_vacia,
+      has_sequence_privilege('anon', 'public.v2_tabla_de_prueba_id_seq', 'USAGE') anon_seq,
+      has_sequence_privilege('authenticated', 'public.v2_tabla_de_prueba_id_seq', 'UPDATE') auth_setval`)).rows[0];
+  await db.exec('drop table public.v2_tabla_de_prueba');
+  assert.deepEqual(r, { anon_lee: false, anon_vacia: false, auth_lee: true, auth_vacia: false, anon_seq: false, auth_setval: false });
+});
 
 let fallas = 0;
 for (const [n, fn] of CASOS){
