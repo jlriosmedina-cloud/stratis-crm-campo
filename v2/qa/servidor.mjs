@@ -399,6 +399,40 @@ caso('las cuatro opciones nuevas de feedback se guardan sin marcarse como fuera 
   assert.deepEqual(v.feedback.slice().sort(), nuevas.slice().sort()); assert.equal(v.datos_observados, null);
 });
 
+// ---------- resultados de BBVA por corte (29/09) ----------
+caso('resultados de BBVA: solo el analista carga, se completan los ceros y un corte se reemplaza completo', async () => {
+  const corte = await diaMas(-1);
+  const filas = [{ customer_id: '1', gestion_con_contacto: true, reactivado: 'Si', facturado: '1500.50' },
+                 { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: null },
+                 { customer_id: '00000003', gestion_con_contacto: true, reactivado: 'En proceso', facturado: null },
+                 { customer_id: '99999999', gestion_con_contacto: true, reactivado: 'Si', facturado: null }];
+  const cargar = (u, f, c = corte, total = null) => como(u, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb, $3::numeric) r`, [c, JSON.stringify(f), total]).then(x => x.rows[0].r);
+  await falla(cargar(EJ, filas), /Solo el analista/);
+  await falla(cargar(null, filas), /permission denied/);
+  await falla(cargar(ANA, filas, await diaMas(1)), /no puede ser futura/);
+  const r = await cargar(ANA, filas);
+  assert.equal(r.cargadas, 3); assert.equal(r.rechazadas, 1); assert.equal(r.reactivados, 2); assert.equal(r.con_contacto, 1); assert.equal(r.reemplazo, false);
+  assert.match(r.detalle[0].motivo, /no está en la base/);
+  assert.equal((await db.query(`select customer_id from v2_resultados_bbva where corte = $1 and facturado = 1500.50`, [corte])).rows[0].customer_id, '00000001', 'no completó los ceros');
+  // lo ve el analista, no el ejecutivo; anon nada
+  assert.equal((await como(ANA, 'select * from v2_resultados_bbva')).rows.length, 3);
+  assert.equal((await como(EJ, 'select * from v2_resultados_bbva')).rows.length, 0, 'el ejecutivo ve los resultados de BBVA');
+  assert.equal((await como(EJ, 'select * from v2_cortes_bbva')).rows.length, 0);
+  await falla(como(null, 'select * from v2_resultados_bbva'), /permission denied/);
+  await falla(como(ANA, `insert into v2_cortes_bbva(corte) values ('2026-01-01')`), /permission denied/);
+  // el mismo corte se reemplaza completo, con su total
+  const r2 = await cargar(ANA, [filas[0]], corte, 2600000);
+  assert.equal(r2.reemplazo, true); assert.equal(r2.cargadas, 1);
+  assert.equal((await db.query('select count(*)::int n from v2_resultados_bbva where corte = $1', [corte])).rows[0].n, 1);
+  assert.equal(Number((await db.query('select facturado_total from v2_cortes_bbva where corte = $1', [corte])).rows[0].facturado_total), 2600000);
+  // si ninguna fila entra, no se toca el corte que ya estaba
+  await falla(cargar(ANA, [filas[3]], corte), /Ninguna fila se pudo cargar/);
+  await falla(cargar(ANA, [{ customer_id: '123456789', gestion_con_contacto: true, reactivado: 'Si' }], corte), /Ninguna fila/);
+  assert.equal((await db.query('select count(*)::int n from v2_resultados_bbva where corte = $1', [corte])).rows[0].n, 1, 'una carga fallida borró el corte');
+  const g = (await db.query(`select tipo, filas, fecha_corte::text from v2_cargas where tipo = 'resultados_bbva' order by id`)).rows;
+  assert.equal(g.length, 2); assert.equal(g[1].fecha_corte, corte);
+});
+
 // Estos van al final: sin la migración, el TRUNCATE sí vacía las tablas.
 const TABLAS_APP = `select c.oid::regclass::text t from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') and (c.relname like 'v2\\_%' or c.relname = 'usuarios') order by 1`;

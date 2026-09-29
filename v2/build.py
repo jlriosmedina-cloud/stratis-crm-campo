@@ -5,6 +5,7 @@ Fuente por app, en v2/<app>/:
   shell.html   estructura de la página, con {{CSS}} y {{JS}}
   estilos.css  estilos (en el escritorio, los bloques se separan con /*@@BLOQUE@@*/)
   app.js       la aplicación; lleva la línea  const BUILD = "{{BUILD}}";
+  recursos/    (opcional) imágenes de diseño, sin datos: "{{RECURSO:nombre.png}}" en app.js se reemplaza por su data URI
 
 Uso:
   python v2/build.py            -> v2/dist/celular/index.html y v2/dist/escritorio/index.html
@@ -15,7 +16,7 @@ Funciona igual en Windows, Mac y Linux (UTF-8 y saltos de línea LF; ver .gitatt
 
 BUILD = los 6 primeros caracteres del sha1 de (estilos + app), así cada cambio real cambia la versión.
 """
-import hashlib, pathlib, shutil, sys
+import base64, hashlib, mimetypes, pathlib, shutil, sys
 V2 = pathlib.Path(__file__).resolve().parent
 RAIZ = V2.parent
 SEP = "/*@@BLOQUE@@*/"
@@ -24,7 +25,11 @@ def armar(app, voz=False):
     d = V2 / app
     leer = lambda n: (d / n).read_text(encoding="utf-8")
     shell, css, js = leer("shell.html"), leer("estilos.css"), leer("app.js")
-    h = hashlib.sha1((css + js).encode()).hexdigest()[:6]
+    rec = sorted((d / "recursos").glob("*")) if (d / "recursos").is_dir() else []
+    h = hashlib.sha1((css + js).encode() + b"".join(r.read_bytes() for r in rec)).hexdigest()[:6]
+    for r in rec:
+        uri = f"data:{mimetypes.guess_type(r.name)[0]};base64," + base64.b64encode(r.read_bytes()).decode()
+        js = js.replace('"{{RECURSO:%s}}"' % r.name, f'"{uri}"')
     js = js.replace('"{{BUILD}}"', f'"{h}"').replace('"{{VOZ}}"', '"si"' if voz else '"no"')
     bloques = css.split(SEP)
     out = shell.replace("{{JS}}", js)

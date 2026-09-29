@@ -482,7 +482,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "01f352";
+const BUILD = "39d0d6";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -849,6 +849,7 @@ function cascaron(){
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
         <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: KPIs, una fila por Customer ID y una por visita">Base para BBVA</button>
+        <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
@@ -1302,6 +1303,7 @@ function cruceBBVA(){
 const TIPOS = {
   diario: { t:"Transacciones diarias", d:"Una fila por comercio y día: cuántas transacciones hubo ese día. Es la carga que confirma las reactivaciones.", ej:"2026-09-24,41000123,4,312.50" },
   acumulado_mes: { t:"Acumulado del mes por corte", d:"Una fila por comercio y fecha de corte con el acumulado del mes. El CRM cuenta un día cuando el acumulado sube.", ej:"2026-09-24,41000123,38,4120.00" },
+  resultados_bbva: { t:"Resultados de BBVA (reactivación)", d:"Tu Excel de BBVA: una fila por Customer ID con gestión con contacto, reactivado y, si lo tienes, el monto facturado. Solo lo ves tú.", ej:"00000001,Si,Si,12500.00" },
 };
 const COLS = ["fecha_corte","customer_id","trx","vol"];
 const ALIAS = { fecha_corte:["fecha_corte","fecha","fecha corte","corte","date","fec_corte"], customer_id:["customer_id","customer id","customerid","cid","cliente","codigo","código","id"], trx:["trx","transacciones","nro_trx","n_trx","cantidad","operaciones","txs"], vol:["vol","volumen","monto","importe","facturacion","facturación","venta","amount"] };
@@ -1322,10 +1324,11 @@ function vistaCargas(){
   <div class="tipos">${Object.entries(TIPOS).map(([k,t]) => `<button class="tipo ${c.tipo===k?"on":""}" data-tipo="${k}"><span class="ico">${ICON.carga}</span><span><b>${t.t}</b><small>${t.d}</small></span></button>`).join("")}</div>
   ${paso === 1 ? `
   <div class="drop" id="drop"><input type="file" id="archivo" accept=".csv,.txt,.xlsx,.xls"><b>Arrastra aquí el archivo de ${tp.t.toLowerCase()}</b>CSV o Excel. Nada se escribe en la base hasta que confirmes en el paso 3.<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn p" id="elegir">Elegir archivo</button></div>
-    <div class="formato">${COLS.map(col => `<div><code>${col}</code>${({fecha_corte:"AAAA-MM-DD (también DD/MM/AAAA)",customer_id:"8 dígitos, el de BBVA",trx:"entero",vol:"decimal con punto (opcional)"})[col]}</div>`).join("")}</div>
+    <div class="formato">${c.tipo === "resultados_bbva" ? COLS_BBVA.map(col => `<div><code>${col}</code>${FORMATO_BBVA[col]}</div>`).join("")
+      : COLS.map(col => `<div><code>${col}</code>${({fecha_corte:"AAAA-MM-DD (también DD/MM/AAAA)",customer_id:"8 dígitos, el de BBVA",trx:"entero",vol:"decimal con punto (opcional)"})[col]}</div>`).join("")}</div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--muted)">La primera fila lleva los nombres de columna. Se aceptan sinónimos (fecha, cliente, transacciones, monto…). Ejemplo: <code style="font-family:ui-monospace,Menlo,Consolas,monospace">${tp.ej}</code></div></div>` : ""}
-  ${paso === 2 ? previa() : ""}
-  ${paso === 3 ? resultadoCarga() : ""}
+  ${paso === 2 ? (c.tipo === "resultados_bbva" ? previaBBVA() : previa()) : ""}
+  ${paso === 3 ? (c.tipo === "resultados_bbva" ? resultadoBBVA() : resultadoCarga()) : ""}
   <div class="panel" style="margin-top:16px"><div class="barra"><b>Historial de cargas</b><span class="lbl">cada carga queda con quién, cuándo y qué cambió</span></div>
   <div style="overflow:auto"><table class="datos"><thead><tr><th>Fecha</th><th>Tipo</th><th>Archivo</th><th>Formato</th><th class="n">Filas</th><th>Corte</th><th>Por</th><th>Notas</th></tr></thead><tbody>
   ${S.cargas.map(g => `<tr><td class="num">${ddhh(g.en)}</td><td>${esc(g.tipo)}</td><td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">${esc(g.archivo || "")}</code></td><td>${esc(g.formato || "—")}</td><td class="n num">${num(g.filas)}</td><td class="num">${g.fecha_corte ? fISO(g.fecha_corte) : "—"}</td><td>${esc((g.por||"").split("@")[0])}</td><td style="font-size:11.5px;color:var(--muted)">${esc(g.notas || "")}</td></tr>`).join("") || `<tr><td colspan="8" class="vacio">Sin cargas todavía.</td></tr>`}
@@ -1398,7 +1401,8 @@ function resultadoCarga(){
 }
 function leerArchivo(f){
   const tipo = S.carga.tipo;
-  const fin = (cab, filas) => { S.carga = { tipo, archivo:f.name, filas:validar(cab, filas), hecho:false, resultado:null }; pintar(); };
+  const fin = (cab, filas) => { S.carga = { tipo, archivo:f.name, filas:tipo === "resultados_bbva" ? validarBBVA(cab, filas) : validar(cab, filas), hecho:false, resultado:null,
+    corte:ayerISO(), facturadoTotal:"" }; pintar(); };
   if (/\.xlsx?$/i.test(f.name)){
     if (!window.XLSX){ toast("No se pudo leer el Excel en este navegador. Exporta la hoja como CSV."); return; }
     const r = new FileReader(); r.onload = () => { const wb = XLSX.read(new Uint8Array(r.result), { type:"array" }); const ws = wb.Sheets[wb.SheetNames[0]]; const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:false, defval:"" }).filter(x => x.some(c => String(c).trim() !== "")); fin(rows[0].map(String), rows.slice(1)); }; r.readAsArrayBuffer(f);
@@ -1424,6 +1428,116 @@ async function cargarFilas(){
     toast("Carga hecha.");
   } catch(e){ toast("No se pudo cargar: " + (e.message || e)); }
   S.ocupado = false; pintar();
+}
+
+/* ---------- Resultados de BBVA (29/09): el Excel mínimo que Jose arma desde el entorno de BBVA ---------- */
+const COLS_BBVA = ["customer_id", "gestion_con_contacto", "reactivado", "facturado"];
+const FORMATO_BBVA = { customer_id:"el de BBVA; si Excel le quitó los ceros de la izquierda, se completan a 8 dígitos", gestion_con_contacto:"Si o No",
+  reactivado:"Si, No o En proceso", facturado:"monto en soles del comercio (opcional; también puedes poner solo el total al cargar)" };
+const ALIAS_BBVA = { customer_id:["customer_id", "customer id", "customerid", "cid", "cliente", "codigo", "código", "id"],
+  gestion_con_contacto:["gestion_con_contacto", "gestión con contacto", "gestion con contacto", "contacto", "gestion", "gestión"],
+  reactivado:["reactivado", "reactivo", "reactivó", "cuenta", "consumio", "consumió", "consumo"], facturado:["facturado", "facturacion", "facturación", "monto", "monto facturado", "importe", "vol", "volumen"] };
+const siNo = v => { const t = String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); return ["si", "s", "1", "true", "x"].includes(t) ? true : ["no", "n", "0", "false", ""].includes(t) ? false : null; };
+const reacNorm = v => { const t = String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); return t === "en proceso" || t === "proceso" ? "En proceso" : siNo(v) === true ? "Si" : siNo(v) === false && t !== "" ? "No" : null; };
+// Sugerencia para un ID que no está en la base: el de la base que difiere en un dígito, o al que le falta uno
+function idParecido(cid){
+  const dif = (a, b) => { let d = 0; for (let i = 0; i < 8; i++) if (a[i] !== b[i]) d++; return d; };
+  const ids = S.base.map(c => c.customer_id), uno = ids.filter(k => dif(k, cid) === 1);
+  if (uno.length === 1) return uno[0];
+  const corto = cid.replace(/^0+/, ""); if (corto.length === 7){ const m = ids.filter(k => [...Array(8).keys()].some(i => k.slice(0, i) + k.slice(i + 1) === corto)); if (m.length === 1) return m[0]; }
+  return null;
+}
+function validarBBVA(cab, filas){
+  const ix = {}; COLS_BBVA.forEach(col => { ix[col] = cab.findIndex(h => ALIAS_BBVA[col].map(normalizar).includes(normalizar(h))); });
+  const faltan = COLS_BBVA.filter(c => c !== "facturado" && ix[c] < 0), vistos = new Set(), res = [];
+  filas.forEach((f, n) => { const err = [];
+    const bruto = String(f[ix.customer_id] ?? "").trim().replace(/\.0$/, ""), cid = /^\d{1,8}$/.test(bruto) ? bruto.padStart(8, "0") : bruto;
+    const gc = siNo(f[ix.gestion_con_contacto]), re = reacNorm(f[ix.reactivado]);
+    const fac = ix.facturado >= 0 ? String(f[ix.facturado] ?? "").trim().replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".") : "";
+    let sug = null;
+    if (!/^\d{8}$/.test(cid)) err.push("customer_id no es numérico");
+    else if (!S.baseMap[cid]){ err.push("customer_id no está en la base"); sug = idParecido(cid); }
+    if (gc === null) err.push("gestion_con_contacto no es Si o No");
+    if (!re) err.push("reactivado no es Si, No o En proceso");
+    if (fac !== "" && !/^\d+(\.\d+)?$/.test(fac)) err.push("facturado no es un monto");
+    if (vistos.has(cid)) err.push("customer_id repetido"); vistos.add(cid);
+    res.push({ n:n + 2, bruto, cid, gc, re, fac, sug, err }); });
+  return { faltan, ix, cab, res, ok:res.filter(r => !r.err.length).length };
+}
+// Primera visita válida (con ubicación, a tiempo, no anulada) de cada comercio en el periodo, hasta la fecha C
+function visitadosAlCorte(C){
+  const o = {}, per = S.periodo && S.periodo.id; (S.act || []).forEach(v => { if (v.estado_anul === "anulada" || v.periodo !== per || v.lat == null || v.fuera_plazo) return;
+    const k = iso(v.visitado_en); if (k <= C && (!o[v.customer_id] || k < o[v.customer_id])) o[v.customer_id] = k; });
+  return o;
+}
+// Regla única de «cuenta» (Jose, 29/09): volvió a transaccionar según BBVA (Reactivado = Si), con gestión con contacto según BBVA,
+// con visita válida de Stratis hasta el corte y en la cartera asignada. La usan la vista previa de la carga y la presentación.
+const cuentaBBVA = (r, primera) => r.reactivado === "Si" && !!r.gestion_con_contacto && !!primera[r.customer_id] && !!(S.baseMap[r.customer_id] || {}).correo;
+function previaBBVA(){
+  const c = S.carga, v = c.filas, malas = v.res.filter(r => r.err.length), buenas = v.res.filter(r => !r.err.length);
+  const primera = visitadosAlCorte(c.corte || hoyISO());
+  const reac = buenas.filter(r => r.re === "Si"), cuentan = reac.filter(r => cuentaBBVA({ reactivado:r.re, gestion_con_contacto:r.gc, customer_id:r.cid }, primera)), fac = cuentan.reduce((a, r) => a + (r.fac === "" ? 0 : Number(r.fac)), 0);
+  const conFac = buenas.some(r => r.fac !== "");
+  return `<div class="panel previa"><div class="barra"><b>${esc(c.archivo)}</b><span class="lbl">Resultados de BBVA · ${v.res.length} filas leídas · columnas: ${v.cab.map(esc).join(", ")}</span><div class="der"><button class="btn" id="otroArchivo">Elegir otro archivo</button><button class="btn p ${S.ocupado?"cargando-btn":""}" id="cargar" ${v.ok===0||v.faltan.length?"disabled":""}>Cargar ${v.ok} filas válidas</button></div></div>
+    <div style="padding:12px">
+    ${v.faltan.length ? `<div class="aviso mal">No encuentro las columnas <b>${v.faltan.join(", ")}</b>. La primera fila debe traer los nombres (por ejemplo: customer ID, Gestion_Con_Contacto, Reactivado).</div>` : ""}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+      <label class="lbl">Fecha de corte de la data de BBVA <input type="date" id="bbvaCorte" value="${esc(c.corte || "")}" max="${hoyISO()}" class="sel"></label>
+      <label class="lbl">Total facturado de los que cuentan (S/, opcional) <input type="text" id="bbvaTotal" value="${esc(c.facturadoTotal || "")}" placeholder="${conFac ? "se suma de la columna facturado" : "ej.: 2600000"}" class="sel" style="width:170px"></label>
+    </div>
+    <div class="checks">
+      <div class="check ok"><i>✓</i><div><b class="num">${v.ok}</b><small>filas válidas</small></div></div>
+      <div class="check ${malas.length?"mal":"ok"}"><i>${malas.length?"!":"✓"}</i><div><b class="num">${malas.length}</b><small>filas que no se cargan</small></div></div>
+      <div class="check ok"><i>${reac.length}</i><div><b style="font-size:12px">reactivados según BBVA</b><small>${cuentan.length} cuentan: con gestión con contacto y visita de Stratis del periodo hasta el corte</small></div></div>
+      ${conFac ? `<div class="check ok"><i>S/</i><div><b class="num">${fac.toLocaleString("es-PE", { maximumFractionDigits:0 })}</b><small>facturado de los que cuentan</small></div></div>` : ""}
+    </div>
+    <div class="aviso">Se guarda como el corte del <b>${c.corte ? fISO(c.corte) : "—"}</b>. Si ya había un corte con esa fecha, se reemplaza completo. No cambia visitas ni el medidor, y los ejecutivos no lo ven.</div>
+    ${malas.length ? `<div style="overflow:auto;margin-top:12px"><table class="datos"><thead><tr><th>Fila</th><th>Customer ID en tu archivo</th><th>Problema</th><th>¿Quisiste decir?</th></tr></thead><tbody>
+      ${malas.slice(0, 80).map(r => `<tr class="err"><td class="num">${r.n}</td><td class="num">${esc(r.bruto)}</td><td>${esc(r.err.join(" · "))}</td><td class="num">${r.sug ? esc(r.sug) + ` <small class="muted">${esc((S.baseMap[r.sug] || {}).distrito || "")}</small>` : "—"}</td></tr>`).join("")}
+    </tbody></table><div style="font-size:11.5px;color:var(--muted);margin-top:6px">Corrige esos Customer ID en tu Excel y vuelve a cargarlo: el corte se reemplaza completo. La sugerencia es el ID de la base que difiere en un dígito.</div></div>` : ""}
+    </div></div>`;
+}
+function resultadoBBVA(){
+  const c = S.carga, r = c.resultado || {}, det = r.detalle || [];
+  return `<div class="panel"><div style="padding:22px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+    <div class="check ok" style="border:0;padding:0"><i style="width:40px;height:40px;font-size:18px">✓</i></div>
+    <div style="flex:1;min-width:240px"><h2 style="font-size:16px">Corte del ${r.corte ? fISO(r.corte) : "—"} cargado: ${num(r.cargadas)} comercios${r.reemplazo ? " (reemplaza el corte anterior de esa fecha)" : ""}</h2>
+      <div class="sub" style="margin:4px 0 10px">${esc(c.archivo)} · carga n.º ${r.carga_id} · ${num(r.reactivados)} reactivados según BBVA, ${num(r.con_contacto)} de ellos con gestión con contacto · ${num(r.rechazadas)} rechazadas por la base.</div>
+      <div class="aviso ok">La presentación para BBVA ya toma este corte para la reactivación y la facturación.</div>
+      ${det.length ? `<div style="overflow:auto;margin-top:10px"><table class="datos"><thead><tr><th>Fila</th><th>Customer ID</th><th>Motivo</th></tr></thead><tbody>${det.slice(0, 50).map(d => `<tr class="err"><td class="num">${d.fila}</td><td class="num">${esc(d.customer_id || "")}</td><td>${esc(d.motivo)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn p" id="otraCarga">Nueva carga</button></div>
+    </div></div></div>`;
+}
+async function cargarBBVA(){
+  const c = S.carga, v = c.filas, ce = $("#bbvaCorte"), tt = $("#bbvaTotal");
+  if (ce) c.corte = ce.value; if (tt) c.facturadoTotal = tt.value;
+  if (!c.corte || c.corte > hoyISO()){ toast("Indica la fecha de corte de la data de BBVA (no puede ser futura)."); return; }
+  const total = String(c.facturadoTotal || "").replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".");
+  if (total !== "" && !/^\d+(\.\d+)?$/.test(total)){ toast("El total facturado no es un monto."); return; }
+  const filas = v.res.filter(r => !r.err.length).map(r => ({ customer_id:r.cid, gestion_con_contacto:r.gc, reactivado:r.re, facturado:r.fac === "" ? null : r.fac }));
+  S.ocupado = true; pintar();
+  try {
+    const { data, error } = await sb.rpc("v2_cargar_resultados_bbva", { p_archivo:c.archivo, p_corte:c.corte, p_filas:filas, p_facturado_total:total === "" ? null : total,
+      p_notas:`${v.res.length} filas en el archivo, ${v.res.length - v.ok} descartadas antes de cargar` });
+    if (error) throw error;
+    c.resultado = data; c.hecho = true; S.resBBVA = null;
+    await cargarCargas(); toast("Resultados de BBVA cargados.");
+  } catch(e){ toast("No se pudo cargar: " + (e.message || e)); }
+  S.ocupado = false; pintar();
+}
+// Último corte de BBVA cargado hasta la fecha C (para la presentación)
+async function cargarResultadosBBVA(C){
+  const { data:cs, error:ec } = await sb.from("v2_cortes_bbva").select("corte,filas,facturado_total,en").order("corte", { ascending:false });
+  if (ec) throw ec;
+  const corte = (cs || []).find(x => x.corte <= C);
+  if (!corte) return null;
+  const filas = [];
+  for (let i = 0; ; i += 1000){
+    const { data, error } = await sb.from("v2_resultados_bbva").select("customer_id,gestion_con_contacto,reactivado,facturado").eq("corte", corte.corte).order("customer_id").range(i, i + 999);
+    if (error) throw error;
+    filas.push(...(data || [])); if (!data || data.length < 1000) break;
+  }
+  return { corte, filas };
 }
 
 /* =========================================================================
@@ -2248,7 +2362,7 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-descartar-ret")){
     const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
@@ -2262,6 +2376,7 @@ document.addEventListener("click", async ev => {
   if (t.hasAttribute("data-pq-alc")){ S.pqAlcance = t.dataset.pqAlc; if ((S.pqSel || "").startsWith("no:")) S.pqSel = ""; pintar(); return; }
   if (t.hasAttribute("data-pq")){ S.pqSel = S.pqSel === t.dataset.pq ? "" : t.dataset.pq; pintar(); if (S.pqSel) document.querySelector(".pq-lista-ancla")?.scrollIntoView({ behavior:"smooth", block:"start" }); return; }
   if (t.hasAttribute("data-base-bbva")){ baseBBVA(); return; }
+  if (t.hasAttribute("data-ppt-bbva")){ presentacionBBVA(); return; }
   if (t.hasAttribute("data-fb-csv")){ csvFeedback(); return; }
   if (t.hasAttribute("data-fb-tipo")){ S.fbTipo = S.fbTipo === t.dataset.fbTipo ? "" : t.dataset.fbTipo; pintar(); return; }
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
@@ -2295,9 +2410,10 @@ document.addEventListener("click", async ev => {
   if (t.dataset.tipo){ S.carga = { tipo:t.dataset.tipo, archivo:null, filas:null, hecho:false, resultado:null }; pintar(); return; }
   if (t.id === "elegir"){ $("#archivo").click(); return; }
   if (t.id === "otroArchivo" || t.id === "otraCarga"){ S.carga = { tipo:S.carga.tipo, archivo:null, filas:null, hecho:false, resultado:null }; pintar(); return; }
-  if (t.id === "cargar"){ if (!S.ocupado) cargarFilas(); return; }
+  if (t.id === "cargar"){ if (!S.ocupado) (S.carga.tipo === "resultados_bbva" ? cargarBBVA() : cargarFilas()); return; }
 });
 document.addEventListener("change", ev => {
+  if (ev.target.id === "bbvaCorte" && S.carga){ S.carga.corte = ev.target.value; pintar(); return; }
   const t = ev.target;
   if (t.id === "fEj"){ S.ej = t.value; S.sel = null; pintar(); }
   if (t.id === "fDia"){ S.dia = t.value; S.sel = null; pintar(); }
@@ -2313,7 +2429,7 @@ document.addEventListener("change", ev => {
   if (t.dataset.marca){ if (t.checked) S.marcadas.add(t.dataset.marca); else S.marcadas.delete(t.dataset.marca); pintar(); }
   if (t.id === "archivo" && t.files[0]) leerArchivo(t.files[0]);
 });
-document.addEventListener("input", ev => { if (ev.target.id === "qTraza"){ S.busca = ev.target.value; S.traza = null; const pos = ev.target.selectionStart; pintar(); const q = $("#qTraza"); q.focus(); q.setSelectionRange(pos, pos); } });
+document.addEventListener("input", ev => { if (ev.target.id === "bbvaTotal" && S.carga){ S.carga.facturadoTotal = ev.target.value; return; } if (ev.target.id === "qTraza"){ S.busca = ev.target.value; S.traza = null; const pos = ev.target.selectionStart; pintar(); const q = $("#qTraza"); q.focus(); q.setSelectionRange(pos, pos); } });
 document.addEventListener("dragover", ev => { const d = ev.target.closest("#drop"); if (d){ ev.preventDefault(); d.classList.add("over"); } });
 document.addEventListener("dragleave", ev => { const d = ev.target.closest("#drop"); if (d) d.classList.remove("over"); });
 document.addEventListener("drop", ev => { const d = ev.target.closest("#drop"); if (!d) return; ev.preventDefault(); d.classList.remove("over"); const f = ev.dataTransfer.files[0]; if (f) leerArchivo(f); });
@@ -2337,5 +2453,489 @@ document.addEventListener("keydown", ev => {
   if (S.sesion) cargar(); else { S.cargando = false; pintar(); }
 })();
 
+/* =========================================================================
+   Presentación semanal para BBVA y Mastercard (PowerPoint, 29/09/2026)
+   Se arma en el navegador con los datos de la base al momento de descargarla: aquí no hay datos de
+   comercios, solo el diseño. Corte por defecto: ayer (el jueves, corte al miércoles; el lunes, la semana
+   cerrada al domingo). Solo el periodo en curso: el modelo de medición cambió el 21/09.
+   ========================================================================= */
+const FONDO_LAMINA = "data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wgARCAQ4B4ADASIAAhEBAxEB/8QAHQABAQEBAQEBAQEBAAAAAAAAAAEIAgUJBgMHBP/EABsBAQEBAQADAQAAAAAAAAAAAAABBAYCAwUH/9oADAMBAAIQAxAAAAHUwoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI5zZpSfQ9eL2zp0ufGV2YMYtnDGLZwxk2cMYtmjGTZtMYXZoxk2aMZNmjGTZoxk2aMZNmjGTZoxk2aMZNmjGTZoxlNnUxg2fDGLZwxi2eMYNnjGDZ4xg2eMYNnjGDZ4xg2eMYNnjGDZ4xg2eMYtm0xi2dDGU2eMYNnwxi2cMYtnDGLZwxi2dTGDZ8MYtnUxg2eMYNnwxi2cMYtnjGF2dDGLZ1MYNnjGDZ4xg2eMYNnjGDZ4xg2eMYTaAxfdnjF7Z4xg2eMYNnjGDZ4xg2eMYNnjGM2eMYNnjGDZ4xi2cMYNnjGDZ4xg2eMYNnjGM2eMYNnjGDZ4xg2eMYNnjGDZ4xg2eMYNnjGDZ4xg2eMYNnjGDZ4xg2eMYNnjGDZ4xd3rfIf2PTtgfmf0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUICgAAAgAAKCAAAAAAAAAoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEBQAAAAAAAAAAQFAAAAAAAAAAAAAAAAAAAAACTx8ebDxv2mXcA4zUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHjY02XjDscm6Bx2sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADxsWbTxP2GTeI4/WAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4uJNtYi6/JvgchrAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8TDu4sM9bj+gKOT2VBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVJHi4W3RhPrMn0IHKawAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEsXzsKb7/LfU9P6sfL9oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACykAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAspAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALKQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACykAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAspyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFlIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFlIiqgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqU5FAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLLBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsssFgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACyywWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLLBfEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZYgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZYjm21BUFSHTmlSHTkdOR05HTmlcjpzSpDpzSuR05HSQ6cjpyOnI6c0qQ6QVBUh05HSQ6cjpyOnI6c0qQ6c0qCuaVIdOR05pXI6cjpyOnI6SHTmlQVBXI6c0rkdOR05HTkdJDpyOkFSHSQ6cjpzSpDpyOnI6cjpBUFQVBUh0gqQ6cjpyOnI6QVyOkFSHSCuR05pUFcjpyOnI6QVBUFQVBXNKgrkdOR05HSCpDpBUFQVIdOR0grkdOR05HTmlQVBUFQVyOkFcjpyOnI6c0qCuaVBbygKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWWIKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWWIPKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLHIoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWUgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFlIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWUgeIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACyxEW1BUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBUFQVBbzV5FAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADrno5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA656OQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOuejkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADrno5SHTmlQVBUFQVBUFQVBUi9Oalc0qCoKgqQ6c0rmlQVBUFc0qCoKgqCoKgqCoKgrmlSHSCoKgqCuaVIdIKgqCpDpBUFQVBULUJUFQVC1InSQ6c0qFqEqCpDpIdIKgqCpDpBUFQVBUFQVBUFQVIvSEqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoKgqCoWoSoKgqCoKgqCoWoSoWoSoWoSoLeaQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACykAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAspAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALKQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACykAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAspAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALKcjyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALLERVSgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtNfXvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnTvDTnRfGqq71VVVVdqq71VVVXaqqqqrvfGqq7VVVVVd6vhVVVVdqqqqqu1Xwqqq7VVVVVdqq+FVVVd6qqqqu18aqrvVVVVV2qrvVVVVdqqqqqu98aqrtVVVVV3q+FVVVV2qqqqq7VfCqqrtVVVVV2qr4aa+uiecTeIiIiJtETeJtERNoiIiIm88oibRERERN4nhN4iJtERERE2ieURNoiIiIm0RPCbRERNoiIiIm084m8RERETaIm8TaIibxERETeecTeIiIibxPCbxETaIiIiJvPKIm0RERETeJ4aPR3hy07w5ad4ctERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERpp66d4ctO8OWneHLTvDlp3hy07w5ad4ctO8OWneHB3hwd4cHeHB3hwd4cHeHB3hwd4cHeHB3hwd4cHeHAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtXo7w4O8ODvDg7w4O8ODvDg7w4O8ODvDg7w4Ou79xfuL48HeHAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrtVVVVVVVVVVVVdqqqqqqqu1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVdqqqqqqqu1VVVV2qqqqqqqqqqqqu1VWr0e+0T7OJtPoxNp9CfaTefRm8+hPtJtE+jNonnE+zibT6U2n0J9pN59Gbz6E+0m8cXv3hxe/eHF794cXv3hxe/eHF794cXv3hxe/eHF794cXv3hxe/eHF794cXv3h87vD53eHzu8Pnd4fO7w+d3h87vD53eHzu8Pnd4fOVy/nu35zTW93/Of7ast/1q01ujTVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVa/zNV3pB/B6uNEamndvzmnYoad2/OfoX87S07t+c0/pfzt7+e7fnPwHa3892/OaPwe7xfOfgPd5vnPwHu93zmj8Xu8Xzn4O9AKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtf5mn8d8V3dx+78XfHd3cfu0/hvju7uP3aJ7RpVoIen3g1rc53GMY4zHMYxznPe5xBMX6LGPEI7nHEJznOc5zhEIJznkI5xCEIR5CEEIQhEIIQhGEIRhCEIQhCEIRhCEYwhCEIQnBO5ziCc8QnGEIQhCEIQhCEIQhCEIQhCEIQhHMYxzGMcxjHMYxmnv8oar/R+P3a09X0wEmyP3XzA0I8wI/ddkeAibk2fr1R+vVH69X69X69fphB7fnwETyBERNyIibIiIiIiIiIiIiIibIiftRE+hPm9PHIiIibkTciJuTwE2TZPEIiJsmyImybIj120vX00/3o1aaGun9G4/d//aAAwDAQACAAMAAAAQ++++++++++++++++++++++++++++++++++qFjDzzNNJjNNNNNNNNNZxzxxxxxxxxxxJFRzzzzzzzxz3xl5x9xxxxxh99999xd99N9999d9NNtNNNNNNNNNNf/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AO9//wD/AP8A/wD9/wD/AP8A/wD/AP8A/wDffffffffffffffffffffffffffffffffffffffffffffff/fffffffffff/8A33//ANr8/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD9e/8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/tL/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/APto/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AMn3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333+3/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP4J/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AOv/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A6/8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wDr/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AOv/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A6wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwzjjjjjjjjjjjjjjjjjjjTjjjjjjjjjjjjjjjjjjjjTjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjTjjjjjjjjjjjjjjjjjjjjTjjjjjjjjjjjjjmPfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffvfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffvfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffvfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffvfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff/fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff3PLDHLDDDHDHLDDDLDDDHLPPDDLDDDHLHPDDDHDDDDLHPDDHDDDDLDPLDDHLDDDFFPLDFLDDDFDFLBDCLDDDFKPPDCLDDDFLFPBDDFDDDCLFPDDFDDDCLCPLvffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvqv8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wDr/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AOv/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A6/8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wDrDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDBDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDBDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDBDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDBDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDBDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPM/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++o+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++o+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++o+++++++u+++++++++++u+++++++++++u+++u++++e+++++++e+++e+++e++++++++++++++++++++++++++++++++++++e++++++++++ee++++++e+++ee+oOOOOOOPPOOPOOOOOOOOPOOOOOOOPPOOPOOOPOOOOPOOeOOOOPPOOPeOOPOOeOGOOOGOOOOPPOOPGGOOOOGGPOOGOOOOPPOOPGaOPOOGaPOOaOOOOPPPOPaOU+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUMJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAUjsMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMaoU888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888+tU888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888+3c888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888+/wDPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPmssMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMNIn/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP8A/wD/AP77333/AP8Ad/f/APP/AN91/wBef/f/AP8A999/999919//APff+fefffffefedfffedf8A3n33333333//AN999995xxxxxx1x82+++++++++++++++++++++++++++++++++9e/8A443/AP8A/wD/AP8A/j//AP8A/wD/AP44/wD/AP8A/wD/AP8A/wD/APDDfjDDDDDDDDDDDDDDDDDDDDDDDjDDfjfjB/f/AH333/44/wD/AP8A/Ynvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvf/EACMRAQEBAAIBAwUBAQAAAAAAAAARYQEhYBAwMSBBUJCgQFH/2gAIAQMBAT8Q/B8PDto0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGii4/6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+lVVVVVVX0qqqqqqqqqqqqqqq/pZzrvDq834dXnj+Smqqqqqqqqqqqq+lVVVVVVVVVVVVX0qqqqqqqqqqqqqqqqqqqqqqqqqqqr6VVVVVVVVVVVVVfSqqqqqqqqqv60YiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiec1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/g5qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqquOURERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERxx+tfp17nXsdOvXr6Ovp69nr/AC9Ovc69jp169fR173X8mHPHm/xiTzf7nHnFx5v97jzi4835FVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVx83cfLlxxa0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRo0aNGjRx38fg/k45KUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSlKUpSnN2/g/k/8QAJxEBAQADAQEAAQMDBQEAAAAAABEBYZFgMSFQcbEQQYEgMFGgocH/2gAIAQIBAT8Q/Qsvti/cf2y0+5aHctDuWj3LU7lrdy1u5afctbuWt3LW7lrdy1u5a3ctbuWt3LW7lqdy1O5aHctXuWr3LV7lq9y1e5avctXuWr3LV7lq9y1O5anctXuWh3LQ7lody0O5aPctHuWh3LV7lo9y0O5avctTuWp3LU7lqdy1O5anctTuWp3LU7lqdy1O5anctTuWp3LU7lqdy1O5anctTuWp3LU7lqdy1O5anctTuWp3LU7lqdy1O5anctTuWp3LU7lqdy1O5anctTuWp3KH9ncst/nGPx+79En+mIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJ/SIiIiIiJ/WJ/WIzn7j+Pb5+P/W/j3Gc/dfx7fLOfuP49xnP2M/wiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIjL/wAef49vlMlw57nHuM/9LGIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIzj3GfnuM/PcZ+e4z89xn57jPz3GfnuM/ERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERnH49xn3GfcZ9xn3GfnuM/PcZ+e4z89xn57jKIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIzj8e4z89xn57jPz3GfnuM/PcZ+e4z89xn57jPz3GfnuM/PcZ+e4z89xn57jPz3GfnuM/PcZ+e4z8flie3z8Wfve3z8Y/j/L2+fj/AO3t8/GMz/l7fPxj/JERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERERGcfhj+f8vb5+ZZSjP34/48uZb3Mt7mW9zLe5lvcy2uZb3Mt7mW1zLe5ltcy3uZb3Mt7m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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/UP6dY14CmRGioTTVNbm2f0Z6/wD0QSiJJD/4HRrbtn9IZYwsUiTW3bP6RSxhYpJrc2z+iblroWCWtzbP6QxsiFqlrdtn9L6+y7S1u2z+kctdC3S1u2z+ls/aHS2Nrdtn9Ld+0IHc2twAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/UP6QWxyzyE6a27V/SI2uhZ5a3bV/S3PtBi28Nbtq/o/4Mi6qsPsTKZFVdKsYuYKYKY0Y0YcYUYUYUYUYyYUYMYyYUYUYUYyYyYyYSYSYyYyY8YsYUf8XMGMIMWMWMIMZMZMIMWMWMZMZMZMZMZMZMZMZMWMeMeMWMZMaJP6hjxjxjJjJjxjxjxjxjxgBjxjxjxixixixixixjxhRixixixixiJixixixiJixixixixixixixixixixixiJixixixiJiJixixixixixixixjJghhBjJjJjJhRixjJgBixixjJiRixixixixixixixixixixixixixixixixixixixixixixixixixixixixixhBiJiJiJhBiJiJiJhBiJiJiJhBiJhRiQ7BHfEW6BEVEyBFdFEf/C7V/Toln1mPU6v+xDSPmhSUngeO54DTx3LxG/f99B47njueO547njueO4j9pudoZLc8dzx3GWo08d/QMtTtez3iXj7O5n5HdheI4XiODuwd29r2N/0g9foPHf2D6/+l4l4ju/79nePHjx48ePHjx48ePHj5IPHjx48ePHjx48fJB48ePkg+SDx48eLxLxLxPAePPA8DwPAvE8Dx3LxPA8Dx3LRLxLxLxLxLxLxLRFs5eJeJaJ1KXiXiJGdRaIkf/RbP694iPRy8fTeJ9hHp/0tH0I9fTeJ4COiwvadB4ix9CMtEhToRCdYsCukBr4qpVNXZKaKjVHQGVHjIRX/AMLtX9P/2Q==";
+const PX = { navy:"0C1137", tinta:"3F5073", gris:"A0ABBC", linea:"DDE2EC", suave:"F3F5FA", azul:"3B43FB", azulOsc:"232C86", naranja:"F86F35",
+  naranjaSuave:"FBDDCF", verde:"0BBC96", blanco:"FFFFFF", lect:"DDE4F4", rojo:"B23A1F" };
+const FT = "Open Sans", FTB = "Open Sans ExtraBold";
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","setiembre","octubre","noviembre","diciembre"];
+const DIAS_SEM = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+const fechaLarga = s => { const [a, m, d] = s.split("-").map(Number); return `${d} de ${MESES[m - 1]} de ${a}`; };
+const diaSem = s => DIAS_SEM[new Date(s + "T12:00:00Z").getUTCDay()];
+const numPE = x => Number(x || 0).toLocaleString("es-PE");
+// Nombre del periodo para BBVA: los periodos 1 y 2 fueron del CRM anterior
+const mayus = t => t.charAt(0).toUpperCase() + t.slice(1);
+const nombrePeriodo = p => ({ "2026-10":"periodo 3", "2026-11":"periodo 4", "2026-12":"periodo 5" })[p && p.id] || `periodo del ${fISO(p.ini)} al ${fISO(p.fin)}`;
+const soles = x => x == null ? "—" : x >= 1e6 ? `S/ ${(x / 1e6).toFixed(1).replace(".", ",")} MM` : x >= 1e3 ? `S/ ${Math.round(x / 1e3).toLocaleString("es-PE")} mil` : `S/ ${Math.round(x).toLocaleString("es-PE")}`;
+const pc = (a, b) => b ? Math.round(a * 100 / b) : 0;
+const masDias = (s, n) => { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+// Corte: acepta AAAA-MM-DD o DD/MM/AAAA; no puede pasar de hoy ni salir del periodo
+function leerCorte(txt){
+  const t = String(txt || "").trim(); let m;
+  if ((m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return t;
+  if ((m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+
+// Todas las cifras de la presentación, al corte C, con las mismas reglas del CRM
+function datosPresentacion(C, RB){
+  const p = S.periodo, per = p.id;
+  const vs = S.act.filter(v => v.estado_anul !== "anulada" && v.periodo === per && iso(v.visitado_en) <= C);
+  const valida = v => v.lat != null && !v.fuera_plazo, contacto = v => v.con !== "Nadie";
+  const vv = vs.filter(valida);   // visitas válidas: con ubicación y a tiempo (las mismas que cuentan en el medidor)
+  const av0 = (S.avance || [])[0] || {}, nEj = Math.max(1, S.ejecutivos.length);
+  const meta = { visEj:av0.meta_visitas, reaEj:av0.meta_reactivados, conv:av0.meta_conversion };
+  meta.vis = meta.visEj * nEj; meta.rea = meta.reaEj * nEj;
+  const cartera = S.base.filter(c => c.correo).length || S.base.length;
+  // días hábiles del periodo (lunes a viernes) y días de fin de semana con campo
+  const dh = []; for (let d = p.ini; d <= p.fin; d = masDias(d, 1)){ const w = new Date(d + "T12:00:00Z").getUTCDay(); if (w >= 1 && w <= 5) dh.push(d); }
+  const conCampo = new Set(vv.map(v => iso(v.visitado_en)));
+  const dias = [...new Set(dh.concat([...conCampo]))].sort();
+  const metaDia = meta.vis / Math.max(1, dh.length);
+  const primera = visitadosAlCorte(C);
+  const visitados = Object.keys(primera).length;
+  let habilN = 0;
+  const serie = dias.map(d => { if (dh.includes(d)) habilN++;
+    return { dia:d, habil:dh.includes(d), meta:Math.round(metaDia * habilN), delDia:d <= C ? new Set(vs.filter(v => valida(v) && iso(v.visitado_en) === d).map(v => v.customer_id)).size : null,
+             acum:d <= C ? Object.values(primera).filter(k => k <= d).length : null }; });
+  const dhCorte = dh.filter(d => d <= C).length, dhConCampo = dh.filter(d => d <= C && conCampo.has(d)).length;
+  // último estado de cada comercio visitado
+  const ult = {}; vv.forEach(v => { const u = ult[v.customer_id]; if (!u || v.visitado_en > u.visitado_en) ult[v.customer_id] = v; });
+  const U = Object.values(ult);
+  const contactados = new Set(vv.filter(contacto).map(v => v.customer_id)).size;
+  const reunion = new Set(vv.filter(v => v.que === "Reunión concretada").map(v => v.customer_id)).size;
+  const cuenta = f => U.filter(f).length;
+  const res = { realiza:cuenta(v => v.decision === "Realizará consumos"), noDecide:cuenta(v => v.decision === "Aún no decide"), desiste:cuenta(v => v.decision === "Desiste del producto"),
+    reag:cuenta(v => v.que === "Reagendada"), sinExito:cuenta(v => contacto(v) && v.que === "Sin éxito"), nadie:cuenta(v => !contacto(v)) };
+  const motivosNadie = {}; U.filter(v => !contacto(v)).forEach(v => { const k = MOTIVO_TXT[v.motivo] || v.motivo || "Sin motivo"; motivosNadie[k] = (motivosNadie[k] || 0) + 1; });
+  const volverAgendado = S.base.filter(c => c.volver_el && c.volver_el >= C).length;
+  // semanas (lunes a domingo) hasta el corte
+  const semanas = []; dias.filter(d => d <= C).forEach(d => { const w = new Date(d + "T12:00:00Z"), lun = masDias(d, -((w.getUTCDay() + 6) % 7));
+    let s = semanas.find(x => x.lun === lun); if (!s){ s = { lun, ini:d, fin:d }; semanas.push(s); } s.fin = d; });
+  semanas.forEach((s, i) => { const en = v => iso(v.visitado_en) >= s.lun && iso(v.visitado_en) <= masDias(s.lun, 6) && iso(v.visitado_en) <= C, sv = vv.filter(en);
+    s.n = i + 1; s.visitas = sv.length; s.nuevos = Object.values(primera).filter(k => k >= s.lun && k <= masDias(s.lun, 6)).length;
+    s.comercios = new Set(sv.map(v => v.customer_id)).size; s.contacto = new Set(sv.filter(contacto).map(v => v.customer_id)).size;
+    s.realiza = new Set(sv.filter(v => v.decision === "Realizará consumos").map(v => v.customer_id)).size;
+    s.acum = Object.values(primera).filter(k => k <= masDias(s.lun, 6) && k <= C).length;
+    s.fin7 = masDias(s.lun, 6) < C ? masDias(s.lun, 6) : C; s.cerrada = masDias(s.lun, 6) <= C; });
+  // distritos: cartera asignada, visitados, contactados y respuesta
+  const dist = {}; const g = k => dist[k] ||= { clave:k, cartera:0, vis:0, con:0, realiza:0, noDecide:0 };
+  S.base.forEach(c => { if (c.distrito && c.correo) g(c.distrito).cartera++; });
+  Object.keys(primera).forEach(cid => { const c = S.baseMap[cid]; if (c && c.distrito) g(c.distrito).vis++; });
+  U.forEach(v => { const c = S.baseMap[v.customer_id], k = (c && c.distrito) || v.distrito; if (!k) return;
+    if (vv.some(x => x.customer_id === v.customer_id && contacto(x))) g(k).con++;
+    if (v.decision === "Realizará consumos") g(k).realiza++; if (v.decision === "Aún no decide") g(k).noDecide++; });
+  Object.values(dist).forEach(o => { o.cob = o.cartera ? o.vis / o.cartera : null; o.fav = o.con ? o.realiza / o.con : null; });
+  // zonas (una por ejecutivo), rutas (9 comercios cada una) y distritos abordados
+  const contactadosSet = new Set(vv.filter(contacto).map(v => v.customer_id)), zonas = {};
+  S.base.filter(c => c.correo).forEach(c => { const z = zonas[c.zona || "Sin zona"] ||= { zona:c.zona || "Sin zona", correo:c.correo, cartera:0, vis:0, con:0, realiza:0, rutas:{}, distritos:{} };
+    z.cartera++; const r = z.rutas[c.ruta || "Sin ruta"] ||= { ruta:c.ruta || "Sin ruta", n:0, vis:0 }; r.n++;
+    const d = z.distritos[c.distrito || "Sin distrito"] ||= { d:c.distrito || "Sin distrito", n:0, vis:0 }; d.n++;
+    if (primera[c.customer_id]){ z.vis++; r.vis++; d.vis++; } if (contactadosSet.has(c.customer_id)) z.con++;
+    if (ult[c.customer_id] && ult[c.customer_id].decision === "Realizará consumos") z.realiza++; });
+  Object.values(zonas).forEach(z => { z.rutasL = Object.values(z.rutas).sort((a, b) => a.ruta.localeCompare(b.ruta, "es", { numeric:true }));
+    z.distL = Object.values(z.distritos).sort((a, b) => b.n - a.n); z.rutasIni = z.rutasL.filter(r => r.vis).length; z.rutasComp = z.rutasL.filter(r => r.vis >= r.n).length;
+    z.distAbord = z.distL.filter(d => d.vis).length; });
+  const zonasL = Object.values(zonas).sort((a, b) => a.zona.localeCompare(b.zona, "es", { numeric:true }));
+  // feedback de las visitas con contacto: qué dijo el comercio, qué hizo el ejecutivo, por qué sí
+  const vc = vv.filter(contacto), tipos = {}, acciones = {}, porQue = {}; let conFb = 0, deEjecutivo = 0;
+  vc.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; conFb++; if (f.fuente === "ejecutivo") deEjecutivo++;
+    // «No se encontraba…» y «Reagendé…» los marca solo el celular según cómo fue la visita: no son lo que dijo el comercio
+    f.tipos.filter(t => t !== FB_NINGUNO && t !== "No se encontraba la persona que tomaba decisiones").forEach(t => { const o = tipos[t] ||= { t, rama:(FEEDBACK.find(x => x[1].includes(t)) || [])[0] || "Otro", n:0, realiza:0 }; o.n++; if (v.decision === "Realizará consumos") o.realiza++; });
+    if (f.fuente === "ejecutivo") (f.acc || []).filter(a => a !== "Reagendé con quien decide").forEach(a => { const o = acciones[a] ||= { a, n:0, realiza:0, noDecide:0 }; o.n++; if (v.decision === "Realizará consumos") o.realiza++; if (v.decision === "Aún no decide") o.noDecide++; });
+    const m = msiDe(v); if (m && m.fuente) m.motivos.forEach(x => { porQue[x] = (porQue[x] || 0) + 1; }); });
+  // citas candidatas: se muestran solo en el escritorio (panel de citas) para que Jose elija; nunca van al archivo (pueden traer nombres)
+  const citas = vc.filter(v => (v.comentario || "").length >= 60 && (v.comentario || "").length <= 240)
+    .sort((a, b) => (b.decision === "Realizará consumos") - (a.decision === "Realizará consumos") || b.visitado_en.localeCompare(a.visitado_en)).slice(0, 8)
+    .map(v => `«${String(v.comentario).replace(/\s+/g, " ").trim()}» (${comoFue(v)[0]}${v.decision ? " · " + v.decision : ""})`);
+  // Reactivación: el último corte de BBVA cargado hasta la fecha C, con la regla de cuentaBBVA.
+  let bbva = null;
+  if (RB){ const F = RB.filas.filter(r => S.baseMap[r.customer_id] && S.baseMap[r.customer_id].correo), reac = F.filter(r => r.reactivado === "Si"), cuentan = reac.filter(r => cuentaBBVA(r, primera));
+    const conFac = F.some(r => r.facturado != null), facturado = conFac ? cuentan.reduce((a, r) => a + Number(r.facturado || 0), 0) : (RB.corte.facturado_total != null ? Number(RB.corte.facturado_total) : null);
+    const porZona = {}; cuentan.forEach(r => { const z = S.baseMap[r.customer_id].zona || "Sin zona"; porZona[z] = (porZona[z] || 0) + 1; });
+    bbva = { corte:RB.corte.corte, filas:F.length, reactivados:reac.length, cuentan:cuentan.length, enProceso:F.filter(r => r.reactivado === "En proceso").length,
+      sinVisita:reac.filter(r => !primera[r.customer_id]).length, visitadosSinContacto:reac.filter(r => primera[r.customer_id] && !r.gestion_con_contacto).length,
+      facturado, porZona, fueraCartera:RB.filas.length - F.length }; }
+  const reactivados = bbva ? bbva.cuentan : null;
+  return { C, p, meta, cartera, nEj, dh, dhCorte, zonasL, dhConCampo, serie, visitados, contactados, reunion, res, motivosNadie, volverAgendado, semanas, dist, tipos:Object.values(tipos).sort((a, b) => b.n - a.n),
+    acciones:Object.values(acciones).sort((a, b) => b.n - a.n), porQue:Object.entries(porQue).sort((a, b) => b[1] - a[1]), conFb, deEjecutivo, citas, reactivados, visitas:vs.length,
+    diasCampo:[...conCampo].filter(d => d <= C).length, bbva };
+}
+
+// Mapa de Lima por distrito, dibujado en un lienzo (sin mosaicos) y devuelto como PNG. Color = cobertura de la cartera;
+// cada distrito con cartera lleva su nombre y «visitados / cartera». Los distritos sin cartera quedan en gris, como contexto.
+const RAMPA_COB = [["E4E8FB", "0 %"], ["B7C0F5", "1–24 %"], ["7F8CEF", "25–49 %"], ["4652E0", "50–74 %"], ["232C86", "75 % o más"]];
+const claseCob = c => c == null ? -1 : c === 0 ? 0 : c < .25 ? 1 : c < .5 ? 2 : c < .75 ? 3 : 4;
+function mapaLima(D){
+  const W = 1500, H = 896, cv = document.createElement("canvas"); cv.width = W; cv.height = H; const x = cv.getContext("2d");
+  const anillos = g => g.geometria.type === "Polygon" ? [g.geometria.coordinates] : g.geometria.type === "MultiPolygon" ? g.geometria.coordinates : [];
+  const geo = (S.geo || []).filter(g => g.geometria), conCartera = geo.filter(g => D.dist[g.clave] && D.dist[g.clave].cartera);
+  x.fillStyle = "#FFFFFF"; x.fillRect(0, 0, W, H);
+  if (!conCartera.length){ x.fillStyle = "#A0ABBC"; x.font = "32px Arial"; x.fillText("Sin límites de distritos cargados", 60, H / 2); return cv.toDataURL("image/png"); }
+  // encuadre: los distritos con cartera, con un margen
+  let [a0, b0, a1, b1] = [180, 90, -180, -90];
+  conCartera.forEach(g => anillos(g).forEach(pl => pl[0].forEach(([lo, la]) => { a0 = Math.min(a0, lo); a1 = Math.max(a1, lo); b0 = Math.min(b0, la); b1 = Math.max(b1, la); })));
+  const mx = (a1 - a0) * .08, my = (b1 - b0) * .08; a0 -= mx; a1 += mx; b0 -= my; b1 += my;
+  const cos = Math.cos((b0 + b1) / 2 * Math.PI / 180), k = Math.min(W / ((a1 - a0) * cos), H / (b1 - b0));
+  const ox = (W - (a1 - a0) * cos * k) / 2, oy = (H - (b1 - b0) * k) / 2;
+  const P = ([lo, la]) => [ox + (lo - a0) * cos * k, oy + (b1 - la) * k];
+  const trazar = pl => { x.beginPath(); pl.forEach(r => r.forEach((q, j) => { const [px, py] = P(q); j ? x.lineTo(px, py) : x.moveTo(px, py); })); x.closePath(); };
+  // centro visual del anillo exterior más grande (centroide por áreas)
+  const centro = g => { let mejor = null, amax = 0;
+    anillos(g).forEach(pl => { const r = pl[0].map(P); let A = 0, cx = 0, cy = 0;
+      for (let i = 0; i < r.length - 1; i++){ const f = r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]; A += f; cx += (r[i][0] + r[i + 1][0]) * f; cy += (r[i][1] + r[i + 1][1]) * f; }
+      if (Math.abs(A) > amax){ amax = Math.abs(A); mejor = [cx / (3 * A), cy / (3 * A)]; } });
+    return mejor; };
+  geo.forEach(g => { const o = D.dist[g.clave], cl = o && o.cartera ? claseCob(o.cob) : -1;
+    anillos(g).forEach(pl => { trazar(pl); x.fillStyle = cl < 0 ? "#F1F3F8" : "#" + RAMPA_COB[cl][0]; x.fill("evenodd"); x.strokeStyle = "#FFFFFF"; x.lineWidth = cl < 0 ? 1.5 : 2.5; x.stroke(); }); });
+  // rótulos
+  // rótulos: primero los distritos con más cartera; si un rótulo choca con otro ya puesto, no se dibuja
+  // (el distrito sigue en los paneles de la derecha y en la tabla de la lámina siguiente)
+  const puestos = [], choca = r => puestos.some(p => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1]);
+  conCartera.slice().sort((a, b) => D.dist[b.clave].cartera - D.dist[a.clave].cartera).forEach(g => { const o = D.dist[g.clave], c = centro(g); if (!c) return;
+    const oscuro = claseCob(o.cob) >= 3, nom = nombreDistrito(g.clave), cifra = `${o.vis}/${o.cartera}`;
+    x.font = "bold 24px Arial"; const w = Math.max(x.measureText(nom).width, 60) + 10, r = [c[0] - w / 2, c[1] - 26, c[0] + w / 2, c[1] + 30];
+    if (choca(r)) return; puestos.push(r);
+    x.textAlign = "center"; x.lineJoin = "round";
+    const esc = (t, y, font) => { x.font = font; x.lineWidth = 6; x.strokeStyle = oscuro ? "rgba(12,17,55,.55)" : "rgba(255,255,255,.92)"; x.strokeText(t, c[0], y); x.fillStyle = oscuro ? "#FFFFFF" : "#0C1137"; x.fillText(t, c[0], y); };
+    esc(nom, c[1] - 3, "bold 24px Arial"); esc(cifra, c[1] + 23, "21px Arial"); });
+  // leyenda
+  const lx = 26, ly = H - 196; x.textAlign = "left";
+  x.fillStyle = "rgba(255,255,255,.94)"; x.fillRect(lx - 14, ly - 40, 290, 232);
+  x.font = "bold 24px Arial"; x.fillStyle = "#0C1137"; x.fillText("Cobertura de la cartera", lx, ly - 10);
+  RAMPA_COB.concat([["F1F3F8", "sin cartera asignada"]]).forEach(([col, t], i) => { const y = ly + 8 + i * 30; x.fillStyle = "#" + col; x.fillRect(lx, y, 34, 20); x.strokeStyle = "#D5DAE6"; x.lineWidth = 1; x.strokeRect(lx, y, 34, 20);
+    x.fillStyle = "#3F5073"; x.font = "21px Arial"; x.fillText(t, lx + 46, y + 17); });
+  return cv.toDataURL("image/png");
+}
+
+// Citas candidatas: se muestran aquí para copiarlas a mano; no viajan en el archivo (pueden traer nombres)
+function mostrarCitas(citas, C){
+  document.getElementById("citasPpt")?.remove();
+  if (!citas.length) return;
+  const d = document.createElement("div"); d.id = "citasPpt";
+  d.style.cssText = "position:fixed;right:20px;bottom:20px;max-width:560px;max-height:60vh;overflow:auto;background:var(--tarjeta);color:var(--ink);border:1px solid var(--linea);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:16px;z-index:50;font-size:13px";
+  d.innerHTML = `<b>Citas de campo para la presentación del ${fISO(C)}</b><div class="muted" style="margin:4px 0 10px;font-size:12px">No van en el archivo. Revisa que no traigan nombres ni teléfonos antes de copiarlas.</div>
+    ${citas.map(c => `<div style="padding:6px 0;border-top:1px solid var(--linea)">${esc(c)}</div>`).join("")}
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn p" data-citas-copiar>Copiar todas</button><button class="btn" data-citas-cerrar>Cerrar</button></div>`;
+  d.querySelector("[data-citas-cerrar]").onclick = () => d.remove();
+  d.querySelector("[data-citas-copiar]").onclick = () => { navigator.clipboard && navigator.clipboard.writeText(citas.join("\n")).then(() => toast("Citas copiadas."), () => toast("No se pudo copiar.")); };
+  document.body.appendChild(d);
+}
+async function presentacionBBVA(){
+  if (S._armandoPpt) return;
+  if (!S.periodo){ toast("No hay un periodo abierto."); return; }
+  const hoy = hoyISO(), sugerido = ayerISO() < S.periodo.ini ? S.periodo.ini : ayerISO();
+  const txt = prompt("Fecha de corte de la presentación (DD/MM/AAAA).\nJueves: corte al día anterior. Lunes: semana cerrada al domingo.", sugerido.split("-").reverse().join("/"));
+  if (txt === null) return;
+  const C = leerCorte(txt);
+  if (!C || C > hoy || C < S.periodo.ini){ toast("Fecha de corte no válida: tiene que estar entre el inicio del periodo y hoy."); return; }
+  S._armandoPpt = true; toast("Armando la presentación…");
+  try {
+    if (!window.PptxGenJS) await cargarScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js");
+    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), S.geo ? null : cargarGeo()]);
+    const av0 = (S.avance || [])[0] || {};
+    if (!av0.meta_visitas || !av0.meta_reactivados || !av0.meta_conversion) throw new Error("no se pudieron leer las metas del periodo; actualiza y vuelve a intentar");
+    const D = datosPresentacion(C, await cargarResultadosBBVA(C));
+    const pres = new PptxGenJS(); pres.layout = "LAYOUT_WIDE"; pres.author = "Stratis"; pres.company = "Stratis"; pres.title = `Campaña BBVA Adquirencia · corte al ${fISO(C)}`;
+    armarLaminas(pres, D);
+    await pres.writeFile({ fileName:`Mastercard_Campaña_BBVA_Adquirencia_${C.replace(/-/g, "")}.pptx` });
+    toast("Presentación descargada: corte al " + fISO(C) + ".");
+    mostrarCitas(D.citas, C);
+  } catch(e){ toast("No se pudo armar la presentación: " + (e.message || e)); }
+  finally { S._armandoPpt = false; }
+}
+
+function armarLaminas(pres, D){
+  const C = D.C, corteTxt = `${diaSem(C)} ${fechaLarga(C)}`, dd = fISO(C);
+  const fondo = FONDO_LAMINA.replace(/^data:/, "");
+  const T = (s, texto, o) => s.addText(texto, Object.assign({ fontFace:FT, color:PX.tinta, fontSize:12, margin:0, isTextBox:true, valign:"top" }, o));
+  const lamina = (titulo, sub) => { const s = pres.addSlide(); s.background = { data:fondo };
+    T(s, titulo, { x:0.6, y:0.42, w:12.1, h:0.62, fontFace:FTB, fontSize:26, color:PX.navy, valign:"middle", fit:"shrink" });
+    if (sub) T(s, sub, { x:0.6, y:1.08, w:12.1, h:0.36, fontSize:13 });
+    return s; };
+  const lectura = (s, texto, sig, y = 6.12) => {
+    s.addShape(pres.shapes.RECTANGLE, { x:0.6, y, w:12.1, h:0.82, fill:{ color:PX.lect }, line:{ color:PX.lect } });
+    s.addShape(pres.shapes.RECTANGLE, { x:0.6, y, w:0.09, h:0.82, fill:{ color:PX.naranja }, line:{ color:PX.naranja } });
+    T(s, [{ text:"La lectura", options:{ bold:true, color:PX.navy, fontSize:11.5, breakLine:true } }, { text:texto, options:{ fontSize:11.5, breakLine:!!sig } }].concat(sig ? [{ text:"Siguiente: ", options:{ bold:true, fontSize:11.5 } }, { text:sig, options:{ fontSize:11.5 } }] : []),
+      { x:0.9, y:y + 0.07, w:11.6, h:0.7, color:PX.tinta, fit:"shrink" }); };
+  const pie = (s, texto) => T(s, texto, { x:0.6, y:7.0, w:12.1, h:0.3, fontSize:8.5, color:PX.gris });
+  const kpi = (s, x, y, w, h, color, titulo, valor, de, avance, caption) => {
+    s.addShape(pres.shapes.RECTANGLE, { x, y, w, h, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+    s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:0.08, fill:{ color }, line:{ color } });
+    T(s, titulo, { x:x + 0.22, y:y + 0.22, w:w - 0.44, h:0.3, fontSize:12, bold:true, color:PX.navy });
+    T(s, valor, { x:x + 0.22, y:y + 0.55, w:de ? w * 0.55 : w - 0.44, h:0.6, fontFace:FTB, fontSize:30, color:PX.navy, valign:"middle", fit:"shrink" });
+    if (de) T(s, de, { x:x + w * 0.55, y:y + 0.7, w:w * 0.45 - 0.22, h:0.35, fontSize:12, color:PX.tinta });
+    if (avance != null){ s.addShape(pres.shapes.RECTANGLE, { x:x + 0.22, y:y + 1.25, w:w - 0.44, h:0.1, fill:{ color:PX.linea }, line:{ color:PX.linea } });
+      if (avance > 0) s.addShape(pres.shapes.RECTANGLE, { x:x + 0.22, y:y + 1.25, w:(w - 0.44) * Math.min(1, avance), h:0.1, fill:{ color:PX.naranja }, line:{ color:PX.naranja } }); }
+    if (caption) T(s, caption, { x:x + 0.22, y:y + 1.42, w:w - 0.44, h:0.34, fontSize:9.5, color:PX.gris }); };
+  const pDias = pc(D.dhCorte, D.dh.length), pVis = pc(D.visitados, D.meta.vis), tasaCon = pc(D.contactados, D.visitados);
+  const ritmo = D.dhConCampo ? Math.round(D.visitados / Math.max(1, D.diasCampo)) : 0, metaDia = Math.round(D.meta.vis / Math.max(1, D.dh.length));
+  const faltan = Math.max(0, D.meta.vis - D.visitados), habRest = D.dh.filter(d => d > C).length, necesario = habRest ? Math.ceil(faltan / habRest) : faltan;
+  const ultSem = D.semanas[D.semanas.length - 1], antSem = D.semanas[D.semanas.length - 2];
+
+  // 1. Portada
+  { const s = pres.addSlide(); s.background = { color:PX.navy };
+    T(s, "Stratis", { x:0.8, y:1.2, w:6, h:0.9, fontFace:FTB, fontSize:48, color:PX.blanco, valign:"middle" });
+    s.addShape(pres.shapes.LINE, { x:0, y:2.35, w:6.6, h:0, line:{ color:"5A6495", width:1 } });
+    T(s, "INNOVATE, PERFORM & GROW", { x:0.8, y:2.55, w:6, h:0.5, fontSize:22, color:PX.blanco });
+    s.addShape(pres.shapes.LINE, { x:0, y:3.25, w:6.6, h:0, line:{ color:"5A6495", width:1 } });
+    T(s, "Campaña BBVA Adquirencia", { x:0.8, y:4.2, w:7, h:0.55, fontSize:26, bold:true, color:PX.blanco });
+    T(s, `Mastercard · reporte semanal del ${nombrePeriodo(D.p)}`, { x:0.8, y:4.85, w:7, h:0.4, fontSize:15, color:"D5DAE6" });
+    T(s, "Corte al " + corteTxt, { x:0.8, y:5.35, w:7, h:0.4, fontSize:15, color:PX.naranja });
+    [[numPE(D.visitados), "comercios visitados", `de ${numPE(D.meta.vis)} de la meta del periodo`], [tasaCon + " %", "con contacto", "de los comercios visitados"], [numPE(D.res.realiza), "realizarán consumos", "según la última visita"]]
+      .forEach(([v, t, c], i) => { const y = 1.55 + i * 1.7; s.addShape(pres.shapes.RECTANGLE, { x:8.4, y, w:4.2, h:1.4, fill:{ color:"1A2150" }, line:{ color:"2B3470" } });
+        T(s, v, { x:8.65, y:y + 0.15, w:3.8, h:0.65, fontFace:FTB, fontSize:32, color:PX.blanco, valign:"middle" });
+        T(s, t, { x:8.65, y:y + 0.8, w:3.8, h:0.28, fontSize:13, bold:true, color:PX.naranja }); T(s, c, { x:8.65, y:y + 1.06, w:3.8, h:0.26, fontSize:10, color:"B9C6E0" }); });
+  }
+
+  // 2. Resumen ejecutivo
+  { const s = lamina("Resumen ejecutivo", `${mayus(nombrePeriodo(D.p))} · del ${fISO(D.p.ini)} al ${fISO(D.p.fin)} · corte al ${corteTxt} · ${D.dhCorte} de ${D.dh.length} días hábiles (${pDias} %)`);
+    const w = 2.87, gap = 0.21;
+    kpi(s, 0.6, 1.6, w, 1.9, PX.naranja, "Comercios visitados", numPE(D.visitados), `de ${numPE(D.meta.vis)}`, D.visitados / D.meta.vis, `${pVis} % de la meta con ${pDias} % de los días`);
+    kpi(s, 0.6 + (w + gap), 1.6, w, 1.9, PX.azul, "Con contacto", tasaCon + " %", `${numPE(D.contactados)} comercios`, null, "hablaron con el dueño, el encargado o un tercero");
+    kpi(s, 0.6 + 2 * (w + gap), 1.6, w, 1.9, PX.verde, "Realizarán consumos", numPE(D.res.realiza), `${pc(D.res.realiza, D.contactados)} % del contacto`, null, `${numPE(D.res.noDecide)} aún no deciden · ${numPE(D.res.reag)} con regreso agendado`);
+    kpi(s, 0.6 + 3 * (w + gap), 1.6, w, 1.9, PX.azulOsc, "Reactivados", D.reactivados == null ? "—" : numPE(D.reactivados), `meta ${numPE(D.meta.rea)}`, D.reactivados == null ? null : D.reactivados / D.meta.rea,
+      D.reactivados == null ? "pendiente de la data de BBVA" : `cuentan (con visita y contacto) · corte BBVA ${fISO(D.bbva.corte)} · conversión ${pc(D.reactivados, D.visitados)} %`);
+    s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:3.75, w:7.4, h:2.15, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+    T(s, "Lo más relevante al corte", { x:0.85, y:3.9, w:7, h:0.32, fontSize:13, bold:true, color:PX.navy });
+    const puntos = [
+      `El equipo lleva ${numPE(D.visitados)} comercios visitados, ${ritmo} por día con campo frente a una meta de ${metaDia} por día hábil.`,
+      ultSem ? `En la semana del ${fISO(ultSem.lun)} se sumaron ${numPE(ultSem.nuevos)} comercios${antSem ? `, frente a ${numPE(antSem.nuevos)} la semana anterior` : ""}.` : "",
+      `${tasaCon} % de los comercios visitados atendió la visita; ${numPE(D.res.realiza)} se comprometieron a volver a usar el POS.`,
+      habRest ? `Para cerrar el periodo en meta faltan ${numPE(faltan)} comercios en ${habRest} días hábiles: ${necesario} por día.` : `El periodo cerró con ${pVis} % de la meta de visitas.`].filter(Boolean);
+    T(s, puntos.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < puntos.length - 1 } })), { x:0.85, y:4.3, w:7, h:1.5, fontSize:11.5, paraSpaceAfter:4 });
+    s.addShape(pres.shapes.RECTANGLE, { x:8.2, y:3.75, w:4.5, h:2.15, fill:{ color:PX.suave }, line:{ color:PX.linea, width:0.75 } });
+    T(s, `Cómo se mide el ${nombrePeriodo(D.p)}`, { x:8.45, y:3.9, w:4.1, h:0.32, fontSize:13, bold:true, color:PX.navy });
+    const reglas = ["Visita: presencial, con ubicación validada, sea cual sea el resultado.", "Reactivado que cuenta: volvió a transaccionar según la data de BBVA, con gestión con contacto y con visita de Stratis.", "Conversión: reactivados que cuentan ÷ comercios visitados."];
+    T(s, reglas.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < reglas.length - 1 } })), { x:8.45, y:4.3, w:4.1, h:1.5, fontSize:10.5, paraSpaceAfter:4 });
+    lectura(s, D.visitados / D.meta.vis >= D.dhCorte / D.dh.length ? "El avance de visitas va por delante del tiempo transcurrido del periodo." : "El avance de visitas está por debajo del tiempo transcurrido del periodo.",
+      D.reactivados == null ? "incorporar la data de BBVA para medir reactivación y facturación." : "sostener el ritmo y convertir el contacto en transacciones.");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Reactivación: ${D.bbva ? `data de BBVA con corte al ${fISO(D.bbva.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
+
+  // 3. Avance del periodo
+  { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Comercios distintos con visita válida, acumulados por día, frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
+    const cats = D.serie.map(x => fISO(x.dia) + (x.habil ? "" : " (sáb)"));
+    s.addChart([{ type:pres.charts.BAR, data:[{ name:"Meta acumulada", labels:cats, values:D.serie.map(x => x.meta) }], options:{ chartColors:[PX.linea], barGapWidthPct:40 } },
+                { type:pres.charts.LINE, data:[{ name:"Visitados acumulados", labels:cats, values:D.serie.map(x => x.acum == null ? null : x.acum) }],
+                  options:{ chartColors:[PX.naranja], lineSize:3, lineDataSymbol:"circle", lineDataSymbolSize:7, showValue:true, dataLabelPosition:"t", dataLabelFontSize:9, dataLabelColor:PX.navy } }],
+      { x:0.6, y:1.6, w:8.6, h:4.35, catAxisLabelColor:PX.gris, valAxisLabelColor:PX.gris, catAxisLabelFontSize:8, valAxisLabelFontSize:9, valGridLine:{ color:"E4E8F0", size:0.5 }, catGridLine:{ style:"none" },
+        showLegend:true, legendPos:"t", legendFontSize:10, legendColor:PX.tinta, catAxisLabelRotate:-45 });
+    s.addShape(pres.shapes.RECTANGLE, { x:9.45, y:1.6, w:3.25, h:4.35, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+    const mejor = D.serie.filter(x => x.delDia != null).sort((a, b) => b.delDia - a.delDia)[0];
+    const bloques = [["Ritmo", `${ritmo} por día con campo`, `meta: ${metaDia} por día hábil`], ["Mejor día", mejor ? `${numPE(mejor.delDia)} el ${diaSem(mejor.dia)} ${fISO(mejor.dia)}` : "—", "comercios visitados ese día"],
+      ["Avance", `${pVis} % de la meta`, `con ${pDias} % de los días hábiles`], ["Para cerrar en meta", habRest ? `${necesario} por día` : "periodo cerrado", habRest ? `${numPE(faltan)} comercios en ${habRest} días hábiles` : ""]];
+    bloques.forEach(([t, v, c], i) => { const y = 1.8 + i * 1.02; T(s, t, { x:9.7, y, w:2.8, h:0.26, fontSize:10, bold:true, color:PX.naranja });
+      T(s, v, { x:9.7, y:y + 0.27, w:2.8, h:0.36, fontSize:14, bold:true, color:PX.navy, fit:"shrink" }); T(s, c, { x:9.7, y:y + 0.63, w:2.8, h:0.26, fontSize:9.5, color:PX.gris }); });
+    lectura(s, D.visitados >= (D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta ? `El acumulado está sobre la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`
+      : `El acumulado está por debajo de la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`, habRest ? `sostener ${necesario} comercios por día hábil hasta el cierre.` : "");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Visita válida: con ubicación y registrada a tiempo; un comercio se cuenta una sola vez. Los días de fin de semana con campo suman al acumulado, sin meta propia.`); }
+
+  // 3b. Avance por zona
+  { const s = lamina("Avance por zona", `${D.zonasL.length} zonas, una por ejecutivo · ${numPE(Math.round(D.cartera / Math.max(1, D.zonasL.length)))} comercios y ${Math.max(0, ...D.zonasL.map(z => z.rutasL.length))} rutas por zona · corte al ${dd}`);
+    const metaFecha = Math.round(D.meta.visEj * D.dhCorte / Math.max(1, D.dh.length)), n = Math.max(1, D.zonasL.length), w = (12.1 - 0.2 * (n - 1)) / n;
+    const colZ = [PX.naranja, PX.azul, PX.verde, PX.azulOsc];
+    D.zonasL.forEach((z, i) => { const x = 0.6 + i * (w + 0.2), y = 1.55, col = colZ[i % colZ.length];
+      s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:2.55, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:0.08, fill:{ color:col }, line:{ color:col } });
+      T(s, zonaNum(z.zona), { x:x + 0.2, y:y + 0.18, w:w - 0.4, h:0.3, fontSize:13, bold:true, color:PX.navy });
+      T(s, `${zonaLugar(z.zona)} · ${ejDe(z.correo).nombre}`, { x:x + 0.2, y:y + 0.47, w:w - 0.4, h:0.24, fontSize:9.5, color:PX.gris, fit:"shrink" });
+      T(s, numPE(z.vis), { x:x + 0.2, y:y + 0.72, w:1.2, h:0.55, fontFace:FTB, fontSize:28, color:PX.navy, valign:"middle" });
+      T(s, `de ${numPE(D.meta.visEj)} · ${pc(z.vis, D.meta.visEj)} %`, { x:x + 1.35, y:y + 0.86, w:w - 1.5, h:0.3, fontSize:10.5, color:PX.tinta });
+      s.addShape(pres.shapes.RECTANGLE, { x:x + 0.2, y:y + 1.32, w:w - 0.4, h:0.1, fill:{ color:PX.linea }, line:{ color:PX.linea } });
+      if (z.vis) s.addShape(pres.shapes.RECTANGLE, { x:x + 0.2, y:y + 1.32, w:(w - 0.4) * Math.min(1, z.vis / D.meta.visEj), h:0.1, fill:{ color:col }, line:{ color:col } });
+      const det = [`Contacto: ${pc(z.con, z.vis)} % de los visitados`, `Realizarán consumos: ${numPE(z.realiza)}`, `Rutas iniciadas: ${z.rutasIni} de ${z.rutasL.length} (${z.rutasComp} completas)`, `Distritos abordados: ${z.distAbord} de ${z.distL.length}`];
+      T(s, det.map((t, j) => ({ text:t, options:{ breakLine:j < det.length - 1 } })), { x:x + 0.2, y:y + 1.52, w:w - 0.4, h:0.95, fontSize:10, paraSpaceAfter:2 }); });
+    const labs = D.zonasL.map(z => nombreZona(z.zona));
+    s.addChart(pres.charts.BAR, [{ name:"Comercios visitados", labels:labs, values:D.zonasL.map(z => z.vis) }, { name:`Meta a la fecha (${metaFecha})`, labels:labs, values:D.zonasL.map(() => metaFecha) },
+      { name:"Con contacto", labels:labs, values:D.zonasL.map(z => z.con) }, { name:"Realizarán consumos", labels:labs, values:D.zonasL.map(z => z.realiza) }],
+      { x:0.6, y:4.25, w:12.1, h:1.75, barGrouping:"clustered", chartColors:[PX.naranja, PX.linea, PX.azul, PX.verde], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:8, dataLabelColor:PX.navy,
+        catAxisLabelColor:PX.tinta, catAxisLabelFontSize:9, valAxisHidden:true, valGridLine:{ style:"none" }, catGridLine:{ style:"none" }, showLegend:true, legendPos:"r", legendFontSize:9 });
+    const orden = D.zonasL.slice().sort((a, b) => b.vis - a.vis), rez = orden[orden.length - 1];
+    lectura(s, orden.length ? `${nombreZona(orden[0].zona)} lleva el mayor avance (${numPE(orden[0].vis)} comercios)${rez && rez !== orden[0] ? `; ${nombreZona(rez.zona)} va más atrás (${numPE(rez.vis)})` : ""}. La meta a la fecha es ${numPE(metaFecha)} por zona.` : "Sin zonas asignadas.",
+      `equilibrar el ritmo entre zonas para que ${D.zonasL.length === 1 ? "la zona cierre" : `las ${["", "", "dos", "tres", "cuatro", "cinco", "seis"][D.zonasL.length] || numPE(D.zonasL.length)} cierren`} en meta.`);
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Meta a la fecha: ${numPE(D.meta.visEj)} comercios por zona × días hábiles transcurridos ÷ días hábiles del periodo. Ruta iniciada: al menos un comercio visitado.`); }
+
+  // 4. Evolución semanal
+  { const s = lamina("Evolución semanal de los indicadores", `Semanas de lunes a domingo · ${nombrePeriodo(D.p)} hasta el ${dd}`);
+    const labs = D.semanas.map(w => `Sem. ${w.n} · ${fISO(w.lun)}`);
+    s.addChart(pres.charts.BAR, [{ name:"Comercios nuevos visitados", labels:labs, values:D.semanas.map(w => w.nuevos) }, { name:"Con contacto", labels:labs, values:D.semanas.map(w => w.contacto) },
+      { name:"Realizarán consumos", labels:labs, values:D.semanas.map(w => w.realiza) }],
+      { x:0.6, y:1.6, w:6.3, h:4.3, barGrouping:"clustered", chartColors:[PX.naranja, PX.azul, PX.verde], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:9, dataLabelColor:PX.navy,
+        catAxisLabelColor:PX.tinta, valAxisLabelColor:PX.gris, valGridLine:{ color:"E4E8F0", size:0.5 }, catGridLine:{ style:"none" }, showLegend:true, legendPos:"t", legendFontSize:10, catAxisLabelFontSize:10 });
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:9.5, fontFace:FT, align:"center", valign:"middle" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10, fontFace:FT, color:PX.tinta, align:"center", valign:"middle" }, o) });
+    const filas = [["Semana", "Nuevos", "Acumulado", "% meta", "Contacto", "Consumos"].map(t => ({ text:t, options:H }))]
+      .concat(D.semanas.map(w => [cel(`${w.n} · ${fISO(w.lun)} al ${fISO(w.fin7)}${w.cerrada ? "" : "*"}`, { align:"left" }), cel(numPE(w.nuevos)), cel(numPE(w.acum)), cel(pc(w.acum, D.meta.vis) + " %"),
+        cel(`${pc(w.contacto, w.comercios)} %`), cel(numPE(w.realiza))]));
+    s.addTable(filas, { x:7.1, y:1.7, w:5.6, colW:[1.5, 0.7, 0.95, 0.7, 0.8, 0.95], border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco }, rowH:0.4 });
+    lectura(s, ultSem && antSem ? `La semana ${ultSem.n} sumó ${numPE(ultSem.nuevos)} comercios nuevos (${ultSem.nuevos >= antSem.nuevos ? "+" : ""}${numPE(ultSem.nuevos - antSem.nuevos)} frente a la anterior) con ${pc(ultSem.contacto, ultSem.comercios)} % de contacto.`
+      : `La primera semana sumó ${numPE(ultSem ? ultSem.nuevos : 0)} comercios visitados con ${ultSem ? pc(ultSem.contacto, ultSem.comercios) : 0} % de contacto.`, "sumar la reactivación semanal cuando esté la data de BBVA.");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Contacto: comercios atendidos ÷ comercios visitados en la semana. Consumos: se comprometieron a usar el POS. * Semana en curso.`); }
+
+  // 5. Mapa de Lima
+  { const s = lamina("Cobertura territorial: dónde está la cartera y cómo avanza", `Lima Metropolitana y Callao · distritos con comercios asignados · corte al ${dd}`);
+    s.addImage({ data:mapaLima(D).replace(/^data:/, ""), x:0.6, y:1.55, w:7.45, h:4.45 });
+    s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:1.55, w:7.45, h:4.45, fill:{ type:"none" }, line:{ color:PX.linea, width:0.75 } });
+    const L = Object.values(D.dist).filter(o => o.cartera);
+    const mejores = L.filter(o => o.con >= 3).sort((a, b) => b.fav - a.fav || b.con - a.con).slice(0, 4);
+    const pendientes = L.map(o => Object.assign({ falta:o.cartera - o.vis }, o)).filter(o => o.falta > 0).sort((a, b) => b.falta - a.falta).slice(0, 4);
+    const panel = (y, h, titulo, color, filas) => {
+      s.addShape(pres.shapes.RECTANGLE, { x:8.3, y, w:4.4, h, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      T(s, titulo, { x:8.5, y:y + 0.12, w:4.0, h:0.3, fontSize:12.5, bold:true, color });
+      filas.forEach(([nom, det, v], i) => { const yy = y + 0.48 + i * 0.4;
+        T(s, nom, { x:8.5, y:yy, w:2.3, h:0.2, fontSize:10.5, bold:true, color:PX.navy, fit:"shrink" });
+        T(s, det, { x:8.5, y:yy + 0.2, w:2.3, h:0.18, fontSize:8.5, color:PX.gris });
+        s.addShape(pres.shapes.RECTANGLE, { x:10.85, y:yy + 0.08, w:1.2, h:0.16, fill:{ color:PX.suave }, line:{ color:PX.suave } });
+        if (v > 0) s.addShape(pres.shapes.RECTANGLE, { x:10.85, y:yy + 0.08, w:1.2 * Math.min(1, v), h:0.16, fill:{ color }, line:{ color } });
+        T(s, Math.round(v * 100) + " %", { x:12.1, y:yy + 0.02, w:0.55, h:0.26, fontSize:10.5, bold:true, color:PX.navy, align:"right" }); });
+      if (!filas.length) T(s, "Todavía sin datos suficientes.", { x:8.5, y:y + 0.5, w:4.0, h:0.3, fontSize:10, color:PX.gris }); };
+    panel(1.55, 2.15, "Dónde responden mejor", PX.verde, mejores.map(o => [nombreDistrito(o.clave), `${o.realiza} de ${o.con} con contacto`, o.fav]));
+    panel(3.85, 2.15, "Mayor cartera por visitar", PX.naranja, pendientes.map(o => [nombreDistrito(o.clave), `${o.falta} de ${o.cartera} sin visitar`, o.cob]));
+    const top = mejores[0], bajo = pendientes[0];
+    lectura(s, `${top ? `Mejor respuesta: ${nombreDistrito(top.clave)} (${pc(top.realiza, top.con)} % de los contactados). ` : ""}${bajo ? `Mayor cartera por visitar: ${nombreDistrito(bajo.clave)} (${numPE(bajo.falta)} comercios).` : ""}`,
+      "orientar la ruta de las próximas semanas a los distritos con más cartera por visitar.");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cifra en el mapa: visitados / cartera. Respuesta: distritos con 3 o más comercios con contacto. Límites: © OpenStreetMap (ODbL).`); }
+
+  // 6. Rutas y distritos abordados por zona
+  { const s = lamina("Rutas y distritos abordados", `${Math.max(0, ...D.zonasL.map(z => z.rutasL.length))} rutas por zona, de ${Math.round(D.cartera / Math.max(1, D.zonasL.reduce((a, z) => a + z.rutasL.length, 0)))} comercios cada una · cada casilla es una ruta · corte al ${dd}`);
+    const tams = [...new Set(D.zonasL.flatMap(z => z.rutasL.map(r => r.n)))];
+    const leyenda = [["F1F3F8", "sin iniciar"], ["B7C0F5", "en curso"], ["232C86", tams.length === 1 ? `completa (${tams[0]} de ${tams[0]})` : "completa"]];
+    leyenda.forEach(([c, t], i) => { const x = 8.2 + i * 1.5; s.addShape(pres.shapes.RECTANGLE, { x, y:1.18, w:0.22, h:0.18, fill:{ color:c }, line:{ color:PX.linea, width:0.5 } });
+      T(s, t, { x:x + 0.28, y:1.15, w:1.2, h:0.24, fontSize:9.5, color:PX.tinta }); });
+    const alto = 4.45 / Math.max(1, D.zonasL.length);
+    D.zonasL.forEach((z, i) => { const y = 1.55 + i * alto;
+      s.addShape(pres.shapes.RECTANGLE, { x:0.6, y, w:12.1, h:alto - 0.1, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      T(s, zonaNum(z.zona), { x:0.78, y:y + 0.1, w:2.1, h:0.28, fontSize:12, bold:true, color:PX.navy });
+      T(s, zonaLugar(z.zona), { x:0.78, y:y + 0.36, w:2.2, h:0.22, fontSize:9.5, bold:true, color:PX.tinta });
+      T(s, `${ejDe(z.correo).nombre} · ${z.rutasIni} de ${z.rutasL.length} rutas`, { x:0.78, y:y + 0.57, w:2.2, h:0.22, fontSize:9, color:PX.gris });
+      const lado = Math.min(0.34, (9.4 - 0.05 * 24) / 25);
+      z.rutasL.slice(0, 25).forEach((r, k) => { const x = 3.05 + k * (lado + 0.05), p = r.vis / Math.max(1, r.n), c = !r.vis ? "F1F3F8" : p >= 1 ? "232C86" : "B7C0F5";
+        s.addShape(pres.shapes.RECTANGLE, { x, y:y + 0.12, w:lado, h:lado, fill:{ color:c }, line:{ color:PX.linea, width:0.5 } });
+        T(s, (r.ruta.match(/\d+/) || [String(k + 1)])[0], { x, y:y + 0.12, w:lado, h:lado, fontSize:7.5, bold:true, color:p >= 1 ? PX.blanco : PX.navy, align:"center", valign:"middle" }); });
+      const ab = z.distL.filter(d => d.vis), pend = z.distL.filter(d => !d.vis);
+      T(s, [{ text:`Distritos abordados (${ab.length} de ${z.distL.length}): `, options:{ bold:true, color:PX.navy } }, { text:ab.length ? ab.map(d => `${nombreDistrito(d.d)} ${d.vis}/${d.n}`).join(" · ") : "ninguno todavía" }]
+        .concat(pend.length ? [{ text:"   Por abordar: ", options:{ bold:true, color:PX.naranja } }, { text:pend.map(d => nombreDistrito(d.d)).join(" · ") }] : []),
+        { x:3.05, y:y + 0.12 + lado + 0.06, w:9.5, h:alto - lado - 0.32, fontSize:9, color:PX.tinta, fit:"shrink" }); });
+    const ini = D.zonasL.reduce((a, z) => a + z.rutasIni, 0), comp = D.zonasL.reduce((a, z) => a + z.rutasComp, 0), tot = D.zonasL.reduce((a, z) => a + z.rutasL.length, 0);
+    lectura(s, `${ini} de ${tot} rutas iniciadas y ${comp} completas. Cada zona avanza ruta por ruta; los distritos por abordar marcan la agenda de las próximas semanas.`, "completar las rutas en curso antes de abrir nuevas, para no dejar comercios a medias.");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cifra junto a cada distrito: visitados / cartera de la zona en ese distrito.`); }
+
+  // 7. Del contacto a la decisión
+  { const s = lamina("Del contacto a la decisión", `Estado de cada comercio visitado según su última visita · corte al ${dd}`);
+    const pasos = [["Cartera asignada", D.cartera, PX.navy], ["Comercios visitados", D.visitados, PX.azulOsc], ["Con contacto", D.contactados, PX.azul], ["Con reunión concretada", D.reunion, PX.naranja], ["Realizarán consumos", D.res.realiza, PX.verde]];
+    const max = Math.max(1, D.cartera);
+    pasos.forEach(([t, n, col], i) => { const y = 1.65 + i * 0.72, w = Math.max(0.08, 4.6 * n / max);
+      T(s, t, { x:0.6, y:y + 0.02, w:2.4, h:0.3, fontSize:12, bold:true, color:PX.navy, align:"right" });
+      if (i) T(s, `${pc(n, pasos[i - 1][1])} % del paso anterior`, { x:0.6, y:y + 0.3, w:2.4, h:0.24, fontSize:9, color:PX.gris, align:"right" });
+      s.addShape(pres.shapes.RECTANGLE, { x:3.15, y, w, h:0.55, fill:{ color:col }, line:{ color:col } });
+      T(s, numPE(n), { x:3.25 + w, y:y + 0.05, w:1.0, h:0.45, fontFace:FTB, fontSize:18, color:col, valign:"middle" }); });
+    s.addShape(pres.shapes.RECTANGLE, { x:9.0, y:1.6, w:3.7, h:1.95, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+    T(s, "Con contacto, qué decidió", { x:9.2, y:1.72, w:3.3, h:0.3, fontSize:12, bold:true, color:PX.navy });
+    const dec = [["Realizarán consumos", D.res.realiza], ["Aún no deciden", D.res.noDecide], ["Regreso agendado (no estaba quien decide)", D.res.reag], ["Sin compromiso", D.res.sinExito], ["Desisten del producto", D.res.desiste]];
+    T(s, dec.map(([t, n], i) => ({ text:`${t}: ${numPE(n)}`, options:{ bullet:true, breakLine:i < dec.length - 1 } })), { x:9.2, y:2.05, w:3.35, h:1.45, fontSize:10.5, paraSpaceAfter:2 });
+    s.addShape(pres.shapes.RECTANGLE, { x:9.0, y:3.7, w:3.7, h:2.25, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+    T(s, `Sin contacto: ${numPE(D.res.nadie)} comercios`, { x:9.2, y:3.82, w:3.3, h:0.3, fontSize:12, bold:true, color:PX.navy });
+    const mn = Object.entries(D.motivosNadie).sort((a, b) => b[1] - a[1]);
+    T(s, mn.length ? mn.map(([t, n], i) => ({ text:`${t}: ${numPE(n)}`, options:{ bullet:true, breakLine:i < mn.length - 1 } })) : "—", { x:9.2, y:4.15, w:3.35, h:1.7, fontSize:10.5, paraSpaceAfter:2 });
+    // reactivación y facturación
+    s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:5.3, w:8.2, h:0.7, fill:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy }, line:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy } });
+    T(s, D.reactivados == null ? [{ text:"Reactivación y facturación: ", options:{ bold:true } }, { text:"pendientes de la data de BBVA. Se reportan cuando la data esté cargada en el CRM." }]
+      : [{ text:`${numPE(D.reactivados)} reactivados que cuentan`, options:{ bold:true } }, { text:` · ${pc(D.reactivados, D.visitados)} % de conversión (meta ${D.meta.conv} %)${D.bbva.facturado != null ? ` · ${soles(D.bbva.facturado)} facturados` : ""} · corte BBVA ${fISO(D.bbva.corte)}.` }],
+      { x:0.85, y:5.38, w:7.8, h:0.55, fontSize:11.5, color:D.reactivados == null ? PX.rojo : PX.blanco, valign:"middle" });
+    lectura(s, `${pc(D.contactados, D.visitados)} % de los visitados atendió la visita y ${pc(D.res.realiza, D.contactados)} % de los contactados se comprometió a usar el POS.`, "convertir el compromiso en transacciones y volver a los comercios con regreso agendado.", 6.12);
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cada comercio aparece una sola vez, con el resultado de su última visita.`); }
+
+  // 7b. Reactivación confirmada por BBVA
+  { const B = D.bbva;
+    const s = lamina("Reactivación confirmada por BBVA", B ? `Corte de la data de BBVA al ${fechaLarga(B.corte)} · cuenta: reactivado y con gestión con contacto según BBVA, con visita de Stratis` : "Pendiente de la data de BBVA");
+    if (!B){
+      s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:1.7, w:12.1, h:2.2, fill:{ color:PX.naranjaSuave }, line:{ color:PX.naranjaSuave } });
+      T(s, [{ text:"Todavía no hay un corte de BBVA cargado hasta esta fecha.", options:{ bold:true, breakLine:true } }, { text:"La reactivación y la facturación se reportan cuando la data de BBVA está cargada en el CRM (Cargas › Resultados de BBVA). No se muestran cifras sin esa fuente." }],
+        { x:0.9, y:1.9, w:11.5, h:1.8, fontSize:14, color:PX.rojo });
+    } else {
+      const w = 2.87, gap = 0.21, prom = B.facturado != null && B.cuentan ? B.facturado / B.cuentan : null;
+      kpi(s, 0.6, 1.6, w, 1.9, PX.azulOsc, "Reactivados que cuentan", numPE(B.cuentan), `meta ${numPE(D.meta.rea)}`, B.cuentan / D.meta.rea, `${pc(B.cuentan, D.meta.rea)} % de la meta · con visita y contacto`);
+      kpi(s, 0.6 + (w + gap), 1.6, w, 1.9, PX.naranja, "Conversión", pc(B.cuentan, D.visitados) + " %", `meta ${D.meta.conv} %`, Math.min(1, pc(B.cuentan, D.visitados) / Math.max(1, D.meta.conv)), `${numPE(B.cuentan)} que cuentan ÷ ${numPE(D.visitados)} visitados`);
+      kpi(s, 0.6 + 2 * (w + gap), 1.6, w, 1.9, PX.verde, "Facturado", soles(B.facturado), "", null, B.facturado == null ? "sin monto en la carga" : prom != null ? `por los que cuentan · ≈ ${soles(prom)} por comercio` : "por los que cuentan");
+      kpi(s, 0.6 + 3 * (w + gap), 1.6, w, 1.9, PX.azul, "Reactivados según BBVA", numPE(B.reactivados), `de ${numPE(B.filas)}`, null, `${numPE(B.enProceso)} en proceso · incluye los que no cuentan`);
+      // por qué no todos cuentan
+      s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:3.75, w:5.9, h:2.2, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      T(s, "Reactivados según BBVA, por qué cuentan o no", { x:0.85, y:3.88, w:5.5, h:0.3, fontSize:12.5, bold:true, color:PX.navy });
+      const pq = [[`Cuentan: visitados y con gestión con contacto`, B.cuentan, PX.verde], [`Visitados, sin gestión con contacto según BBVA`, B.visitadosSinContacto, PX.naranja], [`Reactivaron sin visita válida de Stratis`, B.sinVisita, PX.gris]];
+      const maxv = Math.max(1, ...pq.map(x => x[1]));
+      pq.forEach(([t, n, col], i) => { const y = 4.3 + i * 0.5; T(s, t, { x:0.85, y, w:3.2, h:0.4, fontSize:10.5, valign:"middle" });
+        s.addShape(pres.shapes.RECTANGLE, { x:4.1, y:y + 0.1, w:Math.max(0.05, 1.7 * n / maxv), h:0.22, fill:{ color:col }, line:{ color:col } });
+        T(s, numPE(n), { x:4.15 + Math.max(0.05, 1.7 * n / maxv), y, w:0.6, h:0.4, fontSize:11, bold:true, color:PX.navy, valign:"middle" }); });
+      // por zona
+      const labs = D.zonasL.map(z => zonaNum(z.zona));
+      s.addChart(pres.charts.BAR, [{ name:"Reactivados que cuentan", labels:labs, values:D.zonasL.map(z => B.porZona[z.zona] || 0) }, { name:`Meta del periodo por zona (${numPE(D.meta.reaEj)})`, labels:labs, values:D.zonasL.map(() => D.meta.reaEj) }],
+        { x:6.75, y:3.75, w:5.95, h:2.2, barGrouping:"clustered", chartColors:[PX.azulOsc, PX.linea], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:9, dataLabelColor:PX.navy,
+          catAxisLabelColor:PX.tinta, catAxisLabelFontSize:10, valAxisHidden:true, valGridLine:{ style:"none" }, catGridLine:{ style:"none" }, showLegend:true, legendPos:"t", legendFontSize:9,
+          showTitle:true, title:"Reactivados que cuentan por zona", titleFontSize:11, titleColor:PX.navy });
+    }
+    lectura(s, B ? `${B.cuentan === 1 ? "1 comercio reactivado cuenta" : `${numPE(B.cuentan)} comercios reactivados cuentan`} para Stratis (${pc(B.cuentan, D.visitados)} % de conversión frente a una meta de ${D.meta.conv} %)${B.facturado != null ? ` y facturan ${soles(B.facturado)}` : ""}.` : "La reactivación se reporta con la data de BBVA.",
+      B ? "sostener la entrega de la data de BBVA para seguir cada reactivación por corte." : "cargar el corte de BBVA en el CRM antes de enviar la presentación.");
+    pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (Customer ID, gestión con contacto y reactivado), cruzada con la cartera del CRM de campo Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: CRM de campo Stratis al ${dd}.`); }
+
+  // 8. La voz del comercio
+  { const s = lamina("La voz del comercio: qué dicen y qué responde el equipo", `Visitas con contacto hasta el ${dd} · ${numPE(D.conFb)} con feedback registrado`);
+    const top = D.tipos.slice(0, 8).reverse();
+    if (top.length) s.addChart(pres.charts.BAR, [{ name:"Menciones", labels:top.map(o => o.t.length > 48 ? o.t.slice(0, 46) + "…" : o.t), values:top.map(o => o.n) }],
+      { x:0.6, y:1.9, w:5.2, h:3.95, barDir:"bar", chartColors:[PX.azul], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:9, dataLabelColor:PX.navy, catAxisLabelColor:PX.tinta, catAxisLabelFontSize:9,
+        valAxisHidden:true, valGridLine:{ style:"none" }, catGridLine:{ style:"none" }, showLegend:false, barGapWidthPct:45 });
+    T(s, "Lo que dicen los comercios", { x:0.6, y:1.55, w:5.2, h:0.3, fontSize:13, bold:true, color:PX.navy });
+    T(s, "Qué respondió el ejecutivo", { x:6.05, y:1.55, w:3.6, h:0.3, fontSize:13, bold:true, color:PX.navy });
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:9.5, fontFace:FT, align:"center", valign:"middle" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:9.5, fontFace:FT, color:PX.tinta, align:"center", valign:"middle" }, o) });
+    const acc = D.acciones.slice(0, 6);
+    s.addTable([[{ text:"Acción", options:H }, { text:"Veces", options:H }, { text:"Terminó en consumo", options:H }]].concat(acc.length ? acc.map(o => [cel(o.a, { align:"left" }), cel(numPE(o.n)), cel(pc(o.realiza, o.n) + " %")]) : [[cel("Sin acciones registradas todavía", { colspan:3 })]]),
+      { x:6.05, y:1.95, w:3.6, colW:[2.1, 0.6, 0.9], border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco }, rowH:0.36 });
+    s.addShape(pres.shapes.RECTANGLE, { x:9.9, y:1.55, w:2.8, h:4.3, fill:{ color:PX.suave }, line:{ color:PX.linea, width:0.75 } });
+    T(s, "Por qué dijeron que sí", { x:10.1, y:1.68, w:2.45, h:0.3, fontSize:12, bold:true, color:PX.verde });
+    const pq = D.porQue.slice(0, 5);
+    T(s, pq.length ? pq.map(([t, n], i) => ({ text:`${t} (${numPE(n)})`, options:{ bullet:true, breakLine:i < pq.length - 1 } })) : "Sin registros todavía", { x:10.1, y:2.05, w:2.5, h:3.7, fontSize:10, paraSpaceAfter:4 });
+    const t1 = D.tipos[0], a1 = D.acciones.filter(o => o.n >= 3).sort((a, b) => b.realiza / b.n - a.realiza / a.n)[0];
+    lectura(s, `${t1 ? `Lo más mencionado: «${t1.t}» (${numPE(t1.n)}). ` : ""}${a1 ? `La respuesta que más convierte: «${a1.a}» (${pc(a1.realiza, a1.n)} % con compromiso de consumo).` : ""}` || "Todavía no hay feedback suficiente para una lectura.",
+      "ajustar el discurso de campo a lo que más mencionan los comercios.");
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Marcado por el ejecutivo en el celular; antes del 24/09, inferido del comentario.`); }
+
+  // 9. Próximos pasos
+  { const s = lamina("Próximos pasos", "");
+    const H = { color:PX.gris, bold:true, fontSize:10, fontFace:FT, charSpacing:2 };
+    T(s, "PUNTO", Object.assign({ x:1.45, y:1.5, w:3, h:0.3 }, H)); T(s, "DESCRIPCIÓN", Object.assign({ x:4.95, y:1.5, w:5.5, h:0.3 }, H)); T(s, "RESPONSABLE", Object.assign({ x:10.6, y:1.5, w:2, h:0.3 }, H));
+    const pasos = [
+      ["Visitas: cerrar el periodo en meta", habRest ? `Faltan ${numPE(faltan)} comercios en ${habRest} días hábiles: ${necesario} por día, con foco en los distritos de cartera alta y poca cobertura.` : "Periodo cerrado: preparar la base del siguiente periodo.", "Stratis", PX.naranja],
+      ["Data de activación de BBVA", "Entrega periódica de la data de transacciones por comercio para confirmar la reactivación y la facturación de los comercios visitados.", "BBVA", PX.azul],
+      ["Regresos agendados", D.volverAgendado ? `${numPE(D.volverAgendado)} comercios con fecha para volver desde el corte: cumplir la cita y convertir el compromiso en transacciones.` : "Agendar el regreso con los comercios que aún no deciden, para convertir el compromiso en transacciones.", "Stratis", PX.verde],
+      ["Feedback de campo", `Seguir lo que más mencionan los comercios${D.tipos[0] ? ` («${D.tipos[0].t}»)` : ""} y ajustar el discurso de campo.`, "Stratis", "0070C0"]];
+    pasos.forEach(([t, d, r, col], i) => { const y = 1.9 + i * 1.12;
+      s.addShape(pres.shapes.RECTANGLE, { x:0.6, y, w:12.1, h:0.98, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      s.addShape(pres.shapes.OVAL, { x:0.8, y:y + 0.22, w:0.55, h:0.55, fill:{ color:col }, line:{ color:col } });
+      T(s, String(i + 1), { x:0.8, y:y + 0.22, w:0.55, h:0.55, fontFace:FTB, fontSize:16, color:PX.blanco, align:"center", valign:"middle" });
+      T(s, t, { x:1.45, y:y + 0.12, w:3.3, h:0.75, fontSize:13, bold:true, color:PX.navy, valign:"middle" });
+      T(s, d, { x:4.95, y:y + 0.12, w:5.5, h:0.75, fontSize:10.5, valign:"middle" });
+      T(s, r, { x:10.6, y:y + 0.12, w:1.9, h:0.75, fontSize:11, bold:true, color:PX.navy, valign:"middle" }); });
+  }
+
+  // 10. Cierre
+  { const s = pres.addSlide(); s.background = { color:PX.navy };
+    T(s, "Stratis", { x:0, y:2.6, w:13.33, h:1.2, fontFace:FTB, fontSize:60, color:PX.blanco, align:"center", valign:"middle" });
+    s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x:5.0, y:4.05, w:3.33, h:0.55, rectRadius:0.25, fill:{ color:"1A2150" }, line:{ color:"5A6495", width:0.75 } });
+    T(s, "www.mystratis.com", { x:5.0, y:4.05, w:3.33, h:0.55, fontSize:15, color:PX.blanco, align:"center", valign:"middle" }); }
+}
+// «SAN JUAN DE LURIGANCHO» → «San Juan de Lurigancho»
+const TILDES = { "JESUS MARIA":"Jesús María", "RIMAC":"Rímac", "ANCON":"Ancón", "SAN MARTIN DE PORRES":"San Martín de Porres", "MI PERU":"Mi Perú", "CHACLACAYO":"Chaclacayo",
+  "LURIN":"Lurín", "SANTA MARIA DEL MAR":"Santa María del Mar", "VILLA MARIA DEL TRIUNFO":"Villa María del Triunfo", "CARMEN DE LA LEGUA REYNOSO":"Carmen de la Legua Reynoso" };
+const nombreDistritoBase = s => String(s || "").toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()).replace(/\s(De|Del|La|Las|Los|Y)\s/g, m => m.toLowerCase());
+const zonaNum = z => { const m = String(z || "").match(/^ZONA\s*(\d+)/i); return m ? `Zona ${m[1]}` : String(z || "Sin zona"); };
+const zonaLugar = z => { const m = String(z || "").match(/^ZONA\s*\d+\s*-\s*(.+)$/i); return m ? nombreDistrito(m[1]) : ""; };
+const nombreZona = z => { const m = String(z || "").match(/^ZONA\s*(\d+)\s*-\s*(.+)$/i); return m ? `Zona ${m[1]} · ${nombreDistrito(m[2])}` : String(z || "Sin zona"); };
+const nombreDistrito = s => TILDES[String(s || "").toUpperCase()] || nombreDistritoBase(s);
 </script>
 </body></html>
