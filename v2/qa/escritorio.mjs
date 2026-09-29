@@ -33,7 +33,7 @@ const ACT = [
 const FX = {
   sesion: { user: { email: ANALISTA.correo }, access_token: 'prueba' },
   tablas: { usuarios: [ANALISTA, EJECUTIVO], v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }, v2_cargas: [], v2_bitacora_visita: [], v2_transacciones: [], v2_feedback_inferido: [] },
-  rpc: { v2_puede_escritorio: true, v2_actividad: ACT, v2_mi_base: BASE, v2_avance: [],
+  rpc: { v2_puede_escritorio: true, v2_actividad: ACT, v2_mi_base: BASE, v2_avance: [{ meta_visitas: 160, meta_reactivados: 40, meta_conversion: 25 }],
          v2_retenidas: [{ cliente_uid: 'uid-retenida-prueba', correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre_corto, customer_id: '00000007', comercio: 'Comercio Prueba 7',
            visitado_en: `${hoy}T15:30:00Z`, mensaje: 'El periodo cerró el 30/09: ya no se reciben visitas de ese periodo.', intentos: 2, payload: { p_con: 'Nadie', p_motivo: 'Cerrado' } }],
          v2_descartar_retenida: null }
@@ -46,8 +46,9 @@ await ctx.route(/cdnjs\.cloudflare\.com\/.*leaflet.*\.css$/, r => r.fulfill({ pa
 await ctx.route(/cdnjs\.cloudflare\.com\/.*xlsx/, r => r.fulfill({ body: '', contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/exceljs/, r => r.fulfill({ path: path.join(NM, 'exceljs/dist/exceljs.min.js'), contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/jszip/, r => r.fulfill({ path: path.join(NM, 'jszip/dist/jszip.min.js'), contentType: 'application/javascript' }));
+await ctx.route(/cdn\.jsdelivr\.net\/npm\/pptxgenjs/, r => r.fulfill({ path: path.join(NM, 'pptxgenjs/dist/pptxgen.bundle.js'), contentType: 'application/javascript' }));
 const p = await ctx.newPage(); const errs = [];
-p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource/.test(m.text())) errs.push(m.text()); });
+p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource|URL scheme "file" is not supported/.test(m.text())) errs.push(m.text()); });
 await p.addInitScript(fx => { window.__FX = fx; }, FX);
 await p.goto(urlDist('escritorio')); await p.waitForTimeout(1500);
 const prueba = async (nombre, fn) => { try { await fn(); console.log('ok  ' + nombre); } catch (e) { fallas++; console.log(`MAL ${nombre}: ${e.message}`); } };
@@ -108,6 +109,56 @@ await prueba('base para BBVA con 4 tablas dinámicas', async () => {
   assert.equal(cv.indexOf('Fuente_Motivos_Si') + 1, 46, 'Visitas: la última columna de antes se movió');
   assert.deepEqual(cv.slice(46), NUEVAS);
   fs.unlinkSync(f);
+});
+await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no está en la base y envía el corte', async () => {
+  await p.evaluate(() => { window.__FX.rpc.v2_cargar_resultados_bbva = a => ({ carga_id: 7, corte: a.p_corte, leidas: a.p_filas.length, cargadas: a.p_filas.length, rechazadas: 0, reemplazo: false, reactivados: 2, con_contacto: 1, detalle: [] });
+    S.vista = 'cargas'; S.carga = { tipo: 'resultados_bbva', archivo: null, filas: null, hecho: false, resultado: null }; pintar(); }); await p.waitForTimeout(300);
+  await p.setInputFiles('#archivo', { name: 'bbva_prueba.csv', mimeType: 'text/csv', buffer: Buffer.from(['customer ID,Gestion_Con_Contacto,Reactivado,Facturado', '1,Si,Si,1500', '00000002,No,Si,', '12345678,Si,No,', '00000003,Sí,En proceso,'].join('\n')) });
+  await p.waitForTimeout(400);
+  assert.ok(await p.locator('text=customer_id no está en la base').count() > 0, 'no marca el ID que no está en la base');
+  await p.fill('#bbvaCorte', hoy); await p.dispatchEvent('#bbvaCorte', 'change'); await p.waitForTimeout(200);
+  const antes = await p.evaluate(() => window.__llamadas.length);
+  await p.click('#cargar'); await p.waitForTimeout(500);
+  const ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_cargar_resultados_bbva');
+  assert.ok(ll, 'no llamó a v2_cargar_resultados_bbva');
+  assert.equal(ll[1].p_corte, hoy);
+  assert.deepEqual(ll[1].p_filas, [{ customer_id: '00000001', gestion_con_contacto: true, reactivado: 'Si', facturado: '1500' },
+    { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: null }, { customer_id: '00000003', gestion_con_contacto: true, reactivado: 'En proceso', facturado: null }]);
+  assert.ok(await p.locator('text=cargado: 3 comercios').count() > 0, 'no muestra el resultado de la carga');
+});
+await prueba('presentación para BBVA: 12 láminas con el corte elegido', async () => {
+  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
+  assert.match(d.suggestedFilename(), new RegExp('^Mastercard_Campaña_BBVA_Adquirencia_' + hoy.replace(/-/g, '') + '\\.pptx$'));
+  const f = path.join(RAIZ, 'qa', 'salida_presentacion_prueba.pptx'); await d.saveAs(f);
+  const z = await JSZip.loadAsync(fs.readFileSync(f));
+  const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  assert.equal(lams.length, 12, 'láminas: ' + lams.length);
+  const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
+  for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Rutas y distritos abordados', 'Evolución semanal', 'Cobertura territorial', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de la data de BBVA'])
+    assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  fs.unlinkSync(f);
+});
+await prueba('presentación con un corte de BBVA de más de 1000 filas: cuenta solo lo reactivado, con contacto y con visita; sin notas en el archivo', async () => {
+  await p.evaluate(h => { window.__FX.tablas.v2_cortes_bbva = [{ corte: h, filas: 3, facturado_total: null, en: h + 'T12:00:00Z' }];
+    // 1: reactivado, con contacto y visitado → cuenta · 2: visitado sin contacto según BBVA · 6: con contacto pero reactivado «No»
+    window.__FX.tablas.v2_resultados_bbva = [{ customer_id: '00000001', gestion_con_contacto: true, reactivado: 'Si', facturado: 1500 },
+      { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: 900 }, { customer_id: '00000006', gestion_con_contacto: true, reactivado: 'No', facturado: null }];
+    // 1000 filas inventadas fuera de la cartera antes de las 3 de prueba: las que cuentan solo llegan en la segunda página
+    window.__FX.tablas.v2_resultados_bbva.unshift(...Array.from({ length: 1000 }, (_, i) => ({ customer_id: String(90000000 + i), gestion_con_contacto: false, reactivado: 'No', facturado: null }))); }, hoy);
+  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
+  const f = path.join(RAIZ, 'qa', 'salida_presentacion_bbva.pptx'); await d.saveAs(f);
+  const z = await JSZip.loadAsync(fs.readFileSync(f));
+  const txt = (await Promise.all(Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
+  assert.ok(txt.includes('1 comercio reactivado cuenta para Stratis'), 'la regla de «cuenta» no da 1');
+  assert.ok(txt.includes('S/ 1.500') || txt.includes('S/ 1,500') || txt.includes('S/ 2 mil'), 'no muestra el facturado de los que cuentan');
+  assert.ok(!txt.includes('pendientes de la data de BBVA'), 'sigue diciendo pendiente con un corte cargado');
+  const notas = Object.keys(z.files).filter(n => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
+  const tn = (await Promise.all(notas.map(n => z.file(n).async('string')))).join(' ');
+  assert.ok(!/Citas candidatas|Revisar las cifras|Texto base armado/.test(tn), 'el archivo lleva notas internas');
+  fs.unlinkSync(f);
+  await p.evaluate(() => { delete window.__FX.tablas.v2_cortes_bbva; delete window.__FX.tablas.v2_resultados_bbva; });
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();

@@ -40,10 +40,10 @@ export const STUB = `
       if (typeof r === 'function') { const x = r(args); return x && x.__error ? mal(x.__error) : ok(x); }
       return ok(r === undefined ? [] : r);
     },
-    from: t => { const q = { select(){ return q; }, eq(){ return q; }, lte(){ return q; }, gte(){ return q; }, in(){ return q; }, order(){ return q; }, limit(){ return q; },
+    from: t => { const q = { select(){ return q; }, eq(){ return q; }, lte(){ return q; }, gte(){ return q; }, in(){ return q; }, order(){ return q; }, limit(){ return q; }, range(a, b){ q.tramo = [a, b + 1]; return q; },
       maybeSingle(){ const d = window.__FX.tablas[t]; return ok(Array.isArray(d) ? d[0] || null : d || null); },
       single(){ return q.maybeSingle(); },
-      then(res, rej){ const d = window.__FX.tablas[t]; return ok(Array.isArray(d) ? d : d ? [d] : []).then(res, rej); } };
+      then(res, rej){ const d = window.__FX.tablas[t], l = Array.isArray(d) ? d : d ? [d] : []; return ok(q.tramo ? l.slice(...q.tramo) : l).then(res, rej); } };
       return q; },
     storage: { from: () => ({ upload: () => ok({}), getPublicUrl: () => ({ data: { publicUrl: '' } }) }) }
   });

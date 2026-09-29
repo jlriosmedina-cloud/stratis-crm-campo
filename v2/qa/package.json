@@ -13,6 +13,7 @@
     "playwright": "^1.47.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.8",
+    "pptxgenjs": "3.12.0"
   }
 }
