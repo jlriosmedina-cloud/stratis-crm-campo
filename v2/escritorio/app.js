@@ -2267,7 +2267,7 @@ function armarLaminas(pres, D){
     const metaFecha = Math.round(D.meta.visEj * D.dhCorte / Math.max(1, D.dh.length)), n = Math.max(1, D.zonasL.length), w = (12.1 - 0.2 * (n - 1)) / n;
     const colZ = [PX.naranja, PX.azul, PX.verde, PX.azulOsc];
     D.zonasL.forEach((z, i) => { const x = 0.6 + i * (w + 0.2), y = 1.55, col = colZ[i % colZ.length];
-      s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:2.55, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:3.2, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
       s.addShape(pres.shapes.RECTANGLE, { x, y, w, h:0.08, fill:{ color:col }, line:{ color:col } });
       T(s, zonaNum(z.zona), { x:x + 0.2, y:y + 0.18, w:w - 0.4, h:0.3, fontSize:13, bold:true, color:PX.navy });
       T(s, `${zonaLugar(z.zona)} · ${ejDe(z.correo).nombre}`, { x:x + 0.2, y:y + 0.47, w:w - 0.4, h:0.24, fontSize:9.5, color:PX.gris, fit:"shrink" });
@@ -2276,11 +2276,17 @@ function armarLaminas(pres, D){
       s.addShape(pres.shapes.RECTANGLE, { x:x + 0.2, y:y + 1.32, w:w - 0.4, h:0.1, fill:{ color:PX.linea }, line:{ color:PX.linea } });
       if (z.vis) s.addShape(pres.shapes.RECTANGLE, { x:x + 0.2, y:y + 1.32, w:(w - 0.4) * Math.min(1, z.vis / D.meta.visEj), h:0.1, fill:{ color:col }, line:{ color:col } });
       const det = [`Contacto: ${pc(z.con, z.vis)} % de los visitados`, `Realizarán consumos: ${numPE(z.realiza)}`, `Rutas iniciadas: ${z.rutasIni} de ${z.rutasL.length} (${z.rutasComp} completas)`, `Distritos abordados: ${z.distAbord} de ${z.distL.length}`];
-      T(s, det.map((t, j) => ({ text:t, options:{ breakLine:j < det.length - 1 } })), { x:x + 0.2, y:y + 1.52, w:w - 0.4, h:0.95, fontSize:10, paraSpaceAfter:2 }); });
+      T(s, det.map((t, j) => ({ text:t, options:{ breakLine:j < det.length - 1 } })), { x:x + 0.2, y:y + 1.5, w:w - 0.4, h:0.95, fontSize:9.5, paraSpaceAfter:2, fit:"shrink" });
+      // Cartera de la zona y sus distritos (comercios asignados en cada uno): cuadro aparte para poder editarlo o quitarlo en PowerPoint
+      const dz = z.distL.length > 8 ? z.distL.slice(0, 7) : z.distL, resto = z.distL.slice(dz.length);
+      s.addShape(pres.shapes.LINE, { x:x + 0.2, y:y + 2.36, w:w - 0.4, h:0, line:{ color:PX.linea, width:0.75 } });
+      T(s, [{ text:`${numPE(z.cartera)} comercios en cartera`, options:{ bold:true, color:PX.navy, breakLine:true } },
+             { text:dz.map(d => `${nombreDistrito(d.d)} ${numPE(d.n)}`).concat(resto.length ? [`otros ${resto.length} distritos ${numPE(resto.reduce((a, d) => a + d.n, 0))}`] : []).join(" · "), options:{ color:PX.tinta } }],
+        { x:x + 0.2, y:y + 2.4, w:w - 0.4, h:0.76, fontSize:8.5, valign:"top", paraSpaceAfter:1, fit:"shrink" }); });
     const labs = D.zonasL.map(z => nombreZona(z.zona));
     s.addChart(pres.charts.BAR, [{ name:"Comercios visitados", labels:labs, values:D.zonasL.map(z => z.vis) }, { name:`Meta a la fecha (${metaFecha})`, labels:labs, values:D.zonasL.map(() => metaFecha) },
       { name:"Con contacto", labels:labs, values:D.zonasL.map(z => z.con) }, { name:"Realizarán consumos", labels:labs, values:D.zonasL.map(z => z.realiza) }],
-      { x:0.6, y:4.25, w:12.1, h:1.75, barGrouping:"clustered", chartColors:[PX.naranja, PX.linea, PX.azul, PX.verde], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:8, dataLabelColor:PX.navy,
+      { x:0.6, y:4.82, w:12.1, h:1.25, barGrouping:"clustered", chartColors:[PX.naranja, PX.linea, PX.azul, PX.verde], showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:8, dataLabelColor:PX.navy,
         catAxisLabelColor:PX.tinta, catAxisLabelFontSize:9, valAxisHidden:true, valGridLine:{ style:"none" }, catGridLine:{ style:"none" }, showLegend:true, legendPos:"r", legendFontSize:9 });
     const orden = D.zonasL.slice().sort((a, b) => b.vis - a.vis), rez = orden[orden.length - 1];
     lectura(s, orden.length ? `${nombreZona(orden[0].zona)} lleva el mayor avance (${numPE(orden[0].vis)} comercios)${rez && rez !== orden[0] ? `; ${nombreZona(rez.zona)} va más atrás (${numPE(rez.vis)})` : ""}. La meta a la fecha es ${numPE(metaFecha)} por zona.` : "Sin zonas asignadas.",
