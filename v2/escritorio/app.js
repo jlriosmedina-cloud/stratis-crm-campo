@@ -156,6 +156,7 @@ function revisarMarcacion(v){
 }
 const resumenRes = v => { const [t, d] = comoFue(v); return `${esc(t)}<small title="${esc(d)}">${esc(d)}</small>`; };
 function repetidaHoy(v){ const d = iso(v.visitado_en); return S.act.some(x => x.id !== v.id && x.customer_id === v.customer_id && x.correo === v.correo && iso(x.visitado_en) === d && x.estado_anul !== "anulada"); }
+const MOTIVOS_REVISAR = ["Zona insegura", "Otro motivo"];
 function senales(v){
   const s = [];
   // Desde el 25/09 no se valida la dirección ni la distancia: la visita vale como la registra el ejecutivo.
@@ -163,6 +164,8 @@ function senales(v){
   const h = horaLima(v.visitado_en); if (h < REGLA.jornadaIni || h >= REGLA.jornadaFin) s.push(["r","Fuera de jornada"]);
   if (repetidaHoy(v)) s.push(["","Repetida hoy"]);
   if (revisarMarcacion(v) && v.estado_anul !== "anulada") s.push(["", "Revisar marcación"]);
+  // 29/09: motivos que no dejan rastro del comercio; la visita cuenta igual, solo se revisa el comentario
+  if (v.con === "Nadie" && MOTIVOS_REVISAR.includes(v.motivo) && v.estado_anul !== "anulada") s.push(["", "Revisar motivo: " + v.motivo.toLowerCase()]);
   if (v.ubicacion_editada_en) s.push(["i","Ubicación actualizada después"]);
   if (v.resultado_editado_en) s.push(["i","Resultado corregido"]);
   if (v.comentario_editado_en) s.push(["i","Comentario corregido"]);
@@ -411,7 +414,7 @@ function panelRetenidas(){
   return `<div class="panel" style="margin-bottom:14px;border-color:var(--rojo)"><div class="barra"><b>${l.length === 1 ? "Una visita retenida" : l.length + " visitas retenidas"} en el celular</b><span class="lbl">El servidor las rechazó y todavía no están registradas. El ejecutivo puede corregirlas y reenviarlas; si la descartas, su celular la quita al sincronizar.</span></div>
     <div class="tabla-wrap"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Visita</th><th>Qué respondió el servidor</th><th class="n">Intentos</th><th class="n">Días retenida</th><th></th></tr></thead><tbody>
     ${l.map(r => `<tr><td>${esc(r.ejecutivo || r.correo)}</td><td>${esc(r.comercio || "—")}<br><small class="muted">ID ${esc(r.customer_id || "—")}</small></td>
-      <td>${r.visitado_en ? ddhh(r.visitado_en) : "—"}<br><small class="muted">${esc(r.payload && r.payload.p_con === "Nadie" ? "No hubo contacto" : r.payload && r.payload.p_que || "")}</small></td>
+      <td>${r.visitado_en ? ddhh(r.visitado_en) : "—"}<br><small class="muted">${esc(r.payload && r.payload.p_con === "Nadie" ? (r.payload.p_motivo === "Dirección errada" ? "El comercio no está en esta dirección" : "No se pudo hacer la visita") : r.payload && r.payload.p_que || "")}</small></td>
       <td>${esc(r.mensaje)}</td><td class="n num">${r.intentos}</td><td class="n num">${Math.max(0, Math.floor((Date.now() - new Date(r.reportada_en || Date.now())) / 86400000))}</td>
       <td><button class="btn" data-descartar-ret="${esc(r.cliente_uid)}">Descartar</button></td></tr>`).join("")}
     </tbody></table></div></div>`;
@@ -429,11 +432,17 @@ function vistaValidacion(){
   if (!S.sel && lista.length) S.sel = lista[0].id;
   const sel = S.act.find(v => v.id === S.sel);
   const metaEq = 160 * Math.max(1, S.ejecutivos.length);
+  // Zona insegura u otro motivo, por ejecutivo, sobre sus visitas no anuladas del periodo (señal que no bloquea)
+  const activas = S.act.filter(v => v.estado_anul !== "anulada"), esRev = v => v.con === "Nadie" && MOTIVOS_REVISAR.includes(v.motivo);
+  const porEj = S.ejecutivos.map(e => { const l = activas.filter(v => v.correo === e.correo), n = l.filter(esRev).length; return { e, n, t:l.length, p:l.length ? Math.round(n * 100 / l.length) : 0 }; })
+    .filter(x => x.t).sort((a, b) => b.p - a.p || b.n - a.n);
+  const nRev = activas.filter(esRev).length;
   return `${panelRetenidas()}
   <div class="resumen">
     <div class="tile"><div class="k">Visitas hoy</div><div class="v num">${hoy.length}</div><div class="d">${S.ejecutivos.map(e => `${esc(e.ini)} ${hoy.filter(v => v.correo === e.correo).length}`).join(" · ") || "sin ejecutivos"}</div></div>
     <div class="tile ${obs.length ? "warn" : ""}"><div class="k">Observadas</div><div class="v num">${obs.length}</div><div class="d">el ejecutivo las ve «en revisión»</div></div>
     <div class="tile ${sinGps ? "bad" : "ok"}"><div class="k">Sin GPS hoy</div><div class="v num">${sinGps}</div><div class="d">sin ubicación no cuentan como visita</div></div>
+    <div class="tile ${nRev ? "warn" : ""}" title="Visitas con «Zona insegura» u «Otro motivo» sobre todas las visitas no anuladas del periodo de cada ejecutivo, incluidas las sin GPS o fuera de plazo (no es la misma base que «Comercios visitados»). Cuentan como visita; solo es para revisar el comentario."><div class="k">Zona insegura u otro motivo</div><div class="v num">${nRev}</div><div class="d">${porEj.map(x => `${esc(x.e.ini)} ${x.p} %`).join(" · ") || "sin visitas"}</div></div>
     <div class="tile ${pedidos ? "warn" : ""}"><div class="k">Pedidos de anulación</div><div class="v num">${pedidos}</div><div class="d">esperan tu decisión</div></div>
     <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${comerciosVis}<small> / ${metaEq}</small></div><div class="d">${cuentan} visitas en el periodo · ${validas} validadas</div></div>
   </div>

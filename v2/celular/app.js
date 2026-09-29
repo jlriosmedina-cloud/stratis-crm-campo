@@ -200,12 +200,14 @@ const dirDe = c => c.direccion_corregida || c.direccion || "";
 const refDe = c => c.referencia || c.referencia_base || "";
 // quedó en volver (reagendada o con el dueño) y la fecha es de hoy en adelante
 const volverPendiente = c => !!c.volver_el && c.volver_el >= new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
+// para la ruta sugerida: solo los regresos de hoy o vencidos (decisión de Jose, 29/09)
+const volverHoy = c => !!c.volver_el && c.volver_el <= new Date().toLocaleDateString("en-CA",{ timeZone:"America/Lima" });
 const tieneGeo = c => c.geo_lat != null && c.geo_lng != null && c.geo_calidad !== "distrito";
 const destinoTxt = c => [dirDe(c), c.distrito, "Lima"].filter(Boolean).join(", ");
 const urlGoogle = c => "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
 const urlWaze = c => tieneGeo(c) ? `https://waze.com/ul?ll=${c.geo_lat},${c.geo_lng}&navigate=yes` : "https://waze.com/ul?navigate=yes&q=" + encodeURIComponent(destinoTxt(c));
 function urlRuta(cs){
-  const ps = cs.filter(c => c.estado === "por" || c.estado === "uno" || c.estado === "rag" || volverPendiente(c)).slice(0, 10);
+  const ps = cs.filter(c => c.estado === "por" || c.estado === "uno" || c.estado === "rag" || volverHoy(c)).slice(0, 10);
   const lista = (ps.length ? ps : cs.slice(0, 10)).map(c => tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c));
   if (!lista.length) return "#";
   const dest = lista[lista.length-1], way = lista.slice(0, -1);

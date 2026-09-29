@@ -78,6 +78,12 @@ for (const tema of ['light', 'dark']) {
     assert.ok(t.includes('Vuelves el'), 'la tarjeta no muestra la fecha para volver');
     const tc = await p.evaluate(() => tarjeta(Object.assign({}, S.base[0], { estado: 'sin', ultima_motivo: 'Cerró definitivamente', visitas: 1, visitas_validas: 1 })));
     assert.ok(tc.includes('Cerró definitivamente'), 'la tarjeta no detalla que cerró definitivamente');
+    // la ruta sugerida toma solo los regresos de hoy o vencidos, no uno de mañana
+    const ruta = await p.evaluate(() => { const b = S.base, c11 = b.find(c => c.customer_id === '00000011');
+      const hoyC = Object.assign({}, b[0], { customer_id: '00000099', estado: 'seg', volver_el: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }), geo_lat: -12.5555 });
+      return { url: decodeURIComponent(urlRuta([c11, hoyC])), lat11: String(c11.geo_lat) }; });
+    assert.ok(ruta.url.includes('-12.5555'), 'la ruta no incluye el regreso de hoy');
+    assert.ok(!ruta.url.includes(ruta.lat11), 'la ruta incluye un regreso de mañana');
     console.log(`ok  ${tema} · «Reagendados» incluye volver con el dueño`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · filtro Reagendados: ${e.message}`); }
   // Segunda visita del día: la hoja avisa y ofrece corregir la de hoy

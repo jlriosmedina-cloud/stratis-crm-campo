@@ -26,7 +26,9 @@ const ACT = [
   visita(4, { con: 'Nadie', motivo: 'Cerrado', que: 'Sin éxito', decision: null, feedback: null }),
   visita(5, { con: 'Nadie', motivo: 'Dirección errada', que: 'Sin éxito', decision: null, feedback: null, direccion_ok: false, comercio_ubicado: false }),
   // contradicción a propósito: marcó Dueño pero el comentario dice que el dueño no estaba
-  visita(6, { con: 'Dueño', comentario: 'El dueño no se encontraba, regresar más tarde' })
+  visita(6, { con: 'Dueño', comentario: 'El dueño no se encontraba, regresar más tarde' }),
+  // 29/09: zona insegura cuenta como visita, pero lleva la señal «Revisar motivo»
+  visita(7, { con: 'Nadie', motivo: 'Zona insegura', que: 'Sin éxito', decision: null, feedback: null, direccion_ok: null })
 ];
 const FX = {
   sesion: { user: { email: ANALISTA.correo }, access_token: 'prueba' },
@@ -57,6 +59,13 @@ await prueba('lista con «Cómo fue la visita»', async () => {
     assert.ok(res.includes(t), 'falta: ' + t);
   assert.ok(res.includes('Cerrado hoy'), '«Cerrado» se lee «Cerrado hoy»');
   assert.ok(/Encargado · Aún no decide · vuelve el/.test(res), 'no muestra la fecha para volver con el encargado');
+});
+await prueba('señal «Revisar motivo» y porcentaje por ejecutivo de zona insegura u otro motivo', async () => {
+  const s = await p.evaluate(() => S.act.filter(v => senales(v).some(x => /^Revisar motivo/.test(x[1]))).map(v => v.customer_id));
+  assert.deepEqual(s, ['00000007']);
+  await p.evaluate(() => { S.vista = 'validacion'; pintar(); }); await p.waitForTimeout(300);
+  const t = await p.locator('.tile', { hasText: 'Zona insegura u otro motivo' }).innerText();
+  assert.match(t, /14 %/, 'el porcentaje del ejecutivo no es 1 de 7: ' + t);
 });
 await prueba('señal «Revisar marcación» solo en la visita contradictoria', async () => {
   const n = await p.evaluate(() => S.act.filter(v => revisarMarcacion(v)).map(v => v.customer_id));
