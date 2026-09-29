@@ -137,6 +137,13 @@ await prueba('presentación para BBVA: 12 láminas con el corte elegido', async 
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
   for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Rutas y distritos abordados', 'Evolución semanal', 'Cobertura territorial', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de la data de BBVA'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  // lámina 3: las barras de nuevos por día suman los comercios visitados del título
+  const tot = Number((txt.match(/(\d+) comercios visitados al/) || [])[1]);
+  const graf = await Promise.all(Object.keys(z.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).map(n => z.file(n).async('string')));
+  const barras = graf.flatMap(x => x.split('<c:ser>')).find(x => x.includes('Nuevos del día'));
+  assert.ok(barras, 'falta la serie de nuevos por día');
+  const suma = [...barras.matchAll(/<c:val>[\s\S]*?<\/c:val>/g)].flatMap(m => [...m[0].matchAll(/<c:v>([\d.]+)<\/c:v>/g)].map(v => Number(v[1]))).reduce((a, b) => a + b, 0);
+  assert.ok(tot > 0 && suma === tot, `las barras suman ${suma} y el título dice ${tot}`);
   fs.unlinkSync(f);
 });
 await prueba('presentación con un corte de BBVA de más de 1000 filas: cuenta solo lo reactivado, con contacto y con visita; sin notas en el archivo', async () => {

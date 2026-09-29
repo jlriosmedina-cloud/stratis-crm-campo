@@ -2027,8 +2027,8 @@ function datosPresentacion(C, RB){
   const visitados = Object.keys(primera).length;
   let habilN = 0;
   const serie = dias.map(d => { if (dh.includes(d)) habilN++;
-    return { dia:d, habil:dh.includes(d), meta:Math.round(metaDia * habilN), delDia:d <= C ? new Set(vs.filter(v => valida(v) && iso(v.visitado_en) === d).map(v => v.customer_id)).size : null,
-             acum:d <= C ? Object.values(primera).filter(k => k <= d).length : null }; });
+    return { dia:d, habil:dh.includes(d), meta:Math.round(metaDia * habilN),
+             nuevos:d <= C ? Object.values(primera).filter(k => k === d).length : null, acum:d <= C ? Object.values(primera).filter(k => k <= d).length : null }; });
   const dhCorte = dh.filter(d => d <= C).length, dhConCampo = dh.filter(d => d <= C && conCampo.has(d)).length;
   // último estado de cada comercio visitado
   const ult = {}; vv.forEach(v => { const u = ult[v.customer_id]; if (!u || v.visitado_en > u.visitado_en) ult[v.customer_id] = v; });
@@ -2244,22 +2244,23 @@ function armarLaminas(pres, D){
     pie(s, `Fuente: CRM de campo Stratis al ${dd}. Reactivación: ${D.bbva ? `data de BBVA con corte al ${fISO(D.bbva.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
 
   // 3. Avance del periodo
-  { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Comercios distintos con visita válida, acumulados por día, frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
+  { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Nuevos visitados por día y acumulado del equipo frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
     const cats = D.serie.map(x => fISO(x.dia) + (x.habil ? "" : " (sáb)"));
-    s.addChart([{ type:pres.charts.BAR, data:[{ name:"Meta acumulada", labels:cats, values:D.serie.map(x => x.meta) }], options:{ chartColors:[PX.linea], barGapWidthPct:40 } },
-                { type:pres.charts.LINE, data:[{ name:"Visitados acumulados", labels:cats, values:D.serie.map(x => x.acum == null ? null : x.acum) }],
-                  options:{ chartColors:[PX.naranja], lineSize:3, lineDataSymbol:"circle", lineDataSymbolSize:7, showValue:true, dataLabelPosition:"t", dataLabelFontSize:9, dataLabelColor:PX.navy } }],
+    // Por cada día, dos barras: el acumulado del equipo (sube día a día) y los comercios nuevos de ese día; la línea gris fina es la meta acumulada.
+    s.addChart([{ type:pres.charts.BAR, data:[{ name:"Acumulado del equipo", labels:cats, values:D.serie.map(x => x.acum) }, { name:"Nuevos del día", labels:cats, values:D.serie.map(x => x.nuevos) }],
+                  options:{ barGrouping:"clustered", chartColors:[PX.azulOsc, PX.naranja], barGapWidthPct:30, barOverlapPct:-5, showValue:true, dataLabelPosition:"outEnd", dataLabelFontSize:8, dataLabelColor:PX.navy } },
+                { type:pres.charts.LINE, data:[{ name:`Meta acumulada (${numPE(D.meta.vis)} al cierre)`, labels:cats, values:D.serie.map(x => x.meta) }], options:{ chartColors:["A9B1C6"], lineSize:1.5, lineDataSymbol:"none" } }],
       { x:0.6, y:1.6, w:8.6, h:4.35, catAxisLabelColor:PX.gris, valAxisLabelColor:PX.gris, catAxisLabelFontSize:8, valAxisLabelFontSize:9, valGridLine:{ color:"E4E8F0", size:0.5 }, catGridLine:{ style:"none" },
-        showLegend:true, legendPos:"t", legendFontSize:10, legendColor:PX.tinta, catAxisLabelRotate:-45 });
+        valAxisMinVal:0, valAxisMaxVal:Math.ceil(Math.max(D.meta.vis, D.visitados) * 1.08 / 100) * 100, showLegend:true, legendPos:"t", legendFontSize:9.5, legendColor:PX.tinta, catAxisLabelRotate:-45 });
     s.addShape(pres.shapes.RECTANGLE, { x:9.45, y:1.6, w:3.25, h:4.35, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
-    const mejor = D.serie.filter(x => x.delDia != null).sort((a, b) => b.delDia - a.delDia)[0];
-    const bloques = [["Ritmo", `${ritmo} por día con campo`, `meta: ${metaDia} por día hábil`], ["Mejor día", mejor ? `${numPE(mejor.delDia)} el ${diaSem(mejor.dia)} ${fISO(mejor.dia)}` : "—", "comercios visitados ese día"],
+    const mejor = D.serie.filter(x => x.nuevos != null).sort((a, b) => b.nuevos - a.nuevos)[0];
+    const bloques = [["Ritmo", `${ritmo} por día con campo`, `meta: ${metaDia} por día hábil`], ["Mejor día", mejor ? `${numPE(mejor.nuevos)} el ${diaSem(mejor.dia)} ${fISO(mejor.dia)}` : "—", "comercios nuevos visitados ese día"],
       ["Avance", `${pVis} % de la meta`, `con ${pDias} % de los días hábiles`], ["Para cerrar en meta", habRest ? `${necesario} por día` : "periodo cerrado", habRest ? `${numPE(faltan)} comercios en ${habRest} días hábiles` : ""]];
     bloques.forEach(([t, v, c], i) => { const y = 1.8 + i * 1.02; T(s, t, { x:9.7, y, w:2.8, h:0.26, fontSize:10, bold:true, color:PX.naranja });
       T(s, v, { x:9.7, y:y + 0.27, w:2.8, h:0.36, fontSize:14, bold:true, color:PX.navy, fit:"shrink" }); T(s, c, { x:9.7, y:y + 0.63, w:2.8, h:0.26, fontSize:9.5, color:PX.gris }); });
     lectura(s, D.visitados >= (D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta ? `El acumulado está sobre la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`
       : `El acumulado está por debajo de la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`, habRest ? `sostener ${necesario} comercios por día hábil hasta el cierre.` : "");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Visita válida: con ubicación y registrada a tiempo; un comercio se cuenta una sola vez. Los días de fin de semana con campo suman al acumulado, sin meta propia.`); }
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Visita válida: con ubicación y registrada a tiempo; un comercio se cuenta una sola vez, el día de su primera visita (las barras naranjas suman el acumulado). Los fines de semana con campo suman, sin meta propia.`); }
 
   // 3b. Avance por zona
   { const s = lamina("Avance por zona", `${D.zonasL.length} zonas, una por ejecutivo · ${numPE(Math.round(D.cartera / Math.max(1, D.zonasL.length)))} comercios y ${Math.max(0, ...D.zonasL.map(z => z.rutasL.length))} rutas por zona · corte al ${dd}`);
