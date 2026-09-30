@@ -420,6 +420,7 @@ function vistaInicio(){
     <div class="cuerpo">
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
         ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
+      ${(() => { const n = S.base.filter(c => esMio(c) && c.bbva_reactivado).length; return n ? `<div class="card bbva-card"><div class="eyebrow">Reactivación según BBVA</div><h2>${n} de tus comercios visitados ${n === 1 ? "figura como reactivado" : "figuran como reactivados"} según BBVA</h2><div class="nota">Pendiente de validación: BBVA lo confirma con el número de transacciones y recién entonces suma a tu avance. Los ves en «Mi base» con el filtro «Reactivados BBVA · por validar».</div></div>` : ""; })()}
       ${colaRechazadas()}
       ${colaEsperando().length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${colaEsperando().length} ${colaEsperando().length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = colaEsperando().map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
         const uno = venc === 1; return venc ? `<b style="color:var(--rojo)">${uno ? "Una ya pasó su plazo" : venc + " ya pasaron su plazo"}:</b> ${uno ? "se registra, pero no cuenta" : "se registran, pero no cuentan"} para tu bono.` : colaEsperando().length === 1 ? `Tiene que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llega después, se registra pero no cuenta para tu bono.` : `Tienen que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llegan después, se registran pero no cuentan para tu bono.`; })()}</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
@@ -453,7 +454,7 @@ function filtrar(omitir){
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
     }
     // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
-    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !c.bbva_reactivado : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
@@ -468,6 +469,7 @@ function tarjeta(c){
   return `<button class="com" data-ficha="${c.customer_id}">
     <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
     <b>${esc(nombreDe(c))}</b>
+    ${c.bbva_reactivado ? `<div class="bbva-rea">Reactivado según BBVA · pendiente de validación</div>` : ""}
     <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
   </button>`;
 }
@@ -481,7 +483,7 @@ function vistaBase(){
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
   const hayLibres = S.base.some(c => !c.correo);
-  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
+  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por validar"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
   const extras = [S.filtroEstado !== "todos", !!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
@@ -536,6 +538,7 @@ function vistaFicha(c){
       <div class="card">
         <div class="fila-ent">${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}<span class="nota">${esc(c.ruta || "")}</span></div>
         ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
+        ${c.bbva_reactivado ? `<div class="explica bbva-rea-ficha">BBVA reporta este comercio como <b>reactivado</b> (corte del ${fISO(c.bbva_reactivado)}). Está <b>pendiente de validación</b>: BBVA lo confirma con el número de transacciones, y recién entonces suma a tu avance.</div>` : ""}
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
           ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
