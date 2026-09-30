@@ -127,17 +127,18 @@ await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no
     { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: null }, { customer_id: '00000003', gestion_con_contacto: true, reactivado: 'En proceso', facturado: null }]);
   assert.ok(await p.locator('text=cargado: 3 comercios').count() > 0, 'no muestra el resultado de la carga');
 });
-await prueba('presentación para BBVA: 12 láminas con el corte elegido', async () => {
+await prueba('presentación para BBVA: 10 láminas con el corte elegido, sin mapa ni rutas', async () => {
   p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
   assert.match(d.suggestedFilename(), new RegExp('^Mastercard_Campaña_BBVA_Adquirencia_' + hoy.replace(/-/g, '') + '\\.pptx$'));
   const f = path.join(RAIZ, 'qa', 'salida_presentacion_prueba.pptx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  assert.equal(lams.length, 12, 'láminas: ' + lams.length);
+  assert.equal(lams.length, 10, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Rutas y distritos abordados', 'Evolución semanal', 'Cobertura territorial', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de confirmación de BBVA'])
+  for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Evolución semanal', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de confirmación de BBVA'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  for (const t of ['Rutas y distritos abordados', 'Cobertura territorial', 'realizarán consumos']) assert.ok(!txt.includes(t), 'no debería ir en el reporte: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   // lámina 3: las barras de nuevos por día suman los comercios visitados del título
   const tot = Number((txt.match(/(\d+) comercios visitados al/) || [])[1]);
@@ -180,7 +181,7 @@ await prueba('totales de BBVA: se tipean con puntos de miles, el CRM pone los gr
   await p.fill('[data-tot="sc_reac"]', '1');
   assert.ok(await p.locator('text=Control de coherencia OK').count() > 0, 'no da OK con los números correctos');
   const prev = await p.locator('#totPrevia').innerText();
-  for (const t of ['1.500,50', '2.300,50', '33,33 %', '50,00 %']) assert.ok(prev.includes(t), 'falta en la vista previa: ' + t);
+  for (const t of ['1.500,50', '2.300,50', '65,22 %', '50,00 %', 'con visita, con o sin contacto']) assert.ok(prev.includes(t), 'falta en la vista previa: ' + t);
   const antes = await p.evaluate(() => window.__llamadas.length);
   await p.click('#guardarTotales'); await p.waitForTimeout(400);
   const ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_guardar_totales_bbva');
@@ -188,20 +189,49 @@ await prueba('totales de BBVA: se tipean con puntos de miles, el CRM pone los gr
   assert.equal(ll[1].p_corte, hoy);
   assert.deepEqual(ll[1].p_totales, { cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0 });
 });
-await prueba('presentación con totales de BBVA: 13 láminas, cuenta lo visitado con contacto y la tabla de facturación', async () => {
+await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reactivados con visita y su detalle', async () => {
   await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; }, hoy);
   p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
   const f = path.join(RAIZ, 'qa', 'salida_presentacion_totales.pptx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-  assert.equal(lams.length, 13, 'láminas: ' + lams.length);
+  assert.equal(lams.length, 11, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Reactivación con visita (con contacto) · cuenta', 'Facturación y transacciones', '1.500,50', '2.300,50', '33,33 %', 'Control de coherencia: OK'])
+  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
+  for (const t of ['Reactivación sin visita', 'No visitados', 'Total universo']) assert.ok(!txt.includes(t), 'la presentación muestra lo que no cuenta: ' + t);
   fs.unlinkSync(f);
   await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
+});
+await prueba('presentación: los comercios del sábado se reparten entre los días hábiles de su semana sin cambiar el total', async () => {
+  const r = await p.evaluate(() => { const act0 = S.act, av0 = S.avance;
+    const v = (i, d) => ({ id:'x' + i, periodo:S.periodo.id, customer_id:String(i).padStart(8, '0'), correo:S.base[0].correo, visitado_en:d + 'T15:00:00Z', lat:-12.09, lng:-77.04, fuera_plazo:false, estado_anul:'activa', con:'Tercero', que:'Reunión concretada', decision:'Aún no decide', comentario:'Comentario de prueba suficientemente largo' });
+    S.act = [v(1, '2026-09-22'), v(2, '2026-09-22'), v(3, '2026-09-23'), v(4, '2026-09-26'), v(5, '2026-09-26'), v(6, '2026-09-26')];
+    S.avance = [{ meta_visitas:160, meta_reactivados:40, meta_conversion:25 }];
+    try { const D = datosPresentacion('2026-09-29', null, null), sp = D.serieP.filter(x => x.dia >= '2026-09-21' && x.dia <= '2026-09-29');
+      return { dias:sp.map(x => [x.dia, x.nuevos]), acum:sp[sp.length - 1].acum, sab:D.serieP.some(x => x.dia === '2026-09-26'), finde:D.finde.length, visitados:D.visitados, diasCampo:D.diasCampo };
+    } finally { S.act = act0; S.avance = av0; } });
+  assert.equal(r.sab, false, 'el sábado sigue en la serie');
+  assert.equal(r.finde, 1); assert.equal(r.visitados, 6); assert.equal(r.acum, 6, 'el acumulado cambió');
+  assert.deepEqual(r.dias.filter(([, n]) => n), [['2026-09-22', 4], ['2026-09-23', 2]]);
+  assert.equal(r.diasCampo, 2, 'el ritmo no usa los días con campo de la serie repartida');
+});
+await prueba('presentación: en «La voz del comercio» cada comercio cuenta una vez y las filas suman el total', async () => {
+  const r = await p.evaluate(() => { const act0 = S.act, av0 = S.avance;
+    const v = (i, fb, acc) => ({ id:'y' + i, periodo:S.periodo.id, customer_id:String(i).padStart(8, '0'), correo:S.base[0].correo, visitado_en:'2026-09-22T15:00:00Z', lat:-12.09, lng:-77.04, fuera_plazo:false, estado_anul:'activa',
+      con:'Dueño', que:'Reunión concretada', decision:'Realizará consumos', feedback:fb, fb_acciones:acc, comentario:'Comentario de prueba suficientemente largo' });
+    S.act = [v(1, ['Pide una tasa más baja', 'Usa POS de otra marca'], ['Evaluar mejora de tasa']), v(2, ['Pide una tasa más baja'], ['Evaluar mejora de tasa', 'Seguimiento del caso']),
+      v(3, ['Usa POS de otra marca'], []), v(4, ['Sin observaciones del comercio'], []), v(5, ['POS no enciende'], ['Validé el estado del equipo'])];
+    S.avance = [{ meta_visitas:160, meta_reactivados:40, meta_conversion:25 }];
+    try { const DL = datosPresentacion('2026-09-29', null, null).dolores; const sq = o => Object.values(o).reduce((a, n) => a + n, 0);
+      return { total:DL.conCompromiso, suma:DL.lista.reduce((a, o) => a + o.n, 0), filas:DL.lista.map(o => [o.t, o.n]), quePaso:sq(DL.quePaso.con) + sq(DL.quePaso.sin), conDolor:DL.conDolorN, sumaDolor:DL.lista.filter(o => !o.sin).reduce((a, o) => a + o.n, 0) }; }
+    finally { S.act = act0; S.avance = av0; } });
+  assert.equal(r.total, 5); assert.equal(r.suma, 5, 'las filas no suman el total: ' + JSON.stringify(r.filas));
+  assert.deepEqual(r.filas.find(x => x[0] === 'Pide una tasa más baja'), ['Pide una tasa más baja', 2]);
+  assert.ok(r.filas.some(x => x[0] === 'Sin punto de dolor registrado' && x[1] === 1));
+  assert.equal(r.quePaso, 5, '«qué pasó en la visita» no suma el total'); assert.equal(r.sumaDolor, r.conDolor, 'la tabla de dolores no suma su total');
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
