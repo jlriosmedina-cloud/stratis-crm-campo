@@ -1077,8 +1077,8 @@ function cuadroTotales(t, g){
   const suma = (ks, nom, n) => ({ nom, n, reac:ks.reduce((a, k) => a + G[k].reac, 0), fac:ks.reduce((a, k) => a + G[k].fac, 0), trx:ks.reduce((a, k) => a + G[k].trx, 0) });
   const tv = suma(["cc", "sc"], "Total visitados", g.vis), tu = suma(["cc", "sc", "nv"], "Total universo", g.universo);
   const errores = [];
-  GRUPOS_TOT.forEach(([k, nom]) => { if (G[k].reac > G[k].n) errores.push(`${nom}: ${numPE(G[k].reac)} reactivados y el CRM tiene ${numPE(G[k].n)} comercios en ese grupo`); });
-  if (g.cc + g.sc !== g.vis || g.vis + g.nv !== g.universo) errores.push("Los grupos del CRM no suman el universo");
+  GRUPOS_TOT.forEach(([k, nom]) => { if (G[k].reac > G[k].n) errores.push(`${nom}: ${numPE(G[k].reac)} reactivados y las visitas de Stratis tienen ${numPE(G[k].n)} comercios en ese grupo`); });
+  if (g.cc + g.sc !== g.vis || g.vis + g.nv !== g.universo) errores.push("Los grupos de visitas de Stratis no suman el universo");
   return { G, tv, tu, errores };
 }
 const pct2 = (a, b) => b ? (100 * a / b).toFixed(2).replace(".", ",") + " %" : "—";
@@ -2198,11 +2198,11 @@ function armarLaminas(pres, D){
     T(s, puntos.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < puntos.length - 1 } })), { x:0.85, y:4.3, w:7, h:1.5, fontSize:11.5, paraSpaceAfter:4 });
     s.addShape(pres.shapes.RECTANGLE, { x:8.2, y:3.75, w:4.5, h:2.15, fill:{ color:PX.suave }, line:{ color:PX.linea, width:0.75 } });
     T(s, `Cómo se mide el ${nombrePeriodo(D.p)}`, { x:8.45, y:3.9, w:4.1, h:0.32, fontSize:13, bold:true, color:PX.navy });
-    const reglas = ["Visita: presencial, con ubicación validada, sea cual sea el resultado.", "Reactivado que cuenta: volvió a transaccionar según la data de BBVA y fue visitado con contacto según el CRM de Stratis.", "Conversión: reactivados que cuentan ÷ comercios visitados."];
+    const reglas = ["Visita: presencial, con ubicación validada, sea cual sea el resultado.", "Reactivado que cuenta: volvió a transaccionar según la data de BBVA y fue visitado con contacto por Stratis.", "Conversión: reactivados que cuentan ÷ comercios visitados."];
     T(s, reglas.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < reglas.length - 1 } })), { x:8.45, y:4.3, w:4.1, h:1.5, fontSize:10.5, paraSpaceAfter:4 });
     lectura(s, D.visitados / D.meta.vis >= D.dhCorte / D.dh.length ? "El avance de visitas va por delante del tiempo transcurrido del periodo." : "El avance de visitas está por debajo del tiempo transcurrido del periodo.",
       D.reactivados == null ? "incorporar la data de BBVA para medir reactivación y facturación." : "sostener el ritmo y convertir el contacto en transacciones.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Reactivación: ${D.rb ? `data de BBVA con corte al ${fISO(D.rb.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Reactivación: ${D.rb ? `data de BBVA con corte al ${fISO(D.rb.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
 
   // 3. Avance del periodo
   { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Nuevos visitados por día y acumulado del equipo frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
@@ -2221,7 +2221,7 @@ function armarLaminas(pres, D){
       T(s, v, { x:9.7, y:y + 0.27, w:2.8, h:0.36, fontSize:14, bold:true, color:PX.navy, fit:"shrink" }); T(s, c, { x:9.7, y:y + 0.63, w:2.8, h:0.26, fontSize:9.5, color:PX.gris }); });
     lectura(s, D.visitados >= (D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta ? `El acumulado está sobre la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`
       : `El acumulado está por debajo de la meta a la fecha (${numPE(D.visitados)} frente a ${numPE((D.serie.filter(x => x.dia <= C).slice(-1)[0] || {}).meta)}).`, habRest ? `sostener ${necesario} comercios por día hábil hasta el cierre.` : "");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Visita válida: con ubicación y registrada a tiempo; un comercio se cuenta una sola vez, el día de su primera visita (las barras naranjas suman el acumulado). Los fines de semana con campo suman, sin meta propia.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Visita válida: con ubicación y registrada a tiempo; un comercio se cuenta una sola vez, el día de su primera visita (las barras naranjas suman el acumulado). Los fines de semana con campo suman, sin meta propia.`); }
 
   // 3b. Avance por zona
   { const s = lamina("Avance por zona", `${D.zonasL.length} zonas, una por ejecutivo · ${numPE(Math.round(D.cartera / Math.max(1, D.zonasL.length)))} comercios y ${Math.max(0, ...D.zonasL.map(z => z.rutasL.length))} rutas por zona · corte al ${dd}`);
@@ -2252,7 +2252,7 @@ function armarLaminas(pres, D){
     const orden = D.zonasL.slice().sort((a, b) => b.vis - a.vis), rez = orden[orden.length - 1];
     lectura(s, orden.length ? `${nombreZona(orden[0].zona)} lleva el mayor avance (${numPE(orden[0].vis)} comercios)${rez && rez !== orden[0] ? `; ${nombreZona(rez.zona)} va más atrás (${numPE(rez.vis)})` : ""}. La meta a la fecha es ${numPE(metaFecha)} por zona.` : "Sin zonas asignadas.",
       `equilibrar el ritmo entre zonas para que ${D.zonasL.length === 1 ? "la zona cierre" : `las ${["", "", "dos", "tres", "cuatro", "cinco", "seis"][D.zonasL.length] || numPE(D.zonasL.length)} cierren`} en meta.`);
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Meta a la fecha: ${numPE(D.meta.visEj)} comercios por zona × días hábiles transcurridos ÷ días hábiles del periodo. Ruta iniciada: al menos un comercio visitado.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Meta a la fecha: ${numPE(D.meta.visEj)} comercios por zona × días hábiles transcurridos ÷ días hábiles del periodo. Ruta iniciada: al menos un comercio visitado.`); }
 
   // 4. Evolución semanal
   { const s = lamina("Evolución semanal de los indicadores", `Semanas de lunes a domingo · ${nombrePeriodo(D.p)} hasta el ${dd}`);
@@ -2269,7 +2269,7 @@ function armarLaminas(pres, D){
     s.addTable(filas, { x:7.1, y:1.7, w:5.6, colW:[1.5, 0.7, 0.95, 0.7, 0.8, 0.95], border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco }, rowH:0.4 });
     lectura(s, ultSem && antSem ? `La semana ${ultSem.n} sumó ${numPE(ultSem.nuevos)} comercios nuevos (${ultSem.nuevos >= antSem.nuevos ? "+" : ""}${numPE(ultSem.nuevos - antSem.nuevos)} frente a la anterior) con ${pc(ultSem.contacto, ultSem.comercios)} % de contacto.`
       : `La primera semana sumó ${numPE(ultSem ? ultSem.nuevos : 0)} comercios visitados con ${ultSem ? pc(ultSem.contacto, ultSem.comercios) : 0} % de contacto.`, "sumar la reactivación semanal cuando esté la data de BBVA.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Contacto: comercios atendidos ÷ comercios visitados en la semana. Consumos: se comprometieron a usar el POS. * Semana en curso.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Contacto: comercios atendidos ÷ comercios visitados en la semana. Consumos: se comprometieron a usar el POS. * Semana en curso.`); }
 
   // 5. Mapa de Lima
   { const s = lamina("Cobertura territorial: dónde está la cartera y cómo avanza", `Lima Metropolitana y Callao · distritos con comercios asignados · corte al ${dd}`);
@@ -2293,7 +2293,7 @@ function armarLaminas(pres, D){
     const top = mejores[0], bajo = pendientes[0];
     lectura(s, `${top ? `Mejor respuesta: ${nombreDistrito(top.clave)} (${pc(top.realiza, top.con)} % de los contactados). ` : ""}${bajo ? `Mayor cartera por visitar: ${nombreDistrito(bajo.clave)} (${numPE(bajo.falta)} comercios).` : ""}`,
       "orientar la ruta de las próximas semanas a los distritos con más cartera por visitar.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cifra en el mapa: visitados / cartera. Respuesta: distritos con 3 o más comercios con contacto. Límites: © OpenStreetMap (ODbL).`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Cifra en el mapa: visitados / cartera. Respuesta: distritos con 3 o más comercios con contacto. Límites: © OpenStreetMap (ODbL).`); }
 
   // 6. Rutas y distritos abordados por zona
   { const s = lamina("Rutas y distritos abordados", `${Math.max(0, ...D.zonasL.map(z => z.rutasL.length))} rutas por zona, de ${Math.round(D.cartera / Math.max(1, D.zonasL.reduce((a, z) => a + z.rutasL.length, 0)))} comercios cada una · cada casilla es una ruta · corte al ${dd}`);
@@ -2317,7 +2317,7 @@ function armarLaminas(pres, D){
         { x:3.05, y:y + 0.12 + lado + 0.06, w:9.5, h:alto - lado - 0.32, fontSize:9, color:PX.tinta, fit:"shrink" }); });
     const ini = D.zonasL.reduce((a, z) => a + z.rutasIni, 0), comp = D.zonasL.reduce((a, z) => a + z.rutasComp, 0), tot = D.zonasL.reduce((a, z) => a + z.rutasL.length, 0);
     lectura(s, `${ini} de ${tot} rutas iniciadas y ${comp} completas. Cada zona avanza ruta por ruta; los distritos por abordar marcan la agenda de las próximas semanas.`, "completar las rutas en curso antes de abrir nuevas, para no dejar comercios a medias.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cifra junto a cada distrito: visitados / cartera de la zona en ese distrito.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Cifra junto a cada distrito: visitados / cartera de la zona en ese distrito.`); }
 
   // 7. Del contacto a la decisión
   { const s = lamina("Del contacto a la decisión", `Estado de cada comercio visitado según su última visita · corte al ${dd}`);
@@ -2338,15 +2338,15 @@ function armarLaminas(pres, D){
     T(s, mn.length ? mn.map(([t, n], i) => ({ text:`${t}: ${numPE(n)}`, options:{ bullet:true, breakLine:i < mn.length - 1 } })) : "—", { x:9.2, y:4.15, w:3.35, h:1.7, fontSize:10.5, paraSpaceAfter:2 });
     // reactivación y facturación
     s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:5.3, w:8.2, h:0.7, fill:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy }, line:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy } });
-    T(s, D.reactivados == null ? [{ text:"Reactivación y facturación: ", options:{ bold:true } }, { text:"pendientes de la data de BBVA. Se reportan cuando la data esté cargada en el CRM." }]
+    T(s, D.reactivados == null ? [{ text:"Reactivación y facturación: ", options:{ bold:true } }, { text:"BBVA las confirmará cuando su data esté actualizada." }]
       : [{ text:`${numPE(D.reactivados)} reactivados que cuentan`, options:{ bold:true } }, { text:` · ${pct2(D.reactivados, D.rb.visitados)} de conversión (meta ${D.meta.conv} %)${D.rb.facturado != null ? ` · ${soles(D.rb.facturado)} facturados` : ""} · corte BBVA ${fISO(D.rb.corte)}.` }],
       { x:0.85, y:5.38, w:7.8, h:0.55, fontSize:11.5, color:D.reactivados == null ? PX.rojo : PX.blanco, valign:"middle" });
     lectura(s, `${pc(D.contactados, D.visitados)} % de los visitados atendió la visita y ${pc(D.res.realiza, D.contactados)} % de los contactados se comprometió a usar el POS.`, "convertir el compromiso en transacciones y volver a los comercios con regreso agendado.", 6.12);
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cada comercio aparece una sola vez, con el resultado de su última visita.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Cada comercio aparece una sola vez, con el resultado de su última visita.`); }
 
   // 7b. Reactivación confirmada por BBVA, con los totales tipeados por corte (la tabla de KPIs de Jose)
   if (D.tot){ const Q = D.tot, g = Q.g, cu = Q.G.cc.reac, fk = x => (x / 1e6).toFixed(2).replace(".", ",");
-    const s = lamina("Reactivación confirmada por BBVA", `Corte de la data de BBVA al ${fechaLarga(Q.corte)} · cuenta: reactivado según BBVA y visitado con contacto según el CRM`);
+    const s = lamina("Reactivación confirmada por BBVA", `Corte de la data de BBVA al ${fechaLarga(Q.corte)} · cuenta: reactivado según BBVA y visitado con contacto por Stratis`);
     const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle" };
     const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
     const filas = [["Universo", g.universo, null, pct2(g.universo, g.universo)], ["Visitas registradas", g.visitas, null, pct2(g.visitas, g.universo)], ["Comercios visitados", g.vis, null, pct2(g.vis, g.universo)],
@@ -2367,7 +2367,7 @@ function armarLaminas(pres, D){
     tarjeta(4.56, 1.38, PX.verde, "Facturación de los que cuentan", soles(Q.G.cc.fac), `${numPE(Q.G.cc.trx)} transacciones · ticket promedio S/ ${montoPE(Q.G.cc.trx ? Q.G.cc.fac / Q.G.cc.trx : 0)}`);
     lectura(s, `${numPE(cu)} comercios reactivados cuentan para Stratis (${pct2(cu, g.vis)} de conversión sobre ${numPE(g.vis)} visitados) y facturan ${soles(Q.G.cc.fac)}. En los visitados con contacto la reactivación llega a ${pct2(cu, g.cc)}, frente a ${pct2(Q.G.nv.reac, g.nv)} en los no visitados.`,
       "sostener la entrega de la data de BBVA para seguir la reactivación por corte.", 6.12);
-    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)}; comercios por grupo del CRM de campo Stratis al mismo corte (visitado y gestión con contacto, como en la base para BBVA). % alcance: sobre los comercios de cada grupo.`);
+    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)}; comercios por grupo según las visitas de Stratis al mismo corte (visitado y gestión con contacto, como en la base para BBVA). % alcance: sobre los comercios de cada grupo.`);
   }
 
   // 7c. Facturación y transacciones: visitados frente a no visitados
@@ -2393,7 +2393,7 @@ function armarLaminas(pres, D){
     barras(6.8, "Ticket promedio por grupo", ks.map(k => Q.G[k].trx ? Q.G[k].fac / Q.G[k].trx : 0), v => "S/ " + montoPE(v), PX.naranja);
     lectura(s, `Los ${numPE(g.vis)} comercios visitados facturan ${soles(Q.tv.fac)} (${pct2(Q.tv.fac, Q.tu.fac)} del universo) con ${numPE(Q.tv.trx)} transacciones; los reactivados con visita y contacto aportan ${soles(Q.G.cc.fac)}.`,
       "cruzar por corte la facturación de los visitados con la de los no visitados.", 6.12);
-    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones por grupo); comercios por grupo del CRM de campo Stratis al mismo corte. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
+    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones por grupo); comercios por grupo según las visitas de Stratis al mismo corte. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
   }
 
   // 7b (sin totales). Reactivación con la carga por Customer ID
@@ -2401,7 +2401,7 @@ function armarLaminas(pres, D){
     const s = lamina("Reactivación confirmada por BBVA", B ? `Corte de la data de BBVA al ${fechaLarga(B.corte)} · cuenta: reactivado y con gestión con contacto según BBVA, con visita de Stratis` : "Pendiente de la data de BBVA");
     if (!B){
       s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:1.7, w:12.1, h:2.2, fill:{ color:PX.naranjaSuave }, line:{ color:PX.naranjaSuave } });
-      T(s, [{ text:"Todavía no hay un corte de BBVA cargado hasta esta fecha.", options:{ bold:true, breakLine:true } }, { text:"La reactivación y la facturación se reportan cuando la data de BBVA está cargada en el CRM (Cargas › Resultados de BBVA). No se muestran cifras sin esa fuente." }],
+      T(s, [{ text:"Reactivación y facturación: pendientes de confirmación de BBVA.", options:{ bold:true, breakLine:true } }, { text:"BBVA confirmará la reactivación y la facturación cuando su data esté actualizada." }],
         { x:0.9, y:1.9, w:11.5, h:1.8, fontSize:14, color:PX.rojo });
     } else {
       const w = 2.87, gap = 0.21, prom = B.facturado != null && B.cuentan ? B.facturado / B.cuentan : null;
@@ -2424,9 +2424,9 @@ function armarLaminas(pres, D){
           catAxisLabelColor:PX.tinta, catAxisLabelFontSize:10, valAxisHidden:true, valGridLine:{ style:"none" }, catGridLine:{ style:"none" }, showLegend:true, legendPos:"t", legendFontSize:9,
           showTitle:true, title:"Reactivados que cuentan por zona", titleFontSize:11, titleColor:PX.navy });
     }
-    lectura(s, B ? `${B.cuentan === 1 ? "1 comercio reactivado cuenta" : `${numPE(B.cuentan)} comercios reactivados cuentan`} para Stratis (${pc(B.cuentan, D.visitados)} % de conversión frente a una meta de ${D.meta.conv} %)${B.facturado != null ? ` y facturan ${soles(B.facturado)}` : ""}.` : "La reactivación se reporta con la data de BBVA.",
-      B ? "sostener la entrega de la data de BBVA para seguir cada reactivación por corte." : "cargar el corte de BBVA en el CRM antes de enviar la presentación.");
-    pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (Customer ID, gestión con contacto y reactivado), cruzada con la cartera del CRM de campo Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: CRM de campo Stratis al ${dd}.`); }
+    lectura(s, B ? `${B.cuentan === 1 ? "1 comercio reactivado cuenta" : `${numPE(B.cuentan)} comercios reactivados cuentan`} para Stratis (${pc(B.cuentan, D.visitados)} % de conversión frente a una meta de ${D.meta.conv} %)${B.facturado != null ? ` y facturan ${soles(B.facturado)}` : ""}.` : "BBVA confirmará la reactivación y la facturación cuando su data esté actualizada.",
+      B ? "sostener la entrega de la data de BBVA para seguir cada reactivación por corte." : "");
+    pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (Customer ID, gestión con contacto y reactivado), cruzada con la cartera de Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: registro de visitas de Stratis al ${dd}.`); }
 
   // 8. La voz del comercio
   { const s = lamina("La voz del comercio: qué dicen y qué responde el equipo", `Visitas con contacto hasta el ${dd} · ${numPE(D.conFb)} con feedback registrado`);
@@ -2448,7 +2448,7 @@ function armarLaminas(pres, D){
     const t1 = D.tipos[0], a1 = D.acciones.filter(o => o.n >= 3).sort((a, b) => b.realiza / b.n - a.realiza / a.n)[0];
     lectura(s, `${t1 ? `Lo más mencionado: «${t1.t}» (${numPE(t1.n)}). ` : ""}${a1 ? `La respuesta que más convierte: «${a1.a}» (${pc(a1.realiza, a1.n)} % con compromiso de consumo).` : ""}` || "Todavía no hay feedback suficiente para una lectura.",
       "ajustar el discurso de campo a lo que más mencionan los comercios.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Marcado por el ejecutivo en el celular; antes del 24/09, inferido del comentario.`); }
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Marcado por el ejecutivo en el celular; antes del 24/09, inferido del comentario.`); }
 
   // 9. Próximos pasos
   { const s = lamina("Próximos pasos", "");

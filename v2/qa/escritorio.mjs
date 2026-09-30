@@ -136,8 +136,9 @@ await prueba('presentación para BBVA: 12 láminas con el corte elegido', async 
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 12, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Rutas y distritos abordados', 'Evolución semanal', 'Cobertura territorial', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de la data de BBVA'])
+  for (const t of ['Resumen ejecutivo', 'Avance por zona', 'Rutas y distritos abordados', 'Evolución semanal', 'Cobertura territorial', 'Reactivación confirmada por BBVA', 'La voz del comercio', 'Próximos pasos', 'pendientes de confirmación de BBVA'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   // lámina 3: las barras de nuevos por día suman los comercios visitados del título
   const tot = Number((txt.match(/(\d+) comercios visitados al/) || [])[1]);
   const graf = await Promise.all(Object.keys(z.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).map(n => z.file(n).async('string')));
@@ -161,7 +162,7 @@ await prueba('presentación con un corte de BBVA de más de 1000 filas: cuenta s
   const txt = (await Promise.all(Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
   assert.ok(txt.includes('1 comercio reactivado cuenta para Stratis'), 'la regla de «cuenta» no da 1');
   assert.ok(txt.includes('S/ 1.500') || txt.includes('S/ 1,500') || txt.includes('S/ 2 mil'), 'no muestra el facturado de los que cuentan');
-  assert.ok(!txt.includes('pendientes de la data de BBVA'), 'sigue diciendo pendiente con un corte cargado');
+  assert.ok(!txt.includes('pendientes de confirmación de BBVA'), 'sigue diciendo pendiente con un corte cargado');
   const notas = Object.keys(z.files).filter(n => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n));
   const tn = (await Promise.all(notas.map(n => z.file(n).async('string')))).join(' ');
   assert.ok(!/Citas candidatas|Revisar las cifras|Texto base armado/.test(tn), 'el archivo lleva notas internas');
@@ -198,6 +199,7 @@ await prueba('presentación con totales de BBVA: 13 láminas, cuenta lo visitado
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
   for (const t of ['Reactivación con visita (con contacto) · cuenta', 'Facturación y transacciones', '1.500,50', '2.300,50', '33,33 %', 'Control de coherencia: OK'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   fs.unlinkSync(f);
   await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
 });
