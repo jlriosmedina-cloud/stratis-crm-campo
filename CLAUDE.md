@@ -29,7 +29,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
   - Casos mínimos:
     - registrar una visita con cada una de las 5 opciones de «¿Cómo fue la visita?»;
     - corregir la visita de hoy;
-    - descargar la base para BBVA con sus 4 tablas dinámicas.
+    - descargar la base para BBVA (hojas KPIs y Base).
 - **Publicar** con `python v2/build.py --publicar`, luego commit y push. **Solo con el OK explícito de Jose, cada vez.**
 - **Cambios en la base:** una migración en `supabase/migrations/` con nombre descriptivo. Aplicarla solo con el OK de Jose. Si cambia una función que usa el celular, se aplica el mismo día en que se publica la app.
   - Desde el 28/09 las funciones nuevas que crea `postgres` nacen sin EXECUTE para `anon` ni `PUBLIC` (privilegios por defecto); `authenticated` y `service_role` sí lo reciben. Una función que deba usarse sin sesión necesita su `grant` explícito, y hay que justificarlo.
@@ -64,9 +64,8 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
   - «Reagendé» solo va con «Reagendada».
 - **Resultado:** Éxito (realizará consumos) · En proceso (aún no decide o reagendada) · No éxito · No se encontró · Sin contacto (todos los motivos de «No se pudo hacer la visita», menos Dirección errada).
 - **Feedback agregado por Stratis el 29/09:** «Desconfía de la visita (duda que representemos a BBVA)» y «No pidió el POS» (Decisión y necesidad), «Solicitó cambio de equipo» (Equipo y contómetros), «Le falta una función» (Uso del POS).
-- **Base para BBVA (Excel del escritorio):** hojas KPIs, 4 tablas dinámicas, Base, Visitas, Feedback_Detalle, Que_Ofrecio_Detalle y Diccionario.
+- **Base para BBVA (Excel del escritorio), modelo de Jose del 30/09:** solo dos hojas, KPIs y Base. Todos los KPIs son fórmulas sobre la hoja Base; la columna Ejecutivo (al final de Base) es la asignación del periodo. Sin notas al pie ni fila de subtítulo en KPIs.
   - `Gestion_Con_Contacto` (SI/NO) y su fecha sirven para el cruce con los volúmenes de BBVA.
-  - Las tablas dinámicas se inyectan con JSZip (ExcelJS no las crea).
 
 ## Contexto de negocio
 
