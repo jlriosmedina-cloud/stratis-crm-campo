@@ -1198,8 +1198,8 @@ function pasoFeedback(r, px = "fb"){
       ${FEEDBACK.map(([g, items]) => `<div class="fb-grupo"><small>${esc(g)}</small>${items.filter(visible).map(op).join("")}</div>`).join("")}
       <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}
     ${abierto ? "" : bloqueArbol(r, px)}
-    <label class="fb-label" for="${px}Nota">Feedback adicional <span>${(r.fbAcc || []).includes("Otra acción") ? "(cuenta la otra acción)" : "(opcional)"}</span></label>
-    <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces.">${esc(r.feedbackNota || "")}</textarea></div>`;
+    <label class="fb-label" for="${px}Nota">Feedback adicional <span>${(r.fbAcc || []).includes("Otra acción") ? "(escribe qué hiciste tú en «Otra acción»)" : "(opcional)"}</span></label>
+    <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="${(r.fbAcc || []).includes("Otra acción") ? "Ej.: coordiné el recojo de 2 POS que no usa y pedí el cambio del que falla." : "Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces."}">${esc(r.feedbackNota || "")}</textarea></div>`;
 }
 /* ---------- Dictado con IA (26/09/2026) ----------
    El ejecutivo cuenta la visita con su voz; la IA (función ia-visita) propone cómo llenar el formulario.
