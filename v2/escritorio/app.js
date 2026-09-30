@@ -314,7 +314,7 @@ const VISTAS = [
   ["feedback","Feedback", ICON.fb, null],
   ["porque","Por qué sí / no", ICON.pq, null],
   ["auditoria","Auditoría", ICON.aud, null],
-  ["cargas","Cargas y descargas", ICON.carga, null],
+  ["cargas","Cargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
 ];
 function pintarNav(){
@@ -341,7 +341,7 @@ function pintar(){
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
               porque:["Por qué sí / por qué no","Por qué tenemos éxito en unas visitas y en otras no: el resultado de cada comercio por su última visita, qué convenció a los que dijeron que sí y qué frenó a los demás."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
-              cargas:["Cargas y descargas","Descarga la base del periodo para BBVA y carga la data de transacciones que BBVA envía de vuelta."],
+              cargas:["Cargas","Carga la data que envía BBVA: transacciones y resultados de reactivación. La base y la presentación para BBVA se descargan con los botones de arriba."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
@@ -836,15 +836,8 @@ function vistaCargas(){
   if (!S.cargas.length && !S._cargasPedidas){ S._cargasPedidas = true; cargarCargas(); }
   const c = S.carga, tp = TIPOS[c.tipo];
   const paso = c.hecho ? 3 : c.filas ? 2 : 1;
-  const per = S.periodo;
   return `
-  <div class="panel descarga-bbva">
-    <div class="db-txt"><b>Base para BBVA · periodo ${esc(per ? per.id : "")}${per ? ` · del ${fISO(per.ini)} al ${fISO(per.fin)}` : ""}</b>
-      <span>Excel con los datos al momento de descargar: <b>KPIs</b> (universo, visitas por ejecutivo, reactivación, recuperados y feedback) · <b>Base</b> (una fila por Customer ID con sus indicadores) · <b>4 tablas dinámicas</b> (feedback por rama, qué ofreció, visitas por ejecutivo y comercios por resultado; se filtran y actualizan en Excel) · <b>Base</b> (una fila por Customer ID con sus indicadores) · <b>Visitas</b> (una fila por visita) · <b>Feedback_Detalle</b> y <b>Que_Ofrecio_Detalle</b> (el árbol de feedback, una fila por detalle y por acción) · <b>Diccionario</b>. La llave es el Customer ID de 8 dígitos.</span>
-      ${S._ultimaBase ? `<small>Última descarga en esta sesión: ${esc(S._ultimaBase)}</small>` : ""}</div>
-    <button class="btn p" data-base-bbva>${ICON.carga} Descargar base para BBVA</button>
-  </div>
-  <div class="barra-sec">Cargar transacciones de BBVA</div>
+  <div class="barra-sec">Cargar data de BBVA</div>
   <div class="pasos"><span class="${paso>1?"ok":"on"}"><i>1</i> Elegir el formato y subir el archivo</span>› <span class="${paso===2?"on":paso>2?"ok":""}"><i>2</i> Revisar la validación</span>› <span class="${paso===3?"on":""}"><i>3</i> Cargar y ver el efecto</span></div>
   <div class="tipos">${Object.entries(TIPOS).map(([k,t]) => `<button class="tipo ${c.tipo===k?"on":""}" data-tipo="${k}"><span class="ico">${ICON.carga}</span><span><b>${t.t}</b><small>${t.d}</small></span></button>`).join("")}</div>
   ${paso === 1 ? `
@@ -1514,7 +1507,7 @@ function vistaPorQue(){
   const embudo = `<div class="pq-embudo">
     ${paso("Visitados", tot, tot, "", "")}
     ${paso("¿Se encontró el comercio?", encontrados, tot, `<b class="num">${nR("noenc")}</b> no se encontraron · dirección errada`, "res:noenc")}
-    ${paso("¿Hubo contacto?", contacto, encontrados, `<b class="num">${nR("sincon")}</b> sin contacto · cerrado, no atendió o no estaba`, "res:sincon")}
+    ${paso("¿Hubo contacto?", contacto, encontrados, `<b class="num">${nR("sincon")}</b> sin contacto · cerrado, cerró definitivamente, no atendió, zona insegura u otro motivo`, "res:sincon")}
     ${paso("¿Hubo reunión?", reunion, contacto, `<b class="num">${contacto - reunion}</b> sin reunión · sin éxito o reagendada`, "res:sinreu")}
     ${paso("¿Usará el POS?", exito.length, reunion, `<b class="num">${reunion - exito.length}</b> todavía no · aún no decide o desiste`, "res:reuno")}
   </div>`;
@@ -1847,7 +1840,7 @@ async function baseBBVA(){
      ["Que_Ofrecio_Detalle","Una fila por visita, rama y acción","Qué hizo u ofreció el ejecutivo en cada rama marcada. «Sin dato» = no lo registró."],
      ["Visitas","Semana","Semana (lunes a domingo) del periodo en que se hizo la visita."],
      ["Ambas","Como_Fue_La_Visita","Lo que eligió el ejecutivo en el celular: Habló con el dueño o encargado · No estaba quien decide, quedó en volver · No estaba quien decide, sin compromiso · No se pudo hacer la visita (antes «No hubo contacto») · El comercio no está en esta dirección. Con_Quien y Que_Paso se mantienen como antes."],
-     ["Visitas","Motivo_Sin_Contacto","Por qué no se pudo hacer la visita: Cerrado (cerrado hoy) · Cerró definitivamente · No atendió · Zona insegura · Otro motivo (desde el 29/09) · Dirección errada. «No estaba» solo en registros anteriores al 26/09."],
+     ["Visitas","Motivo_Sin_Contacto","Por qué no se pudo hacer la visita: Cerrado (cerrado hoy) · Cerró definitivamente · No atendió · Zona insegura · Otro motivo (desde el 29/09) · Dirección errada. «No estaba» solo en registros anteriores al 26/09. Una visita anterior puede figurar con un motivo nuevo cuando Stratis la reclasificó; el cambio queda en la bitácora de la visita."],
      ["Ambas","Columnas al final (desde el 29/09)","Feedback agregado por Stratis el 29/09 (Desconfía de la visita, No pidió el POS, Solicitó cambio de equipo, Le falta una función): van al final para no correr las columnas anteriores. 1 = el comercio lo mencionó."],
      ["Base","Comercio_Cerro_Definitivamente","SI si en la última visita el local había cerrado definitivamente. La visita cuenta igual; el comercio no pasa a Cancelado."],
      ["Visitas","Fecha_Reagenda","Fecha en que el ejecutivo quedó en volver: si no estaba quien decide (Reagendada) y, desde el 29/09, también si habló con el dueño o encargado."],
@@ -1866,7 +1859,6 @@ async function baseBBVA(){
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    S._ultimaBase = `${ddhh(new Date())} · ${filasB.length} comercios · ${filasV.length} visitas`; if (S.vista === "cargas") pintar();
     toast(`Base para BBVA descargada: ${filasB.length} comercios y ${filasV.length} visitas${conTD ? ", con 4 tablas dinámicas" : " (no se pudieron armar las tablas dinámicas)"}.`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
