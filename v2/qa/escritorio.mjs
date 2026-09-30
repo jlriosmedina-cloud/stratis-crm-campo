@@ -168,6 +168,39 @@ await prueba('presentación con un corte de BBVA de más de 1000 filas: cuenta s
   fs.unlinkSync(f);
   await p.evaluate(() => { delete window.__FX.tablas.v2_cortes_bbva; delete window.__FX.tablas.v2_resultados_bbva; });
 });
+await prueba('totales de BBVA: se tipean con puntos de miles, el CRM pone los grupos y se controla la coherencia', async () => {
+  await p.evaluate(h => { window.__FX.rpc.v2_guardar_totales_bbva = a => ({ carga_id: 9, corte: a.p_corte, reemplazo: false });
+    S.vista = 'cargas'; S.totBBVA = []; S.carga = { tipo: 'totales_bbva', archivo: null, filas: null, hecho: false, resultado: null, tot: { corte: h, v: {}, notas: '' } }; pintar(); }, hoy); await p.waitForTimeout(300);
+  const V = { cc_reac: '2', cc_fac: '1.500,50', cc_trx: '30', sc_reac: '5', sc_fac: '800', sc_trx: '10', nv_reac: '0', nv_fac: '0', nv_trx: '0' };
+  for (const [k, v] of Object.entries(V)) await p.fill(`[data-tot="${k}"]`, v);
+  // el CRM tiene 2 visitados sin contacto: 5 reactivados no cuadra
+  assert.ok(await p.locator('text=Control de coherencia: Visitados sin contacto').count() > 0, 'no marca el grupo que no cuadra');
+  assert.ok(await p.locator('#guardarTotales').isDisabled(), 'deja guardar con el control en rojo');
+  await p.fill('[data-tot="sc_reac"]', '1');
+  assert.ok(await p.locator('text=Control de coherencia OK').count() > 0, 'no da OK con los números correctos');
+  const prev = await p.locator('#totPrevia').innerText();
+  for (const t of ['1.500,50', '2.300,50', '33,33 %', '50,00 %']) assert.ok(prev.includes(t), 'falta en la vista previa: ' + t);
+  const antes = await p.evaluate(() => window.__llamadas.length);
+  await p.click('#guardarTotales'); await p.waitForTimeout(400);
+  const ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_guardar_totales_bbva');
+  assert.ok(ll, 'no llamó a v2_guardar_totales_bbva');
+  assert.equal(ll[1].p_corte, hoy);
+  assert.deepEqual(ll[1].p_totales, { cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0 });
+});
+await prueba('presentación con totales de BBVA: 13 láminas, cuenta lo visitado con contacto y la tabla de facturación', async () => {
+  await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; }, hoy);
+  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
+  const f = path.join(RAIZ, 'qa', 'salida_presentacion_totales.pptx'); await d.saveAs(f);
+  const z = await JSZip.loadAsync(fs.readFileSync(f));
+  const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  assert.equal(lams.length, 13, 'láminas: ' + lams.length);
+  const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
+  for (const t of ['Reactivación con visita (con contacto) · cuenta', 'Facturación y transacciones', '1.500,50', '2.300,50', '33,33 %', 'Control de coherencia: OK'])
+    assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
+  fs.unlinkSync(f);
+  await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
+});
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : '\nTodas las pruebas del escritorio pasaron');
