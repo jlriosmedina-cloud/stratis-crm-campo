@@ -462,6 +462,22 @@ caso('totales de BBVA: solo el analista guarda, valida los números y un corte s
   assert.match(g[1].notas, /"cc_reac": 12/, 'no guardó los valores anteriores'); assert.match(g[1].notas, /"nv_fac": 3456789.01/);
 });
 
+// ---------- reactivados de BBVA en la base del ejecutivo (30/09): informativo, solo con visita ----------
+caso('mi base: el reactivado de BBVA se ve solo si el comercio tiene visita válida, y no cambia el estado', async () => {
+  const conVisita = await nuevoComercio(41), sinVisita = await nuevoComercio(42);
+  await registrar(EJ, { cid: conVisita, con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide' });
+  const corte = await diaMas(0);
+  await db.query(`delete from v2_cortes_bbva`);
+  await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb)`, [corte, JSON.stringify([
+    { customer_id: conVisita, gestion_con_contacto: true, reactivado: 'Si' }, { customer_id: sinVisita, gestion_con_contacto: false, reactivado: 'Si' }])]);
+  const mb = (await como(EJ, `select customer_id, bbva_reactivado::text r, estado from public.v2_mi_base() where customer_id in ($1, $2) order by 1`, [conVisita, sinVisita])).rows;
+  assert.deepEqual(mb.map(x => [x.customer_id, x.r]), [[conVisita, corte], [sinVisita, null]], 'el reactivado de BBVA sin visita no debe verse');
+  assert.equal(mb[0].estado, 'seg', 'el reactivado de BBVA no debe cambiar el estado (el bono sigue con las transacciones)');
+  // otro ejecutivo no ve esos comercios
+  assert.equal((await como(OTRO, `select 1 from public.v2_mi_base() where customer_id = $1`, [conVisita])).rows.length, 0);
+  await falla(como(null, `select * from public.v2_mi_base()`), /permission denied/);
+});
+
 // Estos van al final: sin la migración, el TRUNCATE sí vacía las tablas.
 const TABLAS_APP = `select c.oid::regclass::text t from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') and (c.relname like 'v2\\_%' or c.relname = 'usuarios') order by 1`;

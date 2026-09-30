@@ -16,6 +16,7 @@ Se aplican solo con el OK de Jose.
 | `20260929100000_tipificaciones_de_visita.sql` | 29/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260929100322` |
 | `20260929120000_resultados_bbva.sql` | 29/09/2026, con el OK de Jose (escritorio publicado el mismo día) | `20260929132503` |
 | `20260930100000_totales_bbva.sql` | 30/09/2026, con el OK de Jose (escritorio publicado el mismo día) | `20260930120544` |
+| `20260930120000_mi_base_reactivado_bbva.sql` | 30/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260930182215` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

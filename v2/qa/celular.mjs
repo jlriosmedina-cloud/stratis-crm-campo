@@ -8,7 +8,9 @@ const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagend
 const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
 const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO }),
   // quedó en volver con el dueño (29/09): sigue en «Aún no decide», pero entra al filtro «Reagendados»
-  comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() })]);
+  comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() }),
+  // BBVA lo reporta reactivado (30/09): informativo, no cambia el estado
+  comercio(12, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', bbva_reactivado: '2026-01-02' })]);
 const NOPIDIO = 'No pidió el POS';
 // La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
 const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
@@ -70,6 +72,18 @@ for (const tema of ['light', 'dark']) {
       c.ok(reg[1]); console.log(`ok  ${tema} · ${c.nombre || c.modo}`);
     } catch (e) { fallas++; console.log(`MAL ${tema} · ${c.nombre || c.modo}: ${e.message}`); await p.evaluate(() => { S.reg = null; pintar(); }); }
   }
+  // Reactivado según BBVA (30/09): se ve en la tarjeta, en el filtro y en Inicio, sin cambiar el estado
+  try {
+    const r = await p.evaluate(() => { S.filtroEstado = 'bbva'; S.filtroVisita = 'todos'; const ids = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos';
+      S.vista = 'inicio'; S.ficha = null; pintar(); return { ids, estado:S.base.find(c => c.customer_id === '00000012').estado }; });
+    if (JSON.stringify(r.ids) !== '["00000012"]') throw new Error('filtro BBVA: ' + JSON.stringify(r.ids));
+    if (r.estado !== 'seg') throw new Error('cambió el estado');
+    if (!(await p.locator('text=como reactivado').count())) throw new Error('no aparece el aviso en Inicio');
+    await p.evaluate(() => { S.vista = 'base'; S.filtroEstado = 'bbva'; pintar(); }); await p.waitForTimeout(200);
+    if (!(await p.locator('.bbva-rea').count())) throw new Error('la tarjeta no muestra «Reactivado según BBVA»');
+    await p.evaluate(() => { S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
+    console.log(`ok  ${tema} · reactivado según BBVA (informativo)`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · reactivado según BBVA: ${e.message}`); }
   // «Reagendados» incluye al que quedó en volver con el dueño, y la tarjeta muestra la fecha
   try {
     const ids = await p.evaluate(() => { S.filtroEstado = 'rag'; S.filtroVisita = 'todos'; const r = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos'; return r; });
