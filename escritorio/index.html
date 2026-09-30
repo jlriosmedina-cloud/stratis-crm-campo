@@ -476,7 +476,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "400a71";
+const BUILD = "7fb5db";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1297,6 +1297,7 @@ function cruceBBVA(){
 const TIPOS = {
   diario: { t:"Transacciones diarias", d:"Una fila por comercio y día: cuántas transacciones hubo ese día. Es la carga que confirma las reactivaciones.", ej:"2026-09-24,41000123,4,312.50" },
   acumulado_mes: { t:"Acumulado del mes por corte", d:"Una fila por comercio y fecha de corte con el acumulado del mes. El CRM cuenta un día cuando el acumulado sube.", ej:"2026-09-24,41000123,38,4120.00" },
+  totales_bbva: { t:"Totales de BBVA por corte", d:"Lo que ves en el drive de BBVA: reactivados, facturación y transacciones por grupo. Se tipea, sin archivo. Es lo que usa la presentación.", ej:"" },
   resultados_bbva: { t:"Resultados de BBVA (reactivación)", d:"Tu Excel de BBVA: una fila por Customer ID con gestión con contacto, reactivado y, si lo tienes, el monto facturado. Solo lo ves tú.", ej:"00000001,Si,Si,12500.00" },
 };
 const COLS = ["fecha_corte","customer_id","trx","vol"];
@@ -1304,18 +1305,19 @@ const ALIAS = { fecha_corte:["fecha_corte","fecha","fecha corte","corte","date",
 function vistaCargas(){
   if (!S.cargas.length && !S._cargasPedidas){ S._cargasPedidas = true; cargarCargas(); }
   const c = S.carga, tp = TIPOS[c.tipo];
-  const paso = c.hecho ? 3 : c.filas ? 2 : 1;
+  const paso = c.hecho ? 3 : c.filas ? 2 : 1, tot = c.tipo === "totales_bbva";
   return `
   <div class="barra-sec">Cargar data de BBVA</div>
-  <div class="pasos"><span class="${paso>1?"ok":"on"}"><i>1</i> Elegir el formato y subir el archivo</span>› <span class="${paso===2?"on":paso>2?"ok":""}"><i>2</i> Revisar la validación</span>› <span class="${paso===3?"on":""}"><i>3</i> Cargar y ver el efecto</span></div>
+  ${tot ? "" : `<div class="pasos"><span class="${paso>1?"ok":"on"}"><i>1</i> Elegir el formato y subir el archivo</span>› <span class="${paso===2?"on":paso>2?"ok":""}"><i>2</i> Revisar la validación</span>› <span class="${paso===3?"on":""}"><i>3</i> Cargar y ver el efecto</span></div>`}
   <div class="tipos">${Object.entries(TIPOS).map(([k,t]) => `<button class="tipo ${c.tipo===k?"on":""}" data-tipo="${k}"><span class="ico">${ICON.carga}</span><span><b>${t.t}</b><small>${t.d}</small></span></button>`).join("")}</div>
-  ${paso === 1 ? `
+  ${tot ? formTotales() : ""}
+  ${!tot && paso === 1 ? `
   <div class="drop" id="drop"><input type="file" id="archivo" accept=".csv,.txt,.xlsx,.xls"><b>Arrastra aquí el archivo de ${tp.t.toLowerCase()}</b>CSV o Excel. Nada se escribe en la base hasta que confirmes en el paso 3.<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn p" id="elegir">Elegir archivo</button></div>
     <div class="formato">${c.tipo === "resultados_bbva" ? COLS_BBVA.map(col => `<div><code>${col}</code>${FORMATO_BBVA[col]}</div>`).join("")
       : COLS.map(col => `<div><code>${col}</code>${({fecha_corte:"AAAA-MM-DD (también DD/MM/AAAA)",customer_id:"8 dígitos, el de BBVA",trx:"entero",vol:"decimal con punto (opcional)"})[col]}</div>`).join("")}</div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--muted)">La primera fila lleva los nombres de columna. Se aceptan sinónimos (fecha, cliente, transacciones, monto…). Ejemplo: <code style="font-family:ui-monospace,Menlo,Consolas,monospace">${tp.ej}</code></div></div>` : ""}
-  ${paso === 2 ? (c.tipo === "resultados_bbva" ? previaBBVA() : previa()) : ""}
-  ${paso === 3 ? (c.tipo === "resultados_bbva" ? resultadoBBVA() : resultadoCarga()) : ""}
+  ${!tot && paso === 2 ? (c.tipo === "resultados_bbva" ? previaBBVA() : previa()) : ""}
+  ${!tot && paso === 3 ? (c.tipo === "resultados_bbva" ? resultadoBBVA() : resultadoCarga()) : ""}
   <div class="panel" style="margin-top:16px"><div class="barra"><b>Historial de cargas</b><span class="lbl">cada carga queda con quién, cuándo y qué cambió</span></div>
   <div style="overflow:auto"><table class="datos"><thead><tr><th>Fecha</th><th>Tipo</th><th>Archivo</th><th>Formato</th><th class="n">Filas</th><th>Corte</th><th>Por</th><th>Notas</th></tr></thead><tbody>
   ${S.cargas.map(g => `<tr><td class="num">${ddhh(g.en)}</td><td>${esc(g.tipo)}</td><td><code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px">${esc(g.archivo || "")}</code></td><td>${esc(g.formato || "—")}</td><td class="n num">${num(g.filas)}</td><td class="num">${g.fecha_corte ? fISO(g.fecha_corte) : "—"}</td><td>${esc((g.por||"").split("@")[0])}</td><td style="font-size:11.5px;color:var(--muted)">${esc(g.notas || "")}</td></tr>`).join("") || `<tr><td colspan="8" class="vacio">Sin cargas todavía.</td></tr>`}
@@ -1512,6 +1514,105 @@ async function cargarBBVA(){
   } catch(e){ toast("No se pudo cargar: " + (e.message || e)); }
   S.ocupado = false; pintar();
 }
+/* Totales de BBVA por corte (30/09): la reactivación vive en el drive de BBVA y no se descarga por comercio. Jose tipea
+   los totales por grupo y el CRM pone los comercios de cada grupo al mismo corte (las columnas Visitado y Gestion_Con_Contacto
+   de la hoja Base). «Reactivado que cuenta» = reactivado según BBVA y visitado con contacto según el CRM. */
+const GRUPOS_TOT = [["cc", "Visitados con contacto"], ["sc", "Visitados sin contacto"], ["nv", "No visitados"]];
+const CAMPOS_TOT = [["reac", "Reactivados"], ["fac", "Facturación (S/)"], ["trx", "Transacciones"]];
+// Montos como se escriben en el drive: 1.234.567,89 · 1234567.89 · 12.345 · 12345
+function leerMonto(t){
+  let x = String(t == null ? "" : t).replace(/S\/|\s/g, "");
+  if (x === "") return null;
+  const uc = x.lastIndexOf(","), up = x.lastIndexOf(".");
+  if (uc >= 0 && up >= 0) x = uc > up ? x.replace(/\./g, "").replace(",", ".") : x.replace(/,/g, "");
+  else if (uc >= 0) x = /^\d{1,3}(,\d{3})+$/.test(x) ? x.replace(/,/g, "") : x.replace(",", ".");
+  else if (up >= 0 && /^\d{1,3}(\.\d{3})+$/.test(x)) x = x.replace(/\./g, "");
+  return /^\d+(\.\d+)?$/.test(x) ? Number(x) : NaN;
+}
+// Grupos del CRM al corte K, sobre la cartera asignada: los mismos que la hoja Base (Visitado y Gestion_Con_Contacto)
+function gruposCRM(K){
+  const cartera = S.base.filter(c => c.correo), enC = new Set(cartera.map(c => c.customer_id)), per = S.periodo && S.periodo.id;
+  const primera = visitadosAlCorte(K), conC = new Set(), des = {}; let visitas = 0;
+  (S.act || []).slice().sort((a, b) => a.visitado_en < b.visitado_en ? -1 : 1).forEach(v => {
+    if (v.estado_anul === "anulada" || v.periodo !== per || iso(v.visitado_en) > K || !enC.has(v.customer_id)) return;
+    visitas++; if (v.decision === "Desiste del producto") des[v.customer_id] = v.equipo || "";
+    if (v.lat != null && !v.fuera_plazo && v.con !== "Nadie") conC.add(v.customer_id); });
+  const vis = Object.keys(primera).filter(c => enC.has(c)).length, rec = Object.keys(des).length;
+  return { universo:cartera.length, visitas, vis, cc:conC.size, sc:vis - conC.size, nv:cartera.length - vis, recupero:rec, equipoRec:Object.values(des).filter(e => e === "Sí").length };
+}
+// Cuadro completo (como la tabla de Jose) a partir de los totales t y los grupos g; errores = controles de coherencia
+function cuadroTotales(t, g){
+  const G = {}; GRUPOS_TOT.forEach(([k, nom]) => { G[k] = { nom, n:g[k], reac:Number(t[k + "_reac"]), fac:Number(t[k + "_fac"]), trx:Number(t[k + "_trx"]) }; });
+  const suma = (ks, nom, n) => ({ nom, n, reac:ks.reduce((a, k) => a + G[k].reac, 0), fac:ks.reduce((a, k) => a + G[k].fac, 0), trx:ks.reduce((a, k) => a + G[k].trx, 0) });
+  const tv = suma(["cc", "sc"], "Total visitados", g.vis), tu = suma(["cc", "sc", "nv"], "Total universo", g.universo);
+  const errores = [];
+  GRUPOS_TOT.forEach(([k, nom]) => { if (G[k].reac > G[k].n) errores.push(`${nom}: ${numPE(G[k].reac)} reactivados y el CRM tiene ${numPE(G[k].n)} comercios en ese grupo`); });
+  if (g.cc + g.sc !== g.vis || g.vis + g.nv !== g.universo) errores.push("Los grupos del CRM no suman el universo");
+  return { G, tv, tu, errores };
+}
+const pct2 = (a, b) => b ? (100 * a / b).toFixed(2).replace(".", ",") + " %" : "—";
+const montoPE = (x, d = 2) => x == null || isNaN(x) ? "—" : Number(x).toLocaleString("de-DE", { minimumFractionDigits:d, maximumFractionDigits:d });
+function totalesDelForm(){
+  const v = S.carga.tot.v, t = {}, faltan = [], malos = [];
+  GRUPOS_TOT.forEach(([g, gn]) => CAMPOS_TOT.forEach(([c, cn]) => { const k = `${g}_${c}`, n = leerMonto(v[k]);
+    if (n == null) faltan.push(`${gn} · ${cn}`); else if (isNaN(n) || (c !== "fac" && n !== Math.trunc(n))) malos.push(`${gn} · ${cn}`); else t[k] = n; }));
+  return { t, faltan, malos };
+}
+function previaTotales(){
+  const tt = S.carga.tot, K = tt.corte, { t, faltan, malos } = totalesDelForm();
+  if (!K) return `<div class="aviso">Elige la fecha de corte de la data de BBVA.</div>`;
+  const g = gruposCRM(K);
+  if (faltan.length || malos.length) return `<div class="aviso ${malos.length ? "mal" : ""}">${malos.length ? `No es un número válido: <b>${malos.map(esc).join(", ")}</b>. ` : ""}${faltan.length ? `Faltan ${faltan.length} de 9 valores.` : ""} El CRM al ${fISO(K)}: ${numPE(g.cc)} visitados con contacto, ${numPE(g.sc)} sin contacto y ${numPE(g.nv)} no visitados (universo ${numPE(g.universo)}).</div>`;
+  const q = cuadroTotales(t, g), fila = (o, b) => `<tr${b ? ' style="font-weight:700"' : ""}><td>${esc(o.nom)}</td><td class="n num">${numPE(o.n)}</td><td class="n num">${numPE(o.reac)}</td><td class="n num">${montoPE(o.fac)}</td><td class="n num">${numPE(o.trx)}</td><td class="n num">${pct2(o.fac, q.tu.fac)}</td><td class="n num">${o.trx ? montoPE(o.fac / o.trx) : "—"}</td><td class="n num">${pct2(o.reac, o.n)}</td></tr>`;
+  return `<div style="overflow:auto"><table class="datos"><thead><tr><th>Grupo</th><th class="n">Comercios (CRM)</th><th class="n">Reactivados</th><th class="n">Facturación (S/)</th><th class="n">Transacciones</th><th class="n">% facturación</th><th class="n">Ticket prom. (S/)</th><th class="n">% alcance</th></tr></thead><tbody>
+    ${fila(q.G.cc)}${fila(q.G.sc)}${fila(q.tv, true)}${fila(q.G.nv)}${fila(q.tu, true)}</tbody></table></div>
+    <div class="aviso ${q.errores.length ? "mal" : "ok"}" style="margin-top:10px">${q.errores.length ? "Control de coherencia: " + q.errores.map(esc).join(" · ") : `Control de coherencia OK · reactivados que cuentan (visitados con contacto): <b>${numPE(q.G.cc.reac)}</b> · conversión ${pct2(q.G.cc.reac, g.vis)} de ${numPE(g.vis)} visitados.`}</div>`;
+}
+function formTotales(){
+  if (!S.totBBVA && !S._totPedidos){ S._totPedidos = true; cargarTotalesBBVA().catch(e => { S.totBBVA = []; toast("No se pudieron leer los totales guardados: " + (e.message || e)); }).then(() => { if (S.vista === "cargas") pintar(); }); }
+  const c = S.carga;
+  if (!c.tot){ const u = (S.totBBVA || [])[0]; c.tot = { corte:u ? u.corte : ayerISO(), v:{}, notas:"" }; if (u) prellenarTotales(u); }
+  const tt = c.tot, { faltan, malos } = totalesDelForm(), q = tt.corte && !faltan.length && !malos.length ? cuadroTotales(totalesDelForm().t, gruposCRM(tt.corte)) : null;
+  return `<div class="panel" style="padding:16px 18px">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <label class="lbl">Fecha de corte de la data de BBVA <input type="date" id="totCorte" value="${esc(tt.corte || "")}" max="${hoyISO()}" class="sel"></label>
+      <label class="lbl" style="flex:1;min-width:240px">Nota (opcional) <input type="text" id="totNotas" value="${esc(tt.notas || "")}" class="sel" style="width:100%" placeholder="Ej.: capturado del drive de BBVA el 30/09"></label></div>
+    <div style="overflow:auto"><table class="datos"><thead><tr><th>Grupo</th>${CAMPOS_TOT.map(([, cn]) => `<th>${cn}</th>`).join("")}</tr></thead><tbody>
+      ${GRUPOS_TOT.map(([g, gn]) => `<tr><td><b>${gn}</b></td>${CAMPOS_TOT.map(([cc]) => `<td><input type="text" inputmode="decimal" class="sel" style="width:150px;text-align:right" data-tot="${g}_${cc}" value="${esc(tt.v[`${g}_${cc}`] || "")}" placeholder="${cc === "fac" ? "1.234.567,89" : cc === "trx" ? "12.345" : "12"}"></td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>
+    <div style="font-size:11.5px;color:var(--muted);margin:6px 0 12px">Copia los números como los ves en el drive de BBVA (con puntos de miles y coma decimal, o sin separadores). Los comercios de cada grupo los pone el CRM al mismo corte, igual que la hoja Base.</div>
+    <div id="totPrevia">${previaTotales()}</div>
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn p ${S.ocupado ? "cargando-btn" : ""}" id="guardarTotales" ${q && !q.errores.length ? "" : "disabled"}>Guardar los totales del ${tt.corte ? fISO(tt.corte) : "corte"}</button>
+      <span class="lbl">Si el corte ya tenía totales, se reemplazan. No cambia visitas ni el medidor.</span></div>
+    ${(S.totBBVA || []).length ? `<div style="overflow:auto;margin-top:16px"><table class="datos"><thead><tr><th>Corte</th><th class="n">Reactivados con contacto</th><th class="n">Sin contacto</th><th class="n">No visitados</th><th class="n">Facturación total (S/)</th><th>Por</th><th>Guardado</th></tr></thead><tbody>
+      ${S.totBBVA.map(u => `<tr><td class="num">${fISO(u.corte)}</td><td class="n num">${numPE(u.cc_reac)}</td><td class="n num">${numPE(u.sc_reac)}</td><td class="n num">${numPE(u.nv_reac)}</td><td class="n num">${montoPE(Number(u.cc_fac) + Number(u.sc_fac) + Number(u.nv_fac))}</td><td>${esc((u.por || "").split("@")[0])}</td><td class="num">${ddhh(u.en)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+  </div>`;
+}
+function prellenarTotales(u){ const tt = S.carga.tot; tt.corte = u.corte; tt.notas = u.notas || "";
+  GRUPOS_TOT.forEach(([g]) => CAMPOS_TOT.forEach(([c]) => { const n = Number(u[`${g}_${c}`]); tt.v[`${g}_${c}`] = c === "fac" ? montoPE(n) : numPE(n); })); }
+function refrescarTotales(){ const p = $("#totPrevia"), b = $("#guardarTotales"); if (!p) return;
+  p.innerHTML = previaTotales(); const { t, faltan, malos } = totalesDelForm(), tt = S.carga.tot;
+  if (b) b.disabled = !(tt.corte && !faltan.length && !malos.length && !cuadroTotales(t, gruposCRM(tt.corte)).errores.length); }
+async function cargarTotalesBBVA(){
+  const { data, error } = await sb.from("v2_totales_bbva").select("*").order("corte", { ascending:false });
+  if (error) throw error;
+  S.totBBVA = data || []; return S.totBBVA;
+}
+async function guardarTotales(){
+  const tt = S.carga.tot, { t, faltan, malos } = totalesDelForm();
+  if (!tt.corte || tt.corte > hoyISO()){ toast("Indica la fecha de corte de la data de BBVA (no puede ser futura)."); return; }
+  if (faltan.length || malos.length){ toast("Completa los 9 valores con números válidos."); return; }
+  if (cuadroTotales(t, gruposCRM(tt.corte)).errores.length){ toast("Revisa el control de coherencia antes de guardar."); return; }
+  S.ocupado = true; pintar();
+  try {
+    const { data, error } = await sb.rpc("v2_guardar_totales_bbva", { p_corte:tt.corte, p_totales:t, p_notas:tt.notas || null });
+    if (error) throw error;
+    await Promise.all([cargarTotalesBBVA(), cargarCargas()]);
+    toast(`Totales del ${fISO(tt.corte)} guardados${data && data.reemplazo ? " (reemplazan los anteriores)" : ""}. La presentación ya los usa.`);
+  } catch(e){ toast("No se pudieron guardar: " + (e.message || e)); }
+  S.ocupado = false; pintar();
+}
+
 // Último corte de BBVA cargado hasta la fecha C (para la presentación)
 async function cargarResultadosBBVA(C){
   const { data:cs, error:ec } = await sb.from("v2_cortes_bbva").select("corte,filas,facturado_total,en").order("corte", { ascending:false });
@@ -2205,7 +2306,7 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-descartar-ret")){
     const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
@@ -2253,10 +2354,13 @@ document.addEventListener("click", async ev => {
   if (t.dataset.tipo){ S.carga = { tipo:t.dataset.tipo, archivo:null, filas:null, hecho:false, resultado:null }; pintar(); return; }
   if (t.id === "elegir"){ $("#archivo").click(); return; }
   if (t.id === "otroArchivo" || t.id === "otraCarga"){ S.carga = { tipo:S.carga.tipo, archivo:null, filas:null, hecho:false, resultado:null }; pintar(); return; }
+  if (t.id === "guardarTotales"){ if (!S.ocupado) guardarTotales(); return; }
   if (t.id === "cargar"){ if (!S.ocupado) (S.carga.tipo === "resultados_bbva" ? cargarBBVA() : cargarFilas()); return; }
 });
 document.addEventListener("change", ev => {
   if (ev.target.id === "bbvaCorte" && S.carga){ S.carga.corte = ev.target.value; pintar(); return; }
+  if (ev.target.id === "totCorte" && S.carga && S.carga.tot){ const u = (S.totBBVA || []).find(x => x.corte === ev.target.value);
+    if (u) prellenarTotales(u); else S.carga.tot.corte = ev.target.value; pintar(); return; }
   const t = ev.target;
   if (t.id === "fEj"){ S.ej = t.value; S.sel = null; pintar(); }
   if (t.id === "fDia"){ S.dia = t.value; S.sel = null; pintar(); }
@@ -2272,7 +2376,9 @@ document.addEventListener("change", ev => {
   if (t.dataset.marca){ if (t.checked) S.marcadas.add(t.dataset.marca); else S.marcadas.delete(t.dataset.marca); pintar(); }
   if (t.id === "archivo" && t.files[0]) leerArchivo(t.files[0]);
 });
-document.addEventListener("input", ev => { if (ev.target.id === "bbvaTotal" && S.carga){ S.carga.facturadoTotal = ev.target.value; return; } if (ev.target.id === "qTraza"){ S.busca = ev.target.value; S.traza = null; const pos = ev.target.selectionStart; pintar(); const q = $("#qTraza"); q.focus(); q.setSelectionRange(pos, pos); } });
+document.addEventListener("input", ev => { if (ev.target.id === "bbvaTotal" && S.carga){ S.carga.facturadoTotal = ev.target.value; return; }
+  if (ev.target.dataset && ev.target.dataset.tot && S.carga && S.carga.tot){ S.carga.tot.v[ev.target.dataset.tot] = ev.target.value; refrescarTotales(); return; }
+  if (ev.target.id === "totNotas" && S.carga && S.carga.tot){ S.carga.tot.notas = ev.target.value; return; } if (ev.target.id === "qTraza"){ S.busca = ev.target.value; S.traza = null; const pos = ev.target.selectionStart; pintar(); const q = $("#qTraza"); q.focus(); q.setSelectionRange(pos, pos); } });
 document.addEventListener("dragover", ev => { const d = ev.target.closest("#drop"); if (d){ ev.preventDefault(); d.classList.add("over"); } });
 document.addEventListener("dragleave", ev => { const d = ev.target.closest("#drop"); if (d) d.classList.remove("over"); });
 document.addEventListener("drop", ev => { const d = ev.target.closest("#drop"); if (!d) return; ev.preventDefault(); d.classList.remove("over"); const f = ev.dataTransfer.files[0]; if (f) leerArchivo(f); });
@@ -2310,11 +2416,11 @@ const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto"
 const DIAS_SEM = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
 const fechaLarga = s => { const [a, m, d] = s.split("-").map(Number); return `${d} de ${MESES[m - 1]} de ${a}`; };
 const diaSem = s => DIAS_SEM[new Date(s + "T12:00:00Z").getUTCDay()];
-const numPE = x => Number(x || 0).toLocaleString("es-PE");
+const numPE = x => Number(x || 0).toLocaleString("de-DE");   // punto de miles y coma decimal, como el Excel de Jose
 // Nombre del periodo para BBVA: los periodos 1 y 2 fueron del CRM anterior
 const mayus = t => t.charAt(0).toUpperCase() + t.slice(1);
 const nombrePeriodo = p => ({ "2026-10":"periodo 3", "2026-11":"periodo 4", "2026-12":"periodo 5" })[p && p.id] || `periodo del ${fISO(p.ini)} al ${fISO(p.fin)}`;
-const soles = x => x == null ? "—" : x >= 1e6 ? `S/ ${(x / 1e6).toFixed(1).replace(".", ",")} MM` : x >= 1e3 ? `S/ ${Math.round(x / 1e3).toLocaleString("es-PE")} mil` : `S/ ${Math.round(x).toLocaleString("es-PE")}`;
+const soles = x => x == null ? "—" : x >= 1e6 ? `S/ ${(x / 1e6).toFixed(2).replace(".", ",")} MM` : x >= 1e3 ? `S/ ${Math.round(x / 1e3).toLocaleString("de-DE")} mil` : `S/ ${Math.round(x).toLocaleString("de-DE")}`;
 const pc = (a, b) => b ? Math.round(a * 100 / b) : 0;
 const masDias = (s, n) => { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
@@ -2327,7 +2433,7 @@ function leerCorte(txt){
 }
 
 // Todas las cifras de la presentación, al corte C, con las mismas reglas del CRM
-function datosPresentacion(C, RB){
+function datosPresentacion(C, RB, TB){
   const p = S.periodo, per = p.id;
   const vs = S.act.filter(v => v.estado_anul !== "anulada" && v.periodo === per && iso(v.visitado_en) <= C);
   const valida = v => v.lat != null && !v.fuera_plazo, contacto = v => v.con !== "Nadie";
@@ -2405,10 +2511,15 @@ function datosPresentacion(C, RB){
     bbva = { corte:RB.corte.corte, filas:F.length, reactivados:reac.length, cuentan:cuentan.length, enProceso:F.filter(r => r.reactivado === "En proceso").length,
       sinVisita:reac.filter(r => !primera[r.customer_id]).length, visitadosSinContacto:reac.filter(r => primera[r.customer_id] && !r.gestion_con_contacto).length,
       facturado, porZona, fueraCartera:RB.filas.length - F.length }; }
-  const reactivados = bbva ? bbva.cuentan : null;
+  // Totales de BBVA por corte (lo que usa la presentación desde el 30/09): grupos del CRM al corte de BBVA
+  let tot = null;
+  if (TB){ const g = gruposCRM(TB.corte); tot = Object.assign({ corte:TB.corte, g }, cuadroTotales(TB, g)); }
+  const reactivados = tot ? tot.G.cc.reac : bbva ? bbva.cuentan : null;
+  // fuente única de la reactivación para las láminas: corte, facturado de los que cuentan y base de la conversión
+  const rb = tot ? { corte:tot.corte, facturado:tot.G.cc.fac, visitados:tot.g.vis } : bbva ? { corte:bbva.corte, facturado:bbva.facturado, visitados } : null;
   return { C, p, meta, cartera, nEj, dh, dhCorte, zonasL, dhConCampo, serie, visitados, contactados, reunion, res, motivosNadie, volverAgendado, semanas, dist, tipos:Object.values(tipos).sort((a, b) => b.n - a.n),
     acciones:Object.values(acciones).sort((a, b) => b.n - a.n), porQue:Object.entries(porQue).sort((a, b) => b[1] - a[1]), conFb, deEjecutivo, citas, reactivados, visitas:vs.length,
-    diasCampo:[...conCampo].filter(d => d <= C).length, bbva };
+    diasCampo:[...conCampo].filter(d => d <= C).length, bbva, tot, rb };
 }
 
 // Mapa de Lima por distrito, dibujado en un lienzo (sin mosaicos) y devuelto como PNG. Color = cobertura de la cartera;
@@ -2484,7 +2595,8 @@ async function presentacionBBVA(){
     await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), S.geo ? null : cargarGeo()]);
     const av0 = (S.avance || [])[0] || {};
     if (!av0.meta_visitas || !av0.meta_reactivados || !av0.meta_conversion) throw new Error("no se pudieron leer las metas del periodo; actualiza y vuelve a intentar");
-    const D = datosPresentacion(C, await cargarResultadosBBVA(C));
+    const TB = (await cargarTotalesBBVA().catch(() => [])).find(u => u.corte <= C) || null;
+    const D = datosPresentacion(C, TB ? null : await cargarResultadosBBVA(C), TB);
     const pres = new PptxGenJS(); pres.layout = "LAYOUT_WIDE"; pres.author = "Stratis"; pres.company = "Stratis"; pres.title = `Campaña BBVA Adquirencia · corte al ${fISO(C)}`;
     armarLaminas(pres, D);
     await pres.writeFile({ fileName:`Mastercard_Campaña_BBVA_Adquirencia_${C.replace(/-/g, "")}.pptx` });
@@ -2544,7 +2656,7 @@ function armarLaminas(pres, D){
     kpi(s, 0.6 + (w + gap), 1.6, w, 1.9, PX.azul, "Con contacto", tasaCon + " %", `${numPE(D.contactados)} comercios`, null, "hablaron con el dueño, el encargado o un tercero");
     kpi(s, 0.6 + 2 * (w + gap), 1.6, w, 1.9, PX.verde, "Realizarán consumos", numPE(D.res.realiza), `${pc(D.res.realiza, D.contactados)} % del contacto`, null, `${numPE(D.res.noDecide)} aún no deciden · ${numPE(D.res.reag)} con regreso agendado`);
     kpi(s, 0.6 + 3 * (w + gap), 1.6, w, 1.9, PX.azulOsc, "Reactivados", D.reactivados == null ? "—" : numPE(D.reactivados), `meta ${numPE(D.meta.rea)}`, D.reactivados == null ? null : D.reactivados / D.meta.rea,
-      D.reactivados == null ? "pendiente de la data de BBVA" : `cuentan (con visita y contacto) · corte BBVA ${fISO(D.bbva.corte)} · conversión ${pc(D.reactivados, D.visitados)} %`);
+      D.reactivados == null ? "pendiente de la data de BBVA" : `cuentan (con visita y contacto) · corte BBVA ${fISO(D.rb.corte)} · conversión ${pct2(D.reactivados, D.rb.visitados)}`);
     s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:3.75, w:7.4, h:2.15, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
     T(s, "Lo más relevante al corte", { x:0.85, y:3.9, w:7, h:0.32, fontSize:13, bold:true, color:PX.navy });
     const puntos = [
@@ -2555,11 +2667,11 @@ function armarLaminas(pres, D){
     T(s, puntos.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < puntos.length - 1 } })), { x:0.85, y:4.3, w:7, h:1.5, fontSize:11.5, paraSpaceAfter:4 });
     s.addShape(pres.shapes.RECTANGLE, { x:8.2, y:3.75, w:4.5, h:2.15, fill:{ color:PX.suave }, line:{ color:PX.linea, width:0.75 } });
     T(s, `Cómo se mide el ${nombrePeriodo(D.p)}`, { x:8.45, y:3.9, w:4.1, h:0.32, fontSize:13, bold:true, color:PX.navy });
-    const reglas = ["Visita: presencial, con ubicación validada, sea cual sea el resultado.", "Reactivado que cuenta: volvió a transaccionar según la data de BBVA, con gestión con contacto y con visita de Stratis.", "Conversión: reactivados que cuentan ÷ comercios visitados."];
+    const reglas = ["Visita: presencial, con ubicación validada, sea cual sea el resultado.", "Reactivado que cuenta: volvió a transaccionar según la data de BBVA y fue visitado con contacto según el CRM de Stratis.", "Conversión: reactivados que cuentan ÷ comercios visitados."];
     T(s, reglas.map((t, i) => ({ text:t, options:{ bullet:true, breakLine:i < reglas.length - 1 } })), { x:8.45, y:4.3, w:4.1, h:1.5, fontSize:10.5, paraSpaceAfter:4 });
     lectura(s, D.visitados / D.meta.vis >= D.dhCorte / D.dh.length ? "El avance de visitas va por delante del tiempo transcurrido del periodo." : "El avance de visitas está por debajo del tiempo transcurrido del periodo.",
       D.reactivados == null ? "incorporar la data de BBVA para medir reactivación y facturación." : "sostener el ritmo y convertir el contacto en transacciones.");
-    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Reactivación: ${D.bbva ? `data de BBVA con corte al ${fISO(D.bbva.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
+    pie(s, `Fuente: CRM de campo Stratis al ${dd}. Reactivación: ${D.rb ? `data de BBVA con corte al ${fISO(D.rb.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
 
   // 3. Avance del periodo
   { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Nuevos visitados por día y acumulado del equipo frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
@@ -2696,13 +2808,65 @@ function armarLaminas(pres, D){
     // reactivación y facturación
     s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:5.3, w:8.2, h:0.7, fill:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy }, line:{ color:D.reactivados == null ? PX.naranjaSuave : PX.navy } });
     T(s, D.reactivados == null ? [{ text:"Reactivación y facturación: ", options:{ bold:true } }, { text:"pendientes de la data de BBVA. Se reportan cuando la data esté cargada en el CRM." }]
-      : [{ text:`${numPE(D.reactivados)} reactivados que cuentan`, options:{ bold:true } }, { text:` · ${pc(D.reactivados, D.visitados)} % de conversión (meta ${D.meta.conv} %)${D.bbva.facturado != null ? ` · ${soles(D.bbva.facturado)} facturados` : ""} · corte BBVA ${fISO(D.bbva.corte)}.` }],
+      : [{ text:`${numPE(D.reactivados)} reactivados que cuentan`, options:{ bold:true } }, { text:` · ${pct2(D.reactivados, D.rb.visitados)} de conversión (meta ${D.meta.conv} %)${D.rb.facturado != null ? ` · ${soles(D.rb.facturado)} facturados` : ""} · corte BBVA ${fISO(D.rb.corte)}.` }],
       { x:0.85, y:5.38, w:7.8, h:0.55, fontSize:11.5, color:D.reactivados == null ? PX.rojo : PX.blanco, valign:"middle" });
     lectura(s, `${pc(D.contactados, D.visitados)} % de los visitados atendió la visita y ${pc(D.res.realiza, D.contactados)} % de los contactados se comprometió a usar el POS.`, "convertir el compromiso en transacciones y volver a los comercios con regreso agendado.", 6.12);
     pie(s, `Fuente: CRM de campo Stratis al ${dd}. Cada comercio aparece una sola vez, con el resultado de su última visita.`); }
 
-  // 7b. Reactivación confirmada por BBVA
-  { const B = D.bbva;
+  // 7b. Reactivación confirmada por BBVA, con los totales tipeados por corte (la tabla de KPIs de Jose)
+  if (D.tot){ const Q = D.tot, g = Q.g, cu = Q.G.cc.reac, fk = x => (x / 1e6).toFixed(2).replace(".", ",");
+    const s = lamina("Reactivación confirmada por BBVA", `Corte de la data de BBVA al ${fechaLarga(Q.corte)} · cuenta: reactivado según BBVA y visitado con contacto según el CRM`);
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
+    const filas = [["Universo", g.universo, null, pct2(g.universo, g.universo)], ["Visitas registradas", g.visitas, null, pct2(g.visitas, g.universo)], ["Comercios visitados", g.vis, null, pct2(g.vis, g.universo)],
+      ["Reactivación", Q.tu.reac, Q.tu.fac, pct2(Q.tu.reac, g.universo)], ["Reactivación con visita (con contacto) · cuenta", cu, Q.G.cc.fac, pct2(cu, g.cc), true],
+      ["Reactivación con visita sin contacto", Q.G.sc.reac, Q.G.sc.fac, pct2(Q.G.sc.reac, g.sc)], ["Reactivación en comercios visitados (total)", Q.tv.reac, Q.tv.fac, pct2(Q.tv.reac, g.vis)],
+      ["Reactivación sin visita", Q.G.nv.reac, Q.G.nv.fac, pct2(Q.G.nv.reac, g.nv)], ["Recupero de POS (derivados a recuperación)", g.recupero, null, pct2(g.recupero, g.vis)], ["   con el equipo ya recuperado", g.equipoRec, null, pct2(g.equipoRec, g.recupero)]];
+    s.addTable([[{ text:"Definición de KPIs", options:H }, { text:"Comercios", options:Object.assign({ align:"right" }, H) }, { text:"Fact. (MM S/)", options:Object.assign({ align:"right" }, H) }, { text:"% alcance", options:Object.assign({ align:"right" }, H) }]]
+      .concat(filas.map(([n, c, f, p, b]) => { const o = b ? { bold:true, fill:{ color:PX.naranjaSuave }, color:PX.navy } : {};
+        return [cel(n, Object.assign({ align:"left" }, o)), cel(numPE(c), o), cel(f == null ? "" : fk(f), o), cel(p, o)]; })),
+      { x:0.6, y:1.6, w:7.45, colW:[3.9, 1.1, 1.2, 1.25], rowH:0.36, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
+    const tarjeta = (y, h, color, titulo, valor, det) => { s.addShape(pres.shapes.RECTANGLE, { x:8.3, y, w:4.4, h, fill:{ color:PX.blanco }, line:{ color:PX.linea, width:0.75 } });
+      s.addShape(pres.shapes.RECTANGLE, { x:8.3, y, w:4.4, h:0.07, fill:{ color }, line:{ color } });
+      T(s, titulo, { x:8.5, y:y + 0.15, w:4.0, h:0.26, fontSize:11, bold:true, color:PX.navy });
+      T(s, valor, { x:8.5, y:y + 0.42, w:4.0, h:0.5, fontFace:FTB, fontSize:24, color:PX.navy, valign:"middle", fit:"shrink" });
+      T(s, det, { x:8.5, y:y + 0.94, w:4.0, h:h - 1.0, fontSize:9.5, color:PX.gris }); };
+    tarjeta(1.6, 1.38, PX.azulOsc, "Reactivados que cuentan", `${numPE(cu)} de ${numPE(D.meta.rea)}`, `${pct2(cu, D.meta.rea)} de la meta del periodo · reactivados según BBVA, visitados con contacto`);
+    tarjeta(3.08, 1.38, PX.naranja, "Conversión", pct2(cu, g.vis), `${numPE(cu)} que cuentan ÷ ${numPE(g.vis)} comercios visitados · meta ${D.meta.conv} % · alcance en visitados con contacto: ${pct2(cu, g.cc)}`);
+    tarjeta(4.56, 1.38, PX.verde, "Facturación de los que cuentan", soles(Q.G.cc.fac), `${numPE(Q.G.cc.trx)} transacciones · ticket promedio S/ ${montoPE(Q.G.cc.trx ? Q.G.cc.fac / Q.G.cc.trx : 0)}`);
+    lectura(s, `${numPE(cu)} comercios reactivados cuentan para Stratis (${pct2(cu, g.vis)} de conversión sobre ${numPE(g.vis)} visitados) y facturan ${soles(Q.G.cc.fac)}. En los visitados con contacto la reactivación llega a ${pct2(cu, g.cc)}, frente a ${pct2(Q.G.nv.reac, g.nv)} en los no visitados.`,
+      "sostener la entrega de la data de BBVA para seguir la reactivación por corte.", 6.12);
+    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)}; comercios por grupo del CRM de campo Stratis al mismo corte (visitado y gestión con contacto, como en la base para BBVA). % alcance: sobre los comercios de cada grupo.`);
+  }
+
+  // 7c. Facturación y transacciones: visitados frente a no visitados
+  if (D.tot){ const Q = D.tot, g = Q.g;
+    const s = lamina("Facturación y transacciones por grupo", `Comercios visitados frente a no visitados · corte de la data de BBVA al ${fechaLarga(Q.corte)} · cartera del ${nombrePeriodo(D.p)}`);
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle", align:"right" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10.5, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
+    const fila = (o, b) => { const x = b ? { bold:true, fill:{ color:PX.suave }, color:PX.navy } : {};
+      return [cel(o.nom, Object.assign({ align:"left" }, x)), cel(numPE(o.n), x), cel(numPE(o.reac), x), cel(montoPE(o.fac), x), cel(numPE(o.trx), x), cel(pct2(o.fac, Q.tu.fac), x), cel(o.trx ? montoPE(o.fac / o.trx) : "—", x)]; };
+    s.addTable([["Grupo", "Comercios", "Reactivados", "Facturación (S/)", "Transacciones", "% facturación", "Ticket prom. (S/)"].map((t, i) => ({ text:t, options:Object.assign({}, H, i ? {} : { align:"left" }) }))]
+      .concat([fila(Q.G.cc), fila(Q.G.sc), fila(Q.tv, true), fila(Q.G.nv), fila(Q.tu, true)]),
+      { x:0.6, y:1.6, w:12.1, colW:[3.3, 1.2, 1.3, 1.9, 1.5, 1.4, 1.5], rowH:0.42, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
+    const labs = ["Visitados con contacto", "Visitados sin contacto", "No visitados"], ks = ["cc", "sc", "nv"];
+    // barras dibujadas (no gráfico nativo): así las cifras salen con coma decimal en cualquier PowerPoint
+    const barras = (x0, titulo, vals, txt, color) => { const mx = Math.max(...vals, 0) || 1;
+      T(s, titulo, { x:x0, y:4.2, w:5.9, h:0.28, fontSize:11, bold:true, color:PX.navy, align:"center" });
+      s.addShape(pres.shapes.LINE, { x:x0, y:5.72, w:5.9, h:0, line:{ color:PX.linea, width:0.75 } });
+      vals.forEach((v, i) => { const cx = x0 + 0.35 + i * 1.95, h = 1.0 * v / mx;
+        if (h > 0) s.addShape(pres.shapes.RECTANGLE, { x:cx + 0.3, y:5.72 - h, w:0.9, h, fill:{ color }, line:{ color } });
+        T(s, txt(v), { x:cx - 0.1, y:5.72 - h - 0.26, w:1.7, h:0.24, fontSize:10, bold:true, color:PX.navy, align:"center" });
+        T(s, labs[i], { x:cx - 0.1, y:5.76, w:1.7, h:0.24, fontSize:9.5, color:PX.tinta, align:"center" }); }); };
+    barras(0.6, "% de reactivación por grupo", ks.map(k => Q.G[k].n ? 100 * Q.G[k].reac / Q.G[k].n : 0), v => v.toFixed(2).replace(".", ",") + " %", PX.azulOsc);
+    barras(6.8, "Ticket promedio por grupo", ks.map(k => Q.G[k].trx ? Q.G[k].fac / Q.G[k].trx : 0), v => "S/ " + montoPE(v), PX.naranja);
+    lectura(s, `Los ${numPE(g.vis)} comercios visitados facturan ${soles(Q.tv.fac)} (${pct2(Q.tv.fac, Q.tu.fac)} del universo) con ${numPE(Q.tv.trx)} transacciones; los reactivados con visita y contacto aportan ${soles(Q.G.cc.fac)}.`,
+      "cruzar por corte la facturación de los visitados con la de los no visitados.", 6.12);
+    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones por grupo); comercios por grupo del CRM de campo Stratis al mismo corte. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
+  }
+
+  // 7b (sin totales). Reactivación con la carga por Customer ID
+  if (!D.tot){ const B = D.bbva;
     const s = lamina("Reactivación confirmada por BBVA", B ? `Corte de la data de BBVA al ${fechaLarga(B.corte)} · cuenta: reactivado y con gestión con contacto según BBVA, con visita de Stratis` : "Pendiente de la data de BBVA");
     if (!B){
       s.addShape(pres.shapes.RECTANGLE, { x:0.6, y:1.7, w:12.1, h:2.2, fill:{ color:PX.naranjaSuave }, line:{ color:PX.naranjaSuave } });

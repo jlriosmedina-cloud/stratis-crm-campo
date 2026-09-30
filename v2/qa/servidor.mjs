@@ -433,6 +433,35 @@ caso('resultados de BBVA: solo el analista carga, se completan los ceros y un co
   assert.equal(g.length, 2); assert.equal(g[1].fecha_corte, corte);
 });
 
+// ---------- totales de BBVA por corte (30/09): Jose los tipea desde el drive de BBVA ----------
+caso('totales de BBVA: solo el analista guarda, valida los números y un corte se reemplaza', async () => {
+  const corte = await diaMas(-1);
+  const T = { cc_reac: 12, cc_fac: 1234567.89, cc_trx: 12345, sc_reac: 7, sc_fac: 234567.8, sc_trx: 2345, nv_reac: 30, nv_fac: 3456789.01, nv_trx: 34567 };
+  const guardar = (u, t, c = corte) => como(u, `select public.v2_guardar_totales_bbva($1::date, $2::jsonb, 'prueba') r`, [c, JSON.stringify(t)]).then(x => x.rows[0].r);
+  await falla(guardar(EJ, T), /Solo el analista/);
+  await falla(guardar(null, T), /permission denied/);
+  await falla(guardar(ANA, T, await diaMas(1)), /no puede ser futura/);
+  await falla(guardar(ANA, Object.assign({}, T, { cc_reac: -1 })), /negativo/);
+  await falla(guardar(ANA, Object.assign({}, T, { sc_trx: 10.5 })), /entero/);
+  await falla(guardar(ANA, Object.assign({}, T, { nv_fac: '3456789.01' })), /no es un número: nv_fac/);
+  const { nv_trx, ...sinUno } = T; await falla(guardar(ANA, sinUno), /Falta o no es un número: nv_trx/);
+  const r = await guardar(ANA, T);
+  assert.equal(r.reemplazo, false);
+  // lo ve el analista, no el ejecutivo; anon nada; nadie escribe directo
+  const fila = (await como(ANA, 'select * from v2_totales_bbva')).rows[0];
+  assert.equal(fila.cc_reac, 12); assert.equal(Number(fila.cc_fac), 1234567.89); assert.equal(Number(fila.nv_trx), 34567);
+  assert.equal((await como(EJ, 'select * from v2_totales_bbva')).rows.length, 0, 'el ejecutivo ve los totales de BBVA');
+  await falla(como(null, 'select * from v2_totales_bbva'), /permission denied/);
+  await falla(como(ANA, `update v2_totales_bbva set cc_reac = 1`), /permission denied/);
+  // el mismo corte se reemplaza
+  const r2 = await guardar(ANA, Object.assign({}, T, { cc_reac: 15 }));
+  assert.equal(r2.reemplazo, true);
+  assert.equal((await db.query('select count(*)::int n, max(cc_reac) m from v2_totales_bbva')).rows[0].m, 15);
+  const g = (await db.query(`select filas, fecha_corte::text, notas from v2_cargas where tipo = 'totales_bbva' order by id`)).rows;
+  assert.equal(g.length, 2); assert.equal(g[1].fecha_corte, corte); assert.match(g[1].notas, /reemplaza/);
+  assert.match(g[1].notas, /"cc_reac": 12/, 'no guardó los valores anteriores'); assert.match(g[1].notas, /"nv_fac": 3456789.01/);
+});
+
 // Estos van al final: sin la migración, el TRUNCATE sí vacía las tablas.
 const TABLAS_APP = `select c.oid::regclass::text t from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') and (c.relname like 'v2\\_%' or c.relname = 'usuarios') order by 1`;
