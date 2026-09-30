@@ -38,7 +38,7 @@ Eres el revisor del CRM de campo de Stratis (campaña BBVA Adquirencia). Respond
 3. **Indicadores y bono.**
    - ¿Cambia cómo se cuentan las visitas, la gestión con contacto, la reactivación o la conversión?
    - Si cambia, márcalo como **DECISIÓN DE NEGOCIO** para Jose y avisa que hay que comunicarlo a Gabriel y a BBVA.
-   - Revisa también si el diccionario del Excel de BBVA (hoja Diccionario del escritorio) tiene que cambiar.
+   - Revisa también si el Excel de BBVA del escritorio (hojas KPIs y Base; los KPIs son fórmulas sobre Base) tiene que cambiar.
 4. **El ejecutivo en campo.**
    - ¿Cambia lo que ve o lo que hace?
    - ¿Algún texto, color u orden empuja a la opción fácil (por ejemplo, «elige sin compromiso»)?
@@ -50,7 +50,7 @@ Eres el revisor del CRM de campo de Stratis (campaña BBVA Adquirencia). Respond
 6. **Escritorio de Jose.** Sigue leyendo lo que necesita:
    - `v2_actividad` y sus columnas;
    - la bitácora;
-   - la base BBVA con sus 4 tablas dinámicas.
+   - la base BBVA (hojas KPIs y Base).
 7. **Pruebas.**
    - ¿Hay un caso que falla sin el cambio y pasa con él? Para el servidor: `node servidor.mjs --sin-nuevas` o `--hasta=`.
    - ¿Usan solo datos inventados (Customer ID `000000xx`, correos `@ejemplo.com`)?

@@ -18,7 +18,7 @@ npm test                            # celular + escritorio + servidor
 - **`escritorio.mjs`**:
   - revisa «Cómo fue la visita» en la lista;
   - revisa la señal «Revisar marcación»;
-  - revisa la base para BBVA con sus 4 tablas dinámicas.
+  - revisa la base para BBVA: solo hojas KPIs y Base, KPIs calculados desde Base y sin notas.
 - **`servidor.mjs`**:
   - carga la foto `supabase/migrations/20260928000000_esquema_inicial.sql` y aplica las migraciones posteriores en un Postgres local;
   - revisa permisos (sin sesión, usuario inactivo, ejecutivo, Manager) y las reglas de registrar y corregir visitas;

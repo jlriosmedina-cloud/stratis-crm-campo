@@ -373,7 +373,7 @@ function cascaron(){
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
-        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: KPIs, una fila por Customer ID y una por visita">Base para BBVA</button>
+        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hoja KPIs y hoja Base (una fila por Customer ID)">Base para BBVA</button>
         <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
@@ -1606,8 +1606,8 @@ function vistaIndicadores(){
 }
 
 /* =========================================================================
-   Base para BBVA (Excel) · modelo validado por Jose el 24/09/2026
-   Llave Customer_ID (texto, 8 dígitos). Hojas: KPIs · Base · Visitas · Diccionario.
+   Base para BBVA (Excel) · modelo de Jose del 30/09/2026
+   Llave Customer_ID (texto, 8 dígitos). Dos hojas: KPIs · Base. Todos los KPIs son fórmulas sobre la hoja Base.
    ========================================================================= */
 const FB_29 = ["Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS", "Solicitó cambio de equipo", "Le falta una función"];
 const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "POS no enciende", "Soporte no ayudó al comercio",
@@ -1616,71 +1616,16 @@ const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No nec
   // agregados por Stratis (árbol del 26/09)
   "Usa POS de otra marca", "Pide una tasa más baja", "Los abonos le llegan con demora", "Cobra con Yape o Plin para no pagar comisión", "Solo acepta efectivo",
   "No tiene contómetros o le quedan pocos", "Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Su funcionario de BBVA no responde",
-  // agregados por Stratis (tipificaciones del 29/09, aprobadas por Gabriel): en el Excel van al final de Base y Visitas
+  // agregados por Stratis (tipificaciones del 29/09, aprobadas por Gabriel): en el Excel van al final de Base
   ...FB_29];
 function cargarScript(src){ return new Promise((ok, mal) => { const e = document.createElement("script"); e.src = src; e.onload = ok; e.onerror = () => mal(new Error("No se pudo cargar " + src)); document.head.appendChild(e); }); }
-/* Tablas dinámicas (26/09): ExcelJS no las arma, así que se agregan al .xlsx ya generado.
-   Cada tabla lleva su propia caché con «refreshOnLoad»: Excel la llena con los datos de la hoja
-   fuente al abrir el archivo, y luego se pueden mover campos, filtrar y actualizar como cualquier
-   tabla dinámica. td = { hoja, nombre, fuente:{ hoja, cols, filas }, filtros:[], filas:[], columnas:[], valor:{ campo, nombre } } */
-async function agregarTablasDinamicas(buf, tds, JSZipLib){
-  const zip = await JSZipLib.loadAsync(buf);
-  const leer = p => zip.file(p).async("string");
-  const xesc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const letra = n => { let s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
-  let wbx = await leer("xl/workbook.xml"), wrels = await leer("xl/_rels/workbook.xml.rels"), ct = await leer("[Content_Types].xml");
-  // hoja → archivo
-  const rid = {}; wbx.replace(/<sheet [^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g, (m, n, r) => { rid[n.replace(/&amp;/g, "&")] = r; });
-  const destino = {}; wrels.replace(/<Relationship Id="([^"]+)"[^>]*Target="([^"]+)"/g, (m, r, t) => { destino[r] = t; });
-  const archivoHoja = n => "xl/" + destino[rid[n]].replace(/^\/?xl\//, "");
-  let caches = "";
-  for (let i = 0; i < tds.length; i++){
-    const td = tds[i], n = i + 1, cid = 10 + n, cols = td.fuente.cols;
-    const idx = c => { const k = cols.indexOf(c); if (k < 0) throw new Error("La columna «" + c + "» no está en " + td.fuente.hoja); return k; };
-    const ref = `A1:${letra(cols.length)}${Math.max(2, td.fuente.filas + 1)}`;
-    // Caché: definición sin registros; Excel la llena al abrir (refreshOnLoad)
-    zip.file(`xl/pivotCache/pivotCacheDefinition${n}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1" refreshOnLoad="1" refreshedBy="Stratis" refreshedDate="46291.5" createdVersion="3" refreshedVersion="3" minRefreshableVersion="3" recordCount="0" upgradeOnRefresh="1"><cacheSource type="worksheet"><worksheetSource ref="${ref}" sheet="${xesc(td.fuente.hoja)}"/></cacheSource><cacheFields count="${cols.length}">${cols.map(c => `<cacheField name="${xesc(c)}" numFmtId="0"><sharedItems/></cacheField>`).join("")}</cacheFields></pivotCacheDefinition>`);
-    zip.file(`xl/pivotCache/pivotCacheRecords${n}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" count="0"/>`);
-    zip.file(`xl/pivotCache/_rels/pivotCacheDefinition${n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords${n}.xml"/></Relationships>`);
-    // Tabla dinámica
-    const eje = {}; (td.filtros || []).forEach(c => eje[idx(c)] = "axisPage"); (td.filas || []).forEach(c => eje[idx(c)] = "axisRow"); (td.columnas || []).forEach(c => eje[idx(c)] = "axisCol");
-    const vf = idx(td.valor.campo), nf = (td.filtros || []).length;
-    const campos = cols.map((c, k) => eje[k] ? `<pivotField axis="${eje[k]}"${k === vf ? ' dataField="1"' : ""} showAll="0"><items count="1"><item t="default"/></items></pivotField>` : `<pivotField${k === vf ? ' dataField="1"' : ""} showAll="0"/>`).join("");
-    const fila0 = td.fila0 || (nf ? 4 + nf : 4);   // los filtros van arriba de la tabla, con una fila de separación
-    const lista = (tag, l) => l && l.length ? `<${tag} count="${l.length}">${l.map(c => `<field x="${idx(c)}"/>`).join("")}</${tag}>` : "";
-    zip.file(`xl/pivotTables/pivotTable${n}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="${xesc(td.nombre)}" cacheId="${cid}" applyNumberFormats="0" applyBorderFormats="0" applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0" applyWidthHeightFormats="1" dataCaption="Valores" updatedVersion="3" minRefreshableVersion="3" createdVersion="3" useAutoFormatting="1" itemPrintTitles="1" indent="0" outline="1" outlineData="1" multipleFieldFilters="0" rowHeaderCaption="${xesc(td.filas && td.filas.length ? td.filas.join(" / ").replace(/_/g, " ") : "")}"><location ref="A${fila0}:B${fila0 + 1}" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"${nf ? ` rowPageCount="${nf}" colPageCount="1"` : ""}/><pivotFields count="${cols.length}">${campos}</pivotFields>${lista("rowFields", td.filas)}${lista("colFields", td.columnas)}${nf ? `<pageFields count="${nf}">${td.filtros.map(c => `<pageField fld="${idx(c)}" hier="-1"/>`).join("")}</pageFields>` : ""}<dataFields count="1"><dataField name="${xesc(td.valor.nombre)}" fld="${vf}" subtotal="count" baseField="0" baseItem="0"/></dataFields><pivotTableStyleInfo name="PivotStyleMedium2" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/></pivotTableDefinition>`);
-    zip.file(`xl/pivotTables/_rels/pivotTable${n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="../pivotCache/pivotCacheDefinition${n}.xml"/></Relationships>`);
-    // la hoja donde va la tabla
-    const hx = archivoHoja(td.hoja), hr = hx.replace(/worksheets\/(sheet\d+\.xml)$/, "worksheets/_rels/$1.rels");
-    const relTd = `<Relationship Id="rIdTD${n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable${n}.xml"/>`;
-    if (zip.file(hr)) zip.file(hr, (await leer(hr)).replace("</Relationships>", relTd + "</Relationships>"));
-    else zip.file(hr, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relTd}</Relationships>`);
-    wrels = wrels.replace("</Relationships>", `<Relationship Id="rIdPC${n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition${n}.xml"/></Relationships>`);
-    caches += `<pivotCache cacheId="${cid}" r:id="rIdPC${n}"/>`;
-    ct = ct.replace("</Types>", `<Override PartName="/xl/pivotCache/pivotCacheDefinition${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/><Override PartName="/xl/pivotCache/pivotCacheRecords${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml"/><Override PartName="/xl/pivotTables/pivotTable${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/></Types>`);
-  }
-  // <pivotCaches> va después de <calcPr> (orden del esquema de workbook)
-  const bloque = `<pivotCaches>${caches}</pivotCaches>`;
-  if (/<calcPr[^>]*\/>/.test(wbx)) wbx = wbx.replace(/(<calcPr[^>]*\/>)/, "$1" + bloque);
-  else if (/<\/calcPr>/.test(wbx)) wbx = wbx.replace("</calcPr>", "</calcPr>" + bloque);
-  else if (/<\/definedNames>/.test(wbx)) wbx = wbx.replace("</definedNames>", "</definedNames>" + bloque);
-  else wbx = wbx.replace("</sheets>", "</sheets>" + bloque);
-  zip.file("xl/workbook.xml", wbx); zip.file("xl/_rels/workbook.xml.rels", wrels); zip.file("[Content_Types].xml", ct);
-  return zip.generateAsync({ type:"arraybuffer", compression:"DEFLATE" });
-}
 async function baseBBVA(){
   if (S._bajandoBase) return; S._bajandoBase = true; toast("Armando la base para BBVA…");
   try {
     if (!window.ExcelJS) await cargarScript("https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js");
     await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido(), cargarMsiInferido()]);
     const per = S.periodo ? S.periodo.id : null;
-    // TIPOS: todas las columnas por tipo. Las del 29/09 (FB_29) van al final de Base y Visitas para no correr las columnas de antes.
+    // TIPOS: todas las columnas por tipo. Las del 29/09 (FB_29) van al final de Base para no correr las columnas de antes.
     const TIPOS = BBVA_ORDEN.concat(FB_NINGUNO), T_ANT = TIPOS.filter(t => !FB_29.includes(t));
     const dmy = s => s ? String(s).slice(0, 10).split("-").reverse().join("/") : "";
     const vs = S.act.filter(v => v.estado_anul !== "anulada" && (!per || v.periodo === per)).sort((a, b) => a.visitado_en < b.visitado_en ? -1 : 1);
@@ -1689,16 +1634,6 @@ async function baseBBVA(){
     const base = S.base.slice().sort((a, b) => a.customer_id < b.customer_id ? -1 : 1);
     const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
     const k = wb.addWorksheet("KPIs"); // primera hoja; se llena al final, cuando ya se conocen los rangos
-    // Tablas dinámicas (26/09): hojas vacías que se completan al final con agregarTablasDinamicas
-    const TD = [
-      ["TD Feedback", "Feedback por rama y detalle · visitas con contacto", "Filtra por semana, resultado o fuente. Una visita puede mencionar más de un detalle. Fuente: hoja Feedback_Detalle."],
-      ["TD Qué ofreció", "Qué ofreció el ejecutivo, por rama", "Solo visitas con feedback marcado. «Sin dato» = el ejecutivo no registró qué ofreció (registros anteriores al 26/09 o el comentario no lo dice). Fuente: hoja Que_Ofrecio_Detalle."],
-      ["TD Visitas", "Visitas por ejecutivo y resultado", "Filtra por semana, cómo fue la visita o si se registró a tiempo. Fuente: hoja Visitas."],
-      ["TD Comercios", "Comercios de la base por resultado y reactivación", "Resultado por la última visita de cada comercio. Filtra por Visitado o Gestion_Con_Contacto para el cruce con los volúmenes de BBVA. Fuente: hoja Base."]];
-    TD.forEach(([n, t, d]) => { const w = wb.addWorksheet(n); w.views = [{ showGridLines:false }];
-      w.getCell("A1").value = t; w.getCell("A1").font = { name:"Arial", size:13, bold:true, color:{ argb:"FF0C1137" } };
-      w.getCell("A2").value = d + " Se actualiza al abrir el archivo; si cambias los datos: clic derecho › Actualizar."; w.getCell("A2").font = { name:"Arial", size:9, italic:true, color:{ argb:"FF5B6680" } };
-      w.getColumn(1).width = 58; for (let i = 2; i <= 8; i++) w.getColumn(i).width = 16; });
     const AZ = "FF0C1137", NA = "FFF86F35", IN = "FF232C86", GR = "FF5B6680", VE = "FF07785F";
     const cab = (ws, cols, grupos) => { const r = ws.getRow(1); r.height = 62;
       cols.forEach((c, i) => { const x = r.getCell(i + 1); x.font = { name:"Arial", bold:true, color:{ argb:"FFFFFFFF" }, size:10 };
@@ -1710,8 +1645,8 @@ async function baseBBVA(){
       ws.getColumn(1).numFmt = "@"; ws.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
       ws.eachRow((row, n) => { if (n > 1) row.eachCell(c => c.font = { name:"Arial", size:10 }); });
     };
-    // Base: una fila por Customer ID
-    const colsB = ["Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente"]);
+    // Base: una fila por Customer ID. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
+    const colsB = ["Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
     const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
       const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
       l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
@@ -1728,138 +1663,60 @@ async function baseBBVA(){
         c.dias_trx || 0, (c.dias_trx || 0) >= 2 ? "SI" : "NO", des.length ? "SI" : "NO", des.length ? des[des.length - 1].equipo || "" : "",
         TIPOS.filter(t => fb.has(t)).join(" | "), [...fuentes].sort().join(" + ")].concat(T_ANT.map(t => fb.has(t) ? 1 : 0), [[...fuera].sort().join(" | "), notas.join(" / "), ACCIONES.filter(a => acc.has(a)).join(" | "), comp.join(" / "), dem.join(" / "),
         ult ? RES_TXT[resultadoDe(ult)] : "Sin visita", m ? m.motivos.join(" | ") : "", m && m.fuente ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : ""],
-        FB_29.map(t => fb.has(t) ? 1 : 0), [ult && ult.motivo === "Cerró definitivamente" ? "SI" : "NO"]); });
+        FB_29.map(t => fb.has(t) ? 1 : 0), [ult && ult.motivo === "Cerró definitivamente" ? "SI" : "NO", c.correo ? ejDe(c.correo).nombre : ""]); });
     const wsB = wb.addWorksheet("Base");
-    const nB0 = colsB.length - FB_29.length - 1;   // columnas antes de las agregadas al final
-    tabla(wsB, "Base", colsB, filasB, [12,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14]),
-      { k:i => (i >= 2 && i <= 18) || i === colsB.length, fb:i => i >= 19 && i < colsB.length, si:i => i > nB0 - 3 && i <= nB0 });
+    const nB0 = colsB.length - FB_29.length - 2;   // columnas antes de las agregadas al final
+    tabla(wsB, "Base", colsB, filasB, [12,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
+      { k:i => (i >= 2 && i <= 18) || i >= colsB.length - 1, fb:i => i >= 19 && i < colsB.length - 1, si:i => i > nB0 - 3 && i <= nB0 });
     wsB.getColumn(4).numFmt = "dd/mm/yyyy";
-    // Visitas: una fila por visita
-    const colsV = ["Customer_ID","Nombre_Comercial","Fecha","Semana","Hora","Ejecutivo","Como_Fue_La_Visita","Con_Quien","Motivo_Sin_Contacto","Que_Paso","Decision","Equipo_Recuperado","Fecha_Reagenda","Comentario","Registrada_a_Tiempo","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado_Visita","Motivos_Si","Fuente_Motivos_Si"], FB_29);
-    const nom = {}; base.forEach(c => nom[c.customer_id] = c.nombre_comercial || c.razon_social || "");
-    const SEMS = semanasPeriodo();
-    const semanaDe = d => { const w = SEMS.find(x => d >= x.k && d <= x.fin) || SEMS.find(x => d <= x.fin);
-      return w ? `Sem. ${fISO(w.ini)} al ${fISO(w.fin)}` : ""; };
-    const filasV = vs.map(v => { const f = fbDe(v) || { tipos:[], fuera:[] }, m = msiDe(v);
-      return [v.customer_id, nom[v.customer_id] || v.comercio || "", dmy(iso(v.visitado_en)), semanaDe(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, comoFue(v)[0], v.con, v.motivo || "", v.que, v.decision || "", v.equipo || "", dmy(v.fecha_reagenda), String(v.comentario || "").replace(/\s+/g, " "), v.fuera_plazo ? "NO" : "SI",
-        TIPOS.filter(t => f.tipos.includes(t)).join(" | "), v.con === "Nadie" ? "No aplica (sin contacto)" : f.fuente === "ejecutivo" ? "Ejecutivo" : f.fuente === "inferido" ? "Inferido del comentario" : ""].concat(T_ANT.map(t => f.tipos.includes(t) ? 1 : 0), [f.fuera.join(" | "), f.nota || "", (f.acc || []).join(" | "), competidorTxt(f.ext), demoraTxt(f.ext),
-        RES_TXT[resultadoDe(v)], m ? m.motivos.join(" | ") : "", m && m.fuente ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : ""], FB_29.map(t => f.tipos.includes(t) ? 1 : 0)); });
-    const wsV = wb.addWorksheet("Visitas");
-    const nV0 = colsV.length - FB_29.length;
-    tabla(wsV, "Visitas", colsV, filasV, [12,28,11,20,7,16,34,10,16,18,18,11,11,50,10,40,18].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13)), { fb:i => i >= 16, si:i => i > nV0 - 3 && i <= nV0 });
-    // Feedback_Detalle: una fila por visita con contacto y detalle del árbol (base de las tablas dinámicas)
     const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || (t === FB_NINGUNO ? "Sin observaciones" : "Otro");
-    const RAMAS_ACC = { "Evaluar mejora de tasa":["Competencia y otros medios de cobro","Tasa y abonos"], "Expliqué cómo y cuándo abona Openpay":["Competencia y otros medios de cobro","Tasa y abonos","Uso del POS"], "Ofrecí evaluación de préstamo BBVA":["Competencia y otros medios de cobro","Tasa y abonos","Decisión y necesidad"], "Mostré los beneficios de cobrar con tarjeta":["Competencia y otros medios de cobro","Decisión y necesidad"], "Revisar la tarifa acordada con BBVA":["Tasa y abonos"], "Validé el estado del equipo":["Equipo y contómetros"], "Descarté errores en sitio (reinicio, chip, batería)":["Equipo y contómetros"], "Solicité reposición de contómetros":["Equipo y contómetros"], "Solicité cambio de equipo (sin costo)":["Equipo y contómetros"], "Solicité cambio de equipo (con costo)":["Equipo y contómetros"], "Capacitación en el momento":["Equipo y contómetros","Uso del POS"], "Capacitación programada":["Uso del POS"], "Llamé a soporte":["Equipo y contómetros","Atención y soporte"], "Generé ticket de atención":["Equipo y contómetros","Atención y soporte","Tasa y abonos"], "Seguimiento del caso":["Tasa y abonos","Equipo y contómetros","Atención y soporte"], "Derivé a postventa":["Tasa y abonos","Equipo y contómetros","Atención y soporte"], "Derivé a BBVA con urgencia":["Tasa y abonos","Equipo y contómetros","Atención y soporte"], "Reagendé con quien decide":["Decisión y necesidad"], "Otra acción":FEEDBACK.map(g => g[0]) };
-    const colsF = ["Customer_ID","Fecha","Semana","Ejecutivo","Como_Fue_La_Visita","Con_Quien","Que_Paso","Decision","Resultado_Visita","Rama","Detalle","Origen","Fuente_Feedback","Que_Ofrecio","POS_Otra_Marca","Tasa_Competidor","Dias_Demora_Abono","Banco_Abono"];
-    const colsA = ["Customer_ID","Fecha","Semana","Ejecutivo","Resultado_Visita","Rama","Que_Ofrecio"];
-    const filasF = [], filasA = [];
-    vs.filter(v => v.con !== "Nadie").forEach(v => { const f = fbDe(v) || { tipos:[], fuera:[] }, e = f.ext || {};
-      const cab0 = [v.customer_id, dmy(iso(v.visitado_en)), semanaDe(iso(v.visitado_en)), ejDe(v.correo).nombre, comoFue(v)[0], v.con, v.que, v.decision || "", RES_TXT[resultadoDe(v)]];
-      const fuente = f.fuente === "ejecutivo" ? "Ejecutivo" : f.fuente === "inferido" ? "Inferido del comentario" : "Sin feedback";
-      const accDe = g => (f.acc || []).filter(a => (RAMAS_ACC[a] || []).includes(g));
-      const det = f.tipos.map(t => [ramaDe(t), t, t === FB_NINGUNO ? "Sin observaciones" : FB_BBVA.has(t) ? "BBVA" : "Stratis"])
-        .concat(f.fuera.map(t => ["Fuera de la lista de BBVA", t, "Inferido"]));
-      if (!det.length) det.push(["Sin detalle", "El comentario no dice qué opina del POS", "Sin detalle"]);
-      det.forEach(([g, t, o]) => filasF.push(cab0.concat([g, t, o, fuente, accDe(g).join(" | "),
-        t === "Usa POS de otra marca" ? competidorTxt(e).replace(/ a [\d,]+ %$/, "") : "", t === "Usa POS de otra marca" && e.tasa_competidor != null ? Number(e.tasa_competidor) : null,
-        t === FB_DEMORA && e.dias_demora_abono != null ? Number(e.dias_demora_abono) : null, t === FB_DEMORA ? e.banco_abono || "" : ""])));
-      if (f.fuente === "ejecutivo") [...new Set(f.tipos.map(ramaDe))].filter(g => g !== "Sin observaciones").forEach(g => {
-        const l = accDe(g); (l.length ? l : ["Sin dato"]).forEach(a => filasA.push([v.customer_id, dmy(iso(v.visitado_en)), semanaDe(iso(v.visitado_en)), ejDe(v.correo).nombre, RES_TXT[resultadoDe(v)], g, a])); });
-    });
-    const wsF = wb.addWorksheet("Feedback_Detalle");
-    tabla(wsF, "Feedback_Detalle", colsF, filasF, [12,11,20,16,34,10,18,18,14,30,44,14,20,40,20,10,10,12], { fb:i => i >= 10 && i <= 15 });
-    const wsA = wb.addWorksheet("Que_Ofrecio_Detalle");
-    tabla(wsA, "Que_Ofrecio_Detalle", colsA, filasA, [12,11,20,16,14,32,44], { fb:i => i >= 6 });
-    // KPIs con fórmulas (rangos fijos, se recalculan en Excel)
-    const nB = filasB.length + 1, nV = Math.max(2, filasV.length + 1);
+    // KPIs: fórmulas sobre la hoja Base (rangos fijos, se recalculan en Excel). Sin notas al pie (Jose, 30/09).
+    const nB = filasB.length + 1;
     const col = (cols, nombre) => { let n = cols.indexOf(nombre) + 1, s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
-    const RB = n => `Base!$${col(colsB, n)}$2:$${col(colsB, n)}$${nB}`, RV = n => `Visitas!$${col(colsV, n)}$2:$${col(colsV, n)}$${nV}`;
+    const RB = n => `Base!$${col(colsB, n)}$2:$${col(colsB, n)}$${nB}`;
     k.views = [{ showGridLines:false }];
-    const ult = vs.length ? vs[vs.length - 1].visitado_en : null;
     const put = (r, c, v, st) => { const x = k.getCell(r, c); x.value = v; x.font = Object.assign({ name:"Arial", size:10 }, st || {}); return x; };
+    const nota = { size:9, italic:true, color:{ argb:GR } };
+    const encab = (r, cols, color) => cols.forEach((h, i) => { const x = put(r, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:color } }; x.alignment = { wrapText:true, vertical:"middle" }; });
     put(1, 1, "Campaña BBVA Adquirencia · periodo " + (per || "") + " · base para BBVA", { size:14, bold:true, color:{ argb:AZ } });
-    put(2, 1, `Periodo del ${fISO(S.periodo && S.periodo.ini)} al ${fISO(S.periodo && S.periodo.fin)}/${S.periodo ? S.periodo.fin.slice(0, 4) : ""} · corte ${ult ? dmy(iso(ult)) + " " + hh(ult) : "—"} · llave: Customer_ID (8 dígitos, texto) · una fila por comercio en «Base» y una por visita en «Visitas»`, { size:9, italic:true, color:{ argb:GR } });
     const tit = (r, t) => put(r, 1, t, { size:11, bold:true, color:{ argb:IN } });
-    const fil = (r, a, f, c) => { put(r, 1, a); put(r, 2, { formula:f }, { bold:true }); if (c) put(r, 3, c, { size:9, italic:true, color:{ argb:GR } }); };
+    const fil = (r, a, f, c) => { put(r, 1, a); put(r, 2, { formula:f }, { bold:true }); if (c) put(r, 3, c, nota); };
     tit(4, "Definición de KPIs a medir");
-    fil(5, "Universo", `COUNTA(${RB("Customer_ID")})`, "Total de clientes: los 900 leads del periodo");
-    fil(6, "Visitas registradas", `COUNTA(${RV("Customer_ID")})`, "Todas las visitas no anuladas, con o sin contacto");
+    fil(5, "Universo", `COUNTA(${RB("Customer_ID")})`, `Total de clientes: los ${numPE(base.length)} leads del periodo`);
+    fil(6, "Visitas registradas", `SUM(${RB("Visitas_Registradas")})`, "Todas las visitas no anuladas, con o sin contacto (suma de Visitas_Registradas de la hoja Base)");
     fil(7, "Comercios visitados", `COUNTIF(${RB("Visitado")},"SI")`, "Con al menos una visita válida y registrada a tiempo (la que cuenta)");
     fil(8, "Reactivación", `COUNTIF(${RB("Reactivado")},"SI")`, "Comercios con transacciones en 2 días distintos después de la visita, según la data de BBVA");
     fil(9, "Recuperados (derivados a recuperación)", `COUNTIF(${RB("Derivado_Recuperacion")},"SI")`, "Comercios que desistieron del producto: se derivan a la recuperación del POS");
     fil(10, "   con el equipo ya recuperado", `COUNTIFS(${RB("Derivado_Recuperacion")},"SI",${RB("Equipo_Recuperado")},"Sí")`, "Según lo que marcó el ejecutivo en la visita");
     tit(12, "Visitas por grupo de ejecutivo");
-    ["Ejecutivo","Base asignada","Visitas registradas","Comercios visitados","Visitas con contacto"].forEach((h, i) => { const x = put(13, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; x.alignment = { wrapText:true, vertical:"middle" }; });
+    encab(13, ["Ejecutivo","Base asignada","Visitas registradas","Comercios visitados","Visitas con contacto"], AZ);
     const ejs = [...new Set(base.filter(c => c.correo).map(c => ejDe(c.correo).nombre))].sort();
     ejs.forEach((e, i) => { const r = 14 + i; put(r, 1, e);
-      put(r, 2, base.filter(c => c.correo && ejDe(c.correo).nombre === e).length, { bold:true }); put(r, 3, { formula:`COUNTIF(${RV("Ejecutivo")},A${r})` }, { bold:true });
-      put(r, 4, new Set(vs.filter(v => valida(v) && ejDe(v.correo).nombre === e).map(v => v.customer_id)).size, { bold:true }); put(r, 5, { formula:`COUNTIFS(${RV("Ejecutivo")},A${r},${RV("Con_Quien")},"<>Nadie")` }, { bold:true }); });
+      put(r, 2, { formula:`COUNTIF(${RB("Ejecutivo")},A${r})` }, { bold:true });
+      put(r, 3, { formula:`SUMIF(${RB("Ejecutivo")},A${r},${RB("Visitas_Registradas")})` }, { bold:true });
+      put(r, 4, { formula:`COUNTIFS(${RB("Ejecutivo")},A${r},${RB("Visitado")},"SI")` }, { bold:true });
+      put(r, 5, { formula:`SUMIF(${RB("Ejecutivo")},A${r},${RB("Visitas_Con_Contacto")})` }, { bold:true }); });
     const rt = 14 + ejs.length; put(rt, 1, "Total", { bold:true }); if (ejs.length) ["B","C","D","E"].forEach((L, i) => put(rt, i + 2, { formula:`SUM(${L}14:${L}${rt - 1})` }, { bold:true }));
-    put(rt + 1, 1, "Base asignada y comercios visitados por ejecutivo: según la asignación del periodo en el CRM (la hoja Base no trae el ejecutivo). Visitas: fórmula sobre la hoja Visitas.", { size:9, italic:true, color:{ argb:GR } });
-    const r0 = rt + 3; tit(r0, "KPIs adicionales · feedback de comercios"); put(r0, 3, "Una visita o un comercio puede tener más de un tipo", { size:9, italic:true, color:{ argb:GR } });
-    ["Tipo de feedback (texto de BBVA)","Comercios","Visitas","Rama"].forEach((h, i) => { const x = put(r0 + 1, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:NA } }; });
-    TIPOS.forEach((t, i) => { const r = r0 + 2 + i; put(r, 1, t + (FB_BBVA.has(t) ? "" : "  (agregada por Stratis)")); put(r, 2, { formula:`SUM(${RB(t)})` }, { bold:true }); put(r, 3, { formula:`SUM(${RV(t)})` }, { bold:true }); put(r, 4, ramaDe(t), { size:9, color:{ argb:GR } }); });
+    const r0 = rt + 3; tit(r0, "KPIs adicionales · feedback de comercios"); put(r0, 3, "Un comercio puede tener más de un tipo", nota);
+    encab(r0 + 1, ["Tipo de feedback (texto de BBVA)","Comercios","Rama"], NA);
+    TIPOS.forEach((t, i) => { const r = r0 + 2 + i; put(r, 1, t + (FB_BBVA.has(t) ? "" : "  (agregada por Stratis)")); put(r, 2, { formula:`SUM(${RB(t)})` }, { bold:true }); put(r, 3, ramaDe(t), { size:9, color:{ argb:GR } }); });
     const rf = r0 + 2 + TIPOS.length;
-    fil(rf, "Visitas con contacto sin tipo de BBVA", `COUNTIFS(${RV("Con_Quien")},"<>Nadie",${RV("Feedback")},"")`, "Comentario sin detalle, o solo motivos fuera de la lista de BBVA");
-    const ra = rf + 2; ["Qué ofreció el ejecutivo (desde el 26/09)","Visitas"].forEach((h, i) => { const x = put(ra, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:NA } }; });
-    ACCIONES.forEach((t, i) => { const r = ra + 1 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RV("Que_Ofrecio")},"*${t.replace(/[*?~]/g, "~$&")}*")` }, { bold:true }); });
-    const rq = ra + 2 + ACCIONES.length; tit(rq, "Por qué sí / por qué no · resultado por comercio"); put(rq, 3, "Por la última visita de cada comercio visitado", { size:9, italic:true, color:{ argb:GR } });
-    ["Resultado","Comercios","Qué incluye"].forEach((h, i) => { const x = put(rq + 1, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:VE } }; });
-    RESULTADOS.forEach(([, t, d], i) => { const r = rq + 2 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Resultado")},"${t}")` }, { bold:true }); put(r, 3, d, { size:9, italic:true, color:{ argb:GR } }); });
+    fil(rf, "Comercios con contacto sin feedback registrado", `COUNTIFS(${RB("Gestion_Con_Contacto")},"SI",${RB("Feedback")},"")`, "Gestión con contacto y sin tipo de feedback en la hoja Base");
+    const ra = rf + 2; encab(ra, ["Qué ofreció el ejecutivo (desde el 26/09)","Comercios"], NA);
+    ACCIONES.forEach((t, i) => { const r = ra + 1 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Que_Ofrecio")},"*${t.replace(/[*?~]/g, "~$&")}*")` }, { bold:true }); });
+    const rq = ra + 2 + ACCIONES.length; tit(rq, "Por qué sí / por qué no · resultado por comercio"); put(rq, 3, "Por la última visita de cada comercio visitado", nota);
+    encab(rq + 1, ["Resultado","Comercios","Qué incluye"], VE);
+    RESULTADOS.forEach(([, t, d], i) => { const r = rq + 2 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Resultado")},"${t}")` }, { bold:true }); put(r, 3, d, nota); });
     const rs = rq + 2 + RESULTADOS.length; put(rs, 1, "Total de comercios visitados", { bold:true }); put(rs, 2, { formula:`SUM(B${rq + 2}:B${rs - 1})` }, { bold:true });
-    const rm = rs + 2; ["Qué lo convenció (comercios con éxito)","Comercios"].forEach((h, i) => { const x = put(rm, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:VE } }; });
+    const rm = rs + 2; encab(rm, ["Qué lo convenció (comercios con éxito)","Comercios"], VE);
     MOTIVOS_SI.forEach((t, i) => { const r = rm + 1 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Motivos_Si")},"*${t}*")` }, { bold:true }); });
     const rsd = rm + 1 + MOTIVOS_SI.length; put(rsd, 1, "Éxito sin detalle de qué lo convenció"); put(rsd, 2, { formula:`COUNTIFS(${RB("Resultado")},"Éxito",${RB("Motivos_Si")},"")` }, { bold:true });
-    put(rsd + 1, 1, "Éxito = el comercio declaró que realizará consumos. Un comercio puede tener más de un motivo. El «por qué no» sale del feedback (tipos de BBVA) de los comercios en proceso o sin éxito.", { size:9, italic:true, color:{ argb:GR } });
-    put(rsd + 3, 1, "Fuente del feedback: «Ejecutivo» = lo marcó en el celular (desde el 24/09); «Inferido del comentario» = visitas anteriores, clasificadas por Stratis leyendo el comentario.", { size:9, italic:true, color:{ argb:GR } });
-    if (!S.base.some(c => c.dias_trx)) put(rsd + 4, 1, "Reactivación en 0: todavía no se cargó la data de transacciones de BBVA del periodo. Se actualiza sola al cargarla.", { size:9, italic:true, color:{ argb:GR } });
     k.getColumn(1).width = 62; [2,3,5].forEach(i => k.getColumn(i).width = 14); k.getColumn(4).width = 30; k.getRow(13).height = 30;
-    // Diccionario
-    const dc = wb.addWorksheet("Diccionario"); dc.views = [{ showGridLines:false }];
-    dc.addRow(["Hoja","Columna","Qué significa"]).eachCell(c => { c.font = { name:"Arial", bold:true, color:{ argb:"FFFFFFFF" } }; c.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; });
-    [["Base","Customer_ID","Llave. Texto de 8 dígitos con ceros a la izquierda. Una fila por comercio de la base del periodo."],
-     ["Base","Visitado","SI si tiene al menos una visita válida y registrada dentro del plazo (la que cuenta para el indicador)."],
-     ["Base","Gestion_Con_Contacto","Para el cruce con los volúmenes de BBVA. SI si tiene al menos una visita válida (con GPS y a tiempo) en la que el ejecutivo habló con alguien del comercio: el dueño, el encargado o un trabajador. Cuenta aunque la dirección de la base estuviera errada, si lo ubicó en otro lugar y habló con él. NO si solo encontró el local cerrado, nadie atendió o no ubicó el comercio."],
-     ["Base","Fecha_Primera_Gestion_Con_Contacto","Fecha (Lima) de la primera visita que cuenta para Gestion_Con_Contacto. Es fecha de Excel: compárala con la fecha de la transacción. Transacción antes de esta fecha = ya estaba activo antes de la visita; en o después = activado después de la visita; sin transacción = no se activa aún."],
-     ["Base","Contacto_En_Otra_Direccion","SI si el contacto fue con el comercio ubicado en una dirección distinta a la de la base."],
-     ["Base","Visitas_Registradas / Validas / Con_Contacto","Visitas no anuladas; las que cuentan; las que hablaron con dueño o tercero."],
-     ["Base","Ultimo_*","Resultado y comentario de la visita más reciente."],
-     ["Base","Dias_Con_Trx / Reactivado","Días distintos con transacciones después de la primera visita válida; Reactivado = SI con 2 días o más."],
-     ["Base","Derivado_Recuperacion / Equipo_Recuperado","SI si en alguna visita el comercio desistió del producto; el estado del equipo (Sí / No / Pendiente) es el que marcó el ejecutivo."],
-     ["Base","Feedback y columnas por tipo","Unión de los tipos de todas las visitas del comercio; 1 = el comercio lo mencionó. Si mencionó algún problema, no se marca «Sin observaciones»."],
-     ["Visitas","Una fila por visita","Fecha y hora de la visita (Lima), resultado, comentario, plazo y feedback de esa visita."],
-     ["Visitas","Registrada_a_Tiempo","NO si llegó después del siguiente día hábil: se ve, pero no cuenta para el indicador."],
-     ["Ambas","Fuente_Feedback","Ejecutivo (marcado en el celular) o Inferido del comentario (visitas anteriores al 24/09)."],
-     ["Ambas","Resultado / Resultado_Visita","Éxito (realizará consumos) · En proceso (aún no decide o reagendada) · No éxito (desiste, o hubo contacto sin éxito) · No se encontró (dirección errada sin contacto) · Sin contacto (cerrado hoy, cerró definitivamente, nadie atendió, zona insegura u otro motivo; todas cuentan como visita). En «Base», por la última visita del comercio; «Sin visita» si todavía no tiene ninguna."],
-     ["Ambas","Motivos_Si / Fuente_Motivos_Si","Qué convenció al comercio (solo cuando el resultado es Éxito). Ejecutivo = marcado en el celular (desde el 25/09); Inferido del comentario = visitas anteriores."],
-     ["Ambas","Fuera_de_la_Lista_BBVA","Motivos que el comercio mencionó y que ningún tipo de BBVA recoge (comisión, POS obtenido por préstamo, etc.). Desde el 26/09 los tipos agregados por Stratis (competencia, tasa, contómetros, uso del POS, etc.) tienen su propia columna."],
-     ["Ambas","Que_Ofrecio","Qué hizo u ofreció el ejecutivo ante el feedback (desde el 26/09). Puede haber varias acciones."],
-     ["Ambas","POS_Otra_Marca","Competidor que usa el comercio (Niubiz, Izipay, Culqi, Mercado Pago u otro) y la tasa que le cobra, si el ejecutivo la anotó."],
-     ["TD *","Tablas dinámicas","Feedback por rama, qué ofreció, visitas por ejecutivo y comercios por resultado. Se actualizan al abrir el archivo; se pueden filtrar, mover campos y actualizar (clic derecho › Actualizar)."],
-     ["Feedback_Detalle","Una fila por visita con contacto y detalle","Rama y detalle del árbol de feedback (Origen: BBVA = texto de BBVA, Stratis = agregado por Stratis). Si la visita no tiene feedback, va una fila «Sin detalle». Incluye competidor, tasa, días de demora del abono y banco cuando corresponden."],
-     ["Que_Ofrecio_Detalle","Una fila por visita, rama y acción","Qué hizo u ofreció el ejecutivo en cada rama marcada. «Sin dato» = no lo registró."],
-     ["Visitas","Semana","Semana (lunes a domingo) del periodo en que se hizo la visita."],
-     ["Ambas","Como_Fue_La_Visita","Lo que eligió el ejecutivo en el celular: Habló con el dueño o encargado · No estaba quien decide, quedó en volver · No estaba quien decide, sin compromiso · No se pudo hacer la visita (antes «No hubo contacto») · El comercio no está en esta dirección. Con_Quien y Que_Paso se mantienen como antes."],
-     ["Visitas","Motivo_Sin_Contacto","Por qué no se pudo hacer la visita: Cerrado (cerrado hoy) · Cerró definitivamente · No atendió · Zona insegura · Otro motivo (desde el 29/09) · Dirección errada. «No estaba» solo en registros anteriores al 26/09. Una visita anterior puede figurar con un motivo nuevo cuando Stratis la reclasificó; el cambio queda en la bitácora de la visita."],
-     ["Ambas","Columnas al final (desde el 29/09)","Feedback agregado por Stratis el 29/09 (Desconfía de la visita, No pidió el POS, Solicitó cambio de equipo, Le falta una función): van al final para no correr las columnas anteriores. 1 = el comercio lo mencionó."],
-     ["Base","Comercio_Cerro_Definitivamente","SI si en la última visita el local había cerrado definitivamente. La visita cuenta igual; el comercio no pasa a Cancelado."],
-     ["Visitas","Fecha_Reagenda","Fecha en que el ejecutivo quedó en volver: si no estaba quien decide (Reagendada) y, desde el 29/09, también si habló con el dueño o encargado."],
-     ["Ambas","Demora_Abono","Cuando el comercio dice que los abonos le llegan con demora: días que demora y banco donde le abonan (BBVA u otro banco), si el ejecutivo los anotó."]]
-      .forEach(f => dc.addRow(f).eachCell(c => { c.font = { name:"Arial", size:10 }; c.alignment = { wrapText:true, vertical:"top" }; }));
-    dc.getColumn(1).width = 10; dc.getColumn(2).width = 40; dc.getColumn(3).width = 100;
-    let buf = await wb.xlsx.writeBuffer(), conTD = true;
-    try {
-      if (!window.JSZip) await cargarScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
-      buf = await agregarTablasDinamicas(buf, [
-        { hoja:TD[0][0], nombre:"TD_Feedback", fuente:{ hoja:"Feedback_Detalle", cols:colsF, filas:Math.max(1, filasF.length) }, filtros:["Semana","Resultado_Visita","Fuente_Feedback"], filas:["Rama","Detalle"], columnas:["Ejecutivo"], valor:{ campo:"Customer_ID", nombre:"Visitas" } },
-        { hoja:TD[1][0], nombre:"TD_Que_Ofrecio", fuente:{ hoja:"Que_Ofrecio_Detalle", cols:colsA, filas:Math.max(1, filasA.length) }, filtros:["Semana","Resultado_Visita"], filas:["Rama","Que_Ofrecio"], columnas:["Ejecutivo"], valor:{ campo:"Customer_ID", nombre:"Visitas" } },
-        { hoja:TD[2][0], nombre:"TD_Visitas", fuente:{ hoja:"Visitas", cols:colsV, filas:Math.max(1, filasV.length) }, filtros:["Semana","Como_Fue_La_Visita","Registrada_a_Tiempo"], filas:["Ejecutivo"], columnas:["Resultado_Visita"], valor:{ campo:"Customer_ID", nombre:"Visitas" } },
-        { hoja:TD[3][0], nombre:"TD_Comercios", fuente:{ hoja:"Base", cols:colsB, filas:Math.max(1, filasB.length) }, filtros:["Visitado","Gestion_Con_Contacto","Derivado_Recuperacion"], filas:["Resultado"], columnas:["Reactivado"], valor:{ campo:"Customer_ID", nombre:"Comercios" } }], window.JSZip);
-    } catch(e){ conTD = false; console.warn("Tablas dinámicas:", e); }
+    const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast(`Base para BBVA descargada: ${filasB.length} comercios y ${filasV.length} visitas${conTD ? ", con 4 tablas dinámicas" : " (no se pudieron armar las tablas dinámicas)"}.`);
+    toast(`Base para BBVA descargada: ${filasB.length} comercios, hojas KPIs y Base.`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
 }

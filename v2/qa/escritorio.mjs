@@ -1,5 +1,5 @@
 // Prueba del escritorio: carga sin errores, «Cómo fue la visita», señal «Revisar marcación»,
-// visitas retenidas en el celular y la base para BBVA con sus 4 tablas dinámicas. Datos inventados.
+// visitas retenidas en el celular y la base para BBVA (hojas KPIs y Base). Datos inventados.
 // Uso: node v2/qa/escritorio.mjs   (antes: python v2/build.py y npm install en v2/qa)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima } from './comun.mjs';
 import assert from 'node:assert/strict';
@@ -45,7 +45,6 @@ await ctx.route(/cdnjs\.cloudflare\.com\/.*leaflet.*\.js$/, r => r.fulfill({ pat
 await ctx.route(/cdnjs\.cloudflare\.com\/.*leaflet.*\.css$/, r => r.fulfill({ path: path.join(NM, 'leaflet/dist/leaflet.css'), contentType: 'text/css' }));
 await ctx.route(/cdnjs\.cloudflare\.com\/.*xlsx/, r => r.fulfill({ body: '', contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/exceljs/, r => r.fulfill({ path: path.join(NM, 'exceljs/dist/exceljs.min.js'), contentType: 'application/javascript' }));
-await ctx.route(/cdn\.jsdelivr\.net\/npm\/jszip/, r => r.fulfill({ path: path.join(NM, 'jszip/dist/jszip.min.js'), contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/pptxgenjs/, r => r.fulfill({ path: path.join(NM, 'pptxgenjs/dist/pptxgen.bundle.js'), contentType: 'application/javascript' }));
 const p = await ctx.newPage(); const errs = [];
 p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource|URL scheme "file" is not supported/.test(m.text())) errs.push(m.text()); });
@@ -86,28 +85,30 @@ await prueba('visitas retenidas: se ven con el mensaje y Jose las descarta', asy
   assert.deepEqual(d[1], { p_cliente_uid: 'uid-retenida-prueba', p_nota: 'Periodo cerrado, no se recupera' });
   assert.equal(await p.locator('text=Una visita retenida').count(), 0, 'el panel no se actualizó');
 });
-await prueba('base para BBVA con 4 tablas dinámicas', async () => {
+await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin notas', async () => {
   await p.evaluate(() => { S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
   const f = path.join(RAIZ, 'qa', 'salida_base_prueba.xlsx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
-  const piv = Object.keys(z.files).filter(n => /^xl\/pivotTables\/pivotTable\d+\.xml$/.test(n));
-  assert.equal(piv.length, 4, 'tablas dinámicas: ' + piv.length);
-  const wb = await z.file('xl/workbook.xml').async('string');
-  for (const h of ['KPIs', 'Base', 'Visitas', 'Feedback_Detalle', 'Diccionario']) assert.ok(wb.includes(`name="${h}"`), 'falta hoja ' + h);
-  // tipificaciones del 29/09: columnas del feedback nuevo y el diccionario de los motivos
-  const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['No pidió el POS', 'Desconfía de la visita (duda que representemos a BBVA)', 'Solicitó cambio de equipo', 'Le falta una función', 'Zona insegura', 'Comercio_Cerro_Definitivamente'])
-    assert.ok(txt.includes(t), 'falta en el Excel: ' + t);
-  // las columnas de antes no se corren: las del 29/09 van después de la última de antes (Base 49, Visitas 46)
+  assert.equal(Object.keys(z.files).filter(n => /^xl\/pivotTables\//.test(n)).length, 0, 'quedaron tablas dinámicas');
   const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
-  const cabs = h => xw.getWorksheet(h).getRow(1).values.slice(1).map(String);
+  assert.deepEqual(xw.worksheets.map(w => w.name), ['KPIs', 'Base']);
+  // tipificaciones del 29/09 al final de Base, sin correr las columnas de antes; después, Comercio_Cerro_Definitivamente y Ejecutivo
+  const cb = xw.getWorksheet('Base').getRow(1).values.slice(1).map(String);
   const NUEVAS = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
-  const cb = cabs('Base'), cv = cabs('Visitas');
   assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 49, 'Base: la última columna de antes se movió');
-  assert.deepEqual(cb.slice(49), NUEVAS.concat('Comercio_Cerro_Definitivamente'));
-  assert.equal(cv.indexOf('Fuente_Motivos_Si') + 1, 46, 'Visitas: la última columna de antes se movió');
-  assert.deepEqual(cv.slice(46), NUEVAS);
+  assert.deepEqual(cb.slice(49), NUEVAS.concat('Comercio_Cerro_Definitivamente', 'Ejecutivo'));
+  assert.equal(xw.getWorksheet('Base').getCell(2, cb.length).value, 'Prueba', 'Base: falta el ejecutivo asignado');
+  const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
+  assert.ok(txt.includes('zona insegura u otro motivo'), 'falta «zona insegura» en «Sin contacto»');
+  // KPIs: todas las fórmulas sobre la hoja Base, sin la fila 2 ni las notas al pie
+  const k = xw.getWorksheet('KPIs'), celdas = [];
+  k.eachRow(r => r.eachCell(c => celdas.push(c.value)));
+  const formulas = celdas.filter(v => v && v.formula).map(v => v.formula);
+  assert.ok(formulas.length > 40 && formulas.every(x => !/Visitas!|Feedback_Detalle!/.test(x)), 'hay KPIs que no salen de la hoja Base');
+  assert.equal(k.getCell('A2').value, null, 'la fila 2 no está vacía');
+  for (const t of ['Todo sale de la hoja Base', 'Éxito = el comercio declaró', 'Fuente del feedback', 'Reactivación en 0', 'llave: Customer_ID', 'la hoja Base no trae el ejecutivo'])
+    assert.ok(!celdas.some(v => typeof v === 'string' && v.includes(t)), 'quedó la nota: ' + t);
   fs.unlinkSync(f);
 });
 await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no está en la base y envía el corte', async () => {
