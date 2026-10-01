@@ -12,7 +12,7 @@ var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ 
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
 const PREVIA = /\/prueba\//.test(location.pathname);
-if (PREVIA){ const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance"]);
+if (PREVIA){ const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance","v2_mis_seguimientos"]);
   const rpcReal = sb.rpc.bind(sb);
   sb.rpc = (fn, args) => LECTURAS.has(fn) ? rpcReal(fn, args) : Promise.resolve({ data:null, error:{ message:"Vista previa: aquí no se guardan cambios." } });
   document.addEventListener("DOMContentLoaded", () => document.body.insertAdjacentHTML("beforeend", '<div class="previa-marca" aria-live="polite">Vista previa · no guarda</div>')); }
@@ -248,7 +248,7 @@ async function cargar(){
     S.yo = u.data; S.admin = ["Analista","Manager"].includes(u.data.rol);
     S.periodo = p.data || null; S.base = b.data || [];
   } catch(e){ S.error = e.message || String(e); }
-  S.cargando = false; pintar(); vaciarCola(); cargarRevisiones();
+  S.cargando = false; pintar(); vaciarCola(); cargarRevisiones(); cargarSeguimientos().then(() => { S._mantenerScroll = true; pintar(); });
 }
 async function cargarRevisiones(){
   if (S.admin || !S.periodo || !S.rev || !S.rev.en_revision){ S.revVisitas = []; return; }
@@ -313,7 +313,7 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.${tarde ? ` ${tarde === 1 ? "Una llegó" : tarde + " llegaron"} fuera de plazo: ${tarde === 1 ? "queda" : "quedan"} en tu historial, pero no ${tarde === 1 ? "cuenta" : "cuentan"} para el bono.` : ""}`, tarde ? 8000 : undefined); recargarBase(); }
 }
-async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones")]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
+async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones"), cargarSeguimientos()]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
 async function cargarActividad(){
   if (S._actCargando) return;
   S._actCargando = true; S.actErr = "";
@@ -420,6 +420,7 @@ function vistaInicio(){
     <div class="cuerpo">
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
         ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
+      ${(() => { const n = S.admin ? 0 : S.base.filter(faltaSeguimiento).length; return n ? `<div class="card seg-card"><div class="eyebrow">Seguimiento remoto</div><h2>${n} ${n === 1 ? "comercio sin contacto espera" : "comercios sin contacto esperan"} tu seguimiento</h2><div class="nota">La visita ya cuenta. Llámalo o escríbele por WhatsApp o correo y registra qué respondió: así ninguna visita queda sin feedback.</div><button class="btn btn-sec" data-ir-sinseg>Ver los comercios</button></div>` : ""; })()}
       ${(() => { const n = S.base.filter(c => esMio(c) && c.bbva_reactivado).length; return n ? `<div class="card bbva-card"><div class="eyebrow">Reactivación según BBVA</div><h2>${n} de tus comercios visitados ${n === 1 ? "figura como reactivado" : "figuran como reactivados"} según BBVA</h2><div class="nota">Pendiente de validación: BBVA lo confirma con el número de transacciones y recién entonces suma a tu avance. Los ves en «Mi base» con el filtro «Reactivados BBVA · por validar».</div></div>` : ""; })()}
       ${colaRechazadas()}
       ${colaEsperando().length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${colaEsperando().length} ${colaEsperando().length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = colaEsperando().map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
@@ -454,7 +455,7 @@ function filtrar(omitir){
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
     }
     // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
-    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !c.bbva_reactivado : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !c.bbva_reactivado : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
@@ -483,7 +484,7 @@ function vistaBase(){
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
   const hayLibres = S.base.some(c => !c.correo);
-  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por validar"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
+  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por validar"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
   const extras = [S.filtroEstado !== "todos", !!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
@@ -588,6 +589,52 @@ const ANUL = {
   anulada:  { t:"Anulada", c:"e-can" },
   rechazada:{ t:"Anulación rechazada", c:"e-seg" }
 };
+/* Seguimiento remoto de las visitas sin contacto (01/10/2026, Jose: que ninguna visita quede sin feedback).
+   Se registra después de la visita; no cambia la visita, el estado ni el bono. Iguales a los check de v2_seguimientos. */
+const SEG_CANALES = ["Llamada", "WhatsApp", "Correo"];
+const SEG_RESULTADOS = ["Respondió: usará el POS", "Respondió: aún no decide", "Respondió: agendamos otra visita", "Respondió: no usará el POS", "No respondió", "El dato de contacto no es válido"];
+const segDe = id => (S.seg || []).filter(x => x.visita_id === id);
+// Comercio cuya última visita fue sin contacto y todavía no tiene un seguimiento registrado después de esa visita
+const faltaSeguimiento = c => esMio(c) && !!c.ultima_motivo && !!c.ultima_visita && S.seg != null
+  && !S.seg.some(x => x.customer_id === c.customer_id && Date.parse(x.hecho_en) >= Date.parse(c.ultima_visita));
+async function cargarSeguimientos(){
+  const { data, error } = await sb.rpc("v2_mis_seguimientos");
+  S.seg = error ? null : (data || []);   // si falla (o aún no existe la función), no se muestra nada: no bloquea la app
+}
+function abrirSeguimiento(id){ S.accion = null; S.segReg = { id, canal:null, resultado:null, nota:"", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); }
+async function enviarSeguimiento(){
+  const r = S.segReg; if (!r || r.enviando) return;
+  if (!r.canal || !r.resultado){ r.error = "Elige el canal y qué respondió el comercio."; S._mantenerScroll = true; return pintar(); }
+  if ((r.nota || "").length > 300){ r.error = "La nota puede tener hasta 300 caracteres."; S._mantenerScroll = true; return pintar(); }
+  r.enviando = true; r.error = ""; S._mantenerScroll = true; pintar();
+  const { error } = await sb.rpc("v2_registrar_seguimiento", { p_visita_id:r.id, p_canal:r.canal, p_resultado:r.resultado, p_nota:(r.nota || "").trim() || null });
+  if (error){ r.enviando = false; r.error = navigator.onLine === false ? "Sin señal: vuelve a intentarlo cuando tengas conexión." : (error.message || String(error)); S._mantenerScroll = true; return pintar(); }
+  S.segReg = null; await cargarSeguimientos(); S._mantenerScroll = true; pintar();
+  avisar("Seguimiento registrado. La visita no cambia.");
+}
+// Lo ya registrado y el botón o el panel para registrar (solo en visitas sin contacto, propias y del periodo en curso)
+function bloqueSeguimiento(v){
+  if (v.con !== "Nadie" || v.estado_anul === "anulada") return "";
+  const l = segDe(v.id), puede = v.es_mia && S.periodo && v.periodo === S.periodo.id && S.seg != null;
+  const hechos = l.length ? `<div class="fb-hist seg-hist"><b>Seguimiento remoto:</b> ${l.map(x => `${esc(x.canal)} · ${esc(x.resultado)} <span class="nota">(${fechaCorta(x.hecho_en)})</span>${x.nota ? ` · ${esc(x.nota)}` : ""}`).join("<br>")}</div>` : "";
+  const r = S.segReg && S.segReg.id === v.id ? S.segReg : null;
+  if (!puede) return hechos;
+  if (!r) return hechos + `<div class="acc-btns"><button class="btn ${l.length ? "btn-lin" : "btn-sec"} mini" data-seg="${v.id}">${l.length ? "Registrar otro seguimiento" : "Registrar seguimiento remoto"}</button></div>`;
+  const op = (g, val, on) => `<button type="button" class="ac ${on ? "on" : ""}" aria-pressed="${on}" data-seg-${g}="${esc(val)}">${esc(val)}</button>`;
+  return hechos + `<div class="acc-panel seg-panel">
+    <b>Seguimiento remoto</b>
+    <div class="nota">No hubo contacto en la visita. Registra qué hiciste después para saber del comercio.</div>
+    <span class="eyebrow">¿Por dónde lo contactaste?</span>
+    <div class="ac-chips">${SEG_CANALES.map(c => op("canal", c, r.canal === c)).join("")}</div>
+    <span class="eyebrow">¿Qué respondió?</span>
+    <div class="ac-chips">${SEG_RESULTADOS.map(c => op("res", c, r.resultado === c)).join("")}</div>
+    <textarea class="campo" id="segNota" rows="2" maxlength="300" placeholder="Nota (opcional): con quién hablaste, qué te dijo">${esc(r.nota)}</textarea>
+    ${r.error ? `<div class="falta">${esc(r.error)}</div>` : ""}
+    <div class="nav2">
+      <button class="btn btn-lin" data-seg-cancelar>Cancelar</button>
+      <button class="btn btn-sec" data-seg-enviar ${r.enviando ? "disabled" : ""}>${r.enviando ? "Guardando…" : "Guardar el seguimiento"}</button>
+    </div></div>`;
+}
 const ACCION = {
   comentario:{ t:"Corregir el comentario", ph:"Escribe el comentario corregido", btn:"Guardar la corrección", min:5, rpc:"v2_editar_comentario" },
   pedir:     { t:"Pedir la anulación", ph:"¿Por qué hay que anular esta visita?", btn:"Enviar el pedido", min:10, rpc:"v2_pedir_anulacion" },
@@ -768,6 +815,7 @@ function lineaVisita(v){
     ${v.direccion_ok === false ? `<br><span class="nota" style="color:var(--rojo)">Dirección de la base: no es correcta${v.comercio_ubicado === true ? " · comercio ubicado en otra dirección" : v.comercio_ubicado === false ? " · comercio no ubicado" : ""}</span>` : v.direccion_ok === true ? `<br><span class="nota">Dirección de la base: correcta</span>` : ""}
     ${v.anul_motivo ? `<br><span class="nota">Motivo: ${esc(v.anul_motivo)}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}</span>` : ""}
     <div class="ubi-fila">${ubi}</div>
+    ${bloqueSeguimiento(v)}
     ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
   </div>`;
 }
@@ -945,7 +993,8 @@ function vistaActividad(){
         <div class="h"><b>${esc(v.comercio)}</b><span>${fechaCorta(v.visitado_en)}</span></div>
         <div class="q">${esc(v.ejecutivo)} · ${esc(v.que)}</div>
         <div class="c">Motivo: ${esc(v.anul_motivo || "sin motivo")}</div>
-        ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
+        ${bloqueSeguimiento(v)}
+    ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
       </div>`).join("")}</div>` : ""}
     <div class="card">
       <div class="eyebrow">${cuentan.length} ${cuentan.length === 1 ? "visita que cuenta" : "visitas que cuentan"}</div>
@@ -969,7 +1018,8 @@ function vistaActividad(){
                <span class="nota">±${Math.round(Number(v.precision_m)||0)} m${v.distancia_m == null ? "" : ` · <span class="${v.distancia_m >= 1000 ? "lejos" : ""}">a ${esc(textoDistancia(v.distancia_m))}</span>`}</span>`}
           <button class="btn btn-lin" style="padding:4px 8px;font-size:12px" data-ficha="${esc(v.customer_id)}">Abrir la ficha</button>
         </div>
-        ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
+        ${bloqueSeguimiento(v)}
+    ${botonesVisita(v)}${panelAccion(v)}${panelCorreccion(v)}
       </div>`).join("")}
     </div>`).join("")}
     <div class="card"><h2>Cómo leer la distancia</h2>
@@ -1533,6 +1583,14 @@ function enlazar(){
   p.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => abrirAccion(b.dataset.id, b.dataset.acc, b.dataset.acc === "comentario" ? textoComentarioDe(b.dataset.id) : ""));
   p.querySelectorAll("[data-acc-cancelar]").forEach(b => b.onclick = () => { S.accion = null; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-acc-enviar]").forEach(b => b.onclick = enviarAccion);
+  p.querySelectorAll("[data-seg]").forEach(b => b.onclick = () => abrirSeguimiento(b.dataset.seg));
+  p.querySelectorAll("[data-seg-canal]").forEach(b => b.onclick = () => { if (S.segReg){ S.segReg.canal = b.dataset.segCanal; S.segReg.error = ""; } S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-seg-res]").forEach(b => b.onclick = () => { if (S.segReg){ S.segReg.resultado = b.dataset.segRes; S.segReg.error = ""; } S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-seg-cancelar]").forEach(b => b.onclick = () => { S.segReg = null; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-seg-enviar]").forEach(b => b.onclick = enviarSeguimiento);
+  const sn = p.querySelector("#segNota");
+  if (sn) sn.oninput = e => { if (S.segReg) S.segReg.nota = e.target.value; };
+  p.querySelectorAll("[data-ir-sinseg]").forEach(b => b.onclick = () => { S.filtroEstado = "sinseg"; S.filtroVisita = "todos"; S.vista = "base"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   const ta = p.querySelector("#accTexto");
   if (ta) ta.oninput = e => { if (S.accion) S.accion.texto = e.target.value; };
   p.querySelectorAll("[data-enviar-cola]").forEach(b => b.onclick = vaciarCola);
@@ -1618,7 +1676,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
    Si lo hay, muestra un aviso que no se puede cerrar con un solo botón «Actualizar», pero nunca mientras hay un formulario
    a medias (registro, corrección, pedido de anulación o corrección de datos): espera a que lo guarde o lo cancele.
    Las visitas sin enviar viven en localStorage (cola), así que recargar no pierde nada. */
-const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando);
+const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando || S.segReg);
 async function revisarVersion(){
   if (S.versionNueva) return mostrarAvisoVersion();
   try {

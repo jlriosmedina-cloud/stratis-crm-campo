@@ -373,3 +373,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .bbva-rea-ficha{margin-top:8px;background:var(--verde-t)}
 .bbva-card{border:1.5px solid #079477}
 .bbva-card .eyebrow{color:#079477}
+/* Seguimiento remoto de las visitas sin contacto (01/10) */
+.fb-hist.seg-hist{background:var(--azul-t)}
+.fb-hist.seg-hist b{color:var(--navy-2)}
+.seg-card{border:1.5px solid var(--azul)}
+.seg-card .eyebrow{color:var(--azul)}
+.seg-panel .eyebrow{margin-top:4px}

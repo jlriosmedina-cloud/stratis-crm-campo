@@ -10,7 +10,9 @@ const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio
   // quedó en volver con el dueño (29/09): sigue en «Aún no decide», pero entra al filtro «Reagendados»
   comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() }),
   // BBVA lo reporta reactivado (30/09): informativo, no cambia el estado
-  comercio(12, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', bbva_reactivado: '2026-01-02' })]);
+  comercio(12, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', bbva_reactivado: '2026-01-02' }),
+  // visita sin contacto (01/10): espera el seguimiento remoto
+  comercio(13, { visitas: 1, visitas_validas: 1, estado: 'vis', ultima_visita: '2026-01-03T15:00:00Z', ultima_que: 'Sin éxito', ultima_motivo: 'Cerrado' })]);
 const NOPIDIO = 'No pidió el POS';
 // La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
 const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
@@ -22,7 +24,7 @@ const FX = {
   sesion: { user: { email: EJECUTIVO.correo }, access_token: 'prueba' },
   tablas: { usuarios: EJECUTIVO, v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' } },
   rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_registrar_visita: () => 'id-prueba',
-         v2_visitas_de: [VISITA_HOY], v2_editar_resultado: null }
+         v2_visitas_de: [VISITA_HOY], v2_editar_resultado: null, v2_mis_seguimientos: [], v2_registrar_seguimiento: () => 1 }
 };
 
 const CASOS = [
@@ -84,6 +86,27 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
     console.log(`ok  ${tema} · reactivado según BBVA (informativo)`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · reactivado según BBVA: ${e.message}`); }
+  // Seguimiento remoto (01/10): Inicio avisa, el filtro lo encuentra y la visita sin contacto lo registra sin tocar la visita
+  try {
+    const r = await p.evaluate(() => { S.filtroEstado = 'sinseg'; S.filtroVisita = 'todos'; const ids = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos';
+      S.vista = 'inicio'; S.ficha = null; pintar(); return ids; });
+    assert.deepEqual(r, ['00000013']);
+    if (!(await p.locator('.seg-card').count())) throw new Error('no aparece el aviso en Inicio');
+    await p.evaluate(v => { S.vista = 'base'; S.hist['00000013'] = [Object.assign({}, v, { id:'visita-sin-contacto', customer_id:'00000013', con:'Nadie', motivo:'Cerrado', que:'Sin éxito', decision:null, feedback:null })];
+      S.ficha = '00000013'; pintar(); }, VISITA_HOY); await p.waitForTimeout(200);
+    await p.click('[data-seg="visita-sin-contacto"]');
+    await p.click('[data-seg-enviar]');
+    if (!(await p.locator('text=Elige el canal').count())) throw new Error('debía pedir el canal y la respuesta');
+    await p.click('[data-seg-canal="WhatsApp"]'); await p.click('[data-seg-res="No respondió"]'); await p.fill('#segNota', 'Le escribí al número de la base');
+    await p.click('[data-seg-enviar]'); await p.waitForTimeout(300);
+    const ll = await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_seguimiento').map(x => x[1]));
+    assert.deepEqual(ll.at(-1), { p_visita_id:'visita-sin-contacto', p_canal:'WhatsApp', p_resultado:'No respondió', p_nota:'Le escribí al número de la base' });
+    // en una visita con contacto no aparece
+    await p.evaluate(v => { S.hist['00000013'] = [v]; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
+    if (await p.locator('[data-seg]').count()) throw new Error('ofrece seguimiento en una visita con contacto');
+    await p.evaluate(() => { S.ficha = null; delete S.hist['00000013']; S.vista = 'inicio'; pintar(); });
+    console.log(`ok  ${tema} · seguimiento remoto de la visita sin contacto`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · seguimiento remoto: ${e.message}`); }
   // «Reagendados» incluye al que quedó en volver con el dueño, y la tarjeta muestra la fecha
   try {
     const ids = await p.evaluate(() => { S.filtroEstado = 'rag'; S.filtroVisita = 'todos'; const r = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos'; return r; });

@@ -476,7 +476,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "4d0426";
+const BUILD = "031388";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1015,8 +1015,8 @@ function montarMapa(el){
   S._mapa = m;
 }
 
-const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val", ubicacion:"ed" };
-const BIT_TIT = { ubicacion:"Ubicación actualizada por el ejecutivo (la anterior quedó aquí)", comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
+const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val", ubicacion:"ed", seguimiento:"reg" };
+const BIT_TIT = { seguimiento:"Seguimiento remoto del ejecutivo (no cambia la visita)", ubicacion:"Ubicación actualizada por el ejecutivo (la anterior quedó aquí)", comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
 function eventos(v){
   const b = S.bit[v.id];
   const base = [{ accion:"registro", por:v.correo, en:v.recibido_en, antes:null, despues:`${comoFue(v).join(" · ")} · ${v.lat == null ? "sin GPS" : "GPS ±" + Math.round(v.precision_m) + " m"}` }];
@@ -2016,6 +2016,12 @@ function resultadoDe(v){
   return "no";
 }
 // Motivos del sí inferidos por Stratis del comentario (tabla v2_motivo_si_inferido, solo escritorio).
+// Seguimiento remoto de las visitas sin contacto (01/10). Si la tabla aún no existe o falla, la presentación sigue sin él.
+async function cargarSeguimientos(){
+  let q = sb.from("v2_seguimientos").select("visita_id,customer_id,canal,resultado,hecho_en"); if (S.periodo) q = q.eq("periodo", S.periodo.id);
+  const r = await q;
+  S.seg = r && !r.error ? (r.data || []) : [];
+}
 async function cargarMsiInferido(){
   const r = await sb.from("v2_motivo_si_inferido").select("visita_id,motivos,confianza,criterio");
   if (r && r.error){ S.msiInfErr = r.error.message; return; }
@@ -2561,9 +2567,13 @@ function datosPresentacion(C, RB, TB){
     : v.decision === "Aún no decide" ? "Aún no decide" : v.decision === "Desiste del producto" ? "Desistió en la visita"
     : v.que === "Reagendada" ? "Quedó en volver con quien decide" : "En evaluación por parte del comercio";
   const quePaso = { con:{}, sin:{} }; recs.forEach(r => { const o = quePaso[r.v.con === "Nadie" ? "sin" : "con"], k = QUE(r.v); o[k] = (o[k] || 0) + 1; });
+  // Seguimiento remoto de los sin contacto, hasta el corte: por la última visita de cada comercio
+  const segSin = { n:0, canales:{}, respondio:0 };
+  recs.filter(r => r.v.con === "Nadie").forEach(r => { const l = (S.seg || []).filter(x => x.visita_id === r.v.id && iso(x.hecho_en) <= C); if (!l.length) return;
+    segSin.n++; [...new Set(l.map(x => x.canal))].forEach(c => { segSin.canales[c] = (segSin.canales[c] || 0) + 1; }); if (l.some(x => /^Respondió/.test(x.resultado))) segSin.respondio++; });
   // por qué dijeron que sí, solo dentro del grupo
   const pqG = {}; recs.forEach(r => { const m = msiDe(r.v); if (m && m.fuente) m.motivos.forEach(x => { pqG[x] = (pqG[x] || 0) + 1; }); });
-  const dolores = { conCompromiso, reac:!!reacID, quePaso, porQue:Object.entries(pqG).sort((a, b) => b[1] - a[1]), conDolorN:recsC.filter(r => r.ts.length).length, corte:RB ? RB.corte.corte : null, lista:topD.concat(otrosD ? [otrosD] : [], sinD) };
+  const dolores = { conCompromiso, reac:!!reacID, quePaso, segSin, porQue:Object.entries(pqG).sort((a, b) => b[1] - a[1]), conDolorN:recsC.filter(r => r.ts.length).length, corte:RB ? RB.corte.corte : null, lista:topD.concat(otrosD ? [otrosD] : [], sinD) };
   // citas candidatas: se muestran solo en el escritorio (panel de citas) para que Jose elija; nunca van al archivo (pueden traer nombres)
   const citas = vc.filter(v => (v.comentario || "").length >= 60 && (v.comentario || "").length <= 240)
     .sort((a, b) => (b.decision === "Realizará consumos") - (a.decision === "Realizará consumos") || b.visitado_en.localeCompare(a.visitado_en)).slice(0, 8)
@@ -2655,7 +2665,7 @@ async function corteYDatos(que, pieza){
   if (txt === null) return null;
   let C = leerCorte(txt);
   if (!C || C > hoy || C < S.periodo.ini){ toast("Fecha de corte no válida: tiene que estar entre el inicio del periodo y hoy."); return null; }
-  await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), S.geo ? null : cargarGeo()]);
+  await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), cargarSeguimientos(), S.geo ? null : cargarGeo()]);
   const av0 = (S.avance || [])[0] || {};
   if (!av0.meta_visitas || !av0.meta_reactivados || !av0.meta_conversion) throw new Error("no se pudieron leer las metas del periodo; actualiza y vuelve a intentar");
   const TB = (await cargarTotalesBBVA().catch(() => [])).find(u => u.corte <= C) || null;
@@ -2988,7 +2998,7 @@ function armarLaminas(pres, D){
     const filasT = filasC.map((o, i) => (i ? [] : [cel(`Con contacto\n${numPE(nCon)}`, Object.assign({ rowspan:filasC.length }, GV))]).concat([
       cel(numPE(o.n), { align:"center", bold:true, color:PX.verde, fontSize:12 }), cel(o.t, o.sin ? { color:PX.gris } : { bold:true, color:PX.navy }), cel(accTxt(o), o.sin ? { color:PX.gris } : {})]));
     if (nSin) filasT.push([cel(`Sin contacto\n${numPE(nSin)}`, GV), cel(numPE(nSin), { align:"center", bold:true, color:PX.verde, fontSize:12 }),
-      cel(`Sin respuesta en la visita: ${sinL.map(([k, n]) => `${k.toLowerCase()} ${numPE(n)}`).join(" · ")}`, { color:PX.gris }), cel("Se registró la visita y el motivo", { color:PX.gris })]);
+      cel(`Sin respuesta en la visita: ${sinL.map(([k, n]) => `${k.toLowerCase()} ${numPE(n)}`).join(" · ")}`, { color:PX.gris }), cel(DL.segSin && DL.segSin.n ? `Seguimiento remoto por ${Object.entries(DL.segSin.canales).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c.toLowerCase()} (${numPE(n)})`).join(", ")}: ${numPE(DL.segSin.n)} de ${numPE(nSin)}${DL.segSin.respondio ? `, respondieron ${numPE(DL.segSin.respondio)}` : ""}` : "Se registró la visita y el motivo", DL.segSin && DL.segSin.n ? {} : { color:PX.gris })]);
     if (!filasT.length) filasT.push([cel(`Ningún comercio ${grupo} al corte.`, { colspan:4, color:PX.gris })]);
     s.addTable([[{ text:"Visita", options:Object.assign({ align:"center" }, H) }, { text:"Comercios", options:Object.assign({ align:"center" }, H) },
       { text:"Reclamo o comentario del comercio", options:H }, { text:"Qué hizo el ejecutivo", options:H }]]

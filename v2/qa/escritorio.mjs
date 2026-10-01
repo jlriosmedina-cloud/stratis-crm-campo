@@ -236,7 +236,7 @@ await prueba('presentación: en «La voz del comercio» cada comercio cuenta una
   assert.equal(r.quePaso, 5, '«qué pasó en la visita» no suma el total'); assert.equal(r.sumaDolor, r.conDolor, 'la tabla de dolores no suma su total');
 });
 await prueba('presentación: con reactivados de BBVA, «La voz del comercio» suma con y sin contacto y separa a los que no tienen reclamo', async () => {
-  const r = await p.evaluate(() => { const act0 = S.act, av0 = S.avance, inf0 = S.fbInf;
+  const r = await p.evaluate(() => { const act0 = S.act, av0 = S.avance, inf0 = S.fbInf, seg0 = S.seg;
     const v = (i, o) => Object.assign({ id:'z' + i, periodo:S.periodo.id, customer_id:String(i).padStart(8, '0'), correo:S.base[0].correo, visitado_en:'2026-09-22T15:00:00Z', lat:-12.09, lng:-77.04, fuera_plazo:false, estado_anul:'activa',
       con:'Dueño', que:'Reunión concretada', decision:'Realizará consumos', feedback:[], fb_acciones:[], comentario:'' }, o);
     S.act = [v(1, { feedback:['Pide una tasa más baja'], fb_acciones:['Evaluar mejora de tasa'] }), v(2, { feedback:['Sin observaciones del comercio'] }),
@@ -245,11 +245,14 @@ await prueba('presentación: con reactivados de BBVA, «La voz del comercio» su
       v(6, { feedback:['Sin observaciones del comercio'] })];
     // reclamo fuera de la lista, leído del comentario: cuenta como reclamo aunque el ejecutivo marcó «Sin observaciones»
     S.fbInf = { z6:{ visita_id:'z6', tipos:[], fuera_de_lista:['Equipo dañado de prueba'], confianza:'Media', criterio:'' } };
+    // seguimiento remoto de una de las dos sin contacto (01/10); el que es posterior al corte no cuenta
+    S.seg = [{ visita_id:'z4', canal:'WhatsApp', resultado:'Respondió: usará el POS', hecho_en:'2026-09-23T15:00:00Z' }, { visita_id:'z5', canal:'Llamada', resultado:'No respondió', hecho_en:'2026-10-05T15:00:00Z' }];
     S.avance = [{ meta_visitas:160, meta_reactivados:40, meta_conversion:25 }];
     const RB = { corte:{ corte:'2026-09-29' }, filas:[1, 2, 3, 4, 5, 6].map(i => ({ customer_id:String(i).padStart(8, '0'), reactivado:'Si', gestion_con_contacto:i < 4, facturado:null })) };
     try { const DL = datosPresentacion('2026-09-29', RB, null).dolores; const sq = o => Object.values(o).reduce((a, n) => a + n, 0);
-      return { total:DL.conCompromiso, con:DL.lista.reduce((a, o) => a + o.n, 0), sin:sq(DL.quePaso.sin), filas:DL.lista.map(o => [o.t, o.n]) }; }
-    finally { S.act = act0; S.avance = av0; S.fbInf = inf0; } });
+      return { total:DL.conCompromiso, con:DL.lista.reduce((a, o) => a + o.n, 0), sin:sq(DL.quePaso.sin), filas:DL.lista.map(o => [o.t, o.n]), seg:DL.segSin }; }
+    finally { S.act = act0; S.avance = av0; S.fbInf = inf0; S.seg = seg0; } });
+  assert.deepEqual(r.seg, { n:1, canales:{ WhatsApp:1 }, respondio:1 }, 'seguimiento remoto: ' + JSON.stringify(r.seg));
   assert.equal(r.total, 6); assert.equal(r.con, 4, 'con contacto: ' + JSON.stringify(r.filas)); assert.equal(r.sin, 2); assert.equal(r.con + r.sin, r.total, 'la tabla no suma el total');
   for (const t of ['Pide una tasa más baja', 'Sin reclamos: el comercio no reportó problemas', 'No estaba quien decide (atendió un tercero)', 'Equipo dañado de prueba'])
     assert.ok(r.filas.some(x => x[0] === t && x[1] === 1), 'falta la fila ' + t + ': ' + JSON.stringify(r.filas));
