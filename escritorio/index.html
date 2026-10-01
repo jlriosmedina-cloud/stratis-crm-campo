@@ -476,7 +476,7 @@ table.datos tr.fuera td{background:var(--hover)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "0ed3a2";
+const BUILD = "c4110e";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -2714,7 +2714,7 @@ function armarLaminas(pres, D){
     // Jose, 30/09: lo más relevante son los reactivados con visita y su detalle
     const puntos = (Q ? [
       `${numPE(Q.tv.reac)} comercios visitados por Stratis reactivaron según BBVA: ${pct2(Q.tv.reac, Q.g.vis)} de los ${numPE(Q.g.vis)} visitados (meta ${D.meta.conv} %).`,
-      `Facturan ${soles(Q.tv.fac)} con ${numPE(Q.tv.trx)} transacciones; ticket promedio S/ ${montoPE(Q.tv.trx ? Q.tv.fac / Q.tv.trx : 0)}.`,
+      `Facturan ${soles(Q.tv.fac)} con ${numPE(Q.tv.trx)} transacciones.`,
       `Con contacto reactivaron ${numPE(Q.G.cc.reac)} (${pct2(Q.G.cc.reac, Q.g.cc)}) y sin contacto ${numPE(Q.G.sc.reac)} (${pct2(Q.G.sc.reac, Q.g.sc)}).`]
       : [`${tasaCon} % de los comercios visitados atendió la visita.`]).concat([
       `El equipo lleva ${numPE(D.visitados)} comercios visitados (${pVis} % de la meta)${habRest ? `; para cerrar en meta faltan ${numPE(faltan)} en ${habRest} días hábiles` : ""}.`]);
@@ -2891,7 +2891,7 @@ function armarLaminas(pres, D){
       T(s, det, { x:8.5, y:y + 0.94, w:4.0, h:h - 1.0, fontSize:9.5, color:PX.gris }); };
     tarjeta(1.6, 1.38, PX.azulOsc, "Reactivados que cuentan", `${numPE(cu)} de ${numPE(D.meta.rea)}`, `${pct2(cu, D.meta.rea)} de la meta del periodo · reactivados según BBVA en comercios visitados por Stratis`);
     tarjeta(3.08, 1.38, PX.naranja, "Conversión", pct2(cu, g.vis), `${numPE(cu)} que cuentan ÷ ${numPE(g.vis)} comercios visitados · meta ${D.meta.conv} %`);
-    tarjeta(4.56, 1.38, PX.verde, "Facturación de los que cuentan", soles(Q.tv.fac), `${numPE(Q.tv.trx)} transacciones · ticket promedio S/ ${montoPE(Q.tv.trx ? Q.tv.fac / Q.tv.trx : 0)}`);
+    tarjeta(4.56, 1.38, PX.verde, "Facturación de los que cuentan", soles(Q.tv.fac), `${numPE(Q.tv.trx)} transacciones`);
     lectura(s, `${numPE(cu)} comercios visitados por Stratis reactivaron según BBVA (${pct2(cu, g.vis)} de conversión sobre ${numPE(g.vis)} visitados) y facturan ${soles(Q.tv.fac)}. Con contacto la reactivación llega a ${pct2(Q.G.cc.reac, g.cc)} y sin contacto a ${pct2(Q.G.sc.reac, g.sc)}.`,
       "sostener la entrega de la data de BBVA para seguir la reactivación por corte.", 6.12);
     pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)}; comercios por grupo según las visitas de Stratis al mismo corte (visitado y gestión con contacto, como en la base para BBVA). % alcance: sobre los comercios de cada grupo.`);
@@ -2903,10 +2903,10 @@ function armarLaminas(pres, D){
     const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle", align:"right" };
     const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10.5, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
     const fila = (o, b) => { const x = b ? { bold:true, fill:{ color:PX.suave }, color:PX.navy } : {};
-      return [cel(o.nom, Object.assign({ align:"left" }, x)), cel(numPE(o.n), x), cel(numPE(o.reac), x), cel(pct2(o.reac, o.n), x), cel(montoPE(o.fac), x), cel(numPE(o.trx), x), cel(pct2(o.fac, Q.tv.fac), x), cel(o.trx ? montoPE(o.fac / o.trx) : "—", x)]; };
-    s.addTable([["Comercios visitados", "Comercios", "Reactivados", "% reactivación", "Facturación (S/)", "Transacciones", "% facturación", "Ticket prom. (S/)"].map((t, i) => ({ text:t, options:Object.assign({}, H, i ? {} : { align:"left" }) }))]
+      return [cel(o.nom, Object.assign({ align:"left" }, x)), cel(numPE(o.n), x), cel(numPE(o.reac), x), cel(pct2(o.reac, o.n), x), cel(montoPE(o.fac), x), cel(numPE(o.trx), x), cel(pct2(o.fac, Q.tv.fac), x)]; };
+    s.addTable([["Comercios visitados", "Comercios", "Reactivados", "% reactivación", "Facturación (S/)", "Transacciones", "% facturación"].map((t, i) => ({ text:t, options:Object.assign({}, H, i ? {} : { align:"left" }) }))]
       .concat([fila(Object.assign({}, Q.G.cc, { nom:"Con contacto" })), fila(Object.assign({}, Q.G.sc, { nom:"Sin contacto" })), fila(Q.tv, true)]),
-      { x:0.6, y:1.6, w:12.1, colW:[2.5, 1.1, 1.2, 1.35, 1.8, 1.45, 1.3, 1.4], rowH:0.5, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
+      { x:0.6, y:1.6, w:12.1, colW:[2.7, 1.3, 1.35, 1.5, 2.0, 1.65, 1.6], rowH:0.5, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
     const labs = ["Con contacto", "Sin contacto", "Total visitados"], ks = ["cc", "sc", "tv"], GG = Object.assign({ tv:Q.tv }, Q.G);
     // barras dibujadas (no gráfico nativo): así las cifras salen con coma decimal en cualquier PowerPoint
     const barras = (x0, titulo, vals, txt, color) => { const mx = Math.max(...vals, 0) || 1;
@@ -2917,7 +2917,7 @@ function armarLaminas(pres, D){
         T(s, txt(v), { x:cx - 0.1, y:5.72 - h - 0.26, w:1.7, h:0.24, fontSize:10, bold:true, color:PX.navy, align:"center" });
         T(s, labs[i], { x:cx - 0.1, y:5.76, w:1.7, h:0.24, fontSize:9.5, color:PX.tinta, align:"center" }); }); };
     barras(0.6, "% de reactivación en comercios visitados", ks.map(k => GG[k].n ? 100 * GG[k].reac / GG[k].n : 0), v => v.toFixed(2).replace(".", ",") + " %", PX.azulOsc);
-    barras(6.8, "Ticket promedio (S/ por transacción)", ks.map(k => GG[k].trx ? GG[k].fac / GG[k].trx : 0), v => "S/ " + montoPE(v), PX.naranja);
+    barras(6.8, "Facturación según BBVA", ks.map(k => GG[k].fac), v => soles(v), PX.naranja);
     lectura(s, `Los ${numPE(Q.tv.reac)} reactivados con visita facturan ${soles(Q.tv.fac)} con ${numPE(Q.tv.trx)} transacciones; los visitados con contacto aportan ${pct2(Q.G.cc.fac, Q.tv.fac)} de esa facturación.`,
       "seguir la facturación de los reactivados con visita en cada corte.", 6.12);
     pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones); comercios según las visitas de Stratis al mismo corte. % facturación: sobre la de los reactivados con visita. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
