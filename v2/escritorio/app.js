@@ -27,6 +27,15 @@ const ACCIONES = ["Evaluar mejora de tasa", "Expliqué cómo y cuándo abona Ope
   "Revisar la tarifa acordada con BBVA", "Validé el estado del equipo", "Descarté errores en sitio (reinicio, chip, batería)", "Solicité reposición de contómetros",
   "Solicité cambio de equipo (sin costo)", "Solicité cambio de equipo (con costo)", "Capacitación en el momento", "Capacitación programada", "Llamé a soporte", "Generé ticket de atención", "Seguimiento del caso",
   "Derivé a postventa", "Derivé a BBVA con urgencia", "Reagendé con quien decide", "Otra acción"];
+// Cómo se lee cada acción del celular en la presentación (deck validado con BBVA, 01/10)
+const ACC_FRASE = { "Evaluar mejora de tasa":"Se evalúa la tasa con Pricing o una campaña vigente", "Expliqué cómo y cuándo abona Openpay":"Se explicó cómo y cuándo abona Openpay",
+  "Ofrecí evaluación de préstamo BBVA":"Se ofreció evaluar un préstamo BBVA", "Mostré los beneficios de cobrar con tarjeta":"Se mostraron los beneficios de cobrar con tarjeta",
+  "Revisar la tarifa acordada con BBVA":"Se revisa la tarifa acordada con BBVA", "Validé el estado del equipo":"Se validó el estado del equipo",
+  "Descarté errores en sitio (reinicio, chip, batería)":"Se descartaron fallas en sitio (reinicio, chip, batería)", "Solicité reposición de contómetros":"Se solicitó la reposición de contómetros",
+  "Solicité cambio de equipo (sin costo)":"Se solicitó el cambio de equipo", "Solicité cambio de equipo (con costo)":"Se solicitó el cambio de equipo",
+  "Capacitación en el momento":"Se capacitó al comercio en el momento", "Capacitación programada":"Se programó una capacitación",
+  "Llamé a soporte":"Se contactó a soporte en el momento de la visita", "Generé ticket de atención":"Se abrió un caso de atención", "Seguimiento del caso":"Se hace seguimiento del caso",
+  "Derivé a postventa":"Se derivó a postventa", "Derivé a BBVA con urgencia":"Se derivó a BBVA con urgencia", "Otra acción":"Otra acción (equipos y escalamientos)" };
 const COMPETIDORES = ["Niubiz", "Izipay", "Culqi", "Mercado Pago", "Otro"];
 // Los 11 textos que envió BBVA; el resto del árbol lo agregó Stratis
 const FB_BBVA = new Set(["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "POS no enciende", "Soporte no ayudó al comercio",
@@ -1359,10 +1368,17 @@ async function cargarFbInferido(){
   S.fbInf = {}; ((r && r.data) || []).forEach(x => { S.fbInf[x.visita_id] = x; });
 }
 // Qué feedback cuenta para una visita: lo que marcó el ejecutivo; si no marcó nada, lo inferido del comentario.
+// Si el ejecutivo solo marcó «Sin observaciones» o «No se encontraba…» y el comentario sí trae un reclamo, se suma lo
+// inferido (Jose, 01/10: que ninguna visita quede sin feedback); «delComentario» dice qué se sumó.
+const FB_SIN_RECLAMO = [FB_NINGUNO, "No se encontraba la persona que tomaba decisiones"];
 function fbDe(v){
   if (v.con === "Nadie") return null;
   const inf = (S.fbInf || {})[v.id];
-  if ((v.feedback || []).length) return { fuente:"ejecutivo", tipos:v.feedback, fuera:[], nota:v.feedback_nota || "", acc:v.fb_acciones || [], ext:v.fb_extra || null, inf };
+  if ((v.feedback || []).length){
+    const sumar = inf && v.feedback.every(t => FB_SIN_RECLAMO.includes(t)) && ((inf.tipos || []).length || (inf.fuera_de_lista || []).length);
+    if (sumar) return { fuente:"ejecutivo", tipos:v.feedback.filter(t => t !== FB_NINGUNO).concat((inf.tipos || []).filter(t => !v.feedback.includes(t))), fuera:inf.fuera_de_lista || [],
+      nota:v.feedback_nota || "", acc:v.fb_acciones || [], ext:v.fb_extra || null, inf, delComentario:(inf.tipos || []).concat(inf.fuera_de_lista || []) };
+    return { fuente:"ejecutivo", tipos:v.feedback, fuera:[], nota:v.feedback_nota || "", acc:v.fb_acciones || [], ext:v.fb_extra || null, inf }; }
   if (inf) return { fuente:"inferido", tipos:inf.tipos || [], fuera:inf.fuera_de_lista || [], confianza:inf.confianza, criterio:inf.criterio, inf };
   return { fuente:null, tipos:[], fuera:[] };
 }
@@ -1381,7 +1397,8 @@ function fichaFeedback(v){
   if (f.fuente === "ejecutivo") h += (f.acc || []).length ? `<div class="fb-sub">Qué ofreció el ejecutivo</div><div class="fb-tags">${tagsFb(f.acc, "acc")}</div>` : (f.tipos.some(t => t !== FB_NINGUNO) ? `<div class="fb-crit">Sin «qué ofreció»: registro anterior al 26/09.</div>` : "");
   if (f.criterio) h += `<div class="fb-crit">${esc(f.criterio)}</div>`;
   if (f.nota) h += `<div class="coment" style="margin-top:8px"><small class="muted" style="display:block;font-size:11px;margin-bottom:2px">Feedback adicional del ejecutivo</small>${esc(f.nota)}</div>`;
-  if (f.fuente === "ejecutivo" && f.inf && f.inf.tipos.length) h += `<div class="fb-crit">Antes, Stratis lo había inferido del comentario como: ${esc(f.inf.tipos.join(" · "))}</div>`;
+  if (f.delComentario) h += `<div class="fb-crit">El ejecutivo marcó «${esc(v.feedback.join(" · "))}»; Stratis sumó del comentario: ${esc(f.delComentario.join(" · "))}${f.inf.criterio ? ` (${esc(f.inf.criterio)})` : ""}</div>`;
+  else if (f.fuente === "ejecutivo" && f.inf && f.inf.tipos.length) h += `<div class="fb-crit">Antes, Stratis lo había inferido del comentario como: ${esc(f.inf.tipos.join(" · "))}</div>`;
   return h;
 }
 function semanasPeriodo(){
@@ -1398,6 +1415,7 @@ function visitasFeedback(){
     && (!sem || (iso(v.visitado_en) >= sem.ini && iso(v.visitado_en) <= sem.fin)))
     .map(v => { let f = fbDe(v);
       if (fuente === "ejecutivo" && f.fuente !== "ejecutivo") f = { fuente:null, tipos:[], fuera:[] };
+      else if (fuente === "ejecutivo" && f.delComentario) f = Object.assign({}, f, { tipos:v.feedback || [], fuera:[], delComentario:null });
       if (fuente === "inferido"){ const i = f.inf; f = i ? { fuente:"inferido", tipos:i.tipos || [], fuera:i.fuera_de_lista || [], confianza:i.confianza, criterio:i.criterio, inf:i } : { fuente:null, tipos:[], fuera:[] }; }
       return { v, f }; });
 }
@@ -1406,7 +1424,7 @@ function csvFeedback(){
   const q = x => `"${String(x == null ? "" : x).replace(/"/g, '""')}"`;
   const filas = visitasFeedback().filter(o => o.f.fuente && tipoCoincide(o)).sort((a, b) => a.v.visitado_en < b.v.visitado_en ? -1 : 1);
   const cab = ["Fecha","Hora","Ejecutivo","Customer ID","Comercio","Distrito","Con quién habló","Qué pasó","Decisión","Feedback (tipos BBVA)","Feedback agregado por Stratis","Fuera de la lista de BBVA","Qué ofreció el ejecutivo","POS de otra marca","Demora del abono","Fuente","Confianza","Comentario del ejecutivo","Feedback adicional"];
-  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(({ v, f }) => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", f.tipos.filter(t => FB_BBVA.has(t) || t === FB_NINGUNO).join(" | "), f.tipos.filter(t => !FB_BBVA.has(t) && t !== FB_NINGUNO).join(" | "), f.fuera.join(" | "), (f.acc || []).join(" | "), competidorTxt(f.ext), demoraTxt(f.ext), FUENTE_TXT[f.fuente], f.confianza || "", (v.comentario || "").replace(/\s+/g, " "), f.nota || ""].map(q).join(";"))).join("\r\n");
+  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(({ v, f }) => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", f.tipos.filter(t => FB_BBVA.has(t) || t === FB_NINGUNO).join(" | "), f.tipos.filter(t => !FB_BBVA.has(t) && t !== FB_NINGUNO).join(" | "), f.fuera.join(" | "), (f.acc || []).join(" | "), competidorTxt(f.ext), demoraTxt(f.ext), (f.delComentario ? "Ejecutivo + inferido del comentario" : FUENTE_TXT[f.fuente]), f.confianza || "", (v.comentario || "").replace(/\s+/g, " "), f.nota || ""].map(q).join(";"))).join("\r\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type:"text/csv;charset=utf-8" }));
   a.download = `feedback_visitas_${S.periodo ? S.periodo.id : ""}${S.fbSemana ? "_semana_" + S.fbSemana : ""}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   toast(`Se descargó el CSV con ${filas.length} visita${filas.length === 1 ? "" : "s"}.`);
@@ -1751,7 +1769,7 @@ async function baseBBVA(){
     const colsB = ["Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
     const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
       const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
-      l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
+      l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); if (f.delComentario) fuentes.add("Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
         (f.acc || []).forEach(a => acc.add(a)); const ct = competidorTxt(f.ext); if (ct && !comp.includes(ct)) comp.push(ct); const dt = demoraTxt(f.ext); if (dt && !dem.includes(dt)) dem.push(dt); });
       if (fb.has(FB_NINGUNO) && fb.size > 1) fb.delete(FB_NINGUNO);
       const des = l.filter(v => v.decision === "Desiste del producto"), m = ult ? msiDe(ult) : null;
@@ -2054,23 +2072,29 @@ function datosPresentacion(C, RB, TB){
   // frecuente del grupo; los que no tienen dolor registrado van en su propia fila y los dolores poco frecuentes en «Otros».
   const recs = []; let conCompromiso = 0;
   U.filter(v => reacID ? reacID.has(v.customer_id) : v.decision === "Realizará consumos").forEach(v => { conCompromiso++; const f = fbDe(v);
-    const ts = f && f.fuente ? f.tipos.filter(t => t !== FB_NINGUNO && t !== "No se encontraba la persona que tomaba decisiones") : [];
+    const ts = f && f.fuente ? f.tipos.filter(t => t !== FB_NINGUNO && t !== "No se encontraba la persona que tomaba decisiones").concat(f.fuera || []) : [];
     const ac = f && f.fuente === "ejecutivo" ? [...new Set(f.acc || [])].filter(a => a !== "Reagendé con quien decide") : [];
     recs.push({ ts, ac, v }); });
-  const frec = {}; recs.forEach(r => r.ts.forEach(t => { frec[t] = (frec[t] || 0) + 1; }));
-  const grp = {}; recs.forEach(r => { const k = r.ts.slice().sort((a, b) => frec[b] - frec[a] || a.localeCompare(b))[0] || "";
-    const g = grp[k] ||= { t:k, n:0, acc:{} }; g.n++; r.ac.forEach(a => { g.acc[a] = (g.acc[a] || 0) + 1; }); });
-  const conDolor = Object.values(grp).filter(g => g.t).sort((a, b) => b.n - a.n || a.t.localeCompare(b.t)), topD = conDolor.slice(0, 5), restoD = conDolor.slice(5);
+  // Los sin contacto no tienen reclamo ni acción: van en su propia fila de la lámina (BBVA, 01/10)
+  const recsC = recs.filter(r => r.v.con !== "Nadie");
+  const frec = {}; recsC.forEach(r => r.ts.forEach(t => { frec[t] = (frec[t] || 0) + 1; }));
+  const fbV = v => v.feedback || [];
+  const grp = {}; recsC.forEach(r => { const k = r.ts.slice().sort((a, b) => frec[b] - frec[a] || a.localeCompare(b))[0]
+      || (fbV(r.v).includes(FB_NINGUNO) ? "" : fbV(r.v).includes("No se encontraba la persona que tomaba decisiones") ? "__dec" : "__nada");
+    const g = grp[k] ||= { t:k, n:0, acc:{}, reag:0 }; g.n++; if (r.v.que === "Reagendada") g.reag++; r.ac.forEach(a => { g.acc[a] = (g.acc[a] || 0) + 1; }); });
+  const conDolor = Object.values(grp).filter(g => g.t && !g.t.startsWith("__")).sort((a, b) => b.n - a.n || a.t.localeCompare(b.t)), topD = conDolor.slice(0, 5), restoD = conDolor.slice(5);
   const otrosD = restoD.length ? restoD.reduce((o, g) => { o.n += g.n; Object.entries(g.acc).forEach(([a, n]) => { o.acc[a] = (o.acc[a] || 0) + n; }); return o; },
-    { t:`Otros puntos de dolor (${restoD.length} tipos)`, n:0, acc:{} }) : null;
-  const sinD = grp[""] ? Object.assign(grp[""], { t:"Sin punto de dolor registrado", sin:true }) : null;
+    { t:`Otros reclamos (${restoD.length} tipos)`, n:0, acc:{} }) : null;
+  const sinD = [["", "Sin reclamos: el comercio no reportó problemas"], ["__dec", "No estaba quien decide (atendió un tercero)"], ["__nada", "Sin feedback registrado"]]
+    .filter(([k]) => grp[k]).map(([k, t]) => Object.assign(grp[k], { t, sin:true, clave:k }));
   // Qué pasó en la visita de cada comercio del grupo (por su última visita): suma exacta del total, con y sin contacto
   const QUE = v => v.con === "Nadie" ? (MOTIVO_TXT[v.motivo] || v.motivo || "Sin motivo") : v.decision === "Realizará consumos" ? "Se comprometió a usar el POS"
-    : v.decision === "Aún no decide" ? "Aún no decide" : v.decision === "Desiste del producto" ? "Desistió en la visita" : v.que === "Reagendada" ? "Quedó en volver con quien decide" : "Sin compromiso en la visita";
+    : v.decision === "Aún no decide" ? "Aún no decide" : v.decision === "Desiste del producto" ? "Desistió en la visita"
+    : v.que === "Reagendada" ? "Quedó en volver con quien decide" : "En evaluación por parte del comercio";
   const quePaso = { con:{}, sin:{} }; recs.forEach(r => { const o = quePaso[r.v.con === "Nadie" ? "sin" : "con"], k = QUE(r.v); o[k] = (o[k] || 0) + 1; });
   // por qué dijeron que sí, solo dentro del grupo
   const pqG = {}; recs.forEach(r => { const m = msiDe(r.v); if (m && m.fuente) m.motivos.forEach(x => { pqG[x] = (pqG[x] || 0) + 1; }); });
-  const dolores = { conCompromiso, reac:!!reacID, quePaso, porQue:Object.entries(pqG).sort((a, b) => b[1] - a[1]), conDolorN:recs.filter(r => r.ts.length).length, corte:RB ? RB.corte.corte : null, lista:topD.concat(otrosD ? [otrosD] : [], sinD ? [sinD] : []) };
+  const dolores = { conCompromiso, reac:!!reacID, quePaso, porQue:Object.entries(pqG).sort((a, b) => b[1] - a[1]), conDolorN:recsC.filter(r => r.ts.length).length, corte:RB ? RB.corte.corte : null, lista:topD.concat(otrosD ? [otrosD] : [], sinD) };
   // citas candidatas: se muestran solo en el escritorio (panel de citas) para que Jose elija; nunca van al archivo (pueden traer nombres)
   const citas = vc.filter(v => (v.comentario || "").length >= 60 && (v.comentario || "").length <= 240)
     .sort((a, b) => (b.decision === "Realizará consumos") - (a.decision === "Realizará consumos") || b.visitado_en.localeCompare(a.visitado_en)).slice(0, 8)
@@ -2215,26 +2239,18 @@ function armarLaminas(pres, D){
   const ultSem = D.semanas[D.semanas.length - 1], antSem = D.semanas[D.semanas.length - 2];
 
   // 1. Portada
-  { const s = pres.addSlide(); s.background = { color:PX.navy };
-    T(s, "Stratis", { x:0.8, y:1.2, w:6, h:0.9, fontFace:FTB, fontSize:48, color:PX.blanco, valign:"middle" });
-    s.addShape(pres.shapes.LINE, { x:0, y:2.35, w:6.6, h:0, line:{ color:"5A6495", width:1 } });
-    T(s, "INNOVATE, PERFORM & GROW", { x:0.8, y:2.55, w:6, h:0.5, fontSize:22, color:PX.blanco });
-    s.addShape(pres.shapes.LINE, { x:0, y:3.25, w:6.6, h:0, line:{ color:"5A6495", width:1 } });
-    T(s, "Campaña BBVA Adquirencia", { x:0.8, y:4.2, w:7, h:0.55, fontSize:26, bold:true, color:PX.blanco });
-    T(s, `Mastercard · reporte semanal del ${nombrePeriodo(D.p)}`, { x:0.8, y:4.85, w:7, h:0.4, fontSize:15, color:"D5DAE6" });
-    T(s, "Corte al " + corteTxt, { x:0.8, y:5.35, w:7, h:0.4, fontSize:15, color:PX.naranja });
-    // Jose, 30/09: sin las promesas de consumo en la portada
-    [[numPE(D.visitados), "comercios visitados", `de ${numPE(D.meta.vis)} de la meta del periodo`], [numPE(D.contactados), "con contacto", `${tasaCon} % de los comercios visitados`]]
-      .forEach(([v, t, c], i) => { const y = 2.4 + i * 1.7; s.addShape(pres.shapes.RECTANGLE, { x:8.4, y, w:4.2, h:1.4, fill:{ color:"1A2150" }, line:{ color:"2B3470" } });
-        T(s, v, { x:8.65, y:y + 0.15, w:3.8, h:0.65, fontFace:FTB, fontSize:32, color:PX.blanco, valign:"middle" });
-        T(s, t, { x:8.65, y:y + 0.8, w:3.8, h:0.28, fontSize:13, bold:true, color:PX.naranja }); T(s, c, { x:8.65, y:y + 1.06, w:3.8, h:0.26, fontSize:10, color:"B9C6E0" }); });
+  // Plantilla oficial de Stratis (Jose, 01/10): la portada «1_Front» trae el logo y el lema en la imagen
+  { const s = pres.addSlide(); s.background = { data:"{{RECURSO:portada_stratis.jpg}}".replace(/^data:/, "") };
+    T(s, "Campaña BBVA – PERU Adquirencia", { x:0.75, y:5.25, w:8, h:0.55, fontSize:26, bold:true, color:PX.blanco });
+    T(s, `Mastercard · reporte semanal del ${nombrePeriodo(D.p)}`, { x:0.75, y:5.85, w:8, h:0.4, fontSize:15, color:"D5DAE6" });
+    T(s, "Corte al " + corteTxt, { x:0.75, y:6.3, w:8, h:0.4, fontSize:15, color:PX.naranja });
   }
 
   // 2. Resumen ejecutivo
   { const s = lamina("Resumen ejecutivo", `${mayus(nombrePeriodo(D.p))} · del ${fISO(D.p.ini)} al ${fISO(D.p.fin)} · corte al ${corteTxt} · ${D.dhCorte} de ${D.dh.length} días hábiles (${pDias} %)`);
     const w = 2.87, gap = 0.21;
     kpi(s, 0.6, 1.6, w, 1.9, PX.naranja, "Comercios visitados", numPE(D.visitados), `de ${numPE(D.meta.vis)}`, D.visitados / D.meta.vis, `${pVis} % de la meta con ${pDias} % de los días`);
-    kpi(s, 0.6 + (w + gap), 1.6, w, 1.9, PX.azul, "Con contacto", tasaCon + " %", `${numPE(D.contactados)} comercios`, null, "hablaron con el dueño, el encargado o un tercero");
+    kpi(s, 0.6 + (w + gap), 1.6, w, 1.9, PX.azul, "Con contacto", tasaCon + " %", `${numPE(D.contactados)} comercios con respuesta`, null, "hablaron con el dueño, el encargado o un tercero");
     const Q = D.tot;
     kpi(s, 0.6 + 2 * (w + gap), 1.6, w, 1.9, PX.verde, "Volumen", D.rb && D.rb.facturado != null ? soles(D.rb.facturado) : "—", "", null,
       Q ? `facturación de los ${numPE(Q.tv.reac)} reactivados · ${numPE(Q.tv.trx)} transacciones` : D.rb ? "facturación de los reactivados" : "pendiente de la data de BBVA");
@@ -2257,6 +2273,32 @@ function armarLaminas(pres, D){
     lectura(s, D.visitados / D.meta.vis >= D.dhCorte / D.dh.length ? "El avance de visitas va por delante del tiempo transcurrido del periodo." : "El avance de visitas está por debajo del tiempo transcurrido del periodo.",
       D.reactivados == null ? "incorporar la data de BBVA para medir reactivación y facturación." : "sostener el ritmo y convertir el contacto en transacciones.");
     pie(s, `Fuente: registro de visitas de Stratis al ${dd}. Reactivación: ${D.rb ? `data de BBVA con corte al ${fISO(D.rb.corte)}` : "pendiente de la data de BBVA"}. Metas: ${numPE(D.meta.visEj)} comercios visitados y ${numPE(D.meta.reaEj)} reactivados por ejecutivo.`); }
+
+  // 2b. Detalle de los reactivados con visita (deck validado con BBVA, 01/10: va justo después del resumen)
+  if (D.tot){ const Q = D.tot, g = Q.g;
+    const s = lamina(`Detalle de los ${numPE(Q.tv.reac)} reactivados con visita`, `Facturación y transacciones según BBVA, con y sin contacto · corte de la data de BBVA al ${fechaLarga(Q.corte)}`);
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle", align:"right" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10.5, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
+    const fila = (o, b) => { const x = b ? { bold:true, fill:{ color:PX.suave }, color:PX.navy } : {};
+      return [cel(o.nom, Object.assign({ align:"left" }, x)), cel(numPE(o.n), x), cel(numPE(o.reac), x), cel(pct2(o.reac, o.n), x), cel(montoPE(o.fac), x), cel(numPE(o.trx), x), cel(pct2(o.fac, Q.tv.fac), x)]; };
+    s.addTable([["Comercios visitados", "Comercios", "Reactivados", "% reactivación", "Facturación (S/)", "Transacciones", "% facturación"].map((t, i) => ({ text:t, options:Object.assign({}, H, i ? {} : { align:"left" }) }))]
+      .concat([fila(Object.assign({}, Q.G.cc, { nom:"Con contacto" })), fila(Object.assign({}, Q.G.sc, { nom:"Sin contacto" })), fila(Q.tv, true)]),
+      { x:0.6, y:1.6, w:12.1, colW:[2.7, 1.3, 1.35, 1.5, 2.0, 1.65, 1.6], rowH:0.5, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
+    const labs = ["Con contacto", "Sin contacto", "Total visitados"], ks = ["cc", "sc", "tv"], GG = Object.assign({ tv:Q.tv }, Q.G);
+    // barras dibujadas (no gráfico nativo): así las cifras salen con coma decimal en cualquier PowerPoint
+    const barras = (x0, titulo, vals, txt, color) => { const mx = Math.max(...vals, 0) || 1;
+      T(s, titulo, { x:x0, y:3.95, w:5.9, h:0.28, fontSize:11, bold:true, color:PX.navy, align:"center" });
+      s.addShape(pres.shapes.LINE, { x:x0, y:5.72, w:5.9, h:0, line:{ color:PX.linea, width:0.75 } });
+      vals.forEach((v, i) => { const cx = x0 + 0.35 + i * 1.95, h = 1.2 * v / mx;
+        if (h > 0) s.addShape(pres.shapes.RECTANGLE, { x:cx + 0.3, y:5.72 - h, w:0.9, h, fill:{ color }, line:{ color } });
+        T(s, txt(v), { x:cx - 0.1, y:5.72 - h - 0.26, w:1.7, h:0.24, fontSize:10, bold:true, color:PX.navy, align:"center" });
+        T(s, labs[i], { x:cx - 0.1, y:5.76, w:1.7, h:0.24, fontSize:9.5, color:PX.tinta, align:"center" }); }); };
+    barras(0.6, "% de reactivación en comercios visitados", ks.map(k => GG[k].n ? 100 * GG[k].reac / GG[k].n : 0), v => v.toFixed(2).replace(".", ",") + " %", PX.azulOsc);
+    barras(6.8, "Facturación según BBVA", ks.map(k => GG[k].fac), v => soles(v), PX.naranja);
+    lectura(s, `Los ${numPE(Q.tv.reac)} reactivados con visita facturan ${soles(Q.tv.fac)} con ${numPE(Q.tv.trx)} transacciones; los visitados con contacto aportan ${pct2(Q.G.cc.fac, Q.tv.fac)} de esa facturación.`,
+      "seguir la facturación de los reactivados con visita en cada corte.", 6.12);
+    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones); comercios según las visitas de Stratis al mismo corte. % facturación: sobre la de los reactivados con visita. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
+  }
 
   // 3. Avance del periodo
   { const s = lamina(`${mayus(nombrePeriodo(D.p))}: ${numPE(D.visitados)} comercios visitados al ${dd}`, `Nuevos visitados por día y acumulado del equipo frente a la meta de ${metaDia} por día hábil · ${numPE(D.cartera)} comercios en cartera, ${numPE(Math.round(D.cartera / D.nEj))} por ejecutivo`);
@@ -2428,32 +2470,6 @@ function armarLaminas(pres, D){
     pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)}; comercios por grupo según las visitas de Stratis al mismo corte (visitado y gestión con contacto, como en la base para BBVA). % alcance: sobre los comercios de cada grupo.`);
   }
 
-  // 7c. Facturación y transacciones: visitados frente a no visitados
-  if (D.tot){ const Q = D.tot, g = Q.g;
-    const s = lamina(`Detalle de los ${numPE(Q.tv.reac)} reactivados con visita`, `Facturación y transacciones según BBVA, con y sin contacto · corte de la data de BBVA al ${fechaLarga(Q.corte)}`);
-    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:10, fontFace:FT, valign:"middle", align:"right" };
-    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10.5, fontFace:FT, color:PX.tinta, valign:"middle", align:"right" }, o) });
-    const fila = (o, b) => { const x = b ? { bold:true, fill:{ color:PX.suave }, color:PX.navy } : {};
-      return [cel(o.nom, Object.assign({ align:"left" }, x)), cel(numPE(o.n), x), cel(numPE(o.reac), x), cel(pct2(o.reac, o.n), x), cel(montoPE(o.fac), x), cel(numPE(o.trx), x), cel(pct2(o.fac, Q.tv.fac), x)]; };
-    s.addTable([["Comercios visitados", "Comercios", "Reactivados", "% reactivación", "Facturación (S/)", "Transacciones", "% facturación"].map((t, i) => ({ text:t, options:Object.assign({}, H, i ? {} : { align:"left" }) }))]
-      .concat([fila(Object.assign({}, Q.G.cc, { nom:"Con contacto" })), fila(Object.assign({}, Q.G.sc, { nom:"Sin contacto" })), fila(Q.tv, true)]),
-      { x:0.6, y:1.6, w:12.1, colW:[2.7, 1.3, 1.35, 1.5, 2.0, 1.65, 1.6], rowH:0.5, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
-    const labs = ["Con contacto", "Sin contacto", "Total visitados"], ks = ["cc", "sc", "tv"], GG = Object.assign({ tv:Q.tv }, Q.G);
-    // barras dibujadas (no gráfico nativo): así las cifras salen con coma decimal en cualquier PowerPoint
-    const barras = (x0, titulo, vals, txt, color) => { const mx = Math.max(...vals, 0) || 1;
-      T(s, titulo, { x:x0, y:3.95, w:5.9, h:0.28, fontSize:11, bold:true, color:PX.navy, align:"center" });
-      s.addShape(pres.shapes.LINE, { x:x0, y:5.72, w:5.9, h:0, line:{ color:PX.linea, width:0.75 } });
-      vals.forEach((v, i) => { const cx = x0 + 0.35 + i * 1.95, h = 1.2 * v / mx;
-        if (h > 0) s.addShape(pres.shapes.RECTANGLE, { x:cx + 0.3, y:5.72 - h, w:0.9, h, fill:{ color }, line:{ color } });
-        T(s, txt(v), { x:cx - 0.1, y:5.72 - h - 0.26, w:1.7, h:0.24, fontSize:10, bold:true, color:PX.navy, align:"center" });
-        T(s, labs[i], { x:cx - 0.1, y:5.76, w:1.7, h:0.24, fontSize:9.5, color:PX.tinta, align:"center" }); }); };
-    barras(0.6, "% de reactivación en comercios visitados", ks.map(k => GG[k].n ? 100 * GG[k].reac / GG[k].n : 0), v => v.toFixed(2).replace(".", ",") + " %", PX.azulOsc);
-    barras(6.8, "Facturación según BBVA", ks.map(k => GG[k].fac), v => soles(v), PX.naranja);
-    lectura(s, `Los ${numPE(Q.tv.reac)} reactivados con visita facturan ${soles(Q.tv.fac)} con ${numPE(Q.tv.trx)} transacciones; los visitados con contacto aportan ${pct2(Q.G.cc.fac, Q.tv.fac)} de esa facturación.`,
-      "seguir la facturación de los reactivados con visita en cada corte.", 6.12);
-    pie(s, `Fuente: totales de la data de BBVA al ${fISO(Q.corte)} (reactivados, facturación y transacciones); comercios según las visitas de Stratis al mismo corte. % facturación: sobre la de los reactivados con visita. Control de coherencia: ${Q.errores.length ? Q.errores.join(" · ") : "OK"}.`);
-  }
-
   // 7b (sin totales). Reactivación con la carga por Customer ID
   if (!D.tot){ const B = D.bbva;
     const s = lamina("Reactivación confirmada por BBVA", B ? `Corte de la data de BBVA al ${fechaLarga(B.corte)} · cuenta: reactivado y con gestión con contacto según BBVA, con visita de Stratis` : "Pendiente de la data de BBVA");
@@ -2486,33 +2502,30 @@ function armarLaminas(pres, D){
       B ? "sostener la entrega de la data de BBVA para seguir cada reactivación por corte." : "");
     pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (Customer ID, gestión con contacto y reactivado), cruzada con la cartera de Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: registro de visitas de Stratis al ${dd}.`); }
 
-  // 8. La voz del comercio (Jose, 30/09): cuadro positivo en vez de los casos negativos. Por cada punto de dolor de los comercios que se
-  // comprometieron a usar el POS, qué hizo el ejecutivo y cuántos comercios terminaron en compromiso de uso.
+  // 8. La voz del comercio. Formato validado con BBVA (01/10): una sola tabla que se lee como línea de tiempo, de izquierda a
+  // derecha: la visita, lo que dijo el comercio y lo que hizo el ejecutivo (en frases). Con contacto arriba, sin contacto abajo.
   { const DL = D.dolores, tot = DL.conCompromiso, grupo = DL.reac ? "reactivados" : "que se comprometieron";
     const s = lamina("La voz del comercio: qué pasó en la visita y qué hizo el ejecutivo", DL.reac ? `${numPE(tot)} comercios reactivados con visita según BBVA (corte ${fISO(DL.corte)}) · por su última visita hasta el ${dd}` : `${numPE(tot)} comercios se comprometieron a usar el POS · por su última visita hasta el ${dd}`);
-    const nomAcc = a => a === "Otra acción" ? "Otra acción (equipos y escalamientos)" : a;
-    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:9.5, fontFace:FT, valign:"middle" };
-    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:9.5, fontFace:FT, color:PX.tinta, valign:"middle" }, o) });
-    const SUB = { bold:true, color:PX.navy, fill:{ color:PX.suave } }, TT = { bold:true, color:PX.blanco, fill:{ color:PX.azulOsc } };
-    // izquierda: los comercios del grupo según lo que pasó en la visita (suma el total)
-    const bloque = (tit, o) => { const l = Object.entries(o).sort((a, b) => b[1] - a[1]), n = l.reduce((a, x) => a + x[1], 0);
-      return n ? [[cel(tit, SUB), cel(numPE(n), Object.assign({ align:"center" }, SUB))]].concat(l.map(([k, m]) => [cel("   " + k), cel(numPE(m), { align:"center" })])) : []; };
-    T(s, `Los ${numPE(tot)} ${grupo}, según lo que pasó en la visita`, { x:0.6, y:1.5, w:5.6, h:0.3, fontSize:12, bold:true, color:PX.navy });
-    s.addTable([[{ text:"Qué pasó en la visita", options:H }, { text:"Comercios", options:Object.assign({ align:"center" }, H) }]]
-      .concat(bloque("Con contacto", DL.quePaso.con), bloque("Sin contacto (cerrado, no atendió u otro motivo)", DL.quePaso.sin), [[cel("Total", TT), cel(numPE(tot), Object.assign({ align:"center" }, TT))]]),
-      { x:0.6, y:1.85, w:5.6, colW:[4.4, 1.2], rowH:0.3, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
-    // derecha: solo los que mencionaron un dolor, con la solución del ejecutivo (suma su propio total)
-    const L = DL.lista.filter(o => !o.sin), nd = DL.conDolorN;
-    T(s, `Los ${numPE(nd)} que mencionaron un dolor, y qué hizo el ejecutivo`, { x:6.5, y:1.5, w:6.2, h:0.3, fontSize:12, bold:true, color:PX.navy });
-    s.addTable([[{ text:"Dolor principal", options:H }, { text:"Solución del ejecutivo (comercios de la fila)", options:H }, { text:"Comercios", options:Object.assign({ align:"center" }, H) }]]
-      .concat(L.length ? L.map(o => { const top = Object.entries(o.acc).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 2);
-          return [cel(o.t, { bold:true, color:PX.navy }), cel(top.length ? top.map(([a, n]) => `${nomAcc(a)} (${numPE(n)} de ${numPE(o.n)})`).join(" · ") : "Sin acción registrada"), cel(numPE(o.n), { align:"center", bold:true, color:PX.verde })]; })
-        .concat([[cel("Total", TT), cel("", TT), cel(numPE(nd), Object.assign({ align:"center" }, TT))]]) : [[cel("Ningún comercio del grupo mencionó un dolor.", { colspan:3 })]]),
-      { x:6.5, y:1.85, w:6.2, colW:[2.05, 3.25, 0.9], rowH:0.36, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
-    const con = Object.values(DL.quePaso.con).reduce((a, n) => a + n, 0), comp = DL.quePaso.con["Se comprometió a usar el POS"] || 0, d1 = L.find(o => !/^Otros/.test(o.t));
-    lectura(s, `De los ${numPE(tot)} ${grupo}, ${numPE(con)} hablaron con el ejecutivo (${numPE(comp)} se comprometieron a usar el POS) y ${numPE(tot - con)} no tuvieron contacto en la visita. ${numPE(nd)} mencionaron un dolor${d1 ? `; el más frecuente, «${d1.t}» (${numPE(d1.n)})` : ""}.`,
-      "registrar en cada visita el dolor del comercio y la solución, para explicar mejor la reactivación.", 6.12);
-    pie(s, `Fuente: registro de visitas de Stratis al ${dd}${DL.reac ? `; reactivados: lista de BBVA al ${fISO(DL.corte)}` : ""}. Cada comercio se cuenta una sola vez, por su última visita; el dolor principal es el más frecuente del grupo.`); }
+    const H = { fill:{ color:PX.navy }, color:PX.blanco, bold:true, fontSize:11, fontFace:FT, valign:"middle" };
+    const cel = (t, o) => ({ text:String(t), options:Object.assign({ fontSize:10.5, fontFace:FT, color:PX.tinta, valign:"middle" }, o) });
+    const TT = { bold:true, color:PX.blanco, fill:{ color:PX.azulOsc } }, GV = { bold:true, color:PX.navy, fill:{ color:PX.suave }, align:"center", fontSize:11.5 };
+    const filasC = DL.lista, nCon = filasC.reduce((a, o) => a + o.n, 0);
+    const sinL = Object.entries(DL.quePaso.sin).sort((a, b) => b[1] - a[1]), nSin = sinL.reduce((a, x) => a + x[1], 0);
+    const accTxt = o => { if (o.clave === "") return DL.reac ? "Sin acción requerida: sigue operando con el POS" : "Sin acción requerida";
+      if (o.clave === "__dec") return o.reag ? `Se reagendó con quien decide (${numPE(o.reag)} de ${numPE(o.n)})` : "Sin acción registrada";
+      const top = Object.entries(o.acc).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 2);
+      return top.length ? top.map(([a, n]) => `${ACC_FRASE[a] || a}${n < o.n ? ` (${numPE(n)} de ${numPE(o.n)})` : ""}`).join(" · ") : "Sin acción registrada"; };
+    T(s, `Los ${numPE(tot)} ${grupo}: qué dijo el comercio y qué hizo el ejecutivo`, { x:0.6, y:1.5, w:12.1, h:0.3, fontSize:12, bold:true, color:PX.navy });
+    const filasT = filasC.map((o, i) => (i ? [] : [cel(`Con contacto\n${numPE(nCon)}`, Object.assign({ rowspan:filasC.length }, GV))]).concat([
+      cel(numPE(o.n), { align:"center", bold:true, color:PX.verde, fontSize:12 }), cel(o.t, o.sin ? { color:PX.gris } : { bold:true, color:PX.navy }), cel(accTxt(o), o.sin ? { color:PX.gris } : {})]));
+    if (nSin) filasT.push([cel(`Sin contacto\n${numPE(nSin)}`, GV), cel(numPE(nSin), { align:"center", bold:true, color:PX.verde, fontSize:12 }),
+      cel(`Sin respuesta en la visita: ${sinL.map(([k, n]) => `${k.toLowerCase()} ${numPE(n)}`).join(" · ")}`, { color:PX.gris }), cel("Se registró la visita y el motivo", { color:PX.gris })]);
+    if (!filasT.length) filasT.push([cel(`Ningún comercio ${grupo} al corte.`, { colspan:4, color:PX.gris })]);
+    s.addTable([[{ text:"Visita", options:Object.assign({ align:"center" }, H) }, { text:"Comercios", options:Object.assign({ align:"center" }, H) },
+      { text:"Reclamo o comentario del comercio", options:H }, { text:"Qué hizo el ejecutivo", options:H }]]
+      .concat(filasT, [[cel("Total", TT), cel(numPE(nCon + nSin), Object.assign({ align:"center" }, TT)), cel("", TT), cel("", TT)]]),
+      { x:0.6, y:1.9, w:12.1, colW:[1.6, 1.2, 4.1, 5.2], rowH:0.36, border:{ type:"solid", color:PX.linea, pt:0.75 }, fill:{ color:PX.blanco } });
+    pie(s, `Fuente: registro de visitas de Stratis al ${dd}${DL.reac ? `; reactivados: lista de BBVA al ${fISO(DL.corte)}` : ""}. Cada comercio se cuenta una sola vez, por su última visita; si dejó varios reclamos, va en el más frecuente del grupo. Incluye el feedback que Stratis leyó en el comentario del ejecutivo.`); }
 
   // 9. Próximos pasos
   { const s = lamina("Próximos pasos", "");
@@ -2533,10 +2546,8 @@ function armarLaminas(pres, D){
   }
 
   // 10. Cierre
-  { const s = pres.addSlide(); s.background = { color:PX.navy };
-    T(s, "Stratis", { x:0, y:2.6, w:13.33, h:1.2, fontFace:FTB, fontSize:60, color:PX.blanco, align:"center", valign:"middle" });
-    s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x:5.0, y:4.05, w:3.33, h:0.55, rectRadius:0.25, fill:{ color:"1A2150" }, line:{ color:"5A6495", width:0.75 } });
-    T(s, "www.mystratis.com", { x:5.0, y:4.05, w:3.33, h:0.55, fontSize:15, color:PX.blanco, align:"center", valign:"middle" }); }
+  // Cierre «2_Closing» de la plantilla oficial (logo y www.mystratis.com en la imagen)
+  { const s = pres.addSlide(); s.background = { data:"{{RECURSO:cierre_stratis.jpg}}".replace(/^data:/, "") }; }
 }
 // «SAN JUAN DE LURIGANCHO» → «San Juan de Lurigancho»
 const TILDES = { "JESUS MARIA":"Jesús María", "RIMAC":"Rímac", "ANCON":"Ancón", "SAN MARTIN DE PORRES":"San Martín de Porres", "MI PERU":"Mi Perú", "CHACLACAYO":"Chaclacayo",

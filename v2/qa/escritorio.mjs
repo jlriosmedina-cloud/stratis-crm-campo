@@ -199,7 +199,7 @@ await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reacti
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 11, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
+  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Reclamo o comentario del comercio', 'comercios con respuesta', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   assert.ok(!/ticket/i.test(txt), 'la presentación muestra el ticket promedio');
@@ -232,8 +232,27 @@ await prueba('presentación: en «La voz del comercio» cada comercio cuenta una
     finally { S.act = act0; S.avance = av0; } });
   assert.equal(r.total, 5); assert.equal(r.suma, 5, 'las filas no suman el total: ' + JSON.stringify(r.filas));
   assert.deepEqual(r.filas.find(x => x[0] === 'Pide una tasa más baja'), ['Pide una tasa más baja', 2]);
-  assert.ok(r.filas.some(x => x[0] === 'Sin punto de dolor registrado' && x[1] === 1));
+  assert.ok(r.filas.some(x => x[0] === 'Sin reclamos: el comercio no reportó problemas' && x[1] === 1));
   assert.equal(r.quePaso, 5, '«qué pasó en la visita» no suma el total'); assert.equal(r.sumaDolor, r.conDolor, 'la tabla de dolores no suma su total');
+});
+await prueba('presentación: con reactivados de BBVA, «La voz del comercio» suma con y sin contacto y separa a los que no tienen reclamo', async () => {
+  const r = await p.evaluate(() => { const act0 = S.act, av0 = S.avance, inf0 = S.fbInf;
+    const v = (i, o) => Object.assign({ id:'z' + i, periodo:S.periodo.id, customer_id:String(i).padStart(8, '0'), correo:S.base[0].correo, visitado_en:'2026-09-22T15:00:00Z', lat:-12.09, lng:-77.04, fuera_plazo:false, estado_anul:'activa',
+      con:'Dueño', que:'Reunión concretada', decision:'Realizará consumos', feedback:[], fb_acciones:[], comentario:'' }, o);
+    S.act = [v(1, { feedback:['Pide una tasa más baja'], fb_acciones:['Evaluar mejora de tasa'] }), v(2, { feedback:['Sin observaciones del comercio'] }),
+      v(3, { con:'Tercero', que:'Reagendada', decision:null, feedback:['No se encontraba la persona que tomaba decisiones'], fb_acciones:['Reagendé con quien decide'] }),
+      v(4, { con:'Nadie', que:'Sin éxito', decision:null, motivo:'Cerrado' }), v(5, { con:'Nadie', que:'Sin éxito', decision:null, motivo:'No atendió' }),
+      v(6, { feedback:['Sin observaciones del comercio'] })];
+    // reclamo fuera de la lista, leído del comentario: cuenta como reclamo aunque el ejecutivo marcó «Sin observaciones»
+    S.fbInf = { z6:{ visita_id:'z6', tipos:[], fuera_de_lista:['Equipo dañado de prueba'], confianza:'Media', criterio:'' } };
+    S.avance = [{ meta_visitas:160, meta_reactivados:40, meta_conversion:25 }];
+    const RB = { corte:{ corte:'2026-09-29' }, filas:[1, 2, 3, 4, 5, 6].map(i => ({ customer_id:String(i).padStart(8, '0'), reactivado:'Si', gestion_con_contacto:i < 4, facturado:null })) };
+    try { const DL = datosPresentacion('2026-09-29', RB, null).dolores; const sq = o => Object.values(o).reduce((a, n) => a + n, 0);
+      return { total:DL.conCompromiso, con:DL.lista.reduce((a, o) => a + o.n, 0), sin:sq(DL.quePaso.sin), filas:DL.lista.map(o => [o.t, o.n]) }; }
+    finally { S.act = act0; S.avance = av0; S.fbInf = inf0; } });
+  assert.equal(r.total, 6); assert.equal(r.con, 4, 'con contacto: ' + JSON.stringify(r.filas)); assert.equal(r.sin, 2); assert.equal(r.con + r.sin, r.total, 'la tabla no suma el total');
+  for (const t of ['Pide una tasa más baja', 'Sin reclamos: el comercio no reportó problemas', 'No estaba quien decide (atendió un tercero)', 'Equipo dañado de prueba'])
+    assert.ok(r.filas.some(x => x[0] === t && x[1] === 1), 'falta la fila ' + t + ': ' + JSON.stringify(r.filas));
 });
 await prueba('reporte para directorio: PDF A4 con los cinco cuadros en el orden del desglose y sin «CRM»', async () => {
   await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; S.totBBVA = null; }, hoy);
