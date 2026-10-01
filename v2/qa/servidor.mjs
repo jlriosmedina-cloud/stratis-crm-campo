@@ -517,6 +517,44 @@ caso('nadie con sesión puede vaciar las visitas, las asignaciones ni la bitáco
   const id = await registrar(EJ, { cid: '00000009', con: 'Nadie', motivo: 'No estaba' });
   assert.equal((await bitacora(id)).length >= 1, true, 'registrar ya no deja su línea en la bitácora');
 });
+caso('seguimiento remoto: el ejecutivo lo registra en su visita sin contacto, deja bitácora y no toca la visita', async () => {
+  const id = await visitaPasada('00000013', 6, 'Nadie', { motivo: 'Cerrado' });
+  const antes = await visita(id);
+  const sid = (await como(EJ, `select public.v2_registrar_seguimiento($1, 'WhatsApp', 'Respondió: usará el POS', '  Le escribí al dueño  ') s`, [id])).rows[0].s;
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió') s`, [id]);
+  const l = (await como(EJ, `select * from public.v2_mis_seguimientos()`)).rows.filter(r => r.visita_id === id);
+  assert.equal(l.length, 2, 'se pueden registrar varios intentos');
+  assert.equal(l[0].nota, 'Le escribí al dueño');
+  const despues = await visita(id);
+  for (const k of ['con', 'que', 'motivo', 'decision', 'fuera_plazo', 'validacion', 'anulada_en']) assert.deepEqual(despues[k], antes[k], 'cambió la visita: ' + k);
+  // despues es texto con el JSON
+  const b = (await bitacora(id)).filter(x => x.despues === 'WhatsApp · Respondió: usará el POS · Le escribí al dueño');
+  assert.equal(b.length, 1, 'falta la línea de la bitácora: '); assert.equal(b[0].por, EJ);
+  // el otro ejecutivo no ve ni registra seguimientos de visitas ajenas
+  assert.equal((await como(OTRO, `select * from public.v2_mis_seguimientos()`)).rows.filter(r => r.visita_id === id).length, 0);
+  await falla(como(OTRO, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [id]), /Solo el ejecutivo/);
+  // el analista lo ve desde el escritorio; el ejecutivo no lee la tabla directo ni escribe en ella
+  assert.ok((await como(ANA, `select * from v2_seguimientos where visita_id = $1`, [id])).rows.length >= 2);
+  assert.equal((await como(EJ, `select * from v2_seguimientos`)).rows.length, 0);
+  await falla(como(EJ, `insert into v2_seguimientos(visita_id, customer_id, periodo, correo, por, canal, resultado) values ($1, '00000013', '2099-01', $2, $2, 'Llamada', 'No respondió')`, [id, EJ]), /permission denied/);
+  await falla(como(null, `select public.v2_mis_seguimientos()`), /permission denied/);
+});
+caso('seguimiento remoto: solo visitas sin contacto, con canal y resultado de la lista', async () => {
+  const conC = await visitaPasada('00000014', 6, 'Dueño', { que: 'Reunión concretada' });
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [conC]), /sin contacto/);
+  const sinC = await visitaPasada('00000015', 6, 'Nadie', { motivo: 'No atendió' });
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Paloma mensajera', 'No respondió')`, [sinC]), /check/);
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'Quién sabe')`, [sinC]), /check/);
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió', repeat('x', 301))`, [sinC]), /300/);
+  await falla(como(INA, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [sinC]), /no está activo/);
+  const anul = await visitaPasada('00000016', 6, 'Nadie', { motivo: 'Cerrado' });
+  await db.query(`update v2_visitas set anulada_en = now(), anulada_por = $2 where id = $1`, [anul, ANA]);
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [anul]), /anulada/);
+  const vieja = await visitaPasada('00000017', 6, 'Nadie', { motivo: 'Cerrado' });
+  await db.query(`insert into v2_periodos(id, ini, fin) values ('2098-12', '2098-12-01', '2098-12-31') on conflict do nothing`);
+  await db.query(`update v2_visitas set periodo = '2098-12' where id = $1`, [vieja]);
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [vieja]), /periodo cerrado/);
+});
 caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
   await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
   const r = (await db.query(`select has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'SELECT') anon_lee,

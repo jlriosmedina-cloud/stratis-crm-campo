@@ -63,6 +63,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
   - normalización de «Reagendada»;
   - «Reagendé» solo va con «Reagendada».
 - **Resultado:** Éxito (realizará consumos) · En proceso (aún no decide o reagendada) · No éxito · No se encontró · Sin contacto (todos los motivos de «No se pudo hacer la visita», menos Dirección errada).
+- **Seguimiento remoto (desde el 01/10):** en las visitas sin contacto, el ejecutivo registra después por qué canal contactó al comercio (Llamada, WhatsApp, Correo) y qué respondió (`v2_registrar_seguimiento`, tabla `v2_seguimientos`). No cambia la visita, el estado ni el bono; deja su línea en la bitácora (acción `seguimiento`). Inicio avisa cuántos comercios sin contacto esperan seguimiento. Meta de Jose: que ninguna visita quede sin feedback.
 - **Feedback agregado por Stratis el 29/09:** «Desconfía de la visita (duda que representemos a BBVA)» y «No pidió el POS» (Decisión y necesidad), «Solicitó cambio de equipo» (Equipo y contómetros), «Le falta una función» (Uso del POS).
 - **Base para BBVA (Excel del escritorio), modelo de Jose del 30/09:** solo dos hojas, KPIs y Base. Todos los KPIs son fórmulas sobre la hoja Base; la columna Ejecutivo (al final de Base) es la asignación del periodo. Sin notas al pie ni fila de subtítulo en KPIs.
   - `Gestion_Con_Contacto` (SI/NO) y su fecha sirven para el cruce con los volúmenes de BBVA.
