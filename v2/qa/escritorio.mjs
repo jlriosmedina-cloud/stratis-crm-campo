@@ -202,6 +202,7 @@ await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reacti
   for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
+  assert.ok(!/ticket/i.test(txt), 'la presentación muestra el ticket promedio');
   for (const t of ['Reactivación sin visita', 'No visitados', 'Total universo']) assert.ok(!txt.includes(t), 'la presentación muestra lo que no cuenta: ' + t);
   fs.unlinkSync(f);
   await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
