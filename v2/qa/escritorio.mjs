@@ -45,6 +45,7 @@ await ctx.route(/cdnjs\.cloudflare\.com\/.*leaflet.*\.js$/, r => r.fulfill({ pat
 await ctx.route(/cdnjs\.cloudflare\.com\/.*leaflet.*\.css$/, r => r.fulfill({ path: path.join(NM, 'leaflet/dist/leaflet.css'), contentType: 'text/css' }));
 await ctx.route(/cdnjs\.cloudflare\.com\/.*xlsx/, r => r.fulfill({ body: '', contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/exceljs/, r => r.fulfill({ path: path.join(NM, 'exceljs/dist/exceljs.min.js'), contentType: 'application/javascript' }));
+await ctx.route(/cdnjs\.cloudflare\.com\/.*jspdf/, r => r.fulfill({ path: path.join(NM, 'jspdf/dist/jspdf.umd.min.js'), contentType: 'application/javascript' }));
 await ctx.route(/cdn\.jsdelivr\.net\/npm\/pptxgenjs/, r => r.fulfill({ path: path.join(NM, 'pptxgenjs/dist/pptxgen.bundle.js'), contentType: 'application/javascript' }));
 const p = await ctx.newPage(); const errs = [];
 p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/net::|fonts|Failed to load resource|URL scheme "file" is not supported/.test(m.text())) errs.push(m.text()); });
@@ -232,6 +233,20 @@ await prueba('presentación: en «La voz del comercio» cada comercio cuenta una
   assert.deepEqual(r.filas.find(x => x[0] === 'Pide una tasa más baja'), ['Pide una tasa más baja', 2]);
   assert.ok(r.filas.some(x => x[0] === 'Sin punto de dolor registrado' && x[1] === 1));
   assert.equal(r.quePaso, 5, '«qué pasó en la visita» no suma el total'); assert.equal(r.sumaDolor, r.conDolor, 'la tabla de dolores no suma su total');
+});
+await prueba('reporte para directorio: PDF A4 con los cinco cuadros en el orden del desglose y sin «CRM»', async () => {
+  await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; S.totBBVA = null; }, hoy);
+  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-reporte-dir]')]);
+  assert.match(d.suggestedFilename(), /^Avance_campana_.+\.pdf$/);
+  const f = path.join(RAIZ, 'qa', 'salida_reporte.pdf'); await d.saveAs(f);
+  const pdf = fs.readFileSync(f).toString('latin1'); fs.unlinkSync(f);
+  assert.ok(pdf.startsWith('%PDF'), 'no es un PDF');
+  const orden = ['COMERCIOS VISITADOS', 'CON CONTACTO', 'REACTIVADOS', 'TASA DE CONVERSI', 'VALOR GENERADO'].map(t => pdf.indexOf('(' + t));
+  assert.ok(orden.every(i => i > 0) && orden.every((i, k) => !k || i > orden[k - 1]), 'los cuadros no siguen el orden del desglose: ' + orden.join(','));
+  assert.ok(!/CRM/.test(pdf), 'el reporte dice «CRM»');
+  for (const t of ['De la base al objetivo'.toUpperCase(), 'S/ 0,00 MM', '50,00%']) assert.ok(pdf.includes(t), 'falta en el reporte: ' + t);
+  await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();

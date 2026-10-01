@@ -375,6 +375,7 @@ function cascaron(){
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
         <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hoja KPIs y hoja Base (una fila por Customer ID)">Base para BBVA</button>
         <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
+        <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
@@ -1837,7 +1838,7 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-reporte-dir],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-descartar-ret")){
     const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
@@ -1852,6 +1853,7 @@ document.addEventListener("click", async ev => {
   if (t.hasAttribute("data-pq")){ S.pqSel = S.pqSel === t.dataset.pq ? "" : t.dataset.pq; pintar(); if (S.pqSel) document.querySelector(".pq-lista-ancla")?.scrollIntoView({ behavior:"smooth", block:"start" }); return; }
   if (t.hasAttribute("data-base-bbva")){ baseBBVA(); return; }
   if (t.hasAttribute("data-ppt-bbva")){ presentacionBBVA(); return; }
+  if (t.hasAttribute("data-reporte-dir")){ reporteDirectorio(); return; }
   if (t.hasAttribute("data-fb-csv")){ csvFeedback(); return; }
   if (t.hasAttribute("data-fb-tipo")){ S.fbTipo = S.fbTipo === t.dataset.fbTipo ? "" : t.dataset.fbTipo; pintar(); return; }
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
@@ -2152,27 +2154,29 @@ function mostrarCitas(citas, C){
   d.querySelector("[data-citas-copiar]").onclick = () => { navigator.clipboard && navigator.clipboard.writeText(citas.join("\n")).then(() => toast("Citas copiadas."), () => toast("No se pudo copiar.")); };
   document.body.appendChild(d);
 }
+// El corte y los datos de la presentación y del reporte para directorio salen de aquí: así las dos piezas dicen lo mismo.
+async function corteYDatos(que, pieza){
+  if (!S.periodo){ toast("No hay un periodo abierto."); return null; }
+  const hoy = hoyISO(), sugerido = ayerISO() < S.periodo.ini ? S.periodo.ini : ayerISO();
+  const txt = prompt(`Fecha de corte ${que} (DD/MM/AAAA).\nJueves: corte al día anterior. Lunes: semana cerrada al domingo.`, sugerido.split("-").reverse().join("/"));
+  if (txt === null) return null;
+  let C = leerCorte(txt);
+  if (!C || C > hoy || C < S.periodo.ini){ toast("Fecha de corte no válida: tiene que estar entre el inicio del periodo y hoy."); return null; }
+  await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), S.geo ? null : cargarGeo()]);
+  const av0 = (S.avance || [])[0] || {};
+  if (!av0.meta_visitas || !av0.meta_reactivados || !av0.meta_conversion) throw new Error("no se pudieron leer las metas del periodo; actualiza y vuelve a intentar");
+  const TB = (await cargarTotalesBBVA().catch(() => [])).find(u => u.corte <= C) || null;
+  // Las cifras cuadran solo si las visitas y la data de BBVA tienen la misma fecha de corte
+  if (TB && TB.corte !== C && confirm(`La data de BBVA está al ${fISO(TB.corte)} y elegiste el ${fISO(C)}.\n\nAceptar: armar ${pieza} al ${fISO(TB.corte)} (todas las cifras cuadran).\nCancelar: armarlo al ${fISO(C)} (visitas al ${fISO(C)}, reactivación al ${fISO(TB.corte)}).`)) C = TB.corte;
+  return { C, D:datosPresentacion(C, await cargarResultadosBBVA(C).catch(() => null), TB) };
+}
 async function presentacionBBVA(){
   if (S._armandoPpt) return;
-  if (!S.periodo){ toast("No hay un periodo abierto."); return; }
-  const hoy = hoyISO(), sugerido = ayerISO() < S.periodo.ini ? S.periodo.ini : ayerISO();
-  const txt = prompt("Fecha de corte de la presentación (DD/MM/AAAA).\nJueves: corte al día anterior. Lunes: semana cerrada al domingo.", sugerido.split("-").reverse().join("/"));
-  if (txt === null) return;
-  let C = leerCorte(txt);
-  if (!C || C > hoy || C < S.periodo.ini){ toast("Fecha de corte no válida: tiene que estar entre el inicio del periodo y hoy."); return; }
-  S._armandoPpt = true; toast("Armando la presentación…");
+  S._armandoPpt = true;
   try {
+    const r = await corteYDatos("de la presentación", "la presentación"); if (!r) return;
+    const { C, D } = r; toast("Armando la presentación…");
     if (!window.PptxGenJS) await cargarScript("https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js");
-    await Promise.all([cargarActividad(true), cargarBase(), cargarAvance(), cargarFbInferido(), cargarMsiInferido(), S.geo ? null : cargarGeo()]);
-    const av0 = (S.avance || [])[0] || {};
-    if (!av0.meta_visitas || !av0.meta_reactivados || !av0.meta_conversion) throw new Error("no se pudieron leer las metas del periodo; actualiza y vuelve a intentar");
-    let TB = (await cargarTotalesBBVA().catch(() => [])).find(u => u.corte <= C) || null;
-    // Las cifras cuadran solo si las visitas y la data de BBVA tienen la misma fecha de corte
-    if (TB && TB.corte !== C && confirm(`La data de BBVA está al ${fISO(TB.corte)} y elegiste el ${fISO(C)}.
-
-Aceptar: armar la presentación al ${fISO(TB.corte)} (todas las cifras cuadran).
-Cancelar: armarla al ${fISO(C)} (visitas al ${fISO(C)}, reactivación al ${fISO(TB.corte)}).`)) C = TB.corte;
-    const D = datosPresentacion(C, await cargarResultadosBBVA(C).catch(() => null), TB);
     const pres = new PptxGenJS(); pres.layout = "LAYOUT_WIDE"; pres.author = "Stratis"; pres.company = "Stratis"; pres.title = `Campaña BBVA Adquirencia · corte al ${fISO(C)}`;
     armarLaminas(pres, D);
     await pres.writeFile({ fileName:`Mastercard_Campaña_BBVA_Adquirencia_${C.replace(/-/g, "")}.pptx` });
@@ -2542,3 +2546,172 @@ const zonaNum = z => { const m = String(z || "").match(/^ZONA\s*(\d+)/i); return
 const zonaLugar = z => { const m = String(z || "").match(/^ZONA\s*\d+\s*-\s*(.+)$/i); return m ? nombreDistrito(m[1]) : ""; };
 const nombreZona = z => { const m = String(z || "").match(/^ZONA\s*(\d+)\s*-\s*(.+)$/i); return m ? `Zona ${m[1]} · ${nombreDistrito(m[2])}` : String(z || "Sin zona"); };
 const nombreDistrito = s => TILDES[String(s || "").toUpperCase()] || nombreDistritoBase(s);
+
+
+/* =========================================================================
+   Reporte para directorio (A4, PDF) · Jose, 30/09/2026
+   La hoja «Avance de la campaña» del CRM v1, con los datos de la v2 y la facturación de BBVA. Usa los mismos datos de la
+   presentación (datosPresentacion), así que las cifras coinciden. Va al directorio de BBVA y Mastercard: sin nombres de
+   ejecutivos ni de comercios, sin bono y sin la palabra «CRM». Los cinco cuadros siguen el orden del desglose (Oliver, 30/09):
+   visitados → con contacto → reactivados → conversión → valor generado.
+   ========================================================================= */
+const LOGO_STRATIS = "{{RECURSO:logo_stratis.png}}";
+async function reporteDirectorio(){
+  if (S._armandoRep) return;
+  S._armandoRep = true;
+  try {
+    const r = await corteYDatos("del reporte", "el reporte"); if (!r) return;
+    toast("Armando el reporte…");
+    if (!(window.jspdf && window.jspdf.jsPDF)) await cargarScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+    const doc = new window.jspdf.jsPDF({ unit:"mm", format:"a4" });
+    hojaDirectorio(doc, r.D);
+    doc.save(`Avance_campana_${r.C}_${nombrePeriodo(r.D.p).replace(/\s+/g, "")}.pdf`);
+    toast("Reporte descargado: corte al " + fISO(r.C) + ".");
+  } catch(e){ toast("No se pudo armar el reporte: " + (e.message || e)); }
+  finally { S._armandoRep = false; }
+}
+// Datos propios de la hoja (día a día y distritos), con las mismas reglas que la presentación
+function datosHoja(D){
+  const C = D.C, per = D.p.id, enC = c => (S.baseMap[c] || {}).correo;
+  const vv = (S.act || []).filter(v => v.estado_anul !== "anulada" && v.periodo === per && iso(v.visitado_en) <= C && v.lat != null && !v.fuera_plazo && enC(v.customer_id));
+  // la semana: la última cerrada (lunes a domingo) hasta el corte; si no hay, la semana en curso
+  const sem = D.semanas.filter(w => w.cerrada).slice(-1)[0] || D.semanas.slice(-1)[0];
+  const lun = sem ? sem.lun : D.p.ini, dom = masDias(lun, 6);
+  const habiles = D.dh.filter(d => d >= lun && d <= masDias(lun, 4) && d <= C);
+  const porDia = f => { const o = {}; vv.filter(f).forEach(v => { const d = iso(v.visitado_en); if (d >= lun && d <= dom) (o[d] ||= new Set()).add(v.customer_id); });
+    const n = {}; Object.keys(o).forEach(d => { n[d] = o[d].size; }); return n; };
+  const nuevos = {}; D.serieP.forEach(x => { if (x.dia >= lun && x.dia <= dom && x.nuevos != null) nuevos[x.dia] = x.nuevos; });
+  // igual que la lámina 3: lo del fin de semana se reparte entre los días hábiles con campo de esa semana
+  const repartir = n => { const destino = habiles.filter(d => (nuevos[d] || 0) > 0).length ? habiles.filter(d => (nuevos[d] || 0) > 0) : habiles, out = {};
+    habiles.forEach(d => { out[d] = n[d] || 0; });
+    Object.keys(n).filter(d => !habiles.includes(d) && n[d]).forEach(d => { if (!destino.length) return; const b = Math.floor(n[d] / destino.length); let r = n[d] - b * destino.length;
+      destino.forEach(x => { out[x] += b + (r > 0 ? 1 : 0); r--; }); });
+    return habiles.map(d => out[d] || 0); };
+  const semana = { lun, cerrada:!!(sem && sem.cerrada), fin:sem ? sem.fin7 : C, dias:habiles, finde:D.finde.some(x => x.dia >= lun && x.dia <= dom),
+    visitados:habiles.map(d => nuevos[d] || 0), contacto:repartir(porDia(v => v.con !== "Nadie")),
+    decide:repartir(porDia(v => v.que === "Reunión concretada")), errada:repartir(porDia(v => v.motivo === "Dirección errada")) };
+  // distritos: los siete con más comercios visitados
+  const errada = {}; new Set(vv.filter(v => v.motivo === "Dirección errada").map(v => v.customer_id)).forEach(c => { const d = (S.baseMap[c] || {}).distrito; if (d) errada[d] = (errada[d] || 0) + 1; });
+  const distritos = Object.values(D.dist).filter(o => o.cartera).map(o => Object.assign({ errada:errada[o.clave] || 0 }, o)).sort((a, b) => b.vis - a.vis || b.cartera - a.cartera);
+  const conVisita = distritos.filter(o => o.vis).length;
+  // lectura: la dirección errada y quien decide
+  const comErr = Object.values(errada).reduce((a, n) => a + n, 0), topErr = Object.entries(errada).sort((a, b) => b[1] - a[1]).slice(0, 2);
+  const conCont = vv.filter(v => v.con !== "Nadie"), noDecide = conCont.filter(v => (v.feedback || []).includes("No se encontraba la persona que tomaba decisiones")).length;
+  return { semana, distritos:distritos.slice(0, 7), nDistritos:distritos.length, conVisita, comErr, topErr, visitasContacto:conCont.length, noDecide };
+}
+function hojaDirectorio(doc, D){
+  const H = datosHoja(D), Q = D.tot, W = 210, m = 12;
+  const NAVY = [12, 17, 55], CORAL = [248, 111, 53], VERDE = [11, 188, 150], VERDE_T = [7, 120, 95], AZUL = [59, 67, 251], AZUL_OSC = [35, 44, 134],
+    GRIS = [63, 80, 115], GRIS2 = [140, 152, 172], LINEA = [221, 226, 236], SUELO = [233, 236, 243], HUESO = [244, 246, 250], ROJO = [176, 58, 36], BLANCO = [255, 255, 255];
+  const san = t => String(t == null ? "" : t).replace(/[≈]/g, "aprox.").replace(/[–—]/g, "-").replace(/…/g, "...").replace(/[^\x00-\xFF]/g, "");
+  const fuente = (z, b) => { doc.setFont("helvetica", b ? "bold" : "normal"); doc.setFontSize(z); };
+  const txt = (t, x, y, o = {}) => { fuente(o.size || 8, o.bold); doc.setTextColor(...(o.color || GRIS)); doc.text(san(t), x, y, { align:o.align || "left" }); };
+  const ancho = (t, z, b) => { fuente(z, b); return doc.getTextWidth(san(t)); };
+  const caja = (x, y, w, h, col, r) => { doc.setFillColor(...col); if (r) doc.roundedRect(x, y, w, h, r, r, "F"); else doc.rect(x, y, w, h, "F"); };
+  const borde = (x, y, w, h, r) => { doc.setDrawColor(...LINEA); doc.setLineWidth(0.25); doc.roundedRect(x, y, w, h, r || 0, r || 0, "S"); };
+  const parrafo = (t, x, y, w, z, col, int) => { fuente(z, false); doc.setTextColor(...(col || GRIS)); const ls = doc.splitTextToSize(san(t), w); ls.forEach((l, k) => doc.text(l, x, y + k * int)); return y + ls.length * int; };
+  const titulo = (t, y, x0 = m, an = W - 2 * m) => { const T = t.toUpperCase(); txt(T, x0, y, { size:8.6, bold:true, color:NAVY }); doc.setDrawColor(...LINEA); doc.setLineWidth(0.25); doc.line(x0 + ancho(T, 8.6, true) + 3, y - 1.1, x0 + an, y - 1.1); };
+  const nPE = x => numPE(Math.round(x)), p0 = (a, b) => b ? Math.round(100 * a / b) + "%" : "-";
+  const fecha = d => d ? d.split("-").reverse().join("/") : "-", plazo = `Plazo de cumplimiento: ${Number(D.p.fin.slice(8))} ${MESES[Number(D.p.fin.slice(5, 7)) - 1].slice(0, 3)}`;
+  const corteB = D.rb ? fISO(D.rb.corte) : null, visitB = D.rb ? D.rb.visitados : D.visitados, reac = D.reactivados;
+
+  // cabecera
+  caja(0, 0, W, 44, NAVY);
+  try { doc.addImage(LOGO_STRATIS, "PNG", m, 9, 30, 7.4); } catch(e){ txt("Stratis", m, 15, { size:16, bold:true, color:BLANCO }); }
+  txt("AVANCE DE LA CAMPAÑA", m, 24.5, { size:8.2, bold:true, color:CORAL });
+  txt("Campaña BBVA Adquirencia", m, 32.5, { size:18.5, bold:true, color:BLANCO });
+  txt(`Reactivación de POS · ${D.nEj} ejecutivos comerciales en campo`, m, 38.6, { size:8.6, color:[201, 208, 228] });
+  const nPer = (String(nombrePeriodo(D.p)).match(/^periodo (\d+)$/) || [])[1];
+  [[nPer ? `Periodo ${nPer} de 5` : "Periodo", `${fecha(D.p.ini)} - ${fecha(D.p.fin)}`], [H.semana.cerrada ? "Semana cerrada" : "Semana en curso", `${fecha(H.semana.lun)} - ${fecha(H.semana.cerrada ? masDias(H.semana.lun, 6) : D.C)}`], ["Base asignada", `${nPE(D.cartera)} comercios`]]
+    .forEach(([a, b], k) => { const y = 10.5 + k * 11; txt(a.toUpperCase(), W - m, y, { size:6.6, color:[142, 154, 184], align:"right" }); txt(b, W - m, y + 5, { size:10.2, bold:true, color:BLANCO, align:"right" }); });
+  caja(0, 44, W, 1.6, CORAL);
+
+  // los cinco cuadros, en el orden del desglose
+  let y = 55;
+  titulo(`Avances del ${nombrePeriodo(D.p)}`, y); y += 3.5;
+  const conv = reac != null ? 100 * reac / Math.max(1, visitB) : null;
+  const cards = [
+    { rot:"Comercios visitados", ind:"1", val:nPE(D.visitados), sub:`de ${nPE(D.meta.vis)} visitas objetivo`, pie:`${p0(D.visitados, D.meta.vis)} de la meta del periodo`, alerta:`faltan ${nPE(Math.max(0, D.meta.vis - D.visitados))}`, ok:D.visitados >= D.meta.vis * D.dhCorte / Math.max(1, D.dh.length), base:plazo },
+    { rot:"Con contacto", ind:"1", val:nPE(D.contactados), sub:`de ${nPE(D.visitados)} comercios visitados`, pie:"conversación con el comercio", alerta:`${p0(D.contactados, D.visitados)} de los visitados`, ok:true, base:"Dueño, encargado o tercero" },
+    { rot:"Reactivados", ind:"2", val:reac == null ? "-" : nPE(reac), sub:`de ${nPE(D.meta.rea)} reactivaciones objetivo`, pie:"transaccionan tras la visita", alerta:reac == null ? "pendiente de BBVA" : `faltan ${nPE(Math.max(0, D.meta.rea - reac))}`, ok:reac != null && reac >= D.meta.rea * D.dhCorte / Math.max(1, D.dh.length), base:plazo },
+    { rot:"Tasa de conversión", ind:"1,2", val:conv == null ? "-" : conv.toFixed(2).replace(".", ",") + "%", sub:`meta ${D.meta.conv}%`, pie:reac == null ? "pendiente de BBVA" : `${nPE(reac)} reactivados ÷ ${nPE(visitB)} visitados`, alerta:conv == null ? "" : conv >= D.meta.conv ? "sobre la meta" : "bajo la meta", ok:conv != null && conv >= D.meta.conv, base:plazo },
+    { rot:"Valor generado", ind:"2", val:D.rb && D.rb.facturado != null ? `S/ ${(D.rb.facturado / 1e6).toFixed(2).replace(".", ",")} MM` : "-", sub:reac == null ? "pendiente de BBVA" : `por los ${nPE(reac)} reactivados`, pie:Q && reac ? `aprox. S/ ${nPE(Q.tv.fac / reac / 1000)} mil por reactivado` : "", alerta:corteB ? `dato al ${corteB}` : "", ok:true, base:"Fuente: data de BBVA" }];
+  const anT = (W - 2 * m - 4 * 2.4) / 5, alT = 30;
+  cards.forEach((t, k) => { const x = m + k * (anT + 2.4);
+    borde(x, y, anT, alT, 0.8); caja(x, y, anT, 1.3, VERDE);   // Jose, 30/09: las cinco franjas superiores en verde
+    txt(t.rot.toUpperCase(), x + 2.2, y + 6.3, { size:6.4, color:GRIS }); txt(t.ind, x + 2.2 + ancho(t.rot.toUpperCase(), 6.4, false) + 0.6, y + 5.2, { size:4.6, bold:true, color:VERDE_T });
+    txt(t.val, x + 2.2, y + 13.6, { size:t.val.length > 9 ? 12.5 : 15, bold:true, color:NAVY });
+    parrafo(t.sub, x + 2.2, y + 17.6, anT - 4.4, 6.4, NAVY, 2.6);
+    txt(t.pie, x + 2.2, y + 22.3, { size:5.9, color:GRIS });
+    txt(t.alerta, x + 2.2, y + 25.2, { size:6.4, bold:true, color:t.ok ? VERDE_T : CORAL });
+    doc.setDrawColor(...LINEA); doc.setLineWidth(0.2); doc.line(x + 2.2, y + 26.6, x + anT - 2.2, y + 26.6);
+    txt(t.base, x + 2.2, y + 28.9, { size:5.3, color:GRIS2 }); });
+  y += alT + 4;
+  y = parrafo(`Fuentes: ¹ Registro de visitas de Stratis, corte al ${fecha(D.C)}.  ² Data transaccional provista por BBVA${corteB ? `, cruzada con las visitas de Stratis al ${fecha(D.rb.corte)}` : ""}. Las cifras de reactivación y volumen son informadas por BBVA; Stratis no tiene acceso a la fuente para validarlas.`, m, y, W - 2 * m, 6, GRIS2, 2.6) + 5;
+
+  // dónde está el periodo (izquierda) y de la base al objetivo (derecha)
+  const anI = 86, xD = m + anI + 8, anD = W - m - xD, y0 = y;
+  titulo("Dónde está el periodo", y, m, anI); titulo("De la base al objetivo", y, xD, anD);
+  const tiempo = D.dhCorte / Math.max(1, D.dh.length);
+  let yl = y + 6;
+  [["Tiempo transcurrido", `${D.dhCorte} de ${D.dh.length} días hábiles`, tiempo, [150, 160, 185]], ["Comercios visitados¹", `${nPE(D.visitados)} de ${nPE(D.meta.vis)} visitas objetivo`, D.visitados / D.meta.vis, CORAL],
+   ["Reactivados²", reac == null ? "pendiente de BBVA" : `${nPE(reac)} de ${nPE(D.meta.rea)}${corteB ? ` · al ${corteB}` : ""}`, reac == null ? 0 : reac / D.meta.rea, VERDE],
+   ["Conversión frente a la meta¹,²", conv == null ? "pendiente de BBVA" : `${conv.toFixed(2).replace(".", ",")}% contra ${D.meta.conv}% · ${(conv / D.meta.conv).toFixed(1).replace(".", ",")} veces`, conv == null ? 0 : conv / D.meta.conv, AZUL]]
+    .forEach(([t, d, f, col]) => { txt(t, m, yl, { size:7.6, bold:true, color:NAVY }); txt(d, m + anI, yl, { size:6.4, color:GRIS, align:"right" });
+      caja(m, yl + 1.8, anI, 2.9, SUELO, 1.45); if (f > 0) caja(m, yl + 1.8, Math.max(2.9, anI * Math.min(1, f)), 2.9, col, 1.45);
+      doc.setDrawColor(...NAVY); doc.setLineWidth(0.45); doc.setLineDashPattern([0.8, 0.6], 0); doc.line(m + anI * tiempo, yl + 0.9, m + anI * tiempo, yl + 5.6); doc.setLineDashPattern([], 0);
+      yl += 10; });
+  yl = parrafo(`La línea punteada marca el tiempo transcurrido (${Math.round(tiempo * 100)}%). Lo que la supera va por delante del calendario.`, m, yl, anI, 6, GRIS2, 2.6);
+  let yr = y + 6;
+  [["Base asignada", D.cartera, NAVY, `${nPE(D.cartera / D.nEj)} por ejecutivo · renovada en cada periodo`], ["Visitados¹", D.visitados, CORAL, "comercios distintos con visita presencial"],
+   ["Con contacto¹", D.contactados, AZUL_OSC, "conversación con el comercio, con o sin quien decide"], ["Reactivados²", reac == null ? 0 : reac, VERDE, reac == null ? "pendiente de la data de BBVA" : `transaccionan después de la visita${corteB ? ` · data BBVA al ${corteB}` : ""}`]]
+    .forEach(([t, n, col, pie]) => { txt(t, xD, yr, { size:7.6, bold:true, color:NAVY }); const pc = ` · ${p0(n, D.cartera)}`;
+      txt(pc, W - m, yr, { size:6.4, color:GRIS, align:"right" }); txt(nPE(n), W - m - ancho(pc, 6.4, false), yr, { size:8.8, bold:true, color:NAVY, align:"right" });
+      caja(xD, yr + 1.8, anD, 2.9, SUELO, 1.45); if (n) caja(xD, yr + 1.8, Math.max(2.9, anD * n / D.cartera), 2.9, col, 1.45);
+      txt(pie, xD, yr + 8, { size:6, color:GRIS }); yr += 13.5; });
+  y = Math.max(yl, yr) + 4;
+
+  // la semana, día a día
+  const S1 = H.semana, dias = S1.dias;
+  titulo(`La semana, día a día¹ · del ${fISO(S1.lun)} al ${fISO(dias[dias.length - 1] || S1.lun)}`, y); y += 3.5;
+  const anP = (W - 2 * m - 3 * 3) / 4, alP = 30;
+  [["Comercios visitados", S1.visitados, CORAL], ["Con contacto", S1.contacto, AZUL_OSC], ["Habló con quien decide", S1.decide, VERDE], ["Dirección errada", S1.errada, ROJO]].forEach(([t, vals, col], k) => {
+    const x = m + k * (anP + 3); borde(x, y, anP, alP, 0.8); txt(t.toUpperCase(), x + 2.2, y + 4.6, { size:6.2, bold:true, color:NAVY });
+    const mx = Math.max(1, ...vals), bw = Math.min(5.6, (anP - 4.4 - (vals.length - 1) * 2) / Math.max(1, vals.length)), yb = y + 24;
+    vals.forEach((v, j) => { const bx = x + 2.2 + j * (bw + 2), h = v ? Math.max(0.6, v / mx * 13) : 0, by = yb - h;
+      if (h) caja(bx, by, bw, h, col); txt(String(v), bx + bw / 2, by - 1, { size:6, bold:true, color:NAVY, align:"center" });
+      txt(fISO(dias[j]), bx + bw / 2, yb + 3.4, { size:4.9, color:GRIS2, align:"center" }); });
+    doc.setDrawColor(...LINEA); doc.setLineWidth(0.2); doc.line(x + 2, yb, x + anP - 2, yb); });
+  y += alP + 3.6;
+  if (S1.finde) { txt("Los comercios visitados en fin de semana se muestran repartidos entre los días hábiles de su semana; el total no cambia.", m, y, { size:6, color:GRIS2 }); y += 4; }
+  y += 3;
+
+  // cómo se va desarrollando la campaña: lectura y distritos
+  titulo("Cómo se va desarrollando la campaña", y); y += 3.5;
+  const anL = 96, xT = m + anL + 6, anTb = W - m - xT;
+  const p1 = `Al ${fecha(D.C)} el equipo lleva ${nPE(D.visitados)} comercios distintos visitados, ${p0(D.visitados, D.meta.vis)} de la meta del periodo con ${Math.round(tiempo * 100)}% de los días hábiles transcurridos, a ${nPE(D.diasCampo ? D.visitados / D.diasCampo : 0)} comercios por día hábil con campo.`;
+  const p2 = reac == null ? "La reactivación y la facturación se informarán cuando BBVA confirme su data." : `Según la data de BBVA al ${corteB}², ${nPE(reac)} comercios visitados ya transaccionan${D.rb.facturado != null ? ` y generaron S/ ${(D.rb.facturado / 1e6).toFixed(2).replace(".", ",")} MM${Q && reac ? `, unos S/ ${nPE(Q.tv.fac / reac / 1000)} mil por comercio` : ""}` : ""}: ${conv.toFixed(2).replace(".", ",")}% de conversión frente a una meta de ${D.meta.conv}%.`;
+  fuente(7.8, false); const l1 = doc.splitTextToSize(san(p1), anL - 8), l2 = doc.splitTextToSize(san(p2), anL - 8), alB = (l1.length + l2.length) * 3.5 + 7;
+  caja(m, y, anL, alB, HUESO); caja(m, y, 1.2, alB, CORAL);
+  let yt = y + 5.2; [l1, l2].forEach(ls => { doc.setTextColor(...GRIS); ls.forEach(l => { doc.text(l, m + 4.5, yt); yt += 3.5; }); yt += 1.6; });
+  let ya = y + alB + 5.5;
+  const faltan = Math.max(0, D.meta.vis - D.visitados), habRest = D.dh.filter(d => d > D.C).length, ritmo = D.diasCampo ? D.visitados / D.diasCampo : 0, proy = D.visitados + ritmo * habRest;
+  [H.comErr ? `1 de cada ${Math.max(1, Math.round(D.visitados / H.comErr))} comercios visitados (${nPE(H.comErr)} de ${nPE(D.visitados)}) tenía la dirección de la base errada${H.topErr.length ? `, sobre todo en ${H.topErr.map(([d, n]) => `${nombreDistrito(d)} (${n})`).join(" y ")}` : ""}.` : "",
+   H.visitasContacto ? `En ${nPE(H.noDecide)} de las ${nPE(H.visitasContacto)} visitas con contacto no estaba quien decide: reagendar con el dueño es la palanca para convertir más.` : "",
+   habRest ? `Quedan ${nPE(D.cartera - D.visitados)} de los ${nPE(D.cartera)} comercios sin visita y ${habRest} días hábiles: con el ritmo actual, el periodo cerraría ${proy >= D.meta.vis ? "sobre" : "bajo"} la meta de ${nPE(D.meta.vis)}${faltan ? ` (faltan ${nPE(faltan)})` : ""}.` : `El periodo cerró con ${nPE(D.visitados)} comercios visitados.`]
+    .filter(Boolean).forEach(a => { txt(">>", m, ya, { size:7.4, bold:true, color:CORAL }); ya = parrafo(a, m + 6, ya, anL - 6, 7.4, GRIS, 3.2) + 2.2; });
+  // tabla de distritos
+  const cols = [["DISTRITO", 0, "left"], ["BASE", 42, "right"], ["VISIT.", 53, "right"], ["CONT.", 63, "right"], ["REALIZ.", 74, "right"], ["ERRADA", anTb, "right"]];
+  let yd = y + 2; cols.forEach(([h, dx, al]) => txt(h, xT + dx, yd, { size:5.8, bold:true, color:NAVY, align:al })); yd += 1.8;
+  H.distritos.forEach(o => { doc.setDrawColor(...LINEA); doc.setLineWidth(0.2); doc.line(xT, yd, xT + anTb, yd); yd += 4.3;
+    const nom = nombreDistrito(o.clave); txt(nom.length > 24 ? nom.slice(0, 23) + "." : nom, xT, yd, { size:7, bold:true, color:NAVY });
+    [[o.cartera, 42, GRIS, false], [o.vis, 53, GRIS, false], [o.con, 63, GRIS, false], [o.realiza, 74, VERDE_T, true], [o.errada, anTb, CORAL, true]]
+      .forEach(([v, dx, col, b]) => txt(String(v), xT + dx, yd, { size:7, bold:b, color:col, align:"right" })); yd += 1.4; });
+  doc.setDrawColor(...LINEA); doc.line(xT, yd, xT + anTb, yd); yd += 4;
+  parrafo(`¹ Los siete distritos con más comercios visitados (${H.conVisita} con visita, de ${H.nDistritos} en la base). Realiz.: el comercio dijo que realizará consumos. Errada: no estaba en la dirección de la base.`, xT, yd, anTb, 5.8, GRIS2, 2.5);
+
+  // pie
+  doc.setDrawColor(...LINEA); doc.setLineWidth(0.25); doc.line(m, 284, W - m, 284);
+  txt("Stratis LATAM · Campaña BBVA Adquirencia", m, 288.5, { size:6.6, color:GRIS2 });
+  txt(`Corte al ${fecha(D.C)}${corteB ? ` · reactivación y volumen al ${fecha(D.rb.corte)}` : ""}`, W - m, 288.5, { size:6.6, color:GRIS2, align:"right" });
+}
