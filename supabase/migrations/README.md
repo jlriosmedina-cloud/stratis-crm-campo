@@ -18,6 +18,7 @@ Se aplican solo con el OK de Jose.
 | `20260930100000_totales_bbva.sql` | 30/09/2026, con el OK de Jose (escritorio publicado el mismo día) | `20260930120544` |
 | `20260930120000_mi_base_reactivado_bbva.sql` | 30/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260930182215` |
 | `20261001100000_seguimiento_remoto.sql` | 01/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261001183005` |
+| `20261006100000_retiro_temporal_de_la_base.sql` | 06/10/2026, con el OK de Jose (cambia `v2_mi_base`; el celular no cambia de versión) | `20261006100628` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

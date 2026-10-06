@@ -555,6 +555,33 @@ caso('seguimiento remoto: solo visitas sin contacto, con canal y resultado de la
   await db.query(`update v2_visitas set periodo = '2098-12' where id = $1`, [vieja]);
   await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [vieja]), /periodo cerrado/);
 });
+caso('retiro temporal: el ejecutivo deja de ver el comercio; el analista lo sigue viendo; al restituirlo vuelve', async () => {
+  // comercios propios de este caso, sin visitas de los casos anteriores
+  await db.exec(`insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad) values ('00000071', 'COMERCIO DE PRUEBA 71 SAC', -12.09, -77.04, 'numero'), ('00000072', 'COMERCIO DE PRUEBA 72 SAC', -12.09, -77.04, 'numero');
+    insert into v2_asignaciones(periodo, customer_id, correo) values ('2099-01', '00000071', '${EJ}'), ('2099-01', '00000072', '${EJ}');`);
+  const ve = async (u, cid) => (await como(u, `select customer_id from public.v2_mi_base('2099-01') where customer_id = $1`, [cid])).rows.length;
+  assert.equal(await ve(EJ, '00000071'), 1);
+  await db.query(`insert into v2_retiros_temporales(periodo, customer_id, motivo, retirado_por) values ('2099-01', '00000071', 'Ya factura según BBVA y no tiene visita', $1)`, [ANA]);
+  assert.equal(await ve(EJ, '00000071'), 0, 'el ejecutivo todavía lo ve');
+  assert.equal(await ve(ANA, '00000071'), 1, 'el analista debe seguir viéndolo (universo de los reportes)');
+  assert.equal(await ve(EJ, '00000072'), 1, 'se ocultó otro comercio');
+  // las apps no escriben en la tabla y el ejecutivo no la lee
+  await falla(como(EJ, `insert into v2_retiros_temporales(periodo, customer_id, motivo, retirado_por) values ('2099-01', '00000072', 'Prueba de escritura directa', $1)`, [EJ]), /permission denied/);
+  assert.equal((await como(EJ, `select * from v2_retiros_temporales`)).rows.length, 0);
+  assert.equal((await como(ANA, `select * from v2_retiros_temporales`)).rows.length >= 1, true);
+  await falla(como(null, `select * from v2_retiros_temporales`), /permission denied/);
+  // un solo retiro vigente por comercio
+  await falla(db.query(`insert into v2_retiros_temporales(periodo, customer_id, motivo, retirado_por) values ('2099-01', '00000071', 'Retiro duplicado de prueba', $1)`, [ANA]), /duplicate|unique/);
+  // si igual recibe una visita (por ejemplo, desde la cola de un celular con la base vieja), vuelve a verlo y le suma
+  await db.query(`insert into v2_retiros_temporales(periodo, customer_id, motivo, retirado_por) values ('2099-01', '00000072', 'Ya factura según BBVA y no tiene visita', $1)`, [ANA]);
+  assert.equal(await ve(EJ, '00000072'), 0);
+  await visitaPasada('00000072', 6, 'Nadie', { motivo: 'Cerrado' });
+  assert.equal(await ve(EJ, '00000072'), 1, 'un retirado con visita debe volver a verse');
+  const n19 = (await como(EJ, `select visitas from public.v2_mi_base('2099-01') where customer_id = '00000072'`)).rows[0];
+  assert.equal(Number(n19.visitas), 1, 'la visita no se cuenta en su base');
+  await db.query(`update v2_retiros_temporales set restituido_en = now(), restituido_por = $1 where customer_id = '00000071'`, [ANA]);
+  assert.equal(await ve(EJ, '00000071'), 1, 'al restituirlo debe volver');
+});
 caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
   await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
   const r = (await db.query(`select has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'SELECT') anon_lee,
