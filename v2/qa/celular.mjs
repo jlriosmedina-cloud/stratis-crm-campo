@@ -12,7 +12,18 @@ const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio
   // BBVA lo reporta reactivado (30/09): informativo, no cambia el estado
   comercio(12, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', bbva_reactivado: '2026-01-02' }),
   // visita sin contacto (01/10): espera el seguimiento remoto
-  comercio(13, { visitas: 1, visitas_validas: 1, estado: 'vis', ultima_visita: '2026-01-03T15:00:00Z', ultima_que: 'Sin éxito', ultima_motivo: 'Cerrado' })]);
+  comercio(13, { visitas: 1, visitas_validas: 1, estado: 'vis', ultima_visita: '2026-01-03T15:00:00Z', ultima_que: 'Sin éxito', ultima_motivo: 'Cerrado' }),
+  // reactivados BBVA vs. comisión (09/10): 14 falta 1 día (visita con contacto), 15 ya cuenta, 16 sin visita con contacto
+  comercio(14, { visitas: 1, visitas_validas: 1, estado: 'uno', ultima_visita: '2026-01-04T15:00:00Z', bbva_reactivado: '2026-01-02' }),
+  comercio(15, { visitas: 1, visitas_validas: 1, estado: 'rea', ultima_visita: '2026-01-04T15:00:00Z', bbva_reactivado: '2026-01-02' }),
+  comercio(16, { visitas: 1, visitas_validas: 1, estado: 'sin', ultima_visita: '2026-01-04T15:00:00Z', ultima_que: 'Sin éxito', ultima_motivo: 'Cerrado', bbva_reactivado: '2026-01-02' }),
+  // recupero del POS (09/10): 17 por llamar a Soporte, 18 en trámite, 19 entregado por validar
+  ...[17, 18, 19].map(i => comercio(i, { visitas: 1, visitas_validas: 1, estado: 'des', ultima_visita: '2026-01-05T15:00:00Z', ultima_que: 'Reunión concretada', ultima_decision: 'Desiste del producto' }))]);
+// 20: caso que pasó de un periodo anterior; el comercio ya no está en la base del ejecutivo
+const RECUP = [['00000018', 'tramite'], ['00000017', 'llamar'], ['00000019', 'entregado'], ['00000020', 'llamar']].map(([customer_id, paso]) => ({ customer_id, comercio: 'COMERCIO ' + customer_id, correo: EJECUTIVO.correo, visita_id: 'vr' + customer_id, paso,
+  caso_soporte: null, desde: '2026-01-05', actualizado_en: '2026-01-05T15:00:00Z', intentos: paso === 'llamar' ? 1 : 0, historial: paso === 'llamar' ? [{ en: '2026-01-06T15:00:00Z', accion: 'llame_soporte', detalle: 'No contestaron, vuelvo a llamar', paso: 'llamar' }] : [] }));
+const RBBVA = [{ customer_id: '00000012', dias_trx: 0, con_contacto: true, ultima_visita_id: 'v12' }, { customer_id: '00000014', dias_trx: 1, con_contacto: true, ultima_visita_id: 'v14' },
+  { customer_id: '00000015', dias_trx: 2, con_contacto: true, ultima_visita_id: 'v15' }, { customer_id: '00000016', dias_trx: 0, con_contacto: false, ultima_visita_id: 'v16' }];
 const NOPIDIO = 'No pidió el POS';
 // La visita de hoy del comercio 6, tal como la devuelve v2_visitas_de: habló con el dueño y aún no decide.
 const VISITA_HOY = { id: 'visita-hoy-prueba', periodo: 'PRUEBA', customer_id: '00000006', visitado_en: HACE_UN_MINUTO, recibido_en: HACE_UN_MINUTO,
@@ -24,7 +35,7 @@ const FX = {
   sesion: { user: { email: EJECUTIVO.correo }, access_token: 'prueba' },
   tablas: { usuarios: EJECUTIVO, v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' } },
   rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_registrar_visita: () => 'id-prueba',
-         v2_visitas_de: [VISITA_HOY], v2_editar_resultado: null, v2_mis_seguimientos: [], v2_registrar_seguimiento: () => 1 }
+         v2_visitas_de: [VISITA_HOY], v2_editar_resultado: null, v2_mis_seguimientos: [], v2_registrar_seguimiento: () => 1, v2_mis_reactivados_bbva: RBBVA, v2_mis_recuperos: RECUP, v2_avanzar_recupero: () => 'tramite' }
 };
 
 const CASOS = [
@@ -74,18 +85,88 @@ for (const tema of ['light', 'dark']) {
       c.ok(reg[1]); console.log(`ok  ${tema} · ${c.nombre || c.modo}`);
     } catch (e) { fallas++; console.log(`MAL ${tema} · ${c.nombre || c.modo}: ${e.message}`); await p.evaluate(() => { S.reg = null; pintar(); }); }
   }
-  // Reactivado según BBVA (30/09): se ve en la tarjeta, en el filtro y en Inicio, sin cambiar el estado
+  // Reactivados BBVA vs. comisión (09/10): etiqueta, mensaje, Inicio, filtro y contacto en la última visita aunque tuvo contacto
   try {
-    const r = await p.evaluate(() => { S.filtroEstado = 'bbva'; S.filtroVisita = 'todos'; const ids = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos';
-      S.vista = 'inicio'; S.ficha = null; pintar(); return { ids, estado:S.base.find(c => c.customer_id === '00000012').estado }; });
-    if (JSON.stringify(r.ids) !== '["00000012"]') throw new Error('filtro BBVA: ' + JSON.stringify(r.ids));
-    if (r.estado !== 'seg') throw new Error('cambió el estado');
-    if (!(await p.locator('text=como reactivado').count())) throw new Error('no aparece el aviso en Inicio');
-    await p.evaluate(() => { S.vista = 'base'; S.filtroEstado = 'bbva'; pintar(); }); await p.waitForTimeout(200);
-    if (!(await p.locator('.bbva-rea').count())) throw new Error('la tarjeta no muestra «Reactivado según BBVA»');
-    await p.evaluate(() => { S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
-    console.log(`ok  ${tema} · reactivado según BBVA (informativo)`);
-  } catch (e) { fallas++; console.log(`MAL ${tema} · reactivado según BBVA: ${e.message}`); }
+    const r = await p.evaluate(() => { S.filtroEstado = 'bbva'; S.filtroVisita = 'todos'; const ids = filtrar().map(c => c.customer_id).sort(); S.filtroEstado = 'todos';
+      const t = id => tarjeta(S.base.find(c => c.customer_id === id));
+      S.vista = 'inicio'; S.ficha = null; pintar(); return { ids, t12: t('00000012'), t14: t('00000014'), t15: t('00000015'), t16: t('00000016'), sinseg: S.base.filter(faltaSeguimiento).map(c => c.customer_id) }; });
+    assert.deepEqual(r.ids, ['00000012', '00000014', '00000016'], 'filtro por contactar');
+    assert.ok(r.t14.includes('Reactivado BBVA · falta 1 día'), 'etiqueta del 14');
+    assert.ok(r.t12.includes('Reactivado BBVA · falta transacción después de tu visita'), 'etiqueta del 12');
+    assert.ok(r.t15.includes('Reactivado · cuenta'), 'etiqueta del 15');
+    assert.ok(r.t16.includes('Reactivado BBVA · falta visita con contacto'), 'etiqueta del 16');
+    assert.deepEqual(r.sinseg, ['00000013'], 'el reactivado sin contacto va en su propia tarjeta, no en «falta seguimiento»');
+    const ini = await p.locator('.vista').innerText();
+    assert.ok(ini.includes('3 reactivados por contactar'), 'tarjeta de Inicio');
+    assert.match(ini, /Reactivados\s+que cuentan/, 'KPI');
+    assert.ok(!/pendiente de validación/i.test(ini), 'quedó «pendiente de validación»');
+    assert.equal(await p.locator('.rea-card [data-ficha]').first().getAttribute('data-ficha'), '00000014', '«falta 1 día» va primero');
+    // ya contactado después del corte: sale de la tarjeta
+    // «No respondió» lo deja en la lista; si respondió, sale (Jose, 09/10)
+    await p.evaluate(() => { S.seg = [{ id: 9, visita_id: 'v12', customer_id: '00000012', canal: 'Llamada', resultado: 'No respondió', nota: null, hecho_en: new Date().toISOString() }]; pintar(); });
+    assert.ok((await p.locator('.vista').innerText()).includes('3 reactivados por contactar'), '«No respondió» lo sacó de la tarjeta');
+    await p.evaluate(() => { S.seg[0].resultado = 'Respondió: aún no decide'; pintar(); });
+    assert.ok((await p.locator('.vista').innerText()).includes('2 reactivados por contactar'), 'el que respondió sigue en la tarjeta');
+    await p.evaluate(() => { S.seg = []; pintar(); });
+    // ficha del 14: mensaje y contacto en su última visita (con contacto)
+    await p.evaluate(v => { S.vista = 'base'; S.hist['00000014'] = [Object.assign({}, v, { id: 'v14', customer_id: '00000014' })]; S.ficha = '00000014'; pintar(); }, VISITA_HOY); await p.waitForTimeout(200);
+    assert.ok((await p.locator('.vista').innerText()).includes('para que cuente necesita transacciones en 2 días distintos después de tu visita'), 'mensaje en la ficha');
+    await p.click('[data-seg="v14"]'); await p.click('[data-seg-canal="Llamada"]'); await p.click('[data-seg-res="Respondió: usará el POS"]');
+    await p.click('[data-seg-enviar]'); await p.waitForTimeout(300);
+    const ll = await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_seguimiento').map(x => x[1]));
+    assert.equal(ll.at(-1).p_visita_id, 'v14');
+    // el 15 ya cuenta: sin botón de contacto en su visita con contacto
+    await p.evaluate(v => { S.hist['00000015'] = [Object.assign({}, v, { id: 'v15', customer_id: '00000015' })]; S.ficha = '00000015'; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
+    if (await p.locator('[data-seg]').count()) throw new Error('ofrece contacto a un reactivado que ya cuenta');
+    await p.evaluate(() => { S.ficha = null; delete S.hist['00000014']; delete S.hist['00000015']; S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
+    console.log(`ok  ${tema} · reactivados BBVA vs. comisión`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · reactivados BBVA vs. comisión: ${e.message}`); }
+  // Recupero del POS (09/10): tarjeta de Inicio, filtro, barra de pasos y un botón grande por paso
+  try {
+    await p.evaluate(() => { S.filtroEstado = 'todos'; S.vista = 'inicio'; S.ficha = null; pintar(); }); await p.waitForTimeout(150);
+    assert.ok((await p.locator('.vista').innerText()).includes('3 equipos por recuperar'), 'tarjeta de Inicio (incluye el que pasó de periodo)');
+    await p.click('.recup-card [data-ficha="00000020"]'); await p.waitForTimeout(150);
+    const t20 = await p.locator('.vista').innerText();
+    assert.ok(t20.includes('COMERCIO 00000020') && t20.includes('Llama a Soporte de Openpay'), 'ficha del caso fuera de la base');
+    assert.equal(await p.locator('[data-recup-accion="llame_soporte"]').count(), 1, 'debe poder avanzarlo');
+    await p.evaluate(() => { S.ficha = null; S.vista = 'inicio'; pintar(); });
+    assert.equal(await p.locator('.recup-card [data-ficha]').first().getAttribute('data-ficha'), '00000017', '«Llamar a Soporte» va primero');
+    // el comercio figura en la base con otro dueño, pero el caso es suyo: igual puede avanzarlo
+    await p.evaluate(() => { const c = S.base.find(b => b.customer_id === '00000017'); c._c = c.correo; c.correo = 'otro@ejemplo.com'; S.vista = 'base'; S.hist['00000017'] = []; S.ficha = '00000017'; pintar(); });
+    await p.waitForTimeout(150);
+    assert.equal(await p.locator('[data-recup-accion="llame_soporte"]').count(), 1, 'sin botón si el comercio tiene otro dueño en la base');
+    await p.evaluate(() => { const c = S.base.find(b => b.customer_id === '00000017'); c.correo = c._c; delete c._c; S.ficha = null; S.vista = 'inicio'; pintar(); });
+    const ids = await p.evaluate(() => { S.filtroEstado = 'recup'; S.filtroVisita = 'todos'; const r = filtrar().map(c => c.customer_id).sort(); S.filtroEstado = 'todos'; return r; });
+    assert.deepEqual(ids, ['00000017', '00000018', '00000019']);
+    const abrir = async cid => { await p.evaluate(id => { S.vista = 'base'; S.hist[id] = []; S.ficha = id; pintar(); }, cid); await p.waitForTimeout(150); };
+    await abrir('00000017');
+    let t = await p.locator('.vista').innerText();
+    assert.ok(t.includes('Llama a Soporte de Openpay para coordinar la devolución del POS.'), 'frase del paso 1');
+    assert.ok((await p.locator('.recup-pasos .on').innerText()).includes('Llamar a Soporte'), 'paso activo');
+    assert.ok(t.includes('No contestaron, vuelvo a llamar'), 'historial');
+    await p.click('[data-recup-accion="llame_soporte"]'); await p.click('[data-recup-det="Me dieron un número de caso"]');
+    await p.fill('#recupCaso', 'CAS-9'); await p.click('[data-recup-enviar]'); await p.waitForTimeout(300);
+    const ll = () => p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_avanzar_recupero').map(x => x[1]));
+    assert.deepEqual((await ll()).at(-1), { p_customer_id: '00000017', p_accion: 'llame_soporte', p_detalle: 'Me dieron un número de caso', p_caso: 'CAS-9', p_nota: null });
+    await abrir('00000018');
+    await p.click('[data-recup-accion="problema"]');
+    const ops = await p.locator('[data-recup-det]').evaluateAll(l => l.map(b => b.dataset.recupDet));
+    assert.deepEqual(ops, ['No quiere entregar el equipo', 'No ubica el equipo', 'Cambió de opinión: seguirá usando el POS'], '«Cambió de opinión» va al final');
+    const n0 = (await ll()).length;
+    await p.click('[data-recup-det="Cambió de opinión: seguirá usando el POS"]'); await p.click('[data-recup-enviar]'); await p.waitForTimeout(200);
+    assert.ok((await p.locator('.vista').innerText()).includes('Escribe en la nota por qué'), 'debe pedir la nota');
+    assert.equal((await ll()).length, n0, 'envió «Cambió de opinión» sin nota');
+    await p.evaluate(() => { S.recupReg = null; pintar(); });
+    assert.ok(await p.evaluate(() => RECUP.trabado.frase.includes('Avísale a Jose')), 'texto de «Trabado»');
+    await p.click('[data-recup-accion="entregado"]'); await p.click('[data-recup-enviar]'); await p.waitForTimeout(300);
+    assert.equal((await ll()).at(-1).p_accion, 'entregado');
+    await abrir('00000019');
+    t = await p.locator('.vista').innerText();
+    assert.ok(t.includes('falta que Jose lo valide'), 'entregado por validar');
+    assert.equal(await p.locator('[data-recup-accion]').count(), 0, 'no debe haber botón en entregado');
+    await p.evaluate(() => { S.ficha = null; S.vista = 'inicio'; pintar(); });
+    console.log(`ok  ${tema} · recupero del POS`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · recupero del POS: ${e.message}`); }
   // Seguimiento remoto (01/10): Inicio avisa, el filtro lo encuentra y la visita sin contacto lo registra sin tocar la visita
   try {
     const r = await p.evaluate(() => { S.filtroEstado = 'sinseg'; S.filtroVisita = 'todos'; const ids = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos';

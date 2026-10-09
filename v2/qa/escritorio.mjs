@@ -199,7 +199,7 @@ await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reacti
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 11, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Reclamo o comentario del comercio', 'comercios con respuesta', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
+  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Reclamo o comentario del comercio', 'comercios con respuesta', 'Volumen', 'Reactivados de la base', 'Comercios reactivados', 'visitas de Stratis al corte de la data de BBVA'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   assert.ok(!/ticket/i.test(txt), 'la presentación muestra el ticket promedio');
@@ -268,8 +268,56 @@ await prueba('reporte para directorio: PDF A4 con los cinco cuadros en el orden 
   const orden = ['COMERCIOS VISITADOS', 'CON CONTACTO', 'REACTIVADOS', 'TASA DE CONVERSI', 'VALOR GENERADO'].map(t => pdf.indexOf('(' + t));
   assert.ok(orden.every(i => i > 0) && orden.every((i, k) => !k || i > orden[k - 1]), 'los cuadros no siguen el orden del desglose: ' + orden.join(','));
   assert.ok(!/CRM/.test(pdf), 'el reporte dice «CRM»');
-  for (const t of ['De la base al objetivo'.toUpperCase(), 'S/ 0,00 MM', '50,00%']) assert.ok(pdf.includes(t), 'falta en el reporte: ' + t);
+  for (const t of ['De la base al objetivo'.toUpperCase(), 'S/ 0,00 MM', '50,00%', 'al corte de la data de BBVA']) assert.ok(pdf.includes(t), 'falta en el reporte: ' + t);
   await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
+});
+await prueba('reactivados BBVA vs. comisión: un estado por comercio, cuadro por ejecutivo y contactados', async () => {
+  const r = await p.evaluate(({ hoy, ej }) => {
+    const v = (cid, con, d) => ({ id: 'vc-' + cid, periodo: 'PRUEBA', customer_id: cid, comercio: 'Comercio ' + cid, correo: ej, visitado_en: d + 'T16:00:00Z', lat: -12.09, lng: -77.04,
+      con, motivo: con === 'Nadie' ? 'Cerrado' : null, que: con === 'Nadie' ? 'Sin éxito' : 'Reunión concretada', decision: null, estado_anul: 'activa', fuera_plazo: false });
+    const b = (i, extra) => Object.assign({ customer_id: String(i).padStart(8, '0'), razon_social: 'COMERCIO ' + i, correo: ej, visitas: 1, visitas_validas: 1, estado: 'seg', dias_trx: 0, bbva_reactivado: '2026-10-06' }, extra);
+    S.base = S.base.concat([b(81, { estado: 'rea', dias_trx: 2 }), b(82, { estado: 'uno', dias_trx: 1 }), b(83), b(84), b(85), b(86)]);
+    S.base.forEach(c => { S.baseMap[c.customer_id] = c; });
+    S.act = S.act.concat([v('00000081', 'Dueño', '2026-09-25'), v('00000082', 'Dueño', '2026-09-25'), v('00000083', 'Tercero', '2026-09-25'),
+      v('00000084', 'Dueño', '2026-09-25'), v('00000085', 'Dueño', '2026-09-25'), v('00000086', 'Nadie', '2026-09-25')]);
+    const t = (cid, f, trx) => ({ customer_id: cid, fecha_corte: f, mes: f.slice(0, 7), formato: 'acumulado_mes', trx });
+    S.trxCom = [t('00000083', '2026-09-23', 0), t('00000083', '2026-09-28', 3), t('00000084', '2026-09-21', 5), t('00000084', '2026-09-28', 5), t('00000086', '2026-09-28', 9)];
+    S.seg = [{ visita_id: 'vc-00000082', customer_id: '00000082', canal: 'Llamada', resultado: 'Respondió: usará el POS', hecho_en: '2026-10-07T15:00:00Z' }];
+    const est = Object.fromEntries(filasComision().map(f => [f.c.customer_id, f.est]));
+    S.vista = 'auditoria'; S.tab = 'bbva'; pintar();
+    return { est, txt: document.querySelector('#contenido, main, body').innerText };
+  }, { hoy, ej: EJECUTIVO.correo });
+  assert.deepEqual(r.est, { '00000081': 'cuenta', '00000082': 'uno', '00000083': 'confirmar', '00000084': 'antes', '00000085': 'sindata', '00000086': 'sincontacto' });
+  for (const t of ['Reactivados BBVA vs. comisión', 'Reactivados BBVA', 'Cuentan', 'Falta 1 día', 'Por confirmar', 'Solo antes de la visita', 'Sin visita con contacto', 'Contactados', '25/09'])
+    assert.ok(r.txt.toLowerCase().includes(t.toLowerCase()), 'falta en el cuadro: ' + t);   // los encabezados van en mayúsculas por CSS
+  assert.match(r.txt, /Total\s+6\s+1\s+1\s+1\s+1\s+1\s+1\s+1/, 'fila Total: 6 BBVA · 1 por estado · 1 sin data · 1 contactado');
+});
+await prueba('recupero del POS: cuadro por ejecutivo, días sin avance y Validar / Observar', async () => {
+  const viejo = new Date(Date.now() - 9 * 864e5).toISOString(), nuevo = new Date().toISOString();
+  const x = (cid, paso, act) => ({ customer_id: cid, correo: EJECUTIVO.correo, visita_id: 'vr' + cid, paso, caso_soporte: paso === 'tramite' ? 'CAS-1' : null, desde: '2026-10-01', actualizado_en: act, intentos: 0, historial: [] });
+  await p.evaluate(({ l, s }) => { window.__FX.rpc.v2_validar_recupero = 'validado'; window.__FX.rpc.v2_mis_recuperos = l; window.__FX.tablas.v2_recuperos = s; S.recups = l; S.recupSigue = s; S.vista = 'auditoria'; S.tab = 'recupero'; pintar(); },
+    { l: [x('00000091', 'llamar', viejo), x('00000092', 'tramite', nuevo), x('00000093', 'entregado', nuevo), x('00000094', 'validado', nuevo), x('00000095', 'trabado', nuevo),
+          x('00000097', 'sigue', nuevo), x('00000098', 'cambio', viejo)], s: [{ customer_id: '00000096', correo: EJECUTIVO.correo, paso: 'sigue', validado_en: '2026-10-08T15:00:00Z' }] });
+  await p.waitForTimeout(300);
+  const txt = (await p.locator('#contenido').innerText()).toLowerCase();
+  for (const t of ['Recupero del POS', 'Casos', 'Llamar a Soporte', 'En trámite', 'Entregado (por validar)', 'Validado', 'Trabado', 'Sigue con el POS', 'Cerrado por cambio de visita', 'Más de 7 días sin avance', 'CAS-1'])
+    assert.ok(txt.includes(t.toLowerCase()), 'falta en el cuadro: ' + t);
+  assert.match(txt, /total\s+8\s+1\s+1\s+1\s+1\s+1\s+2\s+1\s+1/, 'fila Total: 8 casos · 1 por paso · 2 siguen (1 por validar) · 1 cerrado por cambio · 1 con más de 7 días');
+  assert.equal(await p.locator('[data-recup-validar="00000097"]').count(), 1, '«Sigue con el POS» por validar debe tener Validar');
+  const antes = await p.evaluate(() => window.__llamadas.length);
+  await p.click('[data-recup-validar="00000093"]'); await p.waitForTimeout(300);
+  let ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).filter(c => c[0] === 'v2_validar_recupero');
+  assert.deepEqual(ll.at(-1)[1], { p_customer_id: '00000093', p_valido: true, p_nota: null });
+  p.once('dialog', d => d.dismiss()); await p.click('[data-recup-observar="00000093"]'); await p.waitForTimeout(200);
+  assert.equal((await p.evaluate(n => window.__llamadas.slice(n), antes)).filter(c => c[0] === 'v2_validar_recupero').length, 1, 'observó sin nota');
+  p.once('dialog', d => d.accept('Openpay no registra la devolución')); await p.click('[data-recup-observar="00000093"]'); await p.waitForTimeout(300);
+  ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).filter(c => c[0] === 'v2_validar_recupero');
+  assert.deepEqual(ll.at(-1)[1], { p_customer_id: '00000093', p_valido: false, p_nota: 'Openpay no registra la devolución' });
+  // mirando un periodo anterior no se valida (los botones actúan sobre el periodo en curso)
+  const per = await p.evaluate(() => S.periodo);
+  await p.evaluate(() => { S.periodo = Object.assign({}, S.periodo, { ini: '2020-01-01', fin: '2020-01-31' }); S.recups = window.__FX.rpc.v2_mis_recuperos; pintar(); });
+  assert.equal(await p.locator('[data-recup-validar]').count(), 0, 'en un periodo anterior no debe haber Validar');
+  await p.evaluate(pp => { S.periodo = pp; pintar(); }, per);
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
