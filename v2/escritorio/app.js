@@ -546,8 +546,8 @@ function montarMapa(el){
   S._mapa = m;
 }
 
-const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val", ubicacion:"ed", seguimiento:"reg" };
-const BIT_TIT = { seguimiento:"Seguimiento remoto del ejecutivo (no cambia la visita)", ubicacion:"Ubicación actualizada por el ejecutivo (la anterior quedó aquí)", comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
+const BIT_CLASE = { registro:"reg", comentario:"ed", resultado:"ed", traslado:"tr", pedido:"anu", aprobado:"anu", rechazado:"val", validada:"val", observada:"obs", revision:"reg", anulada:"anu", restituida:"val", ubicacion:"ed", seguimiento:"reg", recupero:"reg" };
+const BIT_TIT = { recupero:"Recupero del POS (no cambia la visita)", seguimiento:"Seguimiento remoto del ejecutivo (no cambia la visita)", ubicacion:"Ubicación actualizada por el ejecutivo (la anterior quedó aquí)", comentario:"Comentario corregido", resultado:"Resultado corregido", traslado:"Trasladada a otro comercio", pedido:"El ejecutivo pidió anular la visita", aprobado:"Anulación aprobada", rechazado:"Pedido de anulación rechazado", validada:"Validada", observada:"Observada · el ejecutivo la ve en revisión", revision:"Vuelve a la cola", anulada:"Anulada por el analista", restituida:"Restituida · vuelve a contar" };
 function eventos(v){
   const b = S.bit[v.id];
   const base = [{ accion:"registro", por:v.correo, en:v.recibido_en, antes:null, despues:`${comoFue(v).join(" · ")} · ${v.lat == null ? "sin GPS" : "GPS ±" + Math.round(v.precision_m) + " m"}` }];
@@ -728,8 +728,8 @@ function vistaEquipo(){
    2 · Auditoría
    ========================================================================= */
 function vistaAuditoria(){
-  return `<div class="tabs">${[["traza","Trazabilidad por visita"],["patrones","Patrones por ejecutivo"],["bbva","Cruce con la data de BBVA"]].map(([k,t])=>`<button class="${S.tab===k?"on":""}" data-tab="${k}">${t}</button>`).join("")}</div>
-  ${S.tab === "traza" ? traza() : S.tab === "patrones" ? patrones() : cruceBBVA()}`;
+  return `<div class="tabs">${[["traza","Trazabilidad por visita"],["patrones","Patrones por ejecutivo"],["bbva","Cruce con la data de BBVA"],["recupero","Recupero del POS"]].map(([k,t])=>`<button class="${S.tab===k?"on":""}" data-tab="${k}">${t}</button>`).join("")}</div>
+  ${S.tab === "traza" ? traza() : S.tab === "patrones" ? patrones() : S.tab === "recupero" ? cuadroRecupero() : cruceBBVA()}`;
 }
 function traza(){
   const q = S.busca.trim().toLowerCase();
@@ -870,6 +870,46 @@ function cuadroComision(){
   <details style="margin-top:8px"><summary>Detalle por comercio (${fs.length})</summary><div style="overflow:auto"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Primera visita con contacto</th><th class="n">Días con trx</th><th>Estado</th><th>Contactado</th></tr></thead><tbody>
     ${det.map(f => `<tr><td class="com"><b>${esc(f.c.nombre_comercial || f.c.razon_social || "")}</b><small>${esc(f.c.customer_id)}</small></td><td>${esc(nombreCorto(ejDe(f.c.correo).nombre))}</td><td class="num">${fISO(f.d1)}</td><td class="n num">${f.c.dias_trx || 0}</td><td><span class="pill ${PILL[f.est]}">${COL.find(x => x[0] === f.est)[1]}</span></td><td>${f.cont ? "Sí" : "—"}</td></tr>`).join("")}
   </tbody></table></div></details></div>`;
+}
+/* Recupero del POS (09/10/2026): lo que hizo cada ejecutivo con los comercios que desistieron. Jose valida u observa. */
+async function cargarRecupero(){
+  S.recups = []; S.recupSigue = []; S.recupErr = "";
+  const [a, b] = await Promise.all([sb.rpc("v2_mis_recuperos", S.periodo ? { p_periodo: S.periodo.id } : {}), (() => { let q = sb.from("v2_recuperos").select("customer_id,correo,paso,validado_en").eq("paso", "sigue"); if (S.periodo) q = q.eq("periodo", S.periodo.id); return q; })()]);
+  S.recupErr = a && a.error ? a.error.message : ""; S.recups = a && !a.error ? (a.data || []) : []; S.recupSigue = b && !b.error ? (b.data || []).filter(x => x.validado_en) : [];   // los que siguen con el POS ya validados (los por validar vienen en v2_mis_recuperos) pintar();
+}
+const RECUP_COL = [["llamar","Llamar a Soporte"],["tramite","En trámite"],["entregado","Entregado (por validar)"],["validado","Validado"],["trabado","Trabado"]];
+const RECUP_NOM = Object.assign(Object.fromEntries(RECUP_COL), { sigue:"Sigue con el POS (por validar)", cambio:"Cerrado por cambio de visita" });
+const recupLento = x => ["llamar","tramite","trabado"].includes(x.paso) && Date.now() - D(x.actualizado_en) > 7 * 864e5;
+function cuadroRecupero(){
+  if (S.recups === undefined){ cargarRecupero(); return `<div class="panel"><div class="barra"><b>Recupero del POS</b><span class="lbl">Cargando…</span></div></div>`; }
+  const l = S.recups || [], sg = S.recupSigue || [];
+  const ejs = [...new Set(l.map(x => x.correo).concat(sg.map(x => x.correo)))].sort();
+  const fila = (nom, xs, ss) => `<tr><td>${nom}</td><td class="n num">${xs.length + ss.length}</td>${RECUP_COL.map(([k]) => `<td class="n num">${xs.filter(x => x.paso === k).length}</td>`).join("")}<td class="n num">${xs.filter(x => x.paso === "sigue").length + ss.length}</td><td class="n num">${xs.filter(x => x.paso === "cambio").length}</td><td class="n num">${xs.filter(recupLento).length}</td></tr>`;
+  const ord = { trabado:0, entregado:1, sigue:2, llamar:3, tramite:4, cambio:5, validado:6 };
+  const det = [...l].sort((a, b) => (ord[a.paso] - ord[b.paso]) || (D(a.actualizado_en) - D(b.actualizado_en)));
+  const nom = cid => { const c = S.baseMap[cid] || {}; return c.nombre_comercial || c.razon_social || (l.find(x => x.customer_id === cid) || {}).comercio || ""; };
+  // Validar / Observar actúan sobre el periodo en curso: mirando un periodo anterior, solo se lee
+  const hoy = diaLimaE(Date.now()), enCurso = !S.periodo || (String(S.periodo.ini) <= hoy && hoy <= String(S.periodo.fin));
+  const dias = x => Math.floor((Date.now() - D(x.actualizado_en)) / 864e5);
+  return `<div class="panel"><div class="barra"><b>Recupero del POS</b><span class="lbl">Comercios que desistieron. El ejecutivo no recoge el equipo: llama a Soporte de Openpay y marca cada paso. Tú validas la entrega.</span></div>
+  <div style="overflow:auto"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Casos</th>${RECUP_COL.map(([, t]) => `<th class="n">${t}</th>`).join("")}<th class="n">Sigue con el POS</th><th class="n">Cerrado por cambio de visita</th><th class="n">Más de 7 días sin avance</th></tr></thead><tbody>
+    ${ejs.map(e => fila(`<span class="ej">${AVATAR(ejDe(e))}${esc(nombreCorto(ejDe(e).nombre))}</span>`, l.filter(x => x.correo === e), sg.filter(x => x.correo === e))).join("")}
+    ${fila("<b>Total</b>", l, sg)}
+  </tbody></table></div>
+  ${det.length ? `<div style="overflow:auto;margin-top:10px"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Paso</th><th class="n">Días sin avance</th><th class="n">Llamadas sin respuesta</th><th>Caso de Soporte</th><th>Lo último</th><th></th></tr></thead><tbody>
+    ${det.map(x => { const u = (x.historial || []).at(-1); return `<tr><td class="com"><b>${esc(nom(x.customer_id))}</b><small>${esc(x.customer_id)}</small></td><td>${esc(nombreCorto(ejDe(x.correo).nombre))}</td>
+      <td><span class="pill ${x.paso === "validado" ? "val" : x.paso === "trabado" || x.paso === "cambio" ? "anu" : x.paso === "entregado" || x.paso === "sigue" ? "obs" : "pend"}">${RECUP_NOM[x.paso] || x.paso}</span></td>
+      <td class="n num ${recupLento(x) ? "mal" : ""}">${dias(x)}</td><td class="n num">${x.intentos || 0}</td><td>${esc(x.caso_soporte || "—")}</td>
+      <td>${u ? `${fISO(diaLimaE(u.en))} · ${esc(u.detalle || u.accion)}${u.nota ? " · " + esc(u.nota) : ""}` : "Sin acciones todavía"}</td>
+      <td>${enCurso && (x.paso === "entregado" || x.paso === "sigue") ? `<button class="btn mini" data-recup-validar="${esc(x.customer_id)}">Validar</button> <button class="btn mini sec" data-recup-observar="${esc(x.customer_id)}">Observar</button>` : ""}</td></tr>`; }).join("")}
+  </tbody></table></div>` : `<div class="aviso" style="margin-top:8px">${S.recupErr ? "No se pudo leer el recupero: " + esc(S.recupErr) : "No hay comercios en recupero en el periodo."}</div>`}</div>`;
+}
+async function validarRecupero(cid, valido){
+  let nota = null;
+  if (!valido){ nota = prompt("¿Por qué observas este recupero? Si estaba entregado vuelve a «En trámite»; si seguía con el POS, vuelve a «Llamar a Soporte» (mínimo 10 caracteres):", ""); if (nota === null) return; nota = nota.trim(); }
+  const { error } = await sb.rpc("v2_validar_recupero", { p_customer_id: cid, p_valido: valido, p_nota: nota });
+  if (error){ toast("No se guardó: " + error.message); return; }
+  toast(valido ? "Recupero validado." : "Recupero observado: vuelve al ejecutivo."); cargarRecupero();
 }
 function cruceBBVA(){
   const cand = S.act.filter(v => v.estado_anul !== "anulada" && v.con !== "Nadie" && v.que === "Reunión concretada").sort((a,b)=>D(a.visitado_en)-D(b.visitado_en));
@@ -1920,8 +1960,10 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-reporte-dir],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-reporte-dir],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
+  if (t.hasAttribute("data-recup-validar")){ validarRecupero(t.dataset.recupValidar, true); return; }
+  if (t.hasAttribute("data-recup-observar")){ validarRecupero(t.dataset.recupObservar, false); return; }
   if (t.hasAttribute("data-descartar-ret")){
     const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
     const nota = prompt(`¿Descartar la visita retenida de ${r.ejecutivo || r.correo} en ${r.comercio || "ID " + r.customer_id}? Su celular la quita al sincronizar.\n\nNota (opcional):`, "");

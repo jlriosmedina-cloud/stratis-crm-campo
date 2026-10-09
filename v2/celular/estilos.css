@@ -380,5 +380,11 @@ textarea.campo{min-height:78px;resize:vertical}
 .seg-card .eyebrow{color:var(--azul)}
 .rea-card{border:1.5px solid #079477}
 .rea-card .eyebrow{color:#079477}
+.recup-card{border:1.5px solid var(--ambar)}
+.recup-card .eyebrow,.recup-ficha .eyebrow{color:var(--ambar)}
+.recup-pasos{display:flex;gap:4px;margin-top:8px}
+.recup-pasos span{flex:1;text-align:center;padding:6px 4px;border-radius:8px;font-size:11.5px;font-weight:700;background:var(--ambar-t);color:var(--muted)}
+.recup-pasos span.hecho{background:var(--verde-t);color:#079477}
+.recup-pasos span.on{background:var(--ambar);color:#fff}
 .bbva-rea.pend{border-color:var(--ambar);color:var(--ambar)}
 .seg-panel .eyebrow{margin-top:4px}

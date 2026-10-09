@@ -20,6 +20,7 @@ Se aplican solo con el OK de Jose.
 | `20261001100000_seguimiento_remoto.sql` | 01/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261001183005` |
 | `20261006100000_retiro_temporal_de_la_base.sql` | 06/10/2026, con el OK de Jose (cambia `v2_mi_base`; el celular no cambia de versión) | `20261006100628` |
 | `20261009100000_seguimiento_reactivados_bbva.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009141119` |
+| `20261010100000_recupero_pos.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009151310` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

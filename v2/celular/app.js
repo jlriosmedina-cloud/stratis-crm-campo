@@ -421,6 +421,10 @@ function vistaInicio(){
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
         ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
       ${(() => { const n = S.admin ? 0 : S.base.filter(faltaSeguimiento).length; return n ? `<div class="card seg-card"><div class="eyebrow">Seguimiento remoto</div><h2>${n} ${n === 1 ? "comercio sin contacto espera" : "comercios sin contacto esperan"} tu seguimiento</h2><div class="nota">La visita ya cuenta. Llámalo o escríbele por WhatsApp o correo y registra qué respondió: así ninguna visita queda sin feedback.</div><button class="btn btn-sec" data-ir-sinseg>Ver los comercios</button></div>` : ""; })()}
+      ${(() => { if (S.admin || !S.recup) return ""; const ord = { llamar:0, trabado:1, tramite:2 }; const l = recupAbiertos().sort((x, y) => ord[x.paso] - ord[y.paso]); const n = l.length;
+        return n ? `<div class="card recup-card"><div class="eyebrow">Recupero del POS</div><h2>${n} ${n === 1 ? "equipo por recuperar" : "equipos por recuperar"}</h2><div class="nota">Comercios que desistieron. Tú no recoges el equipo: llama a Soporte de Openpay y marca cada paso.</div>
+        <div class="paradas">${l.map(x => { const c = S.base.find(b => b.customer_id === x.customer_id); return `<button class="parada" data-ficha="${esc(x.customer_id)}"><span class="n">${x.paso === "trabado" ? "!" : RECUP_PASOS.findIndex(p => p[0] === x.paso) + 1}</span><span class="t"><b>${esc(c ? nombreDe(c) : (x.comercio || "ID " + x.customer_id))}</b><small>${esc(RECUP[x.paso].frase)}</small></span></button>`; }).join("")}</div>
+        <button class="btn btn-sec" data-ir-recup>Ver los comercios</button></div>` : ""; })()}
       ${(() => { if (S.admin || S.seg == null) return ""; const l = S.base.filter(c => porContactar(c) && !contactadoDesde(c)).sort((x, y) => (rbbvaDe(y).dias_trx - rbbvaDe(x).dias_trx) || (rbbvaDe(y).con_contacto - rbbvaDe(x).con_contacto)); const n = l.length;
         return n ? `<div class="card rea-card"><div class="eyebrow">Reactivados BBVA · comisión</div><h2>${n} ${n === 1 ? "reactivado por contactar" : "reactivados por contactar"}</h2><div class="nota">BBVA los reporta reactivados, pero todavía no cuentan para ti: necesitan transacciones en 2 días distintos después de tu visita con contacto. Llámalos o escríbeles y registra el contacto.</div>
         <div class="paradas">${l.slice(0, 8).map(c => `<button class="parada" data-ficha="${esc(c.customer_id)}"><span class="n">${rbbvaDe(c).dias_trx}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(etiquetaComision(c).t)}</small></span></button>`).join("")}</div>
@@ -458,7 +462,7 @@ function filtrar(omitir){
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
     }
     // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
-    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "recup" ? !recupDe(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
@@ -487,7 +491,7 @@ function vistaBase(){
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
   const hayLibres = S.base.some(c => !c.correo);
-  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por contactar"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
+  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por contactar"],["recup","Recupero del POS"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
   const extras = [S.filtroEstado !== "todos", !!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
@@ -525,7 +529,7 @@ function vistaRutas(){
   </div>`;
 }
 function vistaFicha(c){
-  if (!c){ S.ficha = null; return vistaInicio(); }
+  if (!c){ const x = S.recup && S.recup.get(S.ficha); if (x && x.paso !== "cambio") return vistaFichaRecupero(x); S.ficha = null; return vistaInicio(); }
   const e = estadoCom(c);
 
   const editando = S.editando === c.customer_id;
@@ -539,6 +543,7 @@ function vistaFicha(c){
       <div class="sub">${esc(c.rubro || "")}</div>
     </div>
     <div class="cuerpo">
+      ${bloqueRecupero(c)}
       <div class="card">
         <div class="fila-ent">${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}<span class="nota">${esc(c.ruta || "")}</span></div>
         ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
@@ -602,9 +607,68 @@ const segDe = id => (S.seg || []).filter(x => x.visita_id === id);
 const faltaSeguimiento = c => esMio(c) && !!c.ultima_motivo && !!c.ultima_visita && S.seg != null && !porContactar(c)
   && !S.seg.some(x => x.customer_id === c.customer_id && Date.parse(x.hecho_en) >= Date.parse(c.ultima_visita));
 async function cargarSeguimientos(){
-  const [s, r] = await Promise.all([sb.rpc("v2_mis_seguimientos"), sb.rpc("v2_mis_reactivados_bbva")]);
+  const [s, r, rc] = await Promise.all([sb.rpc("v2_mis_seguimientos"), sb.rpc("v2_mis_reactivados_bbva"), sb.rpc("v2_mis_recuperos")]);
   S.seg = s.error ? null : (s.data || []);   // si falla (o aún no existe la función), no se muestra nada: no bloquea la app
   S.rbbva = r.error ? null : new Map((r.data || []).map(x => [x.customer_id, x]));
+  S.recup = rc.error ? null : new Map((rc.data || []).map(x => [x.customer_id, x]));
+}
+/* Recupero del POS (09/10/2026). El ejecutivo no recupera el equipo (lo hacen Soporte de Openpay y el comercio): registra lo
+   que hizo, paso a paso, con un solo botón grande. Jose valida el cierre en el escritorio. No cambia la visita ni el bono. */
+const RECUP_PASOS = [["llamar","Llamar a Soporte"],["tramite","En trámite"],["entregado","Entregado"]];
+const RECUP = {
+  llamar:   { frase:"Llama a Soporte de Openpay para coordinar la devolución del POS.", accion:"llame_soporte", btn:"Ya llamé a Soporte" },
+  tramite:  { frase:"Soporte ya tiene el caso. Confirma con el comercio cuando entregue el equipo.", accion:"entregado", btn:"El comercio ya entregó el equipo" },
+  entregado:{ frase:"Entregado · falta que Jose lo valide." },
+  validado: { frase:"Recupero cerrado." },
+  trabado:  { frase:"Avísale a Jose y vuelve a llamar a Soporte cuando el comercio acepte.", accion:"llame_soporte", btn:"Ya llamé a Soporte" },
+  sigue:    { frase:"El comercio seguirá usando el POS · falta que Jose lo valide." }
+};
+const RECUP_DET = { llame_soporte:["Programaron el recojo", "Me dieron un número de caso", "No contestaron, vuelvo a llamar"],
+  problema:["No quiere entregar el equipo", "No ubica el equipo", "Cambió de opinión: seguirá usando el POS"] };
+const CAMBIO_OPINION = "Cambió de opinión: seguirá usando el POS";
+// «cambio»: la visita del desiste cambió (otra reunión, corrección o anulación) y el caso se cerró solo; no se muestra al ejecutivo
+const recupDe = c => { const x = S.recup && S.recup.get(c.customer_id); return x && x.paso !== "cambio" ? x : null; };
+// Casos abiertos del ejecutivo, también los que pasaron de un periodo anterior aunque el comercio ya no esté en su base
+const recupAbiertos = () => S.admin || !S.recup ? [] : [...S.recup.values()].filter(x => x.correo === miCorreo() && ["llamar","tramite","trabado"].includes(x.paso));
+// Ficha mínima para un caso cuyo comercio no está en la base actual del ejecutivo
+function vistaFichaRecupero(x){
+  return `<div class="vista">
+    <div class="cab"><button class="volver" data-cerrar-ficha>${ICON.atras} Volver</button><h1>${esc(x.comercio || "ID " + x.customer_id)}</h1><div class="sub">ID ${esc(x.customer_id)} · recupero de un periodo anterior</div></div>
+    <div class="cuerpo">${bloqueRecupero({ customer_id:x.customer_id, correo:x.correo })}</div></div>`;
+}
+function abrirRecupero(cid, accion){ S.accion = null; S.recupReg = { cid, accion, detalle:null, caso:"", nota:"", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); }
+async function enviarRecupero(){
+  const r = S.recupReg; if (!r || r.enviando) return;
+  if (r.accion !== "entregado" && !r.detalle){ r.error = r.accion === "problema" ? "Elige qué problema hay." : "Elige qué te dijeron en Soporte."; S._mantenerScroll = true; return pintar(); }
+  if (r.detalle === CAMBIO_OPINION && r.nota.trim().length < 10){ r.error = "Escribe en la nota por qué seguirá usando el POS (mínimo 10 caracteres)."; S._mantenerScroll = true; return pintar(); }
+  r.enviando = true; r.error = ""; S._mantenerScroll = true; pintar();
+  const { error } = await sb.rpc("v2_avanzar_recupero", { p_customer_id:r.cid, p_accion:r.accion, p_detalle:r.accion === "entregado" ? null : r.detalle,
+    p_caso:r.detalle === "Me dieron un número de caso" ? (r.caso.trim() || null) : null, p_nota:r.nota.trim() || null });
+  if (error){ r.enviando = false; r.error = navigator.onLine === false ? "Sin señal: vuelve a intentarlo cuando tengas conexión." : (error.message || String(error)); S._mantenerScroll = true; return pintar(); }
+  S.recupReg = null; await cargarSeguimientos(); S._mantenerScroll = true; pintar();
+  avisar("Recupero actualizado. La visita no cambia.");
+}
+const RECUP_ACC = { entregado:"Marcaste que entregó el equipo", validar:"Jose lo validó", observar:"Jose lo observó" };
+function bloqueRecupero(c){
+  const x = recupDe(c); if (!x) return "";
+  const P = RECUP[x.paso] || RECUP.llamar, idx = RECUP_PASOS.findIndex(p => p[0] === (x.paso === "validado" ? "entregado" : x.paso));
+  const barra = `<div class="recup-pasos">${RECUP_PASOS.map(([k, t], i) => `<span class="${i === idx && x.paso !== "validado" ? "on" : i < idx || x.paso === "validado" ? "hecho" : ""}">${i + 1} · ${t}</span>`).join("")}</div>`;
+  const hist = (x.historial || []).length ? `<div class="fb-hist seg-hist"><b>Lo que se hizo:</b> ${x.historial.map(e => `${fechaCorta(e.en)} · ${esc(e.detalle || RECUP_ACC[e.accion] || e.accion)}${e.nota ? ` · ${esc(e.nota)}` : ""}`).join("<br>")}</div>` : "";
+  const r = S.recupReg && S.recupReg.cid === c.customer_id ? S.recupReg : null, puede = !S.admin && x.correo === miCorreo() && !!P.accion;   // el caso es del ejecutivo de la visita
+  let acc = "";
+  if (puede && !r) acc = `<button class="btn btn-sec btn-full" style="margin-top:10px" data-recup-accion="${P.accion}">${P.btn}</button><button class="btn btn-lin mini" style="margin-top:8px" data-recup-accion="problema">Hay un problema</button>`;
+  else if (puede){
+    const dets = RECUP_DET[r.accion] || [];
+    acc = `<div class="acc-panel seg-panel"><b>${r.accion === "problema" ? "¿Qué problema hay?" : r.accion === "entregado" ? "¿El comercio ya entregó el equipo?" : "¿Qué te dijeron en Soporte?"}</b>
+      ${dets.length ? `<div class="ac-chips">${dets.map(d => `<button type="button" class="ac ${r.detalle === d ? "on" : ""}" aria-pressed="${r.detalle === d}" data-recup-det="${esc(d)}">${esc(d)}</button>`).join("")}</div>` : ""}
+      ${r.detalle === "Me dieron un número de caso" ? `<input class="campo" id="recupCaso" maxlength="40" placeholder="Número de caso (opcional)" value="${esc(r.caso)}">` : ""}
+      <textarea class="campo" id="recupNota" rows="2" maxlength="300" placeholder="${r.detalle === CAMBIO_OPINION ? "¿Por qué seguirá usando el POS? (obligatorio)" : "Nota (opcional)"}">${esc(r.nota)}</textarea>
+      ${r.error ? `<div class="falta">${esc(r.error)}</div>` : ""}
+      <div class="nav2"><button class="btn btn-lin" data-recup-cancelar>Cancelar</button><button class="btn btn-sec" data-recup-enviar ${r.enviando ? "disabled" : ""}>${r.enviando ? "Guardando…" : "Guardar"}</button></div></div>`;
+  }
+  return `<div class="card recup-ficha"><div class="eyebrow">Recupero del POS</div>${barra}
+    <div class="explica" style="margin-top:8px">${x.paso === "trabado" ? "<b>Trabado.</b> " : ""}${P.frase}${x.caso_soporte ? ` Caso de Soporte: <b>${esc(x.caso_soporte)}</b>.` : ""}${x.intentos ? ` Llamadas sin respuesta: ${x.intentos}.` : ""}</div>
+    ${acc}${hist}</div>`;
 }
 /* Reactivados BBVA vs. comisión (09/10/2026). BBVA reporta el comercio reactivado; al ejecutivo le cuenta solo si,
    después de su primera visita válida con contacto, transacciona en 2 días distintos (v2_dias_trx). */
@@ -1610,6 +1674,13 @@ function enlazar(){
   p.querySelectorAll("[data-seg-res]").forEach(b => b.onclick = () => { if (S.segReg){ S.segReg.resultado = b.dataset.segRes; S.segReg.error = ""; } S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-seg-cancelar]").forEach(b => b.onclick = () => { S.segReg = null; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-seg-enviar]").forEach(b => b.onclick = enviarSeguimiento);
+  p.querySelectorAll("[data-recup-accion]").forEach(b => b.onclick = () => abrirRecupero(S.ficha, b.dataset.recupAccion));
+  p.querySelectorAll("[data-recup-det]").forEach(b => b.onclick = () => { if (S.recupReg){ S.recupReg.detalle = b.dataset.recupDet; S.recupReg.error = ""; } S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-recup-cancelar]").forEach(b => b.onclick = () => { S.recupReg = null; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-recup-enviar]").forEach(b => b.onclick = enviarRecupero);
+  p.querySelectorAll("[data-ir-recup]").forEach(b => b.onclick = () => { S.filtroEstado = "recup"; S.filtroVisita = "todos"; S.vista = "base"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
+  const rcs = p.querySelector("#recupCaso"); if (rcs) rcs.oninput = e => { if (S.recupReg) S.recupReg.caso = e.target.value; };
+  const rno = p.querySelector("#recupNota"); if (rno) rno.oninput = e => { if (S.recupReg) S.recupReg.nota = e.target.value; };
   const sn = p.querySelector("#segNota");
   if (sn) sn.oninput = e => { if (S.segReg) S.segReg.nota = e.target.value; };
   p.querySelectorAll("[data-ir-bbva]").forEach(b => b.onclick = () => { S.filtroEstado = "bbva"; S.filtroVisita = "todos"; S.vista = "base"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
@@ -1699,7 +1770,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
    Si lo hay, muestra un aviso que no se puede cerrar con un solo botón «Actualizar», pero nunca mientras hay un formulario
    a medias (registro, corrección, pedido de anulación o corrección de datos): espera a que lo guarde o lo cancele.
    Las visitas sin enviar viven en localStorage (cola), así que recargar no pierde nada. */
-const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando || S.segReg);
+const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando || S.segReg || S.recupReg);
 async function revisarVersion(){
   if (S.versionNueva) return mostrarAvisoVersion();
   try {
