@@ -386,6 +386,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .fb-hist.seg-hist b{color:var(--navy-2)}
 .seg-card{border:1.5px solid var(--azul)}
 .seg-card .eyebrow{color:var(--azul)}
+.rea-card{border:1.5px solid #079477}
+.rea-card .eyebrow{color:#079477}
+.bbva-rea.pend{border-color:var(--ambar);color:var(--ambar)}
 .seg-panel .eyebrow{margin-top:4px}
 </style>
 
@@ -401,7 +404,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "a791eb";
+const BUILD = "59e3cb";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -807,7 +810,7 @@ function vistaInicio(){
       <div class="fila"><div><h1>Hola, ${esc(nombre)}</h1><div class="sub">${diaLargo(new Date())}${S.periodo ? ` · quedan ${diasQuedan()} días del periodo` : ""}</div></div>${cabeceraMenu()}</div>
       <div class="kpis">
         <div class="kpi naranja"><b>${m.visitados}<small> /${meta}</small></b><span>Comercios visitados${S.admin?"<br>equipo":""}</span></div>
-        <div class="kpi verde"><b>${m.reactivados}<small> /${metaR}</small></b><span>Reactivados<br>según data BBVA</span></div>
+        <div class="kpi verde"><b>${m.reactivados}<small> /${metaR}</small></b><span>Reactivados<br>que cuentan</span></div>
         <div class="kpi"><b>${pct(m.conv).replace("%","")}<small>%</small></b><span>Conversión<br>meta 25%</span></div>
       </div>
     </div>
@@ -815,7 +818,10 @@ function vistaInicio(){
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
         ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
       ${(() => { const n = S.admin ? 0 : S.base.filter(faltaSeguimiento).length; return n ? `<div class="card seg-card"><div class="eyebrow">Seguimiento remoto</div><h2>${n} ${n === 1 ? "comercio sin contacto espera" : "comercios sin contacto esperan"} tu seguimiento</h2><div class="nota">La visita ya cuenta. Llámalo o escríbele por WhatsApp o correo y registra qué respondió: así ninguna visita queda sin feedback.</div><button class="btn btn-sec" data-ir-sinseg>Ver los comercios</button></div>` : ""; })()}
-      ${(() => { const n = S.base.filter(c => esMio(c) && c.bbva_reactivado).length; return n ? `<div class="card bbva-card"><div class="eyebrow">Reactivación según BBVA</div><h2>${n} de tus comercios visitados ${n === 1 ? "figura como reactivado" : "figuran como reactivados"} según BBVA</h2><div class="nota">Pendiente de validación: BBVA lo confirma con el número de transacciones y recién entonces suma a tu avance. Los ves en «Mi base» con el filtro «Reactivados BBVA · por validar».</div></div>` : ""; })()}
+      ${(() => { if (S.admin || S.seg == null) return ""; const l = S.base.filter(c => porContactar(c) && !contactadoDesde(c)).sort((x, y) => (rbbvaDe(y).dias_trx - rbbvaDe(x).dias_trx) || (rbbvaDe(y).con_contacto - rbbvaDe(x).con_contacto)); const n = l.length;
+        return n ? `<div class="card rea-card"><div class="eyebrow">Reactivados BBVA · comisión</div><h2>${n} ${n === 1 ? "reactivado por contactar" : "reactivados por contactar"}</h2><div class="nota">BBVA los reporta reactivados, pero todavía no cuentan para ti: necesitan transacciones en 2 días distintos después de tu visita con contacto. Llámalos o escríbeles y registra el contacto.</div>
+        <div class="paradas">${l.slice(0, 8).map(c => `<button class="parada" data-ficha="${esc(c.customer_id)}"><span class="n">${rbbvaDe(c).dias_trx}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(etiquetaComision(c).t)}</small></span></button>`).join("")}</div>
+        <button class="btn btn-sec" data-ir-bbva>Ver los comercios</button></div>` : ""; })()}
       ${colaRechazadas()}
       ${colaEsperando().length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${colaEsperando().length} ${colaEsperando().length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = colaEsperando().map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
         const uno = venc === 1; return venc ? `<b style="color:var(--rojo)">${uno ? "Una ya pasó su plazo" : venc + " ya pasaron su plazo"}:</b> ${uno ? "se registra, pero no cuenta" : "se registran, pero no cuentan"} para tu bono.` : colaEsperando().length === 1 ? `Tiene que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llega después, se registra pero no cuenta para tu bono.` : `Tienen que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llegan después, se registran pero no cuentan para tu bono.`; })()}</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
@@ -849,7 +855,7 @@ function filtrar(omitir){
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
     }
     // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
-    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !c.bbva_reactivado : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
@@ -864,7 +870,7 @@ function tarjeta(c){
   return `<button class="com" data-ficha="${c.customer_id}">
     <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
     <b>${esc(nombreDe(c))}</b>
-    ${c.bbva_reactivado ? `<div class="bbva-rea">Reactivado según BBVA · pendiente de validación</div>` : ""}
+    ${(() => { const k = etiquetaComision(c); return k ? `<div class="bbva-rea ${k.c}">${k.t}</div>` : ""; })()}
     <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
   </button>`;
 }
@@ -878,7 +884,7 @@ function vistaBase(){
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
   const hayLibres = S.base.some(c => !c.correo);
-  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por validar"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
+  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por contactar"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
   const extras = [S.filtroEstado !== "todos", !!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
@@ -933,7 +939,7 @@ function vistaFicha(c){
       <div class="card">
         <div class="fila-ent">${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}<span class="nota">${esc(c.ruta || "")}</span></div>
         ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
-        ${c.bbva_reactivado ? `<div class="explica bbva-rea-ficha">BBVA reporta este comercio como <b>reactivado</b> (corte del ${fISO(c.bbva_reactivado)}). Está <b>pendiente de validación</b>: BBVA lo confirma con el número de transacciones, y recién entonces suma a tu avance.</div>` : ""}
+        ${(() => { const k = etiquetaComision(c); return k ? `<div class="explica bbva-rea-ficha"><b>${k.t}</b> (BBVA, corte del ${fISO(c.bbva_reactivado)}). ${k.ayuda}</div>` : ""; })()}
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
           ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
@@ -988,12 +994,29 @@ const ANUL = {
 const SEG_CANALES = ["Llamada", "WhatsApp", "Correo"];
 const SEG_RESULTADOS = ["Respondió: usará el POS", "Respondió: aún no decide", "Respondió: agendamos otra visita", "Respondió: no usará el POS", "No respondió", "El dato de contacto no es válido"];
 const segDe = id => (S.seg || []).filter(x => x.visita_id === id);
-// Comercio cuya última visita fue sin contacto y todavía no tiene un seguimiento registrado después de esa visita
-const faltaSeguimiento = c => esMio(c) && !!c.ultima_motivo && !!c.ultima_visita && S.seg != null
+// Comercio cuya última visita fue sin contacto y todavía no tiene un seguimiento registrado después de esa visita.
+// Los reactivados de BBVA que aún no cuentan van en su propia tarjeta («por contactar»), no aquí.
+const faltaSeguimiento = c => esMio(c) && !!c.ultima_motivo && !!c.ultima_visita && S.seg != null && !porContactar(c)
   && !S.seg.some(x => x.customer_id === c.customer_id && Date.parse(x.hecho_en) >= Date.parse(c.ultima_visita));
 async function cargarSeguimientos(){
-  const { data, error } = await sb.rpc("v2_mis_seguimientos");
-  S.seg = error ? null : (data || []);   // si falla (o aún no existe la función), no se muestra nada: no bloquea la app
+  const [s, r] = await Promise.all([sb.rpc("v2_mis_seguimientos"), sb.rpc("v2_mis_reactivados_bbva")]);
+  S.seg = s.error ? null : (s.data || []);   // si falla (o aún no existe la función), no se muestra nada: no bloquea la app
+  S.rbbva = r.error ? null : new Map((r.data || []).map(x => [x.customer_id, x]));
+}
+/* Reactivados BBVA vs. comisión (09/10/2026). BBVA reporta el comercio reactivado; al ejecutivo le cuenta solo si,
+   después de su primera visita válida con contacto, transacciona en 2 días distintos (v2_dias_trx). */
+const MSG_CUENTA = "Este comercio ya usa el POS, pero para que cuente necesita transacciones en 2 días distintos después de tu visita. Llámalo o escríbele.";
+const MSG_SIN_CONTACTO = "Este comercio ya usa el POS, pero tu visita fue sin contacto. Para que cuente necesitas volver y conversar con el comercio, y que después transaccione en 2 días distintos. Llámalo o escríbele para coordinar.";
+const rbbvaDe = c => (S.rbbva && S.rbbva.get(c.customer_id)) || null;
+const porContactar = c => { const f = rbbvaDe(c); return !!f && esMio(c) && f.dias_trx < 2; };
+// Sale de «por contactar» solo si el comercio respondió (Jose, 09/10): «No respondió» o un dato no válido lo mantienen en la lista
+const contactadoDesde = c => !!c.bbva_reactivado && (S.seg || []).some(x => x.customer_id === c.customer_id && /^Respondió/.test(x.resultado || "") && diaLima(Date.parse(x.hecho_en)) >= c.bbva_reactivado);
+function etiquetaComision(c){
+  const f = rbbvaDe(c); if (!f) return null;
+  if (f.dias_trx >= 2) return { t:"Reactivado · cuenta", c:"ok", ayuda:"BBVA lo reporta reactivado y transaccionó en 2 días distintos después de tu visita: cuenta para ti." };
+  if (!f.con_contacto) return { t:"Reactivado BBVA · falta visita con contacto", c:"pend", ayuda:MSG_SIN_CONTACTO };
+  if (f.dias_trx === 1) return { t:"Reactivado BBVA · falta 1 día", c:"pend", ayuda:MSG_CUENTA };
+  return { t:"Reactivado BBVA · falta transacción después de tu visita", c:"pend", ayuda:MSG_CUENTA };
 }
 function abrirSeguimiento(id){ S.accion = null; S.segReg = { id, canal:null, resultado:null, nota:"", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); }
 async function enviarSeguimiento(){
@@ -1008,16 +1031,18 @@ async function enviarSeguimiento(){
 }
 // Lo ya registrado y el botón o el panel para registrar (solo en visitas sin contacto, propias y del periodo en curso)
 function bloqueSeguimiento(v){
-  if (v.con !== "Nadie" || v.estado_anul === "anulada") return "";
+  const com = S.base.find(c => c.customer_id === v.customer_id), rb = com && porContactar(com) ? rbbvaDe(com) : null;
+  const porRea = v.con !== "Nadie" && !!rb && rb.ultima_visita_id === v.id;
+  if ((v.con !== "Nadie" && !porRea) || v.estado_anul === "anulada") return "";
   const l = segDe(v.id), puede = v.es_mia && S.periodo && v.periodo === S.periodo.id && S.seg != null;
   const hechos = l.length ? `<div class="fb-hist seg-hist"><b>Seguimiento remoto:</b> ${l.map(x => `${esc(x.canal)} · ${esc(x.resultado)} <span class="nota">(${fechaCorta(x.hecho_en)})</span>${x.nota ? ` · ${esc(x.nota)}` : ""}`).join("<br>")}</div>` : "";
   const r = S.segReg && S.segReg.id === v.id ? S.segReg : null;
   if (!puede) return hechos;
-  if (!r) return hechos + `<div class="acc-btns"><button class="btn ${l.length ? "btn-lin" : "btn-sec"} mini" data-seg="${v.id}">${l.length ? "Registrar otro seguimiento" : "Registrar seguimiento remoto"}</button></div>`;
+  if (!r) return hechos + `<div class="acc-btns"><button class="btn ${l.length ? "btn-lin" : "btn-sec"} mini" data-seg="${v.id}">${porRea ? (l.length ? "Registrar otro contacto" : "Registrar contacto") : l.length ? "Registrar otro seguimiento" : "Registrar seguimiento remoto"}</button></div>`;
   const op = (g, val, on) => `<button type="button" class="ac ${on ? "on" : ""}" aria-pressed="${on}" data-seg-${g}="${esc(val)}">${esc(val)}</button>`;
   return hechos + `<div class="acc-panel seg-panel">
     <b>Seguimiento remoto</b>
-    <div class="nota">No hubo contacto en la visita. Registra qué hiciste después para saber del comercio.</div>
+    <div class="nota">${porRea ? "Ya usa el POS: contáctalo para que vuelva a transaccionar después de tu visita." : "No hubo contacto en la visita. Registra qué hiciste después para saber del comercio."}</div>
     <span class="eyebrow">¿Por dónde lo contactaste?</span>
     <div class="ac-chips">${SEG_CANALES.map(c => op("canal", c, r.canal === c)).join("")}</div>
     <span class="eyebrow">¿Qué respondió?</span>
@@ -1984,6 +2009,7 @@ function enlazar(){
   p.querySelectorAll("[data-seg-enviar]").forEach(b => b.onclick = enviarSeguimiento);
   const sn = p.querySelector("#segNota");
   if (sn) sn.oninput = e => { if (S.segReg) S.segReg.nota = e.target.value; };
+  p.querySelectorAll("[data-ir-bbva]").forEach(b => b.onclick = () => { S.filtroEstado = "bbva"; S.filtroVisita = "todos"; S.vista = "base"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   p.querySelectorAll("[data-ir-sinseg]").forEach(b => b.onclick = () => { S.filtroEstado = "sinseg"; S.filtroVisita = "todos"; S.vista = "base"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   const ta = p.querySelector("#accTexto");
   if (ta) ta.oninput = e => { if (S.accion) S.accion.texto = e.target.value; };

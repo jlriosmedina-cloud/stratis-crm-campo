@@ -582,6 +582,50 @@ caso('retiro temporal: el ejecutivo deja de ver el comercio; el analista lo sigu
   await db.query(`update v2_retiros_temporales set restituido_en = now(), restituido_por = $1 where customer_id = '00000071'`, [ANA]);
   assert.equal(await ve(EJ, '00000071'), 1, 'al restituirlo debe volver');
 });
+// ---------- reactivados de BBVA que aún no cuentan para la comisión (09/10) ----------
+caso('seguimiento: reactivado BBVA que aún no cuenta, aunque la visita tuvo contacto; los demás no', async () => {
+  const [c73, c74, c75, c76] = [await nuevoComercio(73), await nuevoComercio(74), await nuevoComercio(75), await nuevoComercio(76)];
+  const previa73 = await visitaPasada(c73, 8, 'Dueño', { que: 'Reunión concretada' });
+  const ult73 = await visitaPasada(c73, 5, 'Tercero', { que: 'Reunión concretada' });
+  const v74 = await visitaPasada(c74, 6, 'Dueño', { que: 'Reunión concretada' });
+  for (const d of [4, 2]) { const f = await diaMas(-d); await db.query(`insert into v2_transacciones(fecha_corte, customer_id, mes, formato, trx) values ($1::date, $2, to_char($1::date, 'YYYY-MM'), 'diario', 3)`, [f, c74]); }
+  const v75 = await visitaPasada(c75, 6, 'Dueño', { que: 'Reunión concretada' });
+  const v76 = await visitaPasada(c76, 6, 'Dueño', { que: 'Reunión concretada' });
+  await db.query(`delete from v2_cortes_bbva`);
+  const cargar = (c, l) => como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb)`, [c, JSON.stringify(l.map(x => ({ customer_id: x, gestion_con_contacto: true, reactivado: 'Si' })))]);
+  await cargar(await diaMas(-60), [c76]);   // corte de otro periodo
+  await cargar(await diaMas(0), [c73, c74]);
+  const antes = await visita(ult73);
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'Respondió: usará el POS') s`, [ult73]);
+  const despues = await visita(ult73);
+  for (const k of ['con', 'que', 'motivo', 'decision', 'fuera_plazo', 'validacion', 'anulada_en']) assert.deepEqual(despues[k], antes[k], 'cambió la visita: ' + k);
+  assert.equal((await bitacora(ult73)).filter(x => x.despues === 'Llamada · Respondió: usará el POS').length, 1, 'falta la línea de la bitácora');
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [previa73]), /sin contacto/);   // no es su última visita
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v74]), /sin contacto/);       // ya cuenta (2 días)
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v75]), /sin contacto/);       // no es reactivado BBVA
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v76]), /sin contacto/);       // reactivado en otro periodo
+  // lo que lee el celular: solo los propios, con días después de la visita con contacto y su última visita
+  const l = (await como(EJ, `select customer_id, dias_trx, con_contacto, ultima_visita_id from public.v2_mis_reactivados_bbva() where customer_id in ($1, $2, $3, $4) order by 1`, [c73, c74, c75, c76])).rows;
+  assert.deepEqual(l.map(x => [x.customer_id, x.dias_trx, x.con_contacto, x.ultima_visita_id]), [[c73, 0, true, ult73], [c74, 2, true, v74]]);
+  assert.equal((await como(OTRO, `select * from public.v2_mis_reactivados_bbva() where customer_id in ($1, $2)`, [c73, c74])).rows.length, 0, 'otro ejecutivo ve reactivados ajenos');
+  await falla(como(null, `select * from public.v2_mis_reactivados_bbva()`), /permission denied/);
+});
+caso('mis reactivados BBVA: sin visita con contacto se marca con_contacto = false y el seguimiento sigue en su visita sin contacto', async () => {
+  const c77 = await nuevoComercio(77);
+  const v77 = await visitaPasada(c77, 5, 'Nadie', { motivo: 'Cerrado' });
+  await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb)`, [await diaMas(0), JSON.stringify([{ customer_id: c77, gestion_con_contacto: false, reactivado: 'Si' }])]);
+  const r = (await como(EJ, `select dias_trx, con_contacto, ultima_visita_id from public.v2_mis_reactivados_bbva() where customer_id = $1`, [c77])).rows;
+  assert.deepEqual(r.map(x => [x.dias_trx, x.con_contacto, x.ultima_visita_id]), [[0, false, v77]]);
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'WhatsApp', 'No respondió')`, [v77]);
+});
+caso('mis reactivados BBVA: solo con visita válida (como v2_mi_base) y la consulta interna no se llama directo', async () => {
+  const c78 = await nuevoComercio(78);
+  const v78 = await visitaPasada(c78, 5, 'Dueño', { que: 'Reunión concretada' });
+  await db.query(`update v2_visitas set lat = null where id = $1`, [v78]);   // sin ubicación: no es visita válida
+  await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb)`, [await diaMas(0), JSON.stringify([{ customer_id: c78, gestion_con_contacto: true, reactivado: 'Si' }])]);
+  assert.equal((await como(EJ, `select * from public.v2_mis_reactivados_bbva() where customer_id = $1`, [c78])).rows.length, 0, 'aparece un reactivado sin visita válida');
+  await falla(como(EJ, `select public.v2_reactivado_por_contactar($1, '2099-01')`, [c78]), /permission denied/);
+});
 caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
   await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
   const r = (await db.query(`select has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'SELECT') anon_lee,
