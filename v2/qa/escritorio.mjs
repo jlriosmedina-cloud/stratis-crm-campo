@@ -199,7 +199,7 @@ await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reacti
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 11, 'láminas: ' + lams.length);
   const txt = (await Promise.all(lams.map(n => z.file(n).async('string')))).join(' ');
-  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Reclamo o comentario del comercio', 'comercios con respuesta', 'Volumen', 'Reactivados de la base', 'Comercios reactivados'])
+  for (const t of ['Reactivación en comercios visitados · cuenta', 'Detalle de los 3 reactivados con visita', '1.500,50', '2.300,50', '50,00 %', 'Control de coherencia: OK', 'qué pasó en la visita y qué hizo el ejecutivo', 'Reclamo o comentario del comercio', 'comercios con respuesta', 'Volumen', 'Reactivados de la base', 'Comercios reactivados', 'visitas de Stratis al corte de la data de BBVA'])
     assert.ok(txt.includes(t), 'falta en la presentación: ' + t);
   assert.ok(!/CRM/.test(txt), 'la presentación dice «CRM»');
   assert.ok(!/ticket/i.test(txt), 'la presentación muestra el ticket promedio');
@@ -268,8 +268,29 @@ await prueba('reporte para directorio: PDF A4 con los cinco cuadros en el orden 
   const orden = ['COMERCIOS VISITADOS', 'CON CONTACTO', 'REACTIVADOS', 'TASA DE CONVERSI', 'VALOR GENERADO'].map(t => pdf.indexOf('(' + t));
   assert.ok(orden.every(i => i > 0) && orden.every((i, k) => !k || i > orden[k - 1]), 'los cuadros no siguen el orden del desglose: ' + orden.join(','));
   assert.ok(!/CRM/.test(pdf), 'el reporte dice «CRM»');
-  for (const t of ['De la base al objetivo'.toUpperCase(), 'S/ 0,00 MM', '50,00%']) assert.ok(pdf.includes(t), 'falta en el reporte: ' + t);
+  for (const t of ['De la base al objetivo'.toUpperCase(), 'S/ 0,00 MM', '50,00%', 'al corte de la data de BBVA']) assert.ok(pdf.includes(t), 'falta en el reporte: ' + t);
   await p.evaluate(() => { delete window.__FX.tablas.v2_totales_bbva; S.totBBVA = null; });
+});
+await prueba('reactivados BBVA vs. comisión: un estado por comercio, cuadro por ejecutivo y contactados', async () => {
+  const r = await p.evaluate(({ hoy, ej }) => {
+    const v = (cid, con, d) => ({ id: 'vc-' + cid, periodo: 'PRUEBA', customer_id: cid, comercio: 'Comercio ' + cid, correo: ej, visitado_en: d + 'T16:00:00Z', lat: -12.09, lng: -77.04,
+      con, motivo: con === 'Nadie' ? 'Cerrado' : null, que: con === 'Nadie' ? 'Sin éxito' : 'Reunión concretada', decision: null, estado_anul: 'activa', fuera_plazo: false });
+    const b = (i, extra) => Object.assign({ customer_id: String(i).padStart(8, '0'), razon_social: 'COMERCIO ' + i, correo: ej, visitas: 1, visitas_validas: 1, estado: 'seg', dias_trx: 0, bbva_reactivado: '2026-10-06' }, extra);
+    S.base = S.base.concat([b(81, { estado: 'rea', dias_trx: 2 }), b(82, { estado: 'uno', dias_trx: 1 }), b(83), b(84), b(85), b(86)]);
+    S.base.forEach(c => { S.baseMap[c.customer_id] = c; });
+    S.act = S.act.concat([v('00000081', 'Dueño', '2026-09-25'), v('00000082', 'Dueño', '2026-09-25'), v('00000083', 'Tercero', '2026-09-25'),
+      v('00000084', 'Dueño', '2026-09-25'), v('00000085', 'Dueño', '2026-09-25'), v('00000086', 'Nadie', '2026-09-25')]);
+    const t = (cid, f, trx) => ({ customer_id: cid, fecha_corte: f, mes: f.slice(0, 7), formato: 'acumulado_mes', trx });
+    S.trxCom = [t('00000083', '2026-09-23', 0), t('00000083', '2026-09-28', 3), t('00000084', '2026-09-21', 5), t('00000084', '2026-09-28', 5), t('00000086', '2026-09-28', 9)];
+    S.seg = [{ visita_id: 'vc-00000082', customer_id: '00000082', canal: 'Llamada', resultado: 'Respondió: usará el POS', hecho_en: '2026-10-07T15:00:00Z' }];
+    const est = Object.fromEntries(filasComision().map(f => [f.c.customer_id, f.est]));
+    S.vista = 'auditoria'; S.tab = 'bbva'; pintar();
+    return { est, txt: document.querySelector('#contenido, main, body').innerText };
+  }, { hoy, ej: EJECUTIVO.correo });
+  assert.deepEqual(r.est, { '00000081': 'cuenta', '00000082': 'uno', '00000083': 'confirmar', '00000084': 'antes', '00000085': 'sindata', '00000086': 'sincontacto' });
+  for (const t of ['Reactivados BBVA vs. comisión', 'Reactivados BBVA', 'Cuentan', 'Falta 1 día', 'Por confirmar', 'Solo antes de la visita', 'Sin visita con contacto', 'Contactados', '25/09'])
+    assert.ok(r.txt.toLowerCase().includes(t.toLowerCase()), 'falta en el cuadro: ' + t);   // los encabezados van en mayúsculas por CSS
+  assert.match(r.txt, /Total\s+6\s+1\s+1\s+1\s+1\s+1\s+1\s+1/, 'fila Total: 6 BBVA · 1 por estado · 1 sin data · 1 contactado');
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();

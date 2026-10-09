@@ -378,4 +378,7 @@ textarea.campo{min-height:78px;resize:vertical}
 .fb-hist.seg-hist b{color:var(--navy-2)}
 .seg-card{border:1.5px solid var(--azul)}
 .seg-card .eyebrow{color:var(--azul)}
+.rea-card{border:1.5px solid #079477}
+.rea-card .eyebrow{color:#079477}
+.bbva-rea.pend{border-color:var(--ambar);color:var(--ambar)}
 .seg-panel .eyebrow{margin-top:4px}
