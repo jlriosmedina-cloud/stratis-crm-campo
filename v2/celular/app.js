@@ -419,7 +419,7 @@ function vistaInicio(){
     </div>
     <div class="cuerpo">
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
-        ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mis visitados</button>`}</div>` : ""}
+        ${(S.revVisitas || []).length ? `<div class="paradas">${S.revVisitas.map(v => `<button class="parada" data-ficha="${esc(v.customer_id)}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">!</span><span class="t"><b>${esc(v.comercio)}</b><small>${fechaCorta(v.visitado_en)} · ${esc(v.validacion_motivo || "")}</small></span></button>`).join("")}</div>` : `<button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base" data-filtro-visita="visitados">Ver mi base</button>`}</div>` : ""}
       ${(() => { const n = S.admin ? 0 : S.base.filter(faltaSeguimiento).length; return n ? `<div class="card seg-card"><div class="eyebrow">Seguimiento remoto</div><h2>${n} ${n === 1 ? "comercio sin contacto espera" : "comercios sin contacto esperan"} tu seguimiento</h2><div class="nota">La visita ya cuenta. Llámalo o escríbele por WhatsApp o correo y registra qué respondió: así ninguna visita queda sin feedback.</div><button class="btn btn-sec" data-ir-sinseg>Ver los comercios</button></div>` : ""; })()}
       ${(() => { if (S.admin || !S.recup) return ""; const ord = { llamar:0, trabado:1, tramite:2 }; const l = recupAbiertos().sort((x, y) => ord[x.paso] - ord[y.paso]); const n = l.length;
         return n ? `<div class="card recup-card"><div class="eyebrow">Recupero del POS</div><h2>${n} ${n === 1 ? "equipo por recuperar" : "equipos por recuperar"}</h2><div class="nota">Comercios que desistieron. Tú no recoges el equipo: llama a Soporte de Openpay y marca cada paso.</div>
@@ -454,12 +454,38 @@ function vistaInicio(){
     </div></div>`;
 }
 const fueVisitado = c => (c.visitas || 0) > 0;
+/* «Falta reactivar» (15/10/2026): visitados que todavía no le cuentan al ejecutivo, del más cercano a lograrse al más lejano.
+   No incluye los reactivados, los que desistieron (van a Recupero), los cancelados ni los que cerraron definitivamente. */
+const faltaReactivar = c => fueVisitado(c) && (porContactar(c) || !(["rea","des","can"].includes(c.estado) || c.ultima_motivo === "Cerró definitivamente"));
+function prioridadFalta(c){
+  const f = porContactar(c) ? rbbvaDe(c) : null;
+  if (f) return 1 - (f.dias_trx || 0) * 0.1 + (f.con_contacto ? 0 : 0.05);
+  if (c.estado === "uno") return 2;
+  if (c.estado === "esp") return 3;
+  if (c.estado === "seg" || c.estado === "rag" || (c.estado === "sin" && !c.ultima_motivo)) return 4;
+  return 5;
+}
+function accionFalta(c){
+  const rb = porContactar(c) ? rbbvaDe(c) : null;
+  if (rb && !rb.con_contacto) return "Reactivado BBVA, tu visita fue sin contacto: vuelve y conversa con el dueño";
+  if (rb && rb.dias_trx === 1) return "Falta 1 día de transacciones: llámalo";
+  if (rb) return "Reactivado BBVA, aún no te cuenta: llámalo";
+  if (c.estado === "uno") return "Falta 1 día de transacciones: llámalo";
+  if (c.estado === "esp") return "Quedó en usar el POS: confirma que transaccione";
+  if (c.estado === "seg") return "Aún no decide: vuelve con el dueño";
+  if (c.estado === "rag" || volverPendiente(c)) return "No estaba quien decide: " + (c.volver_el ? "vuelve el " + fISO(c.volver_el) : "vuelve con el dueño");
+  if (c.estado === "sin" && !c.ultima_motivo) return "No estaba quien decide: vuelve con el dueño";
+  return c.ultima_motivo === "Zona insegura" ? "Zona insegura: llámalo, no vuelvas" : "Sin contacto: vuelve o llama";
+}
+const FILTRO_INICIO = { bbva:"Reactivados BBVA por contactar", recup:"Recupero del POS", sinseg:"Sin contacto · falta seguimiento", rag:"Reagendados" };
 function filtrar(omitir){
   const q = S.q.trim().toLowerCase();
-  return S.base.filter(c => {
+  const l = S.base.filter(c => {
     if (omitir !== "visita"){
       if (S.filtroVisita === "por" && fueVisitado(c)) return false;
       if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
+      if (S.filtroVisita === "falta" && !faltaReactivar(c)) return false;
+      if (S.filtroVisita === "rea" && c.estado !== "rea") return false;
     }
     // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
     if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "recup" ? !recupDe(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
@@ -471,19 +497,21 @@ function filtrar(omitir){
     if (q && !(String(c.customer_id).includes(q) || String(c.ruc || "").includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
     return true;
   });
+  return omitir !== "visita" && S.filtroVisita === "falta" ? l.map((c, i) => [c, i]).sort((a, b) => (prioridadFalta(a[0]) - prioridadFalta(b[0])) || (a[1] - b[1])).map(x => x[0]) : l;
 }
 function tarjeta(c){
-  const e = estadoCom(c);
+  const e = estadoCom(c), hacer = (S.filtroVisita === "falta" || S.filtroEstado === "bbva") && faltaReactivar(c) ? accionFalta(c) : "";
   return `<button class="com" data-ficha="${c.customer_id}">
     <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
     <b>${esc(nombreDe(c))}</b>
     ${(() => { const k = etiquetaComision(c); return k ? `<div class="bbva-rea ${k.c}">${k.t}</div>` : ""; })()}
+    ${hacer ? `<div class="hacer">→ ${esc(hacer)}</div>` : ""}
     <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
   </button>`;
 }
 function vistaBase(){
   const sinVisita = filtrar("visita");
-  const nVis = sinVisita.filter(fueVisitado).length, nPor = sinVisita.length - nVis;
+  const nVis = sinVisita.filter(fueVisitado).length, nPor = sinVisita.length - nVis, nFalta = sinVisita.filter(faltaReactivar).length, nRea = sinVisita.filter(c => c.estado === "rea").length;
   let todo = filtrar();
   if (S.filtroVisita === "vis") todo = todo.slice().sort((a,b) => new Date(b.ultima_visita || 0) - new Date(a.ultima_visita || 0));
   const total = todo.length, lista = todo.slice(0, 300);
@@ -491,19 +519,18 @@ function vistaBase(){
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
   const hayLibres = S.base.some(c => !c.correo);
-  const est = [["todos","Cualquier resultado"],["esp","Esperando 2 días"],["uno","1 día · volver"],["rea","Reactivados"],["bbva","Reactivados BBVA · por contactar"],["recup","Recupero del POS"],["sinseg","Sin contacto · falta seguimiento"],["seg","Aún no decide"],["rag","Reagendados"],["sin","Sin éxito"],["des","Desistió"],["can","Cancelados"]];
-  const extras = [S.filtroEstado !== "todos", !!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
+  const extras = [!!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
     <div class="barra"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>
       <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por customer ID, RUC o razón social" value="${esc(S.q)}" autocomplete="off"></label></div>
     <div class="barra-filtros">
-      <div class="chips">${chip("por","Por visitar",nPor)}${chip("vis","Visitados",nVis)}${chip("todos","Todos")}</div>
+      <div class="chips">${chip("por","Por visitar",nPor)}${chip("falta","Falta reactivar",nFalta)}${chip("rea","Reactivados",nRea)}${chip("todos","Todos",sinVisita.length)}</div>
       <button class="chip fijo ${S.masFiltros||extras?"on":""}" data-mas aria-label="Más filtros" title="Más filtros">${ICON.filtro}${extras ? ` <span class="cuenta">${extras}</span>` : ""}</button>
     </div>
+    ${S.filtroEstado !== "todos" ? `<div class="filtro-inicio"><span>${esc(FILTRO_INICIO[S.filtroEstado] || "Filtro de Inicio")}</span><button data-quitar-estado aria-label="Quitar el filtro">✕</button></div>` : ""}
     ${S.masFiltros ? `<div class="panel-filtros">
       <div class="eyebrow" style="padding:0 0 2px">Filtros</div>
-      <div class="filtros"><select id="fEstado" aria-label="Resultado">${est.map(([k,t]) => `<option value="${k}" ${S.filtroEstado===k?"selected":""}>${esc(t)}</option>`).join("")}</select></div>
       <div class="filtros">
         <select id="fDistrito" aria-label="Distrito"><option value="">Todos los distritos</option>${distritos.map(d => `<option ${S.filtroDistrito===d?"selected":""}>${esc(d)}</option>`).join("")}</select>
         <select id="fRuta" aria-label="Ruta"><option value="">Todas las rutas</option>${rs.map(r => `<option ${S.filtroRuta===r.nombre?"selected":""}>${esc(r.nombre)}</option>`).join("")}</select>
@@ -1691,7 +1718,7 @@ function enlazar(){
   p.querySelectorAll("[data-corregir-cola]").forEach(b => b.onclick = () => corregirDeCola(b.dataset.corregirCola));
   p.querySelectorAll("[data-vista]").forEach(b => b.onclick = () => {
     S.vista = b.dataset.vista; S.ficha = null; S.accion = null; S.corr = null;
-    if (b.dataset.filtroVisita) S.filtroVisita = "vis";
+    if (b.dataset.filtroVisita) { S.filtroVisita = "todos"; S.filtroEstado = "todos"; }
     if (S.vista === "actividad") cargarActividad();
     if (S.vista === "avance") cargarAvance();
     pintar();
@@ -1700,7 +1727,8 @@ function enlazar(){
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; S.filtroVisita = "todos"; S.masFiltros = true; pintar(); });
   p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
   p.querySelectorAll("[data-ir-extra]").forEach(b => b.onclick = () => { const t = document.getElementById("dirExtra"); if (t) t.scrollIntoView({ behavior:"smooth", block:"start" }); });
-  p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.corr = null; pintar(); });
+  p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.filtroEstado = "todos"; S.corr = null; pintar(); });
+  p.querySelectorAll("[data-quitar-estado]").forEach(b => b.onclick = () => { S.filtroEstado = "todos"; pintar(); });
   p.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => { S.masFiltros = !S.masFiltros; pintar(); });
   p.querySelectorAll("[data-limpiar]").forEach(b => b.onclick = () => {
     S.filtroEstado = "todos"; S.filtroDistrito = ""; S.filtroRuta = ""; S.filtroEjecutivo = ""; S.filtroDueno = "todos"; pintar(); });
@@ -1730,7 +1758,7 @@ function enlazar(){
     if (error) return avisar("No se guardó la corrección: " + esc(error.message), 6000);
     S.editando = null; await recargarBase(); avisar("Corrección guardada con tu nombre."); });
   const q = $("#q"); if (q){ q.oninput = () => { S.q = q.value; const pos = q.selectionStart; pintar(); const n = $("#q"); n.focus(); n.setSelectionRange(pos,pos); }; }
-  const fs = $("#fEstado"); if (fs) fs.onchange = () => { S.filtroEstado = fs.value; pintar(); };
+
   const fu = $("#fDueno"); if (fu) fu.onchange = () => { S.filtroDueno = fu.value; pintar(); };
   const fd = $("#fDistrito"); if (fd) fd.onchange = () => { S.filtroDistrito = fd.value; pintar(); };
   const fr = $("#fRuta"); if (fr) fr.onchange = () => { S.filtroRuta = fr.value; pintar(); };

@@ -121,6 +121,29 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.ficha = null; delete S.hist['00000014']; delete S.hist['00000015']; S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
     console.log(`ok  ${tema} · reactivados BBVA vs. comisión`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · reactivados BBVA vs. comisión: ${e.message}`); }
+  // Mi base con 4 chips (15/10): Por visitar · Falta reactivar · Reactivados · Todos; sin el desplegable de resultados
+  try {
+    await p.evaluate(() => { S.vista = 'base'; S.ficha = null; S.filtroEstado = 'todos'; S.filtroVisita = 'falta'; S.masFiltros = true; pintar(); }); await p.waitForTimeout(150);
+    const chips = await p.locator('[data-visita]').evaluateAll(l => l.map(b => b.dataset.visita + ':' + b.innerText.replace(/\s+/g, ' ').trim()));
+    assert.deepEqual(chips, ['por:Por visitar 9', 'falta:Falta reactivar 6', 'rea:Reactivados 1', 'todos:Todos 19']);
+    assert.equal(await p.locator('#fEstado').count(), 0, 'sigue el desplegable de resultados');
+    const orden = await p.evaluate(() => filtrar().map(c => c.customer_id));
+    assert.deepEqual(orden, ['00000014', '00000012', '00000016', '00000006', '00000011', '00000013'], 'orden de Falta reactivar');
+    const t = await p.locator('.vista').innerText();
+    assert.ok(t.includes('Falta 1 día de transacciones: llámalo'), 'qué hacer del 14');
+    assert.ok(t.includes('Sin contacto: vuelve o llama'), 'qué hacer del 13');
+    await p.click('[data-visita="rea"]'); await p.waitForTimeout(100);
+    assert.deepEqual(await p.evaluate(() => filtrar().map(c => c.customer_id)), ['00000015']);
+    // llegar desde Inicio: etiqueta con la X; tocar la X o un chip la quita
+    await p.evaluate(() => { S.filtroEstado = 'bbva'; S.filtroVisita = 'todos'; pintar(); }); await p.waitForTimeout(100);
+    assert.equal(await p.locator('[data-quitar-estado]').count(), 1, 'falta la etiqueta del filtro');
+    await p.click('[data-quitar-estado]'); await p.waitForTimeout(100);
+    assert.equal(await p.evaluate(() => S.filtroEstado), 'todos');
+    await p.evaluate(() => { S.filtroEstado = 'recup'; pintar(); }); await p.click('[data-visita="falta"]'); await p.waitForTimeout(100);
+    assert.equal(await p.evaluate(() => S.filtroEstado), 'todos', 'un chip debe quitar el filtro de Inicio');
+    await p.evaluate(() => { S.filtroVisita = 'todos'; S.masFiltros = false; S.vista = 'inicio'; pintar(); });
+    console.log(`ok  ${tema} · Mi base con 4 chips`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · Mi base con 4 chips: ${e.message}`); }
   // Recupero del POS (09/10): tarjeta de Inicio, filtro, barra de pasos y un botón grande por paso
   try {
     await p.evaluate(() => { S.filtroEstado = 'todos'; S.vista = 'inicio'; S.ficha = null; pintar(); }); await p.waitForTimeout(150);
