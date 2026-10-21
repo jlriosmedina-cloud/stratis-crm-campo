@@ -401,3 +401,4 @@ textarea.campo{min-height:78px;resize:vertical}
 .barra .fila-ent h1{margin-bottom:6px}
 .av-fila{margin-top:10px} .av-fila .fila-ent{font-size:13.5px;margin-bottom:6px} .av-fila b{color:var(--ink)}
 .franja-como{background:var(--navy-2)}
+.parada.opcional .n{background:var(--suelo);color:var(--muted)}

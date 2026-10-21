@@ -221,6 +221,7 @@ const CALIDAD = { comercio:"ubicado por el nombre del comercio", numero:"ubicado
    (visitados antes de la base nueva: no son pendientes, pero cuentan si BBVA los reactiva). Con la base vieja,
    que no trae «origen», el celular se ve como antes. */
 const META_PERIODO = 225;
+const DEL_DIA = 8, RUTA_ESPECIAL = /^Ruta 9[89]\b|Base anterior|Por ubicar/i;
 const GRUPO = { 1:{ t:"Ubicado al 100 %", c:"g1", chip:"Al 100 %" }, 2:{ t:"Rango cercano", c:"g2", chip:"Cercanos" }, 3:{ t:"Llama antes de ir", c:"g3", chip:"Llamar antes" } };
 const hayBloques = () => S.base.some(c => c.origen);
 const esNueva = c => c.origen === "base_nueva";
@@ -451,10 +452,14 @@ function vistaInicio(){
   const m = metricas();
   const rs = rutas();
   const hayRutas = S.base.some(c => c.ruta);
-  const pendiente = r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)));
+  // Rutas del bloque (20/10): el orden 1 a 8 es «del día» y del 9 en adelante son opcionales que no traban la ruta.
+  // «Ruta 98 · Base anterior» y «Ruta 99 · Por ubicar» nunca son la ruta de hoy.
+  const enBloques = hayBloques(), opcional = c => enBloques && c.orden > DEL_DIA;
+  const especial = r => enBloques && RUTA_ESPECIAL.test(r.nombre);
+  const pendiente = r => !especial(r) && r.cs.some(c => c.estado === "por" && !opcional(c) && (!c.correo || esMio(c)));
   const ultima = S.base.filter(c => c.ultima_visita && esMio(c)).sort((a,b) => String(b.ultima_visita).localeCompare(String(a.ultima_visita)))[0];
   const rutaUltima = ultima ? rs.find(r => r.cs.includes(ultima)) : null;
-  const rutaHoy = hayRutas ? ((rutaUltima && pendiente(rutaUltima) ? rutaUltima : null) || rs.find(pendiente) || rs[0]) : null;
+  const rutaHoy = hayRutas ? ((rutaUltima && pendiente(rutaUltima) ? rutaUltima : null) || rs.find(pendiente) || rs.find(r => !especial(r)) || null) : null;
   const mios = S.base.filter(esMio).sort((a,b) => String(b.ultima_visita||"").localeCompare(String(a.ultima_visita||"")));
   const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
@@ -497,8 +502,8 @@ function vistaInicio(){
         <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
-        <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
-        <div class="paradas">${rutaHoy.cs.slice(0,12).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(dirDe(c))}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div>
+        <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs.some(c => !opcional(c) && c.estado === "por") ? rutaHoy.cs.filter(c => !opcional(c)) : rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
+        <div class="paradas">${rutaHoy.cs.slice(0, enBloques ? 13 : 12).map((c,i) => `<button class="parada${opcional(c) ? " opcional" : ""}" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${opcional(c) ? "Opcional · " : ""}${esc(dirDe(c))}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div>
       </div>` : ""}
       ${volver.length ? `<div class="card"><div class="eyebrow" style="color:var(--ambar)">Vale la pena volver</div><h2>${volver.length} comercio(s) con un solo día de transacción</h2><div class="nota">Un segundo día distinto antes del cierre los convierte en reactivados.</div>
         <div class="paradas">${volver.map(c => `<button class="parada" data-ficha="${c.customer_id}"><span class="n" style="background:var(--ambar-t);color:var(--ambar)">1</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(c.distrito)} · ${esc(dirDe(c))}</small></span></button>`).join("")}</div></div>` : ""}
@@ -588,7 +593,7 @@ function tarjeta(c){
     <b>${GRUPO[c.grupo_ubicacion] ? `<span class="ub-dot ${GRUPO[c.grupo_ubicacion].c}" title="${GRUPO[c.grupo_ubicacion].t}"></span>` : ""}${esc(nombreDe(c))}</b>
     ${(() => { const k = etiquetaComision(c); return k ? `<div class="bbva-rea ${k.c}">${k.t}</div>` : ""; })()}
     ${hacer ? `<div class="hacer">→ ${esc(hacer)}</div>` : ""}
-    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}${esAnterior(c) ? " · base anterior" : ""}</span></div>
+    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}${esAnterior(c) ? " · base anterior" : ""}${S.filtroRuta && hayBloques() && c.orden > DEL_DIA ? " · opcional" : ""}</span></div>
   </button>`;
 }
 function vistaBase(){

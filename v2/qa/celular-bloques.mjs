@@ -94,6 +94,23 @@ for (const tema of ['light', 'dark']) {
     assert.match(t, /Comercios visitados\s*1 \/ 225/); assert.match(t, /2 visitados · 1 con contacto/);
     await p.evaluate(() => { S.vista = 'inicio'; pintar(); });
   });
+  await prueba(`${tema} · ruta de hoy: los opcionales no la traban y la 98 y la 99 nunca salen`, async () => {
+    const r = await p.evaluate(() => {
+      const orig = S.base, hoy = () => { const c = [...document.querySelectorAll('.ruta-hoy')].find(x => x.textContent.includes('Tu ruta de hoy')); return c ? c.querySelector('h2').textContent : null; };
+      const mk = (id, ruta, orden, vis) => Object.assign({}, orig[0], { customer_id: id, ruta, orden, visitas: vis ? 1 : 0, visitas_validas: vis ? 1 : 0, estado: vis ? 'vis' : 'por',
+        ultima_visita: vis ? '2026-01-03T15:00:00Z' : null, ultima_que: vis ? 'Reunión concretada' : null, ultima_motivo: null });
+      const ruta = (n, pend) => { const l = []; for (let o = 1; o <= 10; o++) l.push(mk('R1' + o, 'Ruta 01', o, !pend(o))); for (let o = 1; o <= 3; o++) l.push(mk('R2' + o, 'Ruta 02', o, n === 'todo'));
+        l.push(mk('R98', 'Ruta 98 · Base anterior · ya visitados', 1, false), mk('R99', 'Ruta 99 · Por ubicar · llamar antes', 1, false)); return l; };
+      const out = {};
+      S.base = ruta('', o => o > 8); S.vista = 'inicio'; pintar(); out.a = hoy();                       // del día hecho, quedan opcionales
+      S.base = ruta('todo', () => false); pintar(); out.b = hoy();                                    // solo quedan la 98 y la 99
+      S.base = ruta('', () => true); pintar(); out.c = hoy(); out.opc = document.querySelectorAll('.ruta-hoy .parada.opcional').length;
+      S.base = orig; pintar(); return out;
+    });
+    assert.equal(r.a, 'Ruta 02', 'los opcionales traban la ruta');
+    assert.ok(r.b && !/98|99/.test(r.b), 'propone la 98 o la 99: ' + r.b);
+    assert.equal(r.c, 'Ruta 01'); assert.equal(r.opc, 2, 'no marca los opcionales');
+  });
   if (errs.length) { fallas++; console.log(`MAL ${tema} · errores de consola:`, errs); }
   await b.close();
 }
