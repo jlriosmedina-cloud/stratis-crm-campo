@@ -21,6 +21,7 @@ Se aplican solo con el OK de Jose.
 | `20261006100000_retiro_temporal_de_la_base.sql` | 06/10/2026, con el OK de Jose (cambia `v2_mi_base`; el celular no cambia de versión) | `20261006100628` |
 | `20261009100000_seguimiento_reactivados_bbva.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009141119` |
 | `20261010100000_recupero_pos.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009151310` |
+| `20261020150000_respaldo_antes_base_2026_11.sql` | 20/10/2026, con el OK de Jose (solo copia en el esquema `respaldo`; no toca `public`) | `20261020213955` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 
