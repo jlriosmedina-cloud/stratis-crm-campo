@@ -88,11 +88,18 @@ const claseDist = v => v.distancia_m == null ? "no" : v.distancia_m <= REGLA.cer
 const tasa = v => v == null ? "—" : (Number(v)*100).toFixed(2).replace(".",",") + " %";
 const nombreCorto = n => String(n || "").split(" ")[0];
 const num = n => Number(n || 0).toLocaleString("es-PE");
+// Ojo de privacidad (base 2026-11): cerrado al entrar y sin recordar el estado. Oculta montos, potenciales,
+// volúmenes, celulares y correos en pantalla. Lo descargable (Base para BBVA, presentación, PDF) no cambia.
+const OCULTO = `<span class="oculto" title="Abre el ojo para verlo">••••</span>`;
+const solesO = n => n == null || n === "" || isNaN(n) ? "—" : "S/ " + (S.ver ? Math.round(Number(n)).toLocaleString("es-PE") : OCULTO);
+const priv = txt => S.ver ? txt : OCULTO;
+const telO = t => !t ? "Sin celular" : S.ver ? esc(t) : "••• ••• " + esc(String(t).replace(/\D/g, "").slice(-3));
+const mailO = t => !t || t === "-" ? "Sin correo" : S.ver ? esc(t) : esc(String(t)[0]) + "•••@" + esc(String(t).split("@")[1] || "•••");
 
 /* ---------- estado ---------- */
 const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, error:"",
-  vista:"validacion", filtro:"todos", ej:"todos", dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
-  act:[], actEn:null, base:[], baseMap:{}, ejecutivos:[], bit:{}, trx:{}, nuevas:new Set(), pausa:false, ultimaRecep:null,
+  vista:"validacion", filtro:"todos", ej:"todos", ver:false, verCel:null, dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
+  act:[], actEn:null, base:[], baseMap:{}, docMap:{}, ejecutivos:[], bit:{}, trx:{}, nuevas:new Set(), pausa:false, ultimaRecep:null,
   tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"", retenidas:[] };
 
 const ICON = {
@@ -108,6 +115,10 @@ const ICON = {
   equipo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   luna:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
   sol:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+  bloques:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h4M7 16.5h7"/></svg>',
+  ojo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  ojoNo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.6 19.6 0 0 1 5.1-5.9M9.9 5.2A9.9 9.9 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>',
+  cel:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>',
   salir:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
 };
 
@@ -242,7 +253,24 @@ async function cargarRetenidas(){
 }
 async function cargarBase(){
   const { data } = await sb.rpc("v2_mi_base");
-  S.base = data || []; S.baseMap = {}; S.base.forEach(c => { S.baseMap[c.customer_id] = c; });
+  // Base 2026-11: los de «salida» siguen en v2_asignaciones (regla n.º 1), pero ya no son cartera salvo que reciban una visita.
+  // baseMap guarda todos, para leer el comercio de cualquier visita.
+  S.base = (data || []).filter(enCartera); S.baseMap = {}; S.docMap = {};
+  (data || []).forEach(c => { if (c.documento) S.docMap[c.documento] = c.customer_id; }); (data || []).forEach(c => { S.baseMap[c.customer_id] = c; });
+}
+const enCartera = c => c.origen !== "salida" || (c.visitas || 0) > 0;
+// Selector de ejecutivo (base 2026-11): todas las vistas se leen con el ejecutivo elegido o con el equipo.
+// Solo filtra mientras se pinta; las descargas y las acciones siempre usan los datos completos.
+function elegirEj(correo){
+  S.ej = correo || "todos"; S.mEj = S.ej; S.fbEj = S.pqEj = S.ej === "todos" ? "" : S.ej;
+  S.sel = null; S.mDist = null; S.mVista = null;
+}
+function conEj(fn){
+  if (S.ej === "todos") return fn();
+  const de = l => Array.isArray(l) ? l.filter(x => x.correo === S.ej) : l;
+  const g = { act:S.act, base:S.base, ejecutivos:S.ejecutivos, avance:S.avance, retenidas:S.retenidas, recups:S.recups, recupSigue:S.recupSigue };
+  Object.keys(g).forEach(k => { S[k] = de(g[k]); });
+  try { return fn(); } finally { Object.assign(S, g); }
 }
 async function bitacora(id){
   if (S.bit[id]) return S.bit[id];
@@ -318,6 +346,7 @@ async function accion(id, tipo, motivo, nota){
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
 const VISTAS = [
   ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
+  ["bloques","Base y bloques", ICON.bloques, null],
   ["equipo","Por ejecutivo", ICON.equipo, null],
   ["mapa","Mapa de distritos", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
@@ -345,6 +374,7 @@ function pintar(){
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   const c = $("#contenido");
   const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
+              bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
@@ -353,13 +383,19 @@ function pintar(){
               cargas:["Cargas","Carga la data que envía BBVA: transacciones y resultados de reactivación. La base y la presentación para BBVA se descargan con los botones de arriba."],
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
+  $("#gEj").innerHTML = `<option value="todos">Equipo completo</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}`;
+  $("#gEj").disabled = S.vista === "cargas"; $("#gEj").title = S.vista === "cargas" ? "Las cargas son de todo el equipo" : "Ver todas las vistas de un ejecutivo o del equipo";
+  $("#btnCel").hidden = S.ej === "todos";
+  $("#btnOjo").innerHTML = S.ver ? `${ICON.ojo} Ocultar datos` : `${ICON.ojoNo} Ver datos`;
+  $("#btnOjo").setAttribute("aria-pressed", String(S.ver)); $("#btnOjo").classList.toggle("cerrado", !S.ver);
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
   if (S._mapa){ try { S._mapa.off(); S._mapa.stop && S._mapa.stop(); S._mapa.remove(); } catch(e){} S._mapa = null; }
   const ae = document.activeElement, foco = ae && ae.id && c.contains(ae) ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const campos = {}; ["mSel","mNota","qTraza"].forEach(id => { const el = document.getElementById(id); if (el) campos[id] = el.value; });
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
-  c.innerHTML = S.vista === "validacion" ? vistaValidacion() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cargas" ? vistaCargas() : vistaIndicadores();
+  // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -379,6 +415,9 @@ function cascaron(){
     <header class="top">
       <div><h1 id="titulo"></h1><div class="sub" id="subtitulo"></div></div>
       <div class="der">
+        <select class="sel" id="gEj" aria-label="Ejecutivo"></select>
+        <button class="btn" id="btnCel" title="Abrir su celular tal como lo ve él, solo para mirar" hidden>${ICON.cel} Ver su celular</button>
+        <button class="btn ojo" id="btnOjo" aria-pressed="false" title="Mostrar u ocultar montos, potenciales, volúmenes, celulares y correos"></button>
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
@@ -442,7 +481,7 @@ function vistaValidacion(){
   if (S.sel && !S.act.find(v => v.id === S.sel)) S.sel = null;
   if (!S.sel && lista.length) S.sel = lista[0].id;
   const sel = S.act.find(v => v.id === S.sel);
-  const metaEq = 160 * Math.max(1, S.ejecutivos.length);
+  const metaEq = ((S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160) * Math.max(1, S.ejecutivos.length);
   // Zona insegura u otro motivo, por ejecutivo, sobre sus visitas no anuladas del periodo (señal que no bloquea)
   const activas = S.act.filter(v => v.estado_anul !== "anulada"), esRev = v => v.con === "Nadie" && MOTIVOS_REVISAR.includes(v.motivo);
   const porEj = S.ejecutivos.map(e => { const l = activas.filter(v => v.correo === e.correo), n = l.filter(esRev).length; return { e, n, t:l.length, p:l.length ? Math.round(n * 100 / l.length) : 0 }; })
@@ -464,7 +503,6 @@ function vistaValidacion(){
           ${[["todos","Todas"],["obs","Observadas"],["anu","Anuladas"]].concat(cnt("pend") ? [["pend","Por validar"]] : []).map(([k,t]) => `<button class="chip ${S.filtro===k?"on":""}" data-filtro="${k}">${t}<span class="c num">${cnt(k)}</span></button>`).join("")}
         </div>
         <div class="der">
-          <select class="sel" id="fEj"><option value="todos">Todos los ejecutivos</option>${S.ejecutivos.map(e=>`<option value="${esc(e.correo)}" ${S.ej===e.correo?"selected":""}>${esc(e.nombre)}</option>`).join("")}</select>
           <select class="sel" id="fDia"><option value="hoy" ${S.dia==="hoy"?"selected":""}>Hoy ${fISO(hoyISO())}</option><option value="ayer" ${S.dia==="ayer"?"selected":""}>Ayer ${fISO(ayerISO())}</option><option value="periodo" ${S.dia==="periodo"?"selected":""}>Todo el periodo</option>${diasPeriodo().filter(d => d.iso !== hoyISO() && d.iso !== ayerISO()).reverse().map(d => `<option value="${d.iso}" ${S.dia===d.iso?"selected":""}>${DOW[d.dow]} ${fISO(d.iso)}</option>`).join("")}</select>
           <label class="lbl"><input type="checkbox" id="fSenal" ${S.soloSenal?"checked":""}> Solo con señales</label>
         </div>
@@ -720,9 +758,124 @@ function vistaEquipo(){
         <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
         <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
       </tbody></table></div>
-    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra 160). Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
+    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra ${metaEj}). Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
   </div>`;
 }
+
+/* =========================================================================
+   Base y bloques · periodo 2026-11 (ESPEC_nueva_estructura_2026-11, sección 3)
+   225 comercios por ejecutivo y periodo (origen 'base_nueva') en dos bloques quincenales.
+   'base_anterior' va aparte: no es pendiente, pero cuenta si BBVA lo reactiva.
+   ========================================================================= */
+const POR_PERIODO = 225;
+const GRUPO_UB = { 1:["val","Ubicado al 100 %"], 2:["obs","Rango cercano"], 3:["anu","Requiere búsqueda"] };
+const esValida = v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo;
+// Reactivado que cuenta para comisión: BBVA lo reporta y transacciona 2 días distintos después de la primera visita válida con contacto
+const cuentaCom = c => !!c.bbva_reactivado && (c.dias_trx || 0) >= 2;
+function fechasBloques(){
+  const f = {};
+  (S.base || []).forEach(c => { if (c.bloque && c.bloque_ini && !f[c.bloque]) f[c.bloque] = { ini:c.bloque_ini, fin:c.bloque_fin }; });
+  // bloque en curso: el 2 desde que empieza; antes (o sin fechas cargadas), el 1
+  return { f, act: f[2] && hoyISO() >= f[2].ini ? 2 : 1 };
+}
+function cifrasBloques(l){
+  const vis = new Set(), con = new Set();
+  S.act.forEach(v => { if (!esValida(v)) return; vis.add(v.customer_id); if (v.con !== "Nadie") con.add(v.customer_id); });
+  const nueva = l.filter(c => c.origen === "base_nueva"), ant = l.filter(c => c.origen === "base_anterior");
+  const pot = xs => xs.reduce((s, c) => s + (Number(c.potencial) || 0), 0);
+  const cuenta = xs => ({ n:xs.length, vis:xs.filter(c => vis.has(c.customer_id)).length, con:xs.filter(c => con.has(c.customer_id)).length,
+    rea:xs.filter(c => c.bbva_reactivado).length, cuentan:xs.filter(cuentaCom).length });
+  const g = { 1:0, 2:0, 3:0, sin:0 }; nueva.forEach(c => { g[GRUPO_UB[c.grupo_ubicacion] ? c.grupo_ubicacion : "sin"]++; });
+  return { b1:cuenta(nueva.filter(c => c.bloque === 1)), b2:cuenta(nueva.filter(c => c.bloque === 2)), per:cuenta(nueva), ant:cuenta(ant), g,
+    pot:{ asig:pot(nueva), vis:pot(nueva.filter(c => vis.has(c.customer_id))), rea:pot(nueva.filter(c => c.bbva_reactivado)) }, vis };
+}
+function vistaBloques(){
+  const base = S.base || [];
+  if (!base.some(c => c.origen)) return `<div class="aviso warn">La base del periodo ${esc(S.periodo ? S.periodo.id : "")} todavía no viene por bloques: el bloque, el origen, el potencial y la ubicación llegan con la carga de la base nueva de BBVA (la prepara Análisis y se aplica con tu OK). Hasta entonces este cuadro queda vacío y el resto del escritorio funciona igual.</div>`;
+  const { f, act } = fechasBloques(), T = cifrasBloques(base), nEj = Math.max(1, S.ejecutivos.length);
+  const rango = b => f[b] ? `${fISO(f[b].ini)} al ${fISO(f[b].fin)}` : "fechas por cargar";
+  const pct = (a, b) => b ? Math.round(a * 100 / b) : 0;
+  const B = act === 1 ? T.b1 : T.b2;
+  const ejs = S.ejecutivos.map(e => ({ e, x:cifrasBloques(base.filter(c => c.correo === e.correo)) })).filter(r => r.x.per.n || r.x.ant.n);
+  const verCel = e => `<button class="btn chico" data-ver-cel="${esc(e.correo)}" title="Abrir su celular tal como lo ve él">${ICON.cel} Celular</button>`;
+  const nomEj = e => `<span class="ej">${AVATAR(e)}${esc(nombreCorto(e.nombre))}</span>`;
+  const conTotal = ejs.length > 1;
+  const filaAv = (nom, x, n, btn) => `<tr><td>${nom}</td>
+    <td class="n num">${x.b1.vis}<span class="muted"> / ${x.b1.n}</span></td><td class="n num">${x.b1.con}</td>
+    <td class="n num">${x.b2.n ? `${x.b2.vis}<span class="muted"> / ${x.b2.n}</span>` : `<span class="muted">por llegar</span>`}</td>
+    <td class="n num"><b>${x.per.vis}</b><span class="muted"> / ${POR_PERIODO * n}</span><div class="barrita"><i style="width:${Math.min(100, pct(x.per.vis, POR_PERIODO * n))}%"></i></div></td>
+    <td class="n num">${x.per.rea}</td><td class="n num"><b>${x.per.cuentan}</b></td>
+    <td class="n num">${x.ant.n}</td><td class="n num">${x.ant.con}</td><td class="n num">${x.ant.rea}</td><td class="n num">${x.ant.cuentan}</td><td>${btn || ""}</td></tr>`;
+  const filaPot = (nom, x) => `<tr><td>${nom}</td><td class="n num">${solesO(x.pot.asig)}</td><td class="n num">${solesO(x.pot.vis)} <span class="muted">${pct(x.pot.vis, x.pot.asig)} %</span></td><td class="n num">${solesO(x.pot.rea)} <span class="muted">${pct(x.pot.rea, x.pot.asig)} %</span></td></tr>`;
+  const filaUb = (nom, x) => `<tr><td>${nom}</td><td class="n num">${x.per.n}</td>${[1, 2, 3].map(k => `<td class="n num">${x.g[k]} <span class="muted">${pct(x.g[k], x.per.n)} %</span></td>`).join("")}<td class="n num">${x.g.sin || "—"}</td></tr>`;
+  // Calidad de ubicación por distrito (base nueva, los dos bloques)
+  const dis = {};
+  base.filter(c => c.origen === "base_nueva").forEach(c => { const o = dis[c.distrito || "Sin distrito"] ||= { n:0, p:0, 1:0, 2:0, 3:0, vis:0, ejs:new Set() };
+    o.n++; o.p += Number(c.potencial) || 0; if (GRUPO_UB[c.grupo_ubicacion]) o[c.grupo_ubicacion]++; if (T.vis.has(c.customer_id)) o.vis++; if (c.correo) o.ejs.add(c.correo); });
+  const filasDis = Object.entries(dis).sort((a, b) => b[1][3] - a[1][3] || b[1].p - a[1].p || b[1].n - a[1].n);
+  const buscar = base.filter(c => c.origen === "base_nueva" && c.grupo_ubicacion === 3).sort((a, b) => (Number(b.potencial) || 0) - (Number(a.potencial) || 0));
+  const nombre = c => c.nombre_comercial || c.razon_social || "";
+  return `
+  <div class="resumen">
+    <div class="tile acc"><div class="k">Bloque ${act} · visitados</div><div class="v num">${B.vis}<small> / ${B.n}</small></div><div class="d">${rango(act)} · ${B.con} con contacto</div></div>
+    <div class="tile"><div class="k">Periodo · visitados</div><div class="v num">${T.per.vis}<small> / ${POR_PERIODO * nEj}</small></div><div class="d">${pct(T.per.vis, POR_PERIODO * nEj)} % · ${POR_PERIODO} por ejecutivo en los dos bloques</div></div>
+    <div class="tile ok"><div class="k">Reactivados que cuentan</div><div class="v num">${T.per.cuentan + T.ant.cuentan}</div><div class="d">${T.per.rea + T.ant.rea} en la lista de BBVA · ${T.ant.cuentan} de la base anterior</div></div>
+    <div class="tile"><div class="k">Potencial asignado</div><div class="v num" style="font-size:20px">${solesO(T.pot.asig)}</div><div class="d">lo que transaccionan con la competencia</div></div>
+    <div class="tile"><div class="k">Base anterior</div><div class="v num">${T.ant.n}</div><div class="d">visitados antes de la base nueva · ${T.ant.con} con contacto</div></div>
+    <div class="tile ${T.g[3] ? "bad" : "ok"}"><div class="k">Requieren búsqueda</div><div class="v num">${T.g[3]}</div><div class="d">${T.g[1]} al 100 % · ${T.g[2]} en rango cercano</div></div>
+  </div>
+  <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Avance por bloque y por periodo</b><span class="lbl">Bloque 1: ${rango(1)} · Bloque 2: ${rango(2)} · un comercio cuenta con una visita válida (no anulada, con ubicación y a tiempo), con o sin contacto</span></div>
+    <div style="overflow:auto"><table class="datos"><thead>
+      <tr><th rowspan="2">Ejecutivo</th><th colspan="2" class="n">Bloque 1</th><th class="n">Bloque 2</th><th colspan="3" class="n">Periodo</th><th colspan="4" class="n">Base anterior</th><th rowspan="2"></th></tr>
+      <tr><th class="n">Visitados</th><th class="n">Con contacto</th><th class="n">Visitados</th><th class="n">Visitados</th><th class="n">En la lista BBVA</th><th class="n">Cuentan</th><th class="n">Comercios</th><th class="n">Con contacto</th><th class="n">En la lista BBVA</th><th class="n">Cuentan</th></tr></thead><tbody>
+      ${ejs.map(r => filaAv(nomEj(r.e), r.x, 1, verCel(r.e))).join("")}
+      ${conTotal ? `<tr class="total">${filaAv("<b>Equipo</b>", T, ejs.length).slice(4)}` : ""}
+    </tbody></table></div>
+    <div class="atajos">«Cuentan» = reactivados de la lista de BBVA con transacciones en 2 días distintos después de la primera visita válida con contacto. La base anterior no suma a los ${POR_PERIODO} del periodo, pero sus reactivados cuentan igual.</div></div>
+  <div class="split2">
+    <div class="panel"><div class="barra"><b>Potencial de la competencia</b><span class="lbl">asignado, visitado y reactivado (en la lista de BBVA) · base nueva</span></div>
+      <div style="overflow:auto"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignado</th><th class="n">Visitado</th><th class="n">Reactivado</th></tr></thead><tbody>
+        ${ejs.map(r => filaPot(nomEj(r.e), r.x)).join("")}${conTotal ? filaPot("<b>Equipo</b>", T).replace("<tr>", `<tr class="total">`) : ""}
+      </tbody></table></div></div>
+    <div class="panel"><div class="barra"><b>Calidad de ubicación por ejecutivo</b><span class="lbl">cómo de seguro es el punto de cada comercio de la base nueva</span></div>
+      <div style="overflow:auto"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Comercios</th><th class="n">Al 100 %</th><th class="n">Cercano</th><th class="n">Buscar</th><th class="n">Sin dato</th></tr></thead><tbody>
+        ${ejs.map(r => filaUb(nomEj(r.e), r.x)).join("")}${conTotal ? filaUb("<b>Equipo</b>", T).replace("<tr>", `<tr class="total">`) : ""}
+      </tbody></table></div></div>
+  </div>
+  <div class="panel" style="margin:16px 0"><div class="barra"><b>Calidad de ubicación por distrito</b><span class="lbl">primero los distritos con más comercios por buscar</span></div>
+    <div class="tabla-wrap" style="max-height:420px"><table class="datos"><thead><tr><th>Distrito</th><th>Ejecutivo</th><th class="n">Comercios</th><th class="n">Potencial</th>${[1, 2, 3].map(k => `<th class="n">${GRUPO_UB[k][1]}</th>`).join("")}<th class="n">Visitados</th></tr></thead><tbody>
+      ${filasDis.map(([d, o]) => `<tr><td>${esc(d)}</td><td>${[...o.ejs].map(c => esc(nombreCorto(ejDe(c).nombre))).join(", ")}</td><td class="n num">${o.n}</td><td class="n num">${solesO(o.p)}</td><td class="n num">${o[1]}</td><td class="n num">${o[2]}</td><td class="n num ${o[3] ? "mal" : ""}">${o[3]}</td><td class="n num">${o.vis}</td></tr>`).join("")}
+    </tbody></table></div></div>
+  <div class="panel"><div class="barra"><b>Requieren búsqueda · ${buscar.length}</b><span class="lbl">no se pudo confirmar el punto: el ejecutivo llama antes de ir. Se resuelven uno por uno; la dirección que manda es la de BBVA.</span></div>
+    ${buscar.length ? `<div class="tabla-wrap" style="max-height:480px"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Dirección de BBVA</th><th>Nota de ubicación</th><th>Contacto</th><th class="n">Potencial</th><th>Visita</th><th></th></tr></thead><tbody>
+      ${buscar.map(c => `<tr><td class="com"><b>${esc(nombre(c))}</b><small>${esc(c.documento || c.customer_id)} · bloque ${c.bloque || "—"}</small></td><td>${c.correo ? esc(nombreCorto(ejDe(c.correo).nombre)) : "—"}</td>
+        <td>${esc(c.direccion || "—")}<br><small class="muted">${esc(c.distrito || "")}</small></td><td><small>${esc(c.geo_nota || "—")}</small></td>
+        <td><small>${telO(c.contacto_celular)}<br>${mailO(c.contacto_correo)}</small></td><td class="n num">${solesO(c.potencial)}</td>
+        <td>${T.vis.has(c.customer_id) ? `<span class="pill val">Visitado</span>` : `<span class="pill pend">Por visitar</span>`}</td>
+        <td>${c.geo_lat != null ? `<a class="btn chico" target="_blank" rel="noopener" href="${gmaps(c.geo_lat, c.geo_lng)}">Maps</a>` : ""}</td></tr>`).join("")}
+    </tbody></table></div>` : `<div class="vacio">No hay comercios por buscar${S.ej !== "todos" ? " para este ejecutivo" : ""}.</div>`}</div>`;
+}
+
+/* ---------- Ver su celular tal como lo ve él (solo lectura; el celular lo resuelve con ?como=) ---------- */
+function abrirCelular(correo){
+  cerrarCelular(); if (!correo) return;
+  const e = ejDe(correo); S.verCel = correo;
+  document.body.insertAdjacentHTML("beforeend", `<div class="velo" id="veloCel" data-cerrar-cel>
+    <div class="cel-marco" role="dialog" aria-modal="true" aria-label="Celular de ${esc(e.nombre)}">
+      <div class="cel-cab"><span class="ej">${AVATAR(e)}<b>Celular de ${esc(nombreCorto(e.nombre))}</b></span><span class="lbl">tal como lo ve él · solo para mirar, no registra visitas</span><button class="btn q" data-cerrar-cel title="Cerrar">Cerrar</button></div>
+      <iframe src="../index.html?como=${encodeURIComponent(correo)}" title="Celular de ${esc(e.nombre)}"></iframe>
+    </div></div>`);
+  document.querySelector("#veloCel .cel-cab button").focus();
+}
+function cerrarCelular(){ const v = document.getElementById("veloCel"); if (v) v.remove(); S.verCel = null; }
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("#btnOjo,#btnCel,[data-ver-cel],[data-cerrar-cel]"); if (!t) return;
+  if (t.id === "btnOjo"){ S.ver = !S.ver; pintar(); return; }
+  if (t.id === "btnCel"){ abrirCelular(S.ej !== "todos" ? S.ej : null); return; }
+  if (t.dataset.verCel){ abrirCelular(t.dataset.verCel); return; }
+  if (t.hasAttribute("data-cerrar-cel") && (t.tagName === "BUTTON" || ev.target === t)) cerrarCelular();
+});
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && S.verCel) cerrarCelular(); });
 
 /* =========================================================================
    2 · Auditoría
@@ -766,7 +919,7 @@ function trazaDetalle(v){
     </div>
     <h3 style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 8px">Línea de tiempo completa</h3>
     ${lineaTiempo(v)}
-    ${trx.length ? `<h3 style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px">Transacciones del comercio después de la visita</h3><table class="datos"><thead><tr><th>Fecha de corte</th><th>Formato</th><th class="n">Transacciones</th><th class="n">Volumen S/</th></tr></thead><tbody>${trx.map(t=>`<tr><td class="num">${fISO(t.fecha_corte)}</td><td>${esc(t.formato)}</td><td class="n num">${num(t.trx)}</td><td class="n num">${num(t.vol)}</td></tr>`).join("")}</tbody></table>` : `<div class="aviso" style="margin-top:8px">${S.trx[v.customer_id] ? "Sin transacciones cargadas después de esta visita." : "Buscando transacciones…"} ${v.decision==="Realizará consumos"?"El comercio dijo que consumiría: vale seguirlo en el próximo corte.":""}</div>`}
+    ${trx.length ? `<h3 style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px">Transacciones del comercio después de la visita</h3><table class="datos"><thead><tr><th>Fecha de corte</th><th>Formato</th><th class="n">Transacciones</th><th class="n">Volumen S/</th></tr></thead><tbody>${trx.map(t=>`<tr><td class="num">${fISO(t.fecha_corte)}</td><td>${esc(t.formato)}</td><td class="n num">${num(t.trx)}</td><td class="n num">${priv(num(t.vol))}</td></tr>`).join("")}</tbody></table>` : `<div class="aviso" style="margin-top:8px">${S.trx[v.customer_id] ? "Sin transacciones cargadas después de esta visita." : "Buscando transacciones…"} ${v.decision==="Realizará consumos"?"El comercio dijo que consumiría: vale seguirlo en el próximo corte.":""}</div>`}
     <textarea id="trazaTxt" style="position:absolute;left:-9999px" aria-hidden="true">${esc(texto)}</textarea>
   </div>`;
 }
@@ -940,7 +1093,7 @@ const TIPOS = {
   resultados_bbva: { t:"Resultados de BBVA (reactivación)", d:"Tu Excel de BBVA: una fila por Customer ID con gestión con contacto, reactivado y, si lo tienes, el monto facturado. Solo lo ves tú.", ej:"00000001,Si,Si,12500.00" },
 };
 const COLS = ["fecha_corte","customer_id","trx","vol"];
-const ALIAS = { fecha_corte:["fecha_corte","fecha","fecha corte","corte","date","fec_corte"], customer_id:["customer_id","customer id","customerid","cid","cliente","codigo","código","id"], trx:["trx","transacciones","nro_trx","n_trx","cantidad","operaciones","txs"], vol:["vol","volumen","monto","importe","facturacion","facturación","venta","amount"] };
+const ALIAS = { fecha_corte:["fecha_corte","fecha","fecha corte","corte","date","fec_corte"], customer_id:["customer_id","customer id","customerid","cid","cliente","codigo","código","id","documento","documento_bbva2","ruc","dni","nro_documento","nro documento","numero_documento","ruc_dni","ruc/dni"], trx:["trx","transacciones","nro_trx","n_trx","cantidad","operaciones","txs"], vol:["vol","volumen","monto","importe","facturacion","facturación","venta","amount"] };
 function vistaCargas(){
   if (!S.cargas.length && !S._cargasPedidas){ S._cargasPedidas = true; cargarCargas(); }
   const c = S.carga, tp = TIPOS[c.tipo];
@@ -953,7 +1106,7 @@ function vistaCargas(){
   ${!tot && paso === 1 ? `
   <div class="drop" id="drop"><input type="file" id="archivo" accept=".csv,.txt,.xlsx,.xls"><b>Arrastra aquí el archivo de ${tp.t.toLowerCase()}</b>CSV o Excel. Nada se escribe en la base hasta que confirmes en el paso 3.<div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn p" id="elegir">Elegir archivo</button></div>
     <div class="formato">${c.tipo === "resultados_bbva" ? COLS_BBVA.map(col => `<div><code>${col}</code>${FORMATO_BBVA[col]}</div>`).join("")
-      : COLS.map(col => `<div><code>${col}</code>${({fecha_corte:"AAAA-MM-DD (también DD/MM/AAAA)",customer_id:"8 dígitos, el de BBVA",trx:"entero",vol:"decimal con punto (opcional)"})[col]}</div>`).join("")}</div>
+      : COLS.map(col => `<div><code>${col}</code>${({fecha_corte:"AAAA-MM-DD (también DD/MM/AAAA)",customer_id:"RUC (11 dígitos), DNI o Customer ID de BBVA; si Excel quitó los ceros de la izquierda, se completan",trx:"entero",vol:"decimal con punto (opcional)"})[col]}</div>`).join("")}</div>
     <div style="margin-top:10px;font-size:11.5px;color:var(--muted)">La primera fila lleva los nombres de columna. Se aceptan sinónimos (fecha, cliente, transacciones, monto…). Ejemplo: <code style="font-family:ui-monospace,Menlo,Consolas,monospace">${tp.ej}</code></div></div>` : ""}
   ${!tot && paso === 2 ? (c.tipo === "resultados_bbva" ? previaBBVA() : previa()) : ""}
   ${!tot && paso === 3 ? (c.tipo === "resultados_bbva" ? resultadoBBVA() : resultadoCarga()) : ""}
@@ -983,16 +1136,16 @@ function validar(cab, filas){
   const per = S.periodo;
   filas.forEach((f, n) => {
     const err = [];
-    const cid = String(f[ix.customer_id] ?? "").trim().replace(/\.0$/, "");
+    const id = idDeBBVA(f[ix.customer_id]), cid = id.cid || String(f[ix.customer_id] ?? "").trim(), doc = id.doc || null;
     const fecha = fechaNorm(f[ix.fecha_corte]);
     const trx = String(f[ix.trx] ?? "").trim().replace(/\.0$/, "");
     const vol = ix.vol >= 0 ? String(f[ix.vol] ?? "").trim().replace(",", ".") : "";
-    if (ix.customer_id >= 0){ if (!/^\d{8}$/.test(cid)) err.push("customer_id no tiene 8 dígitos"); else if (!S.baseMap[cid]) err.push("customer_id no está en la base"); }
+    if (ix.customer_id >= 0 && id.err) err.push("documento o customer_id " + id.err);
     if (ix.fecha_corte >= 0){ if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(Date.parse(fecha))) err.push("fecha_corte no es una fecha"); else if (per && (fecha < per.ini || fecha > hoyISO())) err.push(fecha > hoyISO() ? "fecha futura" : `fecha anterior al periodo (${fISO(per.ini)})`); }
     if (ix.trx >= 0 && !/^\d+$/.test(trx)) err.push("trx no es un entero");
     if (vol !== "" && isNaN(parseFloat(vol))) err.push("vol no es numérico");
     const llave = `${fecha}|${cid}`; if (vistos.has(llave)) err.push("fila duplicada (mismo comercio y fecha)"); vistos.add(llave);
-    res.push({ n:n+2, cid, fecha, trx, vol, err });
+    res.push({ n:n+2, cid, doc, fecha, trx, vol, err });
   });
   return { faltan, ix, cab, res, ok: res.filter(r=>!r.err.length).length };
 }
@@ -1046,7 +1199,7 @@ function parseCSV(txt){
 }
 async function cargarFilas(){
   const c = S.carga, v = c.filas;
-  const filas = v.res.filter(r => !r.err.length).map(r => ({ fecha_corte:r.fecha, customer_id:r.cid, trx:r.trx, vol: r.vol === "" ? null : r.vol }));
+  const filas = v.res.filter(r => !r.err.length).map(r => ({ fecha_corte:r.fecha, documento:r.doc, customer_id:r.cid, trx:r.trx, vol: r.vol === "" ? null : r.vol }));
   S.ocupado = true; pintar();
   try {
     const { data, error } = await sb.rpc("v2_cargar_transacciones", { p_archivo:c.archivo, p_formato:c.tipo, p_filas:filas, p_notas:`${v.res.length} filas en el archivo, ${v.res.length - v.ok} descartadas antes de cargar` });
@@ -1058,11 +1211,21 @@ async function cargarFilas(){
   S.ocupado = false; pintar();
 }
 
+// Base 2026-11: BBVA reporta por RUC o DNI. Hace lo mismo que v2_comercio_de_id en el servidor: 11 dígitos = RUC;
+// hasta 8 = se completa con ceros (Excel quita el cero del DNI) y se busca como Customer ID o como DNI; lo ambiguo no se adivina.
+function idDeBBVA(bruto){
+  const v = String(bruto ?? "").trim().replace(/[.,]0+$/, "");
+  if (!/^\d{1,11}$/.test(v) || v.length === 9 || v.length === 10) return { err:"no es un Customer ID, un DNI (8 dígitos) ni un RUC (11 dígitos)" };
+  if (v.length === 11) return S.docMap[v] ? { cid:S.docMap[v], doc:v } : { doc:v, err:"el RUC no está en la base" };
+  const k = v.padStart(8, "0"), a = S.baseMap[k] ? k : null, b = S.docMap[k] || null;
+  if (a && b && a !== b) return { doc:k, err:"coincide con un Customer ID y con el DNI de otro comercio: revisar a mano" };
+  return a || b ? { cid:a || b, doc:k } : { doc:k, err:"no está en la base" };
+}
 /* ---------- Resultados de BBVA (29/09): el Excel mínimo que Jose arma desde el entorno de BBVA ---------- */
 const COLS_BBVA = ["customer_id", "gestion_con_contacto", "reactivado", "facturado"];
-const FORMATO_BBVA = { customer_id:"el de BBVA; si Excel le quitó los ceros de la izquierda, se completan a 8 dígitos", gestion_con_contacto:"Si o No",
+const FORMATO_BBVA = { customer_id:"RUC (11 dígitos), DNI o Customer ID de BBVA; si Excel quitó los ceros de la izquierda, se completan", gestion_con_contacto:"Si o No",
   reactivado:"Si, No o En proceso", facturado:"monto en soles del comercio (opcional; también puedes poner solo el total al cargar)" };
-const ALIAS_BBVA = { customer_id:["customer_id", "customer id", "customerid", "cid", "cliente", "codigo", "código", "id"],
+const ALIAS_BBVA = { customer_id:["customer_id", "customer id", "customerid", "cid", "cliente", "codigo", "código", "id", "documento", "documento_bbva2", "ruc", "dni", "nro_documento", "nro documento", "numero_documento", "ruc_dni", "ruc/dni"],
   gestion_con_contacto:["gestion_con_contacto", "gestión con contacto", "gestion con contacto", "contacto", "gestion", "gestión"],
   reactivado:["reactivado", "reactivo", "reactivó", "cuenta", "consumio", "consumió", "consumo"], facturado:["facturado", "facturacion", "facturación", "monto", "monto facturado", "importe", "vol", "volumen"] };
 const siNo = v => { const t = String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); return ["si", "s", "1", "true", "x"].includes(t) ? true : ["no", "n", "0", "false", ""].includes(t) ? false : null; };
@@ -1079,17 +1242,16 @@ function validarBBVA(cab, filas){
   const ix = {}; COLS_BBVA.forEach(col => { ix[col] = cab.findIndex(h => ALIAS_BBVA[col].map(normalizar).includes(normalizar(h))); });
   const faltan = COLS_BBVA.filter(c => c !== "facturado" && ix[c] < 0), vistos = new Set(), res = [];
   filas.forEach((f, n) => { const err = [];
-    const bruto = String(f[ix.customer_id] ?? "").trim().replace(/\.0$/, ""), cid = /^\d{1,8}$/.test(bruto) ? bruto.padStart(8, "0") : bruto;
+    const bruto = String(f[ix.customer_id] ?? "").trim().replace(/[.,]0+$/, ""), id = idDeBBVA(bruto), cid = id.cid || id.doc || bruto, doc = id.doc || null;
     const gc = siNo(f[ix.gestion_con_contacto]), re = reacNorm(f[ix.reactivado]);
     const fac = ix.facturado >= 0 ? String(f[ix.facturado] ?? "").trim().replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".") : "";
     let sug = null;
-    if (!/^\d{8}$/.test(cid)) err.push("customer_id no es numérico");
-    else if (!S.baseMap[cid]){ err.push("customer_id no está en la base"); sug = idParecido(cid); }
+    if (id.err){ err.push("documento o customer_id " + id.err); if (/^\d{8}$/.test(cid) && !id.cid) sug = idParecido(cid); }
     if (gc === null) err.push("gestion_con_contacto no es Si o No");
     if (!re) err.push("reactivado no es Si, No o En proceso");
     if (fac !== "" && !/^\d+(\.\d+)?$/.test(fac)) err.push("facturado no es un monto");
-    if (vistos.has(cid)) err.push("customer_id repetido"); vistos.add(cid);
-    res.push({ n:n + 2, bruto, cid, gc, re, fac, sug, err }); });
+    if (vistos.has(cid)) err.push("comercio repetido en el archivo"); vistos.add(cid);
+    res.push({ n:n + 2, bruto, cid, doc, gc, re, fac, sug, err }); });
   return { faltan, ix, cab, res, ok:res.filter(r => !r.err.length).length };
 }
 // Primera visita válida (con ubicación, a tiempo, no anulada) de cada comercio en el periodo, hasta la fecha C
@@ -1108,7 +1270,7 @@ function previaBBVA(){
   const conFac = buenas.some(r => r.fac !== "");
   return `<div class="panel previa"><div class="barra"><b>${esc(c.archivo)}</b><span class="lbl">Resultados de BBVA · ${v.res.length} filas leídas · columnas: ${v.cab.map(esc).join(", ")}</span><div class="der"><button class="btn" id="otroArchivo">Elegir otro archivo</button><button class="btn p ${S.ocupado?"cargando-btn":""}" id="cargar" ${v.ok===0||v.faltan.length?"disabled":""}>Cargar ${v.ok} filas válidas</button></div></div>
     <div style="padding:12px">
-    ${v.faltan.length ? `<div class="aviso mal">No encuentro las columnas <b>${v.faltan.join(", ")}</b>. La primera fila debe traer los nombres (por ejemplo: customer ID, Gestion_Con_Contacto, Reactivado).</div>` : ""}
+    ${v.faltan.length ? `<div class="aviso mal">No encuentro las columnas <b>${v.faltan.join(", ")}</b>. La primera fila debe traer los nombres (por ejemplo: RUC/DNI o customer ID, Gestion_Con_Contacto, Reactivado).</div>` : ""}
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">
       <label class="lbl">Fecha de corte de la data de BBVA <input type="date" id="bbvaCorte" value="${esc(c.corte || "")}" max="${hoyISO()}" class="sel"></label>
       <label class="lbl">Total facturado de los que cuentan (S/, opcional) <input type="text" id="bbvaTotal" value="${esc(c.facturadoTotal || "")}" placeholder="${conFac ? "se suma de la columna facturado" : "ej.: 2600000"}" class="sel" style="width:170px"></label>
@@ -1117,12 +1279,12 @@ function previaBBVA(){
       <div class="check ok"><i>✓</i><div><b class="num">${v.ok}</b><small>filas válidas</small></div></div>
       <div class="check ${malas.length?"mal":"ok"}"><i>${malas.length?"!":"✓"}</i><div><b class="num">${malas.length}</b><small>filas que no se cargan</small></div></div>
       <div class="check ok"><i>${reac.length}</i><div><b style="font-size:12px">reactivados según BBVA</b><small>${cuentan.length} cuentan: con gestión con contacto y visita de Stratis del periodo hasta el corte</small></div></div>
-      ${conFac ? `<div class="check ok"><i>S/</i><div><b class="num">${fac.toLocaleString("es-PE", { maximumFractionDigits:0 })}</b><small>facturado de los que cuentan</small></div></div>` : ""}
+      ${conFac ? `<div class="check ok"><i>S/</i><div><b class="num">${priv(fac.toLocaleString("es-PE", { maximumFractionDigits:0 }))}</b><small>facturado de los que cuentan</small></div></div>` : ""}
     </div>
     <div class="aviso">Se guarda como el corte del <b>${c.corte ? fISO(c.corte) : "—"}</b>. Si ya había un corte con esa fecha, se reemplaza completo. No cambia visitas ni el medidor, y los ejecutivos no lo ven.</div>
-    ${malas.length ? `<div style="overflow:auto;margin-top:12px"><table class="datos"><thead><tr><th>Fila</th><th>Customer ID en tu archivo</th><th>Problema</th><th>¿Quisiste decir?</th></tr></thead><tbody>
+    ${malas.length ? `<div style="overflow:auto;margin-top:12px"><table class="datos"><thead><tr><th>Fila</th><th>RUC, DNI o Customer ID en tu archivo</th><th>Problema</th><th>¿Quisiste decir?</th></tr></thead><tbody>
       ${malas.slice(0, 80).map(r => `<tr class="err"><td class="num">${r.n}</td><td class="num">${esc(r.bruto)}</td><td>${esc(r.err.join(" · "))}</td><td class="num">${r.sug ? esc(r.sug) + ` <small class="muted">${esc((S.baseMap[r.sug] || {}).distrito || "")}</small>` : "—"}</td></tr>`).join("")}
-    </tbody></table><div style="font-size:11.5px;color:var(--muted);margin-top:6px">Corrige esos Customer ID en tu Excel y vuelve a cargarlo: el corte se reemplaza completo. La sugerencia es el ID de la base que difiere en un dígito.</div></div>` : ""}
+    </tbody></table><div style="font-size:11.5px;color:var(--muted);margin-top:6px">Corrige esos números en tu Excel y vuelve a cargarlo: el corte se reemplaza completo. La sugerencia es el ID de la base que difiere en un dígito.</div></div>` : ""}
     </div></div>`;
 }
 function resultadoBBVA(){
@@ -1132,7 +1294,7 @@ function resultadoBBVA(){
     <div style="flex:1;min-width:240px"><h2 style="font-size:16px">Corte del ${r.corte ? fISO(r.corte) : "—"} cargado: ${num(r.cargadas)} comercios${r.reemplazo ? " (reemplaza el corte anterior de esa fecha)" : ""}</h2>
       <div class="sub" style="margin:4px 0 10px">${esc(c.archivo)} · carga n.º ${r.carga_id} · ${num(r.reactivados)} reactivados según BBVA, ${num(r.con_contacto)} de ellos con gestión con contacto · ${num(r.rechazadas)} rechazadas por la base.</div>
       <div class="aviso ok">La presentación para BBVA ya toma este corte para la reactivación y la facturación.</div>
-      ${det.length ? `<div style="overflow:auto;margin-top:10px"><table class="datos"><thead><tr><th>Fila</th><th>Customer ID</th><th>Motivo</th></tr></thead><tbody>${det.slice(0, 50).map(d => `<tr class="err"><td class="num">${d.fila}</td><td class="num">${esc(d.customer_id || "")}</td><td>${esc(d.motivo)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${det.length ? `<div style="overflow:auto;margin-top:10px"><table class="datos"><thead><tr><th>Fila</th><th>Documento o Customer ID</th><th>Motivo</th></tr></thead><tbody>${det.slice(0, 50).map(d => `<tr class="err"><td class="num">${d.fila}</td><td class="num">${esc(d.customer_id || "")}</td><td>${esc(d.motivo)}</td></tr>`).join("")}</tbody></table></div>` : ""}
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn p" id="otraCarga">Nueva carga</button></div>
     </div></div></div>`;
 }
@@ -1142,7 +1304,7 @@ async function cargarBBVA(){
   if (!c.corte || c.corte > hoyISO()){ toast("Indica la fecha de corte de la data de BBVA (no puede ser futura)."); return; }
   const total = String(c.facturadoTotal || "").replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".");
   if (total !== "" && !/^\d+(\.\d+)?$/.test(total)){ toast("El total facturado no es un monto."); return; }
-  const filas = v.res.filter(r => !r.err.length).map(r => ({ customer_id:r.cid, gestion_con_contacto:r.gc, reactivado:r.re, facturado:r.fac === "" ? null : r.fac }));
+  const filas = v.res.filter(r => !r.err.length).map(r => ({ documento:r.doc, customer_id:r.cid, gestion_con_contacto:r.gc, reactivado:r.re, facturado:r.fac === "" ? null : r.fac }));
   S.ocupado = true; pintar();
   try {
     const { data, error } = await sb.rpc("v2_cargar_resultados_bbva", { p_archivo:c.archivo, p_corte:c.corte, p_filas:filas, p_facturado_total:total === "" ? null : total,
@@ -1202,7 +1364,7 @@ function previaTotales(){
   if (!K) return `<div class="aviso">Elige la fecha de corte de la data de BBVA.</div>`;
   const g = gruposCRM(K);
   if (faltan.length || malos.length) return `<div class="aviso ${malos.length ? "mal" : ""}">${malos.length ? `No es un número válido: <b>${malos.map(esc).join(", ")}</b>. ` : ""}${faltan.length ? `Faltan ${faltan.length} de 9 valores.` : ""} El CRM al ${fISO(K)}: ${numPE(g.cc)} visitados con contacto, ${numPE(g.sc)} sin contacto y ${numPE(g.nv)} no visitados (universo ${numPE(g.universo)}).</div>`;
-  const q = cuadroTotales(t, g), fila = (o, b) => `<tr${b ? ' style="font-weight:700"' : ""}><td>${esc(o.nom)}</td><td class="n num">${numPE(o.n)}</td><td class="n num">${numPE(o.reac)}</td><td class="n num">${montoPE(o.fac)}</td><td class="n num">${numPE(o.trx)}</td><td class="n num">${pct2(o.fac, q.tu.fac)}</td><td class="n num">${o.trx ? montoPE(o.fac / o.trx) : "—"}</td><td class="n num">${pct2(o.reac, o.n)}</td></tr>`;
+  const q = cuadroTotales(t, g), fila = (o, b) => `<tr${b ? ' style="font-weight:700"' : ""}><td>${esc(o.nom)}</td><td class="n num">${numPE(o.n)}</td><td class="n num">${numPE(o.reac)}</td><td class="n num">${priv(montoPE(o.fac))}</td><td class="n num">${numPE(o.trx)}</td><td class="n num">${pct2(o.fac, q.tu.fac)}</td><td class="n num">${o.trx ? priv(montoPE(o.fac / o.trx)) : "—"}</td><td class="n num">${pct2(o.reac, o.n)}</td></tr>`;
   return `<div style="overflow:auto"><table class="datos"><thead><tr><th>Grupo</th><th class="n">Comercios (CRM)</th><th class="n">Reactivados</th><th class="n">Facturación (S/)</th><th class="n">Transacciones</th><th class="n">% facturación</th><th class="n">Ticket prom. (S/)</th><th class="n">% alcance</th></tr></thead><tbody>
     ${fila(q.G.cc)}${fila(q.G.sc)}${fila(q.tv, true)}${fila(q.G.nv)}${fila(q.tu, true)}</tbody></table></div>
     <div class="aviso ${q.errores.length ? "mal" : "ok"}" style="margin-top:10px">${q.errores.length ? "Control de coherencia: " + q.errores.map(esc).join(" · ") : `Control de coherencia OK · reactivados que cuentan (con visita, con o sin contacto): <b>${numPE(q.tv.reac)}</b> · conversión ${pct2(q.tv.reac, g.vis)} de ${numPE(g.vis)} visitados.`}</div>`;
@@ -1217,14 +1379,14 @@ function formTotales(){
       <label class="lbl">Fecha de corte de la data de BBVA <input type="date" id="totCorte" value="${esc(tt.corte || "")}" max="${hoyISO()}" class="sel"></label>
       <label class="lbl" style="flex:1;min-width:240px">Nota (opcional) <input type="text" id="totNotas" value="${esc(tt.notas || "")}" class="sel" style="width:100%" placeholder="Ej.: capturado del drive de BBVA el 30/09"></label></div>
     <div style="overflow:auto"><table class="datos"><thead><tr><th>Grupo</th>${CAMPOS_TOT.map(([, cn]) => `<th>${cn}</th>`).join("")}</tr></thead><tbody>
-      ${GRUPOS_TOT.map(([g, gn]) => `<tr><td><b>${gn}</b></td>${CAMPOS_TOT.map(([cc]) => `<td><input type="text" inputmode="decimal" class="sel" style="width:150px;text-align:right" data-tot="${g}_${cc}" value="${esc(tt.v[`${g}_${cc}`] || "")}" placeholder="${cc === "fac" ? "1.234.567,89" : cc === "trx" ? "12.345" : "12"}"></td>`).join("")}</tr>`).join("")}
+      ${GRUPOS_TOT.map(([g, gn]) => `<tr><td><b>${gn}</b></td>${CAMPOS_TOT.map(([cc]) => `<td><input type="${S.ver || cc !== "fac" ? "text" : "password"}" inputmode="decimal" class="sel" style="width:150px;text-align:right" data-tot="${g}_${cc}" value="${esc(tt.v[`${g}_${cc}`] || "")}" placeholder="${cc === "fac" ? "1.234.567,89" : cc === "trx" ? "12.345" : "12"}"></td>`).join("")}</tr>`).join("")}
     </tbody></table></div>
     <div style="font-size:11.5px;color:var(--muted);margin:6px 0 12px">Copia los números como los ves en el drive de BBVA (con puntos de miles y coma decimal, o sin separadores). Los comercios de cada grupo los pone el CRM al mismo corte, igual que la hoja Base.</div>
     <div id="totPrevia">${previaTotales()}</div>
     <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn p ${S.ocupado ? "cargando-btn" : ""}" id="guardarTotales" ${q && !q.errores.length ? "" : "disabled"}>Guardar los totales del ${tt.corte ? fISO(tt.corte) : "corte"}</button>
       <span class="lbl">Si el corte ya tenía totales, se reemplazan. No cambia visitas ni el medidor.</span></div>
     ${(S.totBBVA || []).length ? `<div style="overflow:auto;margin-top:16px"><table class="datos"><thead><tr><th>Corte</th><th class="n">Reactivados con contacto</th><th class="n">Sin contacto</th><th class="n">No visitados</th><th class="n">Facturación total (S/)</th><th>Por</th><th>Guardado</th></tr></thead><tbody>
-      ${S.totBBVA.map(u => `<tr><td class="num">${fISO(u.corte)}</td><td class="n num">${numPE(u.cc_reac)}</td><td class="n num">${numPE(u.sc_reac)}</td><td class="n num">${numPE(u.nv_reac)}</td><td class="n num">${montoPE(Number(u.cc_fac) + Number(u.sc_fac) + Number(u.nv_fac))}</td><td>${esc((u.por || "").split("@")[0])}</td><td class="num">${ddhh(u.en)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${S.totBBVA.map(u => `<tr><td class="num">${fISO(u.corte)}</td><td class="n num">${numPE(u.cc_reac)}</td><td class="n num">${numPE(u.sc_reac)}</td><td class="n num">${numPE(u.nv_reac)}</td><td class="n num">${priv(montoPE(Number(u.cc_fac) + Number(u.sc_fac) + Number(u.nv_fac)))}</td><td>${esc((u.por || "").split("@")[0])}</td><td class="num">${ddhh(u.en)}</td></tr>`).join("")}</tbody></table></div>` : ""}
   </div>`;
 }
 function prellenarTotales(u){ const tt = S.carga.tot; tt.corte = u.corte; tt.notas = u.notas || "";
@@ -1377,7 +1539,6 @@ function vistaMapa(){
     <div class="barra">
       <div class="chips" role="tablist" aria-label="Qué pintar en el mapa">${MET.map(([c, t, d]) => `<button class="chip ${k === c ? "on" : ""}" data-mmet="${c}" title="${esc(d)}">${t}</button>`).join("")}</div>
       <div class="der">
-        <select class="sel" id="mEj" aria-label="Ejecutivo"><option value="todos">Todos los ejecutivos</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.mEj === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select>
         <select class="sel" id="mRango" aria-label="Rango"><option value="periodo">Todo el periodo</option><option value="semana" ${S.mRango === "semana" ? "selected" : ""}>Esta semana</option><option value="hoy" ${S.mRango === "hoy" ? "selected" : ""}>Hoy</option></select>
         <label class="lbl"><input type="checkbox" id="mPuntos" ${S.mPuntos !== false ? "checked" : ""}> Puntos de visita</label>
       </div>
@@ -1430,7 +1591,7 @@ function montarMapaDistritos(el){
       const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return;
       L.circleMarker([v.lat, v.lng], { radius:4, color:borde, weight:1.5, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 })
         .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(d)} ${hh(v.visitado_en)}<br>${esc(comoFue(v)[0])}${v.distancia_m != null ? ` · a ${mDist(v.distancia_m)}` : ""}`, { className:"etq-mapa", direction:"top", offset:[0,-4] })
-        .on("click", () => { S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; S.ej = "todos"; S.sel = v.id; pintar(); })
+        .on("click", () => { S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; if (S.ej !== "todos" && v.correo !== S.ej) elegirEj("todos"); S.sel = v.id; pintar(); })
         .addTo(m); });
   }
   const selCapa = capas.find(x => x[0].clave === S.mEnfocar);
@@ -1571,7 +1732,6 @@ function vistaFeedback(){
   return `
   <div class="barra-filtros" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
     <select class="sel" id="fbSemana" aria-label="Semana"><option value="">Todo el periodo</option>${semanasPeriodo().map(w => `<option value="${w.k}" ${S.fbSemana === w.k ? "selected" : ""}>Semana del ${fISO(w.ini)} al ${fISO(w.fin)}</option>`).join("")}</select>
-    <select class="sel" id="fbEj" aria-label="Ejecutivo"><option value="">Todos los ejecutivos</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.fbEj === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select>
     <select class="sel" id="fbFuente" aria-label="Fuente"><option value="todas" ${(S.fbFuente || "todas") === "todas" ? "selected" : ""}>Ejecutivo e inferido del comentario</option><option value="ejecutivo" ${S.fbFuente === "ejecutivo" ? "selected" : ""}>Solo lo que marcó el ejecutivo</option><option value="inferido" ${S.fbFuente === "inferido" ? "selected" : ""}>Solo lo inferido del comentario</option></select>
     <button class="btn" data-fb-csv style="margin-left:auto">Descargar CSV para BBVA</button>
   </div>
@@ -1764,7 +1924,6 @@ function vistaPorQue(){
   return `
   <div class="barra-filtros" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
     <select class="sel" id="pqSemana" aria-label="Semana"><option value="">Todo el periodo</option>${semanasPeriodo().map(w => `<option value="${w.k}" ${S.pqSemana === w.k ? "selected" : ""}>Semana del ${fISO(w.ini)} al ${fISO(w.fin)}</option>`).join("")}</select>
-    <select class="sel" id="pqEj" aria-label="Ejecutivo"><option value="">Todos los ejecutivos</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.pqEj === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select>
     <button class="btn" data-pq-csv style="margin-left:auto">Descargar CSV</button>
   </div>
   ${S.msiInfErr ? `<div class="aviso warn" style="margin-bottom:12px">No se pudo leer lo inferido de «qué lo convenció»: ${esc(S.msiInfErr)}</div>` : ""}
@@ -1870,7 +2029,8 @@ async function baseBBVA(){
       ws.eachRow((row, n) => { if (n > 1) row.eachCell(c => c.font = { name:"Arial", size:10 }); });
     };
     // Base: una fila por Customer ID. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
-    const colsB = ["Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
+    // «Documento» (Jose, 21/10): RUC de 11 o DNI de 8 de la base 2026-11, como texto, al lado de Customer_ID (que no cambia).
+    const colsB = ["Customer_ID","Documento","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
     const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
       const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
       l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); if (f.delComentario) fuentes.add("Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
@@ -1880,7 +2040,7 @@ async function baseBBVA(){
       // Para el cruce con los volúmenes de BBVA: primera visita válida (con GPS y a tiempo) en la que habló con alguien del comercio,
       // aunque haya sido en otra dirección (dirección errada pero comercio ubicado)
       const gc = l.find(v => valida(v) && v.con !== "Nadie"), fGc = gc ? iso(gc.visitado_en).split("-").map(Number) : null;
-      return [c.customer_id,
+      return [c.customer_id, c.documento || "",
         l.some(valida) ? "SI" : "NO", gc ? "SI" : "NO", fGc ? new Date(Date.UTC(fGc[0], fGc[1] - 1, fGc[2])) : null,
         gc ? (l.some(v => valida(v) && v.con !== "Nadie" && v.direccion_ok === false) ? "SI" : "NO") : "", l.length, l.filter(valida).length, l.filter(v => v.con !== "Nadie").length, l.length ? dmy(iso(l[0].visitado_en)) : "", ult ? dmy(iso(ult.visitado_en)) : "",
         ult ? ult.con : "", ult ? ult.que + (ult.motivo ? " · " + ult.motivo : "") : "", ult ? ult.decision || "" : "", ult ? String(ult.comentario || "").replace(/\s+/g, " ") : "",
@@ -1890,9 +2050,9 @@ async function baseBBVA(){
         FB_29.map(t => fb.has(t) ? 1 : 0), [ult && ult.motivo === "Cerró definitivamente" ? "SI" : "NO", c.correo ? ejDe(c.correo).nombre : ""]); });
     const wsB = wb.addWorksheet("Base");
     const nB0 = colsB.length - FB_29.length - 2;   // columnas antes de las agregadas al final
-    tabla(wsB, "Base", colsB, filasB, [12,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
-      { k:i => (i >= 2 && i <= 18) || i >= colsB.length - 1, fb:i => i >= 19 && i < colsB.length - 1, si:i => i > nB0 - 3 && i <= nB0 });
-    wsB.getColumn(4).numFmt = "dd/mm/yyyy";
+    tabla(wsB, "Base", colsB, filasB, [12,13,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
+      { k:i => (i >= 3 && i <= 19) || i >= colsB.length - 1, fb:i => i >= 20 && i < colsB.length - 1, si:i => i > nB0 - 3 && i <= nB0 });
+    wsB.getColumn(2).numFmt = "@"; wsB.getColumn(colsB.indexOf("Fecha_Primera_Gestion_Con_Contacto") + 1).numFmt = "dd/mm/yyyy";
     const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || (t === FB_NINGUNO ? "Sin observaciones" : "Otro");
     // KPIs: fórmulas sobre la hoja Base (rangos fijos, se recalculan en Excel). Sin notas al pie (Jose, 30/09).
     const nB = filasB.length + 1;
@@ -1986,7 +2146,7 @@ document.addEventListener("click", async ev => {
   if (t.id === "btnTema"){ cambiarTema(); return; }
   if (t.dataset.mmet){ S.mMet = t.dataset.mmet; pintar(); return; }
   if (t.hasAttribute("data-mdist")){ const c = t.dataset.mdist || null; S.mDist = c && S.mDist === c && t.tagName === "TR" ? null : c; S.mEnfocar = S.mDist; S.mScroll = t.tagName === "TR" && !!S.mDist; if (!c) S.mVista = null; pintar(); return; }
-  if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; S.ej = t.dataset.irEj || "todos"; S.sel = null; S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
+  if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; elegirEj(t.dataset.irEj || "todos"); S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
   if (t.dataset.vista){ S.vista = t.dataset.vista; if (t.dataset.tab) S.tab = t.dataset.tab; S.accion = null; try { history.replaceState(null, "", "#" + S.vista); } catch(e){} pintar(); return; }
   if (t.dataset.filtro){ S.filtro = t.dataset.filtro; S.sel = null; S.accion = null; pintar(); return; }
   if (t.dataset.sel){ if (ev.target.closest("input")) return; S.sel = t.dataset.sel; S.accion = null; pintar(); return; }
@@ -2006,7 +2166,7 @@ document.addEventListener("click", async ev => {
   if (t.dataset.tab){ S.tab = t.dataset.tab; pintar(); return; }
   if (t.dataset.traza){ S.traza = t.dataset.traza; pintar(); return; }
   if (t.dataset.irTraza){ S.vista = "auditoria"; S.tab = "traza"; S.traza = t.dataset.irTraza; S.busca = ""; pintar(); return; }
-  if (t.dataset.irCola){ S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; S.ej = "todos"; S.sel = t.dataset.irCola; pintar(); return; }
+  if (t.dataset.irCola){ S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; if (S.ej !== "todos" && (S.act.find(v => v.id === t.dataset.irCola) || {}).correo !== S.ej) elegirEj("todos"); S.sel = t.dataset.irCola; pintar(); return; }
   if (t.hasAttribute("data-copiar")){ const txt = $("#trazaTxt").value; (navigator.clipboard?.writeText(txt) || Promise.reject()).then(() => toast("Trazabilidad copiada como texto.")).catch(() => { const ta = $("#trazaTxt"); ta.style.position = "static"; ta.select(); toast("Selecciona y copia el texto."); }); return; }
   if (t.dataset.tipo){ S.carga = { tipo:t.dataset.tipo, archivo:null, filas:null, hecho:false, resultado:null }; pintar(); return; }
   if (t.id === "elegir"){ $("#archivo").click(); return; }
@@ -2019,14 +2179,11 @@ document.addEventListener("change", ev => {
   if (ev.target.id === "totCorte" && S.carga && S.carga.tot){ const u = (S.totBBVA || []).find(x => x.corte === ev.target.value);
     if (u) prellenarTotales(u); else S.carga.tot.corte = ev.target.value; pintar(); return; }
   const t = ev.target;
-  if (t.id === "fEj"){ S.ej = t.value; S.sel = null; pintar(); }
+  if (t.id === "gEj"){ elegirEj(t.value); pintar(); }
   if (t.id === "fDia"){ S.dia = t.value; S.sel = null; pintar(); }
-  if (t.id === "mEj"){ S.mEj = t.value; S.mDist = null; S.mVista = null; pintar(); }
   if (t.id === "fbSemana"){ S.fbSemana = t.value; pintar(); }
-  if (t.id === "fbEj"){ S.fbEj = t.value; pintar(); }
   if (t.id === "fbFuente"){ S.fbFuente = t.value; pintar(); }
   if (t.id === "pqSemana"){ S.pqSemana = t.value; pintar(); }
-  if (t.id === "pqEj"){ S.pqEj = t.value; pintar(); }
   if (t.id === "mRango"){ S.mRango = t.value; pintar(); }
   if (t.id === "mPuntos"){ S.mPuntos = t.checked; pintar(); }
   if (t.id === "fSenal"){ S.soloSenal = t.checked; S.sel = null; pintar(); }
@@ -2052,7 +2209,7 @@ document.addEventListener("keydown", ev => {
 
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["validacion","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["validacion","bloques","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
