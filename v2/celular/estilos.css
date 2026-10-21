@@ -401,3 +401,9 @@ textarea.campo{min-height:78px;resize:vertical}
 .barra .fila-ent h1{margin-bottom:6px}
 .av-fila{margin-top:10px} .av-fila .fila-ent{font-size:13.5px;margin-bottom:6px} .av-fila b{color:var(--ink)}
 .franja-como{background:var(--navy-2)}
+/* Ruta propia (21/10): mover a otra ruta y armar la ruta de hoy */
+.armar-card,.mover{display:grid;gap:10px}
+.mover{margin-top:10px}
+.ordenar{display:flex;gap:4px;flex:none}
+.ordenar button{width:34px;height:34px;border:1px solid var(--linea);border-radius:9px;background:var(--tarjeta);color:var(--azul);font-weight:700;font-size:13px}
+.ordenar button[disabled],.armar-card .btn[disabled],.mover .btn[disabled]{opacity:.4}
