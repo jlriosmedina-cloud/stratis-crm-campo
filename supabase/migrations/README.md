@@ -21,7 +21,12 @@ Se aplican solo con el OK de Jose.
 | `20261006100000_retiro_temporal_de_la_base.sql` | 06/10/2026, con el OK de Jose (cambia `v2_mi_base`; el celular no cambia de versión) | `20261006100628` |
 | `20261009100000_seguimiento_reactivados_bbva.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009141119` |
 | `20261010100000_recupero_pos.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009151310` |
+| `20261021100000_base_2026_11_bloques.sql` | 21/10/2026, con el OK de Jose, junto con la carga del bloque 1 (celular d9ca90 y escritorio 159664 se publican el mismo día) | `base_2026_11_bloques` |
+| `20261021110000_cargas_por_documento.sql` | 21/10/2026, con el OK de Jose | `cargas_por_documento` |
+| `20261021115000_meta_visitas_2026_11.sql` | 21/10/2026, con el OK de Jose (meta de visitas 225) | `meta_visitas_2026_11` |
+| `20261021120000_avance_base_2026_11.sql` | 21/10/2026, con el OK de Jose (v2_avance: base y visitados solo con la base nueva; 2026-10 sin cambios) | `avance_base_2026_11` |
 | `20261020150000_respaldo_antes_base_2026_11.sql` | 20/10/2026, con el OK de Jose (solo copia en el esquema `respaldo`; no toca `public`) | `20261020213955` |
+| `20261021130000_ruta_propia_del_ejecutivo.sql` | 21/10/2026, con el OK de Jose (ruta propia del ejecutivo; celular publicado el mismo día) | `20261021002550` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

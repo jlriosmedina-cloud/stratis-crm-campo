@@ -246,8 +246,11 @@ function botonOjo(){
   return `<button type="button" class="ojo${S.ver ? " on" : ""}" data-ojo aria-pressed="${S.ver}">${S.ver ? ICON.ojo : ICON.ojoNo}<span>${S.ver ? "Datos visibles" : "Datos ocultos"}</span></button>`;
 }
 // Vista «como» (solo lectura): se quita todo lo que escribe
-const SOLO_ESCRITURA = "[data-registrar],[data-dictar-visita],[data-editar],[data-guardar-datos],[data-corr],[data-acc],[data-seg],[data-recup-accion],[data-enviar-cola],[data-corregir-cola],[data-corregir-hoy]";
+const SOLO_ESCRITURA = "[data-registrar],[data-mover],[data-armar],[data-dictar-visita],[data-editar],[data-guardar-datos],[data-corr],[data-acc],[data-seg],[data-recup-accion],[data-enviar-cola],[data-corregir-cola],[data-corregir-hoy]";
 const baseVisible = l => S.como ? l.filter(c => c.correo === S.como.correo && (c.origen !== "salida" || (c.visitas || 0) > 0)) : l;
+// Ruta propia (21/10): el ejecutivo mueve comercios entre rutas y cambia el orden (v2_armar_ruta). La recomendada queda en
+// ruta_rec y orden_rec; ruta y orden pasan a ser la que manda en el celular. Sin ruta_propia (o con la base de antes), todo igual.
+const prepararBase = l => baseVisible(l).map(c => Object.assign(c, { ruta_rec:c.ruta, orden_rec:c.orden }, c.ruta_propia ? { ruta:c.ruta_propia, orden:c.orden_propio } : {}));
 function avisar(msg, ms){ S.toast = msg; pintar(); clearTimeout(avisar._t); avisar._t = setTimeout(() => { S.toast = null; pintar(); }, ms || 3600); }
 
 const ICON = {
@@ -291,7 +294,7 @@ async function cargar(){
       const rpcReal = sb.rpc.bind(sb);
       sb.rpc = (fn, args) => LECTURAS.has(fn) ? rpcReal(fn, args) : Promise.resolve({ data:null, error:{ message:"Vista de Jose: aquí no se guardan cambios." } });
     }
-    S.periodo = p.data || null; S.base = baseVisible(b.data || []);
+    S.periodo = p.data || null; S.base = prepararBase(b.data || []);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar(); vaciarCola(); cargarRevisiones(); cargarSeguimientos().then(() => { S._mantenerScroll = true; pintar(); });
 }
@@ -358,7 +361,7 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.${tarde ? ` ${tarde === 1 ? "Una llegó" : tarde + " llegaron"} fuera de plazo: ${tarde === 1 ? "queda" : "quedan"} en tu historial, pero no ${tarde === 1 ? "cuenta" : "cuentan"} para el bono.` : ""}`, tarde ? 8000 : undefined); recargarBase(); }
 }
-async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones"), cargarSeguimientos()]); if (!b.error){ S.base = baseVisible(b.data || []); S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
+async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones"), cargarSeguimientos()]); if (!b.error){ S.base = prepararBase(b.data || []); S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
 async function cargarActividad(){
   if (S._actCargando) return;
   S._actCargando = true; S.actErr = "";
@@ -398,6 +401,22 @@ function rutas(){
   S.base.forEach(c => { const k = c.ruta || ("Distrito · " + (c.distrito || "sin distrito")); if (!m.has(k)) m.set(k, []); m.get(k).push(c); });
   return [...m.entries()].map(([nombre, cs]) => ({ nombre, cs: cs.sort((a,b) => (a.orden||999) - (b.orden||999)) }))
     .sort((a,b) => a.nombre.localeCompare(b.nombre, "es", { numeric:true }));
+}
+// La ruta de hoy: la de la última visita si le quedan comercios por visitar; si no, la primera con pendientes
+function rutaHoyDe(rs){
+  const pendiente = r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)));
+  const ultima = S.base.filter(c => c.ultima_visita && esMio(c)).sort((a,b) => String(b.ultima_visita).localeCompare(String(a.ultima_visita)))[0];
+  const rutaUltima = ultima ? rs.find(r => r.cs.includes(ultima)) : null;
+  return (rutaUltima && pendiente(rutaUltima) ? rutaUltima : null) || rs.find(pendiente) || rs[0];
+}
+// Rutas que puede armar el ejecutivo: las que tienen comercios suyos. Los de «salida» (se ven solo si tienen visita) no se mueven.
+const movible = c => esMio(c) && c.origen !== "salida";
+const misRutas = () => [...new Set(S.base.filter(c => movible(c) && c.ruta).map(c => c.ruta))].sort((a,b) => a.localeCompare(b, "es", { numeric:true }));
+const deRuta = nombre => S.base.filter(c => movible(c) && c.ruta === nombre).sort((a,b) => (a.orden||999) - (b.orden||999));
+async function armarRuta(ruta, ids){
+  const { error } = await sb.rpc("v2_armar_ruta", { p_ruta:ruta, p_customer_ids:ids });
+  if (error) return /fetch|network|conex/i.test(error.message) ? "Sin señal. Inténtalo cuando vuelva la conexión." : error.message;
+  await recargarBase(); return "";
 }
 const diasQuedan = () => S.periodo ? Math.max(0, Math.ceil((new Date(S.periodo.fin + "T23:59:59-05:00") - new Date())/86400000)) : 0;
 
@@ -451,10 +470,7 @@ function vistaInicio(){
   const m = metricas();
   const rs = rutas();
   const hayRutas = S.base.some(c => c.ruta);
-  const pendiente = r => r.cs.some(c => c.estado === "por" && (!c.correo || esMio(c)));
-  const ultima = S.base.filter(c => c.ultima_visita && esMio(c)).sort((a,b) => String(b.ultima_visita).localeCompare(String(a.ultima_visita)))[0];
-  const rutaUltima = ultima ? rs.find(r => r.cs.includes(ultima)) : null;
-  const rutaHoy = hayRutas ? ((rutaUltima && pendiente(rutaUltima) ? rutaUltima : null) || rs.find(pendiente) || rs[0]) : null;
+  const rutaHoy = hayRutas ? rutaHoyDe(rs) : null;
   const mios = S.base.filter(esMio).sort((a,b) => String(b.ultima_visita||"").localeCompare(String(a.ultima_visita||"")));
   const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
@@ -630,11 +646,77 @@ function vistaRutas(){
   return `<div class="vista">
     <div class="barra"><h1>Rutas</h1><div style="color:var(--cabecera-sub);font-size:13px">Grupos de comercios cercanos: un día de trabajo cada uno.</div></div>
     ${!S.base.some(c => c.ruta) ? `<div class="lista"><div class="vacio">Las rutas se arman cuando llegue la base completa con distritos y direcciones. Mientras tanto, busca el comercio en ${S.admin?"Base":"Mi base"}.</div></div>` : ""}
+    ${tarjetaArmar(rs)}
     <div class="lista">${S.base.some(c => c.ruta) && rs.length ? rs.map(r => { const hechos = r.cs.filter(c => c.visitas > 0).length;
-      return `<div class="com"><div class="l1"><span>${r.cs.length} comercios</span><span class="pill ${hechos===r.cs.length?"e-rea":"e-por"}">${hechos} de ${r.cs.length} visitados</span></div><b>${esc(r.nombre)}</b>
+      return `<div class="com"><div class="l1"><span>${r.cs.length} comercios${r.cs.some(c => c.ruta_propia) ? " · armada por ti" : ""}</span><span class="pill ${hechos===r.cs.length?"e-rea":"e-por"}">${hechos} de ${r.cs.length} visitados</span></div><b>${esc(r.nombre)}</b>
         <div class="pista"><i style="width:${r.cs.length?hechos/r.cs.length*100:0}%;background:var(--naranja)"></i></div>
         <div class="nav2"><button class="btn btn-lin" data-ruta="${esc(r.nombre)}">Ver comercios</button><a class="btn btn-sec" href="${urlRuta(r.cs)}" target="_blank" rel="noopener">Google Maps</a></div></div>`; }).join("") : ""}</div>
   </div>`;
+}
+// «Armar mi ruta de hoy» (21/10): elegir la ruta, ordenar con ▲▼, sumar comercios de otras rutas y guardar (v2_armar_ruta)
+function tarjetaArmar(rs){
+  if (S.admin || !misRutas().length) return "";
+  const a = S.armar;
+  if (!a){ const h = rutaHoyDe(rs.filter(r => misRutas().includes(r.nombre)));
+    return `<div class="lista" style="padding-bottom:0"><div class="card armar-card"><div><div class="eyebrow">Tu ruta de hoy</div><h2>${esc(h ? h.nombre : "")}</h2></div>
+      <div class="nota">Cámbiale el orden o súmale comercios de otras rutas. La ruta recomendada no se pierde.</div>
+      <button class="btn btn-sec btn-full" data-armar="${esc(h ? h.nombre : "")}">${ICON.ruta} Armar mi ruta de hoy</button></div></div>`; }
+  const porId = id => S.base.find(c => c.customer_id === id);
+  const fuera = S.base.filter(c => movible(c) && !a.ids.includes(c.customer_id) && !fueVisitado(c)).sort((x, y) => String(x.ruta || "").localeCompare(String(y.ruta || ""), "es", { numeric:true }) || (x.orden||999) - (y.orden||999));
+  const propias = deRuta(a.ruta).filter(c => c.ruta_propia);
+  return `<div class="lista" style="padding-bottom:0"><div class="card armar-card">
+    <div class="eyebrow">Armar mi ruta de hoy</div>
+    <select id="armarRuta" class="campo" aria-label="Ruta">${misRutas().map(r => `<option ${a.ruta===r?"selected":""}>${esc(r)}</option>`).join("")}</select>
+    <div class="paradas">${a.ids.map((id, i) => { const c = porId(id) || { customer_id:id }; return `<div class="parada"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc(a.nuevos.includes(id) ? "Viene de " + (c.ruta || "sin ruta") : dirDe(c))}</small></span>
+      <span class="ordenar"><button data-armar-subir="${i}" aria-label="Subir" ${i ? "" : "disabled"}>▲</button><button data-armar-bajar="${i}" aria-label="Bajar" ${i < a.ids.length - 1 ? "" : "disabled"}>▼</button>${a.nuevos.includes(id) ? `<button data-armar-quitar="${i}" aria-label="Quitar">✕</button>` : ""}</span></div>`; }).join("")}</div>
+    ${fuera.length ? `<select id="armarAgregar" class="campo" aria-label="Agregar un comercio"><option value="">Agregar un comercio de otra ruta…</option>${fuera.map(c => `<option value="${esc(c.customer_id)}">${esc(nombreDe(c))} · ${esc(c.ruta || "sin ruta")}</option>`).join("")}</select>` : ""}
+    <div class="nota">Ordénala como la vas a caminar. Solo cambia la ruta: tus visitas y tu avance no cambian. La ruta recomendada no se pierde.</div>
+    ${a.error ? `<div class="falta">${esc(a.error)}</div>` : ""}
+    <div class="btns"><button class="btn btn-lin" data-armar-cancelar>Cancelar</button><button class="btn btn-pri" data-armar-guardar ${a.cambiado && !a.enviando ? "" : "disabled"}>${a.enviando ? "Guardando…" : "Guardar mi ruta"}</button></div>
+    ${propias.length && !a.cambiado ? `<button class="btn btn-lin btn-full" data-armar-volver>Deshacer mis cambios en esta ruta</button>` : ""}
+  </div></div>`;
+}
+const abrirArmar = ruta => { S.armar = { ruta, ids:deRuta(ruta).map(c => c.customer_id), nuevos:[], cambiado:false, enviando:false, error:"" }; S._mantenerScroll = true; pintar(); };
+async function guardarArmar(volver){
+  const a = S.armar; if (!a || a.enviando) return;
+  const ids = volver ? deRuta(a.ruta).filter(c => c.ruta_propia).map(c => c.customer_id) : a.ids;
+  if (!ids.length) return;
+  a.enviando = true; a.error = ""; S._mantenerScroll = true; pintar();
+  const err = await armarRuta(volver ? null : a.ruta, ids);
+  if (err){ a.enviando = false; a.error = "No se guardó: " + err; S._mantenerScroll = true; return pintar(); }
+  S.armar = null; avisar(volver ? "Esta ruta volvió a la recomendada." : "Tu ruta quedó guardada.");
+}
+// «Mover a otra ruta» en la ficha: el comercio va al final de la ruta elegida (o de una ruta nueva)
+function tarjetaRuta(c){
+  if (S.admin || !movible(c)) return "";
+  const m = S.mover && S.mover.cid === c.customer_id ? S.mover : null;
+  const otras = misRutas().filter(r => r !== c.ruta);
+  return `<div class="card ruta-card"><div class="fila-ent"><div><div class="eyebrow">Ruta${c.ruta_propia ? " · armada por ti" : ""}</div><h2>${esc(c.ruta || "Sin ruta")}${c.ruta && c.orden ? ` · parada ${c.orden}` : ""}</h2></div>${m ? "" : `<button class="btn mini" data-mover="${esc(c.customer_id)}">Mover a otra ruta</button>`}</div>
+    ${c.ruta_propia ? `<div class="nota">Recomendada: ${esc(c.ruta_rec || "sin ruta")}${c.orden_rec ? ` · parada ${c.orden_rec}` : ""}.</div>` : ""}
+    ${m ? `<div class="mover">
+      <select id="moverA" class="campo" aria-label="Ruta de destino"><option value="">Elige la ruta</option>${otras.map(r => `<option ${m.destino===r?"selected":""}>${esc(r)}</option>`).join("")}<option value="__nueva" ${m.destino==="__nueva"?"selected":""}>Una ruta nueva…</option></select>
+      ${m.destino === "__nueva" ? `<input class="campo" id="moverNueva" maxlength="80" placeholder="Nombre de la ruta nueva" value="${esc(m.nueva)}">` : ""}
+      <div class="nota">Va al final de esa ruta; el orden lo cambias en Rutas. Tus visitas no cambian.</div>
+      ${m.error ? `<div class="falta">${esc(m.error)}</div>` : ""}
+      <div class="btns"><button class="btn btn-lin" data-mover-cancelar>Cancelar</button><button class="btn btn-pri" data-mover-guardar ${m.enviando ? "disabled" : ""}>${m.enviando ? "Guardando…" : "Mover aquí"}</button></div>
+      ${c.ruta_propia ? `<button class="btn btn-lin btn-full" data-mover-volver>Volver a la ruta recomendada</button>` : ""}
+    </div>` : ""}
+  </div>`;
+}
+async function guardarMover(volver){
+  const m = S.mover; if (!m || m.enviando) return;
+  const c = S.base.find(x => x.customer_id === m.cid); if (!c) return;
+  let ruta = null, ids = [c.customer_id];
+  if (!volver){
+    ruta = m.destino === "__nueva" ? m.nueva.trim() : m.destino;
+    m.error = !ruta ? (m.destino === "__nueva" ? "Escribe el nombre de la ruta nueva." : "Elige la ruta.") : ruta.length < 3 ? "El nombre de la ruta va de 3 a 80 caracteres." : "";
+    if (m.error){ S._mantenerScroll = true; return pintar(); }
+    ids = deRuta(ruta).filter(x => x !== c).map(x => x.customer_id).concat(c.customer_id);
+  }
+  m.enviando = true; m.error = ""; S._mantenerScroll = true; pintar();
+  const err = await armarRuta(ruta, ids);
+  if (err){ m.enviando = false; m.error = "No se movió: " + err; S._mantenerScroll = true; return pintar(); }
+  S.mover = null; avisar(volver ? "Volvió a su ruta recomendada." : "Movido a " + esc(ruta) + ".");
 }
 function vistaFicha(c){
   if (!c){ const x = S.recup && S.recup.get(S.ficha); if (x && x.paso !== "cambio") return vistaFichaRecupero(x); S.ficha = null; return vistaInicio(); }
@@ -671,6 +753,7 @@ function vistaFicha(c){
         ${c.tasa_debito != null && c.tasas_aprox !== false ? `<div class="aprox" style="text-align:center;margin-top:8px">Tasas referenciales · confirmar la vigente con BBVA</div>` : ""}
       </div>
       ${tarjetaDireccion(c)}
+      ${tarjetaRuta(c)}
       ${tarjetaPotencial(c)}
       ${tarjetaContacto(c)}
       ${S.admin ? "" : VOZ_IA ? `<div class="reg-btns"><button class="btn btn-pri btn-full" data-dictar-visita="${esc(c.customer_id)}">${ICON.mic} Dictar la visita</button>
@@ -1793,7 +1876,23 @@ function enlazar(){
   });
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; S.corr = null; pintar(); });
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; S.filtroVisita = "todos"; S.masFiltros = true; pintar(); });
-  p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
+  p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; S.mover = null; pintar(); });
+  p.querySelectorAll("[data-mover]").forEach(b => b.onclick = () => { S.mover = { cid:b.dataset.mover, destino:"", nueva:"", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-mover-cancelar]").forEach(b => b.onclick = () => { S.mover = null; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-mover-guardar]").forEach(b => b.onclick = () => guardarMover(false));
+  p.querySelectorAll("[data-mover-volver]").forEach(b => b.onclick = () => guardarMover(true));
+  const ma = p.querySelector("#moverA"); if (ma) ma.onchange = () => { S.mover.destino = ma.value; S.mover.error = ""; S._mantenerScroll = true; pintar(); };
+  const mn = p.querySelector("#moverNueva"); if (mn) mn.oninput = e => { S.mover.nueva = e.target.value; };
+  p.querySelectorAll("[data-armar]").forEach(b => b.onclick = () => abrirArmar(b.dataset.armar || misRutas()[0]));
+  p.querySelectorAll("[data-armar-cancelar]").forEach(b => b.onclick = () => { S.armar = null; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-armar-guardar]").forEach(b => b.onclick = () => guardarArmar(false));
+  p.querySelectorAll("[data-armar-volver]").forEach(b => b.onclick = () => guardarArmar(true));
+  const mueve = (i, j) => { const l = S.armar.ids; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; S.armar.cambiado = true; S._mantenerScroll = true; pintar(); };
+  p.querySelectorAll("[data-armar-subir]").forEach(b => b.onclick = () => mueve(+b.dataset.armarSubir, +b.dataset.armarSubir - 1));
+  p.querySelectorAll("[data-armar-bajar]").forEach(b => b.onclick = () => mueve(+b.dataset.armarBajar, +b.dataset.armarBajar + 1));
+  p.querySelectorAll("[data-armar-quitar]").forEach(b => b.onclick = () => { const id = S.armar.ids.splice(+b.dataset.armarQuitar, 1)[0]; S.armar.nuevos = S.armar.nuevos.filter(x => x !== id); S._mantenerScroll = true; pintar(); });
+  const ar = p.querySelector("#armarRuta"); if (ar) ar.onchange = () => abrirArmar(ar.value);
+  const ag = p.querySelector("#armarAgregar"); if (ag) ag.onchange = () => { if (!ag.value) return; S.armar.ids.push(ag.value); S.armar.nuevos.push(ag.value); S.armar.cambiado = true; S._mantenerScroll = true; pintar(); };
   p.querySelectorAll("[data-ojo]").forEach(b => b.onclick = () => { S.ver = !S.ver; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-grupo]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroVisita = "g" + b.dataset.grupo; S.filtroEstado = "todos"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.filtroEstado = "todos"; S.corr = null; pintar(); });
@@ -1866,7 +1965,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
    Si lo hay, muestra un aviso que no se puede cerrar con un solo botón «Actualizar», pero nunca mientras hay un formulario
    a medias (registro, corrección, pedido de anulación o corrección de datos): espera a que lo guarde o lo cancele.
    Las visitas sin enviar viven en localStorage (cola), así que recargar no pierde nada. */
-const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando || S.segReg || S.recupReg);
+const ocupadoParaActualizar = () => !!(S.reg || S.corr || S.accion || S.editando || S.segReg || S.recupReg || S.mover || (S.armar && S.armar.cambiado));
 async function revisarVersion(){
   if (S.versionNueva) return mostrarAvisoVersion();
   try {

@@ -73,7 +73,7 @@ async function como(correo, sql, params){
   await db.exec(correo ? 'set role authenticated' : 'set role anon');
   try { return await db.query(sql, params); } finally { await db.exec('reset role'); }
 }
-const falla = async (p, re) => { let err = null; try { await p; } catch (e) { err = e; } assert.ok(err, 'debía fallar y no falló'); if (re) assert.match(err.message, re); };
+const falla = async (p, re) => { let err = null; try { await p; } catch (e) { err = e; } assert.ok(err, 'debía fallar y no falló' + (re ? ' (' + re + ')' : '')); if (re) assert.match(err.message, re); };
 const visita = async id => (await db.query('select * from v2_visitas where id = $1', [id])).rows[0];
 // Visita con fecha pasada, cargada directo (como si hubiera llegado a tiempo)
 async function visitaPasada(cid, dias, con, extra = {}){
@@ -739,6 +739,156 @@ caso('recupero: si la visita cambia, el caso se cierra solo; los casos abiertos 
   assert.deepEqual(l4.map(x => x.paso), ['tramite'], 'el caso sale dos veces');
 });
 const repeat300 = () => 'x'.repeat(301);
+// ---------- base 2026-11 en bloques (20/10) ----------
+caso('base en bloques: la salida se oculta al ejecutivo, pero su visita en cola se guarda y vuelve a verse', async () => {
+  const [sal, ant, nue] = [await nuevoComercio(131), await nuevoComercio(132), await nuevoComercio(133)];
+  await db.query(`update v2_asignaciones set origen = 'salida' where periodo = '2099-01' and customer_id = $1`, [sal]);
+  await db.query(`update v2_asignaciones set origen = 'base_anterior' where periodo = '2099-01' and customer_id = $1`, [ant]);
+  await db.query(`update v2_asignaciones set origen = 'base_nueva', bloque = 1 where periodo = '2099-01' and customer_id = $1`, [nue]);
+  await db.query(`update v2_comercios set documento = '20999999991', potencial = 1500, vinculacion = '2. Semi Vinculado', vol_092026 = 320,
+    tipo_equipo = 'SMARTPOS', grupo_ubicacion = 2, geo_nota = 'Otra dirección en la nota', contacto_celular = '999000111', contacto_correo = 'prueba@ejemplo.com'
+    where customer_id = $1`, [nue]);
+  await db.query(`insert into v2_bloques(periodo, bloque, ini, fin) values ('2099-01', 1, $1::date, $2::date)`, [await diaMas(-3), await diaMas(10)]);
+  const ve = async (u, cid) => (await como(u, `select * from public.v2_mi_base('2099-01') where customer_id = $1`, [cid])).rows;
+  assert.equal((await ve(EJ, sal)).length, 0, 'el ejecutivo todavía ve un comercio de salida');
+  assert.equal((await ve(ANA, sal)).length, 1, 'el analista debe seguir viéndolo');
+  const a = (await ve(EJ, ant))[0]; assert.equal(a.origen, 'base_anterior'); assert.equal(a.bloque, null);
+  const n = (await ve(EJ, nue))[0];
+  assert.deepEqual([n.origen, n.bloque, n.documento, Number(n.potencial), n.grupo_ubicacion, n.contacto_celular], ['base_nueva', 1, '20999999991', 1500, 2, '999000111']);
+  const fin = (await como(EJ, `select bloque_fin::text f from public.v2_mi_base('2099-01') where customer_id = $1`, [nue])).rows[0].f;
+  assert.equal(fin, await diaMas(10), 'el fin del bloque no llega a la base');
+  // Regla n.º 1: una visita a un comercio de salida (desde la cola de un celular con la base vieja) se guarda y cuenta
+  const id = await registrar(EJ, { cid: sal, con: 'Nadie', motivo: 'Cerrado' });
+  assert.ok(id, 'la visita a un comercio de salida no se guardó');
+  assert.equal((await ve(EJ, sal)).length, 1, 'un comercio de salida con visita debe volver a verse');
+  // las columnas de siempre no cambian de lugar (el celular publicado sigue leyendo igual)
+  const cols = (await db.query(`select array_agg(a order by n) c from unnest((select proargnames from pg_proc where proname = 'v2_mi_base')) with ordinality t(a, n) where n > 1`)).rows[0].c;
+  assert.deepEqual(cols.slice(0, 3), ['customer_id', 'razon_social', 'rubro']); assert.equal(cols[42], 'bbva_reactivado'); assert.equal(cols[43], 'documento');
+  // valores fuera de la lista se rechazan; las apps no escriben en v2_bloques
+  await falla(db.query(`update v2_asignaciones set origen = 'otra' where customer_id = $1`, [sal]), /check/);
+  await falla(db.query(`update v2_asignaciones set bloque = null where periodo = '2099-01' and customer_id = $1`, [nue]), /check/);
+  await falla(db.query(`update v2_comercios set documento = '1234567' where customer_id = $1`, [nue]), /check/);
+  await falla(como(ANA, `insert into v2_bloques(periodo, bloque, ini, fin) values ('2099-01', 2, now()::date, now()::date)`), /permission denied/);
+  await falla(como(null, `select * from v2_bloques`), /permission denied/);
+});
+caso('cargas por documento: RUC, DNI sin el cero inicial y Customer ID llegan al comercio; lo ambiguo se rechaza', async () => {
+  // comercio nuevo con RUC (customer_id = RUC), comercio nuevo con DNI que empieza en 0, y uno de siempre al que se le puso su RUC
+  await db.exec(`insert into v2_comercios(customer_id, razon_social, documento) values ('20999999992', 'COMERCIO DE PRUEBA RUC SAC', '20999999992'), ('00999998', 'COMERCIO DE PRUEBA DNI', '00999998'),
+    ('00000141', 'COMERCIO DE PRUEBA 141 SAC', '20999999993');`);
+  // un DNI que coincide con el Customer ID de otro comercio: no se adivina
+  await db.exec(`insert into v2_comercios(customer_id, razon_social) values ('00000142', 'COMERCIO DE PRUEBA 142 SAC');
+    insert into v2_comercios(customer_id, razon_social, documento) values ('99999142', 'COMERCIO DE PRUEBA DNI 142', '00000142');`);
+  const corte = await diaMas(-2);
+  const r = (await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb) r`, [corte, JSON.stringify([
+    { documento: '20999999992', gestion_con_contacto: true, reactivado: 'Si' },
+    { documento: '999998', gestion_con_contacto: true, reactivado: 'Si' },
+    { customer_id: '20999999993', gestion_con_contacto: false, reactivado: 'No' },
+    { customer_id: '00000001', gestion_con_contacto: true, reactivado: 'En proceso' },
+    { documento: '142', gestion_con_contacto: true, reactivado: 'Si' },
+    { documento: '20111111111', gestion_con_contacto: true, reactivado: 'Si' },
+    { documento: '1234567890', gestion_con_contacto: true, reactivado: 'Si' },
+    { documento: '20999999992', customer_id: '00000001', gestion_con_contacto: true, reactivado: 'Si' }])])).rows[0].r;
+  assert.equal(r.cargadas, 4); assert.equal(r.rechazadas, 4);
+  assert.match(r.detalle.map(d => d.motivo).join(' | '), /DNI de otro comercio.*RUC no está en la base.*ni un RUC.*comercios distintos/);
+  const ids = (await db.query(`select customer_id from v2_resultados_bbva where corte = $1 order by 1`, [corte])).rows.map(x => x.customer_id);
+  assert.deepEqual(ids, ['00000001', '00000141', '00999998', '20999999992']);
+  const t = (await como(ANA, `select public.v2_cargar_transacciones('prueba.xlsx', 'diario', $1::jsonb) r`, [JSON.stringify([
+    { documento: '20999999992,0', fecha_corte: corte, trx: '3', vol: '120.5' }, { customer_id: '999998', fecha_corte: corte, trx: '1' },
+    { customer_id: '00000001', fecha_corte: corte, trx: '2' }, { documento: '20111111111', fecha_corte: corte, trx: '1' }])])).rows[0].r;
+  assert.equal(t.insertadas, 3); assert.equal(t.rechazadas, 1);
+  assert.equal((await db.query(`select count(*)::int n from v2_transacciones where customer_id in ('20999999992', '00999998') and fecha_corte = $1`, [corte])).rows[0].n, 2);
+  // la traducción no se llama directo desde las apps
+  await falla(como(ANA, `select public.v2_comercio_de_id('20999999992')`), /permission denied/);
+  await falla(como(null, `select public.v2_comercio_de_id('20999999992')`), /permission denied/);
+  await falla(como(ANA, `select public.v2_comercio_de_fila('{}'::jsonb)`), /permission denied/);
+});
+caso('avance con la base 2026-11: base y visitados solo con la base nueva; los reactivados de la base anterior sí cuentan', async () => {
+  const av = async () => { const r = (await como(ANA, `select correo, base, visitados, reactivados from public.v2_avance('2099-01') where correo = $1`, [EJ])).rows[0]; return [r.base, r.visitados, r.reactivados]; };
+  const [c1, c2] = [await nuevoComercio(151), await nuevoComercio(152)];
+  await visitaPasada(c1, 6, 'Dueño', { que: 'Reunión concretada' });
+  await visitaPasada(c2, 6, 'Dueño', { que: 'Reunión concretada' });
+  const corte = await diaMas(-1);
+  await como(ANA, `select public.v2_cargar_transacciones('prueba.xlsx', 'diario', $1::jsonb)`, [JSON.stringify([
+    { customer_id: c1, fecha_corte: await diaMas(-3), trx: '2' }, { customer_id: c1, fecha_corte: corte, trx: '1' }])]);
+  const antes = await av();
+  assert.equal((await como(ANA, `select estado from public.v2_mi_base('2099-01') where customer_id = $1`, [c1])).rows[0].estado, 'rea', 'el comercio de prueba no quedó reactivado');
+  // c1 (reactivado y visitado) pasa a la base anterior: sale de la base y de visitados, pero sigue en reactivados
+  await db.query(`update v2_asignaciones set origen = 'base_anterior' where periodo = '2099-01' and customer_id = $1`, [c1]);
+  const despues = await av();
+  assert.deepEqual([despues[0], despues[1], despues[2]], [antes[0] - 1, antes[1] - 1, antes[2]]);
+  // c2 (visitado) pasa a salida: tampoco suma a la base ni a visitados
+  await db.query(`update v2_asignaciones set origen = 'salida' where periodo = '2099-01' and customer_id = $1`, [c2]);
+  const ult = await av();
+  assert.deepEqual([ult[0], ult[1]], [despues[0] - 1, despues[1] - 1]);
+});
+// ---------- ruta propia del ejecutivo (21/10) ----------
+caso('ruta propia: el ejecutivo arma su ruta sin perder la recomendada y cada cambio deja su línea', async () => {
+  const [a, b, c] = [await nuevoComercio(161), await nuevoComercio(162), await nuevoComercio(163)];
+  await db.query(`update v2_asignaciones set ruta = 'Ruta 01 · Prueba', orden = (customer_id::int - 160) where periodo = '2099-01' and customer_id = any($1)`, [[a, b, c]]);
+  const armar = (u, ruta, ids) => como(u, `select public.v2_armar_ruta($1, $2::text[]) n`, [ruta, ids]).then(r => r.rows[0].n);
+  const ve = async cid => (await como(EJ, `select ruta, orden, ruta_propia, orden_propio, ruta_propia_en from public.v2_mi_base('2099-01') where customer_id = $1`, [cid])).rows[0];
+  const lineas = async cid => (await db.query(`select visita_id, periodo, accion, por, antes, despues from v2_bitacora_visita where customer_id = $1 and accion = 'ruta' order by id`, [cid])).rows;
+  // c pasa a una ruta nueva, primero; a y b se reordenan en la recomendada (b antes que a)
+  assert.equal(await armar(EJ, 'Ruta 02 · Prueba', [c]), 1);
+  assert.equal(await armar(EJ, 'Ruta 01 · Prueba', [b, a]), 2);
+  const [va, vb, vc] = [await ve(a), await ve(b), await ve(c)];
+  assert.deepEqual([vc.ruta, vc.orden, vc.ruta_propia, vc.orden_propio], ['Ruta 01 · Prueba', 3, 'Ruta 02 · Prueba', 1], 'la ruta recomendada se perdió o la propia no llegó');
+  assert.deepEqual([va.orden, va.orden_propio, vb.orden, vb.orden_propio], [1, 2, 2, 1]);
+  assert.ok(vc.ruta_propia_en, 'falta la fecha del cambio');
+  const l = await lineas(c);
+  assert.equal(l.length, 1); assert.equal(l[0].visita_id, null); assert.equal(l[0].periodo, '2099-01'); assert.equal(l[0].por, EJ);
+  assert.equal(l[0].antes, 'Ruta 01 · Prueba · 3'); assert.equal(l[0].despues, 'Ruta 02 · Prueba · 1');
+  // repetir lo mismo no escribe ni deja otra línea
+  assert.equal(await armar(EJ, 'Ruta 01 · Prueba', [b, a]), 0);
+  assert.equal((await lineas(a)).length, 1);
+  // volver a la recomendada
+  assert.equal(await armar(EJ, null, [c]), 1);
+  const vc2 = await ve(c);
+  assert.deepEqual([vc2.ruta, vc2.orden, vc2.ruta_propia, vc2.orden_propio], ['Ruta 01 · Prueba', 3, null, null]);
+  assert.match((await lineas(c))[1].despues, /^vuelve a la recomendada · Ruta 01 · Prueba · 3$/);
+  // el ejecutivo no lee esas líneas; el analista sí
+  assert.equal((await como(EJ, `select 1 from v2_bitacora_visita where customer_id = $1`, [c])).rows.length, 0, 'el ejecutivo lee líneas sin visita');
+  assert.equal((await como(ANA, `select 1 from v2_bitacora_visita where customer_id = $1`, [c])).rows.length, 2);
+});
+caso('ruta propia: solo comercios propios del periodo vigente, sin repetir; ni el analista ni anon', async () => {
+  const [a, sal, libre] = [await nuevoComercio(171), await nuevoComercio(172), await nuevoComercio(174)];
+  await db.query(`update v2_asignaciones set origen = 'salida' where periodo = '2099-01' and customer_id = $1`, [sal]);
+  await db.query(`update v2_asignaciones set correo = null where periodo = '2099-01' and customer_id = $1`, [libre]);
+  const armar = (u, ruta, ids) => como(u, `select public.v2_armar_ruta($1, $2::text[]) n`, [ruta, ids]);
+  await falla(armar(EJ, 'Ruta 05 · Prueba', [a, '00000011']), /Solo puedes mover comercios de tu base/);   // de otro ejecutivo
+  await falla(armar(EJ, 'Ruta 05 · Prueba', [libre]), /Solo puedes mover comercios de tu base/);      // libre
+  await falla(armar(EJ, 'Ruta 05 · Prueba', [sal]), /Solo puedes mover comercios de tu base/);             // de salida
+  await falla(armar(EJ, 'Ruta 05 · Prueba', ['99999999']), /Solo puedes mover comercios de tu base/);      // no existe
+  await falla(armar(EJ, 'Ruta 05 · Prueba', [a, a]), /dos veces/);
+  await falla(armar(EJ, 'Ruta 05 · Prueba', []), /al menos un comercio/);
+  await falla(armar(EJ, 'xy', [a]), /de 3 a 80/);
+  await falla(armar(OTRO, 'Ruta 05 · Prueba', [a]), /Solo puedes mover comercios de tu base/);
+  await falla(armar(ANA, 'Ruta 05 · Prueba', [a]), /cada ejecutivo/);
+  await falla(armar(INA, 'Ruta 05 · Prueba', [a]), /no está activo/);
+  await falla(armar(null, 'Ruta 05 · Prueba', [a]), /permission denied/);
+  // un comercio del periodo anterior no se mueve (solo el vigente)
+  await db.query(`insert into v2_periodos(id, ini, fin) values ('2098-12', '2098-12-01', '2098-12-31') on conflict do nothing`);
+  await db.query(`insert into v2_comercios(customer_id, razon_social) values ('00000173', 'COMERCIO DE PRUEBA 173 SAC')`);
+  await db.query(`insert into v2_asignaciones(periodo, customer_id, correo) values ('2098-12', '00000173', $1)`, [EJ]);
+  await falla(armar(EJ, 'Ruta 05 · Prueba', ['00000173']), /Solo puedes mover comercios de tu base/);
+  // nada cambió y el ejecutivo tampoco puede escribir directo en v2_asignaciones
+  assert.equal((await db.query(`select count(*)::int n from v2_asignaciones where ruta_propia is not null and customer_id = any($1)`, [[a, sal, libre, '00000011', '00000173']])).rows[0].n, 0);
+  const up = await como(EJ, `update v2_asignaciones set ruta_propia = 'Por fuera', orden_propio = 1 where customer_id = $1`, [a]);
+  assert.equal(up.affectedRows, 0, 'el ejecutivo escribió directo en v2_asignaciones');
+  // la bitácora sigue pidiendo visita o comercio con periodo
+  await falla(db.query(`insert into v2_bitacora_visita(accion, por) values ('ruta', 'x')`), /check/);
+});
+caso('ruta propia: no toca visitas ni el medidor; v2_mi_base agrega las columnas al final', async () => {
+  const a = await nuevoComercio(181);
+  await como(EJ, `select public.v2_armar_ruta('Ruta 07 · Prueba', $1::text[])`, [[a]]);
+  const id = await registrar(EJ, { cid: a, con: 'Nadie', motivo: 'Cerrado' });
+  assert.ok(id, 'la visita a un comercio con ruta propia no se guardó');
+  const r = (await como(EJ, `select visitas, ruta_propia from public.v2_mi_base('2099-01') where customer_id = $1`, [a])).rows[0];
+  assert.deepEqual([r.visitas, r.ruta_propia], [1, 'Ruta 07 · Prueba']);
+  const cols = (await db.query(`select array_agg(a order by n) c from unnest((select proargnames from pg_proc where proname = 'v2_mi_base')) with ordinality t(a, n) where n > 1`)).rows[0].c;
+  assert.deepEqual([cols[16], cols[17], cols[42], cols[43], cols[56]], ['ruta', 'orden', 'bbva_reactivado', 'documento', 'contacto_correo']);
+  assert.deepEqual(cols.slice(57), ['ruta_propia', 'orden_propio', 'ruta_propia_en']);
+});
 caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
   await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
   const r = (await db.query(`select has_table_privilege('anon', 'public.v2_tabla_de_prueba', 'SELECT') anon_lee,
