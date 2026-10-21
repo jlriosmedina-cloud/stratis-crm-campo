@@ -9,7 +9,7 @@ import JSZip from 'jszip';
 
 const NM = path.join(RAIZ, 'qa', 'node_modules');
 const ANALISTA = { correo: 'analista.prueba@ejemplo.com', nombre: 'Analista Prueba', nombre_corto: 'Analista', rol: 'Analista', activo: true };
-const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i));
+const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i, i === 1 ? { documento: '00999001' } : {}));
 const hoy = hoyLima();
 const visita = (i, extra) => Object.assign({
   id: `00000000-0000-0000-0000-00000000000${i}`, periodo: 'PRUEBA', customer_id: String(i).padStart(8, '0'), comercio: `Comercio Prueba ${i}`, razon_social: `COMERCIO DE PRUEBA ${i} SAC`,
@@ -97,9 +97,13 @@ await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin no
   // tipificaciones del 29/09 al final de Base, sin correr las columnas de antes; después, Comercio_Cerro_Definitivamente y Ejecutivo
   const cb = xw.getWorksheet('Base').getRow(1).values.slice(1).map(String);
   const NUEVAS = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
-  assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 49, 'Base: la última columna de antes se movió');
-  assert.deepEqual(cb.slice(49), NUEVAS.concat('Comercio_Cerro_Definitivamente', 'Ejecutivo'));
+  // 21/10: «Documento» (RUC o DNI, como texto) va al lado de Customer_ID; las demás se corren una
+  assert.deepEqual(cb.slice(0, 3), ['Customer_ID', 'Documento', 'Visitado'], 'Base: falta Documento al lado de Customer_ID');
+  assert.equal(xw.getWorksheet('Base').getColumn(2).numFmt, '@', 'Documento debe ir como texto');
+  assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 50, 'Base: la última columna de antes se movió');
+  assert.deepEqual(cb.slice(50), NUEVAS.concat('Comercio_Cerro_Definitivamente', 'Ejecutivo'));
   assert.equal(xw.getWorksheet('Base').getCell(2, cb.length).value, 'Prueba', 'Base: falta el ejecutivo asignado');
+  assert.equal(xw.getWorksheet('Base').getCell(2, 2).value, '00999001', 'Documento con su cero a la izquierda');
   const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
   assert.ok(txt.includes('zona insegura u otro motivo'), 'falta «zona insegura» en «Sin contacto»');
   // KPIs: todas las fórmulas sobre la hoja Base, sin la fila 2 ni las notas al pie
@@ -124,8 +128,8 @@ await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no
   const ll = (await p.evaluate(n => window.__llamadas.slice(n), antes)).find(x => x[0] === 'v2_cargar_resultados_bbva');
   assert.ok(ll, 'no llamó a v2_cargar_resultados_bbva');
   assert.equal(ll[1].p_corte, hoy);
-  assert.deepEqual(ll[1].p_filas, [{ customer_id: '00000001', gestion_con_contacto: true, reactivado: 'Si', facturado: '1500' },
-    { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: null }, { customer_id: '00000003', gestion_con_contacto: true, reactivado: 'En proceso', facturado: null }]);
+  assert.deepEqual(ll[1].p_filas, [{ documento: '00000001', customer_id: '00000001', gestion_con_contacto: true, reactivado: 'Si', facturado: '1500' },
+    { documento: '00000002', customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: null }, { documento: '00000003', customer_id: '00000003', gestion_con_contacto: true, reactivado: 'En proceso', facturado: null }]);
   assert.ok(await p.locator('text=cargado: 3 comercios').count() > 0, 'no muestra el resultado de la carga');
 });
 await prueba('presentación para BBVA: 10 láminas con el corte elegido, sin mapa ni rutas', async () => {
@@ -181,7 +185,11 @@ await prueba('totales de BBVA: se tipean con puntos de miles, el CRM pone los gr
   assert.ok(await p.locator('#guardarTotales').isDisabled(), 'deja guardar con el control en rojo');
   await p.fill('[data-tot="sc_reac"]', '1');
   assert.ok(await p.locator('text=Control de coherencia OK').count() > 0, 'no da OK con los números correctos');
+  // con el ojo cerrado (así abre) la facturación no se ve; con el ojo abierto, sí
+  assert.ok(!(await p.locator('#totPrevia').innerText()).includes('1.500,50'), 'con el ojo cerrado se ve la facturación');
+  await p.evaluate(() => { S.ver = true; refrescarTotales(); });
   const prev = await p.locator('#totPrevia').innerText();
+  await p.evaluate(() => { S.ver = false; });
   for (const t of ['1.500,50', '2.300,50', '65,22 %', '50,00 %', 'con visita, con o sin contacto']) assert.ok(prev.includes(t), 'falta en la vista previa: ' + t);
   const antes = await p.evaluate(() => window.__llamadas.length);
   await p.click('#guardarTotales'); await p.waitForTimeout(400);
@@ -318,6 +326,56 @@ await prueba('recupero del POS: cuadro por ejecutivo, días sin avance y Validar
   await p.evaluate(() => { S.periodo = Object.assign({}, S.periodo, { ini: '2020-01-01', fin: '2020-01-31' }); S.recups = window.__FX.rpc.v2_mis_recuperos; pintar(); });
   assert.equal(await p.locator('[data-recup-validar]').count(), 0, 'en un periodo anterior no debe haber Validar');
   await p.evaluate(pp => { S.periodo = pp; pintar(); }, per);
+});
+await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de privacidad y cargas por RUC o DNI', async () => {
+  const dia = n => new Date(Date.now() + n * 864e5).toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  const E2 = 'ejecutivo2.prueba@ejemplo.com', b1 = { bloque: 1, bloque_ini: dia(-1), bloque_fin: dia(10) }, b2 = { bloque: 2, bloque_ini: dia(11), bloque_fin: dia(25) };
+  const n = (i, x) => comercio(i, Object.assign({ origen: 'base_nueva' }, b1, x));
+  const filas = [n(11, { potencial: 1000, grupo_ubicacion: 1 }), n(12, { potencial: 2000, grupo_ubicacion: 2 }),
+    n(13, { potencial: 0, grupo_ubicacion: 3, documento: '20000000013', contacto_celular: '987654321', contacto_correo: 'dueno@ejemplo.com', geo_nota: 'Llamar antes de ir' }),
+    n(14, { potencial: 500, grupo_ubicacion: 1, documento: '00999014' }), n(15, Object.assign({ potencial: 0, grupo_ubicacion: 1, documento: '00000012' }, b2)),
+    comercio(16, { origen: 'base_anterior', visitas: 1, visitas_validas: 1, bbva_reactivado: dia(-1), dias_trx: 2 }),
+    comercio(17, { origen: 'salida', visitas: 0 }),
+    n(21, { correo: E2, potencial: 3000, grupo_ubicacion: 1 })];
+  const vis = (i, x) => visita(i, Object.assign({ id: `00000000-0000-0000-0000-0000000001${i}`, customer_id: String(i).padStart(8, '0'), comercio: `Comercio Prueba ${i}` }, x));
+  const nuevas = [vis(11), vis(12, { con: 'Nadie', motivo: 'Cerrado', que: 'Sin éxito', decision: null }), vis(16), vis(21, { correo: E2 })];
+  await p.evaluate(async ([filas, nuevas, E2]) => { window.__FX.rpc.v2_mi_base = filas; await cargarBase();
+    S.ejecutivos.push({ correo: E2, nombre: 'Segundo', ini: 'SE', color: 'var(--ej2)' }); S.act = S.act.concat(nuevas);
+    elegirEj('todos'); S.ver = false; S.vista = 'bloques'; pintar(); }, [filas, nuevas, E2]);
+  await p.waitForTimeout(300);
+  assert.equal(await p.evaluate(() => S.base.some(c => c.customer_id === '00000017')), false, 'un comercio de «salida» sin visita sigue en la cartera');
+  const tile = async k => (await p.locator('.tile', { hasText: k }).first().innerText()).replace(/\s+/g, ' ');
+  assert.match(await tile('Bloque 1 · visitados'), /3 \/ 5/, 'bloque 1 del equipo');
+  assert.match(await tile('Periodo · visitados'), /3 \/ 450/, 'periodo del equipo: 225 por ejecutivo');
+  assert.match(await tile('Reactivados que cuentan'), /\b1\b.*1 de la base anterior/, 'reactivado de la base anterior');
+  assert.match(await tile('Requieren búsqueda'), /\b1\b/);
+  // ojo cerrado al entrar: no se ven potenciales, celulares ni correos
+  let txt = await p.locator('#contenido').innerText();
+  assert.ok(!/6,500|6\.500/.test(txt) && txt.includes('S/ ••••'), 'con el ojo cerrado se ve el potencial');
+  assert.ok(txt.includes('••• ••• 321') && txt.includes('d•••@ejemplo.com') && !txt.includes('987654321'), 'con el ojo cerrado se ve el contacto');
+  await p.click('#btnOjo'); await p.waitForTimeout(200); txt = await p.locator('#contenido').innerText();
+  assert.ok(txt.includes('S/ 6,500') && txt.includes('987654321') && txt.includes('dueno@ejemplo.com'), 'con el ojo abierto no aparecen los datos');
+  await p.click('#btnOjo');
+  // selector de ejecutivo: todas las vistas se leen con él
+  assert.equal(await p.locator('#btnCel').isHidden(), true, '«Ver su celular» solo con un ejecutivo elegido');
+  await p.selectOption('#gEj', EJECUTIVO.correo); await p.waitForTimeout(300);
+  assert.match(await tile('Bloque 1 · visitados'), /2 \/ 4/, 'bloque 1 del ejecutivo');
+  assert.match(await tile('Periodo · visitados'), /2 \/ 225/, 'periodo del ejecutivo');
+  await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; pintar(); }); await p.waitForTimeout(300);
+  const coms = (await p.locator('td.com b').allInnerTexts()).join(' | ');
+  assert.ok(coms.includes('Comercio Prueba 11') && !coms.includes('Comercio Prueba 21'), 'Visitas no se filtró por ejecutivo: ' + coms);
+  await p.click('#btnCel'); await p.waitForTimeout(200);
+  assert.match(await p.locator('#veloCel iframe').getAttribute('src'), /\.\.\/index\.html\?como=ejecutivo\.prueba%40ejemplo\.com$/);
+  if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/escritorio-celular.png` });
+  await p.keyboard.press('Escape'); assert.equal(await p.locator('#veloCel').count(), 0, 'Esc no cerró el celular');
+  // cargas por RUC o DNI (igual que v2_comercio_de_id en el servidor)
+  await p.evaluate(() => { S.vista = 'cargas'; pintar(); }); await p.waitForTimeout(200);
+  assert.equal(await p.locator('#gEj').isDisabled(), true, 'en Cargas el selector debe estar apagado');
+  const r = await p.evaluate(() => ['20000000013', '999014', '999014.0', '12', '123', '1234567890', '20000000099'].map(x => idDeBBVA(x)));
+  assert.equal(r[0].cid, '00000013', 'RUC'); assert.equal(r[1].cid, '00000014', 'DNI sin el cero'); assert.equal(r[2].cid, '00000014', 'el «.0» de Excel');
+  assert.match(r[3].err || '', /revisar a mano/, 'Customer ID y DNI de otro comercio: no se adivina');
+  assert.match(r[4].err || '', /no está en la base/); assert.match(r[5].err || '', /ni un RUC/); assert.match(r[6].err || '', /RUC no está/);
+  await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
 });
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
