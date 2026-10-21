@@ -386,7 +386,9 @@ function metricas(){
   const mios = S.base.filter(esMio);
   const bl = hayBloques();
   const visitados = mios.filter(c => c.visitas_validas > 0 && (!bl || esNueva(c))).length;
-  const reactivados = mios.filter(c => c.estado === "rea").length;
+  // «Reactivados que cuentan» (Jose, 21/10): en la lista de BBVA del último corte y con 2 días de transacciones después de la
+  // visita con contacto (v2_mis_reactivados_bbva). Incluye la base anterior. Si esa lectura falla, se usa el estado del comercio.
+  const reactivados = S.rbbva ? mios.filter(c => { const f = rbbvaDe(c); return !!f && f.dias_trx >= 2; }).length : mios.filter(c => c.estado === "rea").length;
   const conv = visitados ? reactivados / visitados * 100 : 0;
   const ejecutivos = new Set(mios.map(c => c.correo)).size || 1;
   return { visitados, reactivados, conv, total: mios.filter(c => !bl || esNueva(c)).length, meta: S.admin ? META_PERIODO * ejecutivos : META_PERIODO };
