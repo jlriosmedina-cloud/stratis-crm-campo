@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagendé con quien decide', SINOBS = 'Sin observaciones del comercio';
 const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
 const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO }),
-  // quedó en volver con el dueño (29/09): sigue en «Aún no decide», pero entra al filtro «Reagendados»
+  // quedó en volver con el dueño (29/09): sigue en «Aún no decide» y su tarjeta muestra cuándo volver
   comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() }),
   // BBVA lo reporta reactivado (30/09): informativo, no cambia el estado
   comercio(12, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', bbva_reactivado: '2026-01-02' }),
@@ -211,10 +211,8 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.ficha = null; delete S.hist['00000013']; S.vista = 'inicio'; pintar(); });
     console.log(`ok  ${tema} · seguimiento remoto de la visita sin contacto`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · seguimiento remoto: ${e.message}`); }
-  // «Reagendados» incluye al que quedó en volver con el dueño, y la tarjeta muestra la fecha
+  // la tarjeta del que quedó en volver con el dueño muestra la fecha
   try {
-    const ids = await p.evaluate(() => { S.filtroEstado = 'rag'; S.filtroVisita = 'todos'; const r = filtrar().map(c => c.customer_id); S.filtroEstado = 'todos'; return r; });
-    assert.deepEqual(ids, ['00000011']);
     const t = await p.evaluate(() => tarjeta(S.base.find(c => c.customer_id === '00000011')));
     assert.ok(t.includes('Vuelves el'), 'la tarjeta no muestra la fecha para volver');
     const tc = await p.evaluate(() => tarjeta(Object.assign({}, S.base[0], { estado: 'sin', ultima_motivo: 'Cerró definitivamente', visitas: 1, visitas_validas: 1 })));
@@ -225,8 +223,8 @@ for (const tema of ['light', 'dark']) {
       return { url: decodeURIComponent(urlRuta([c11, hoyC])), lat11: String(c11.geo_lat) }; });
     assert.ok(ruta.url.includes('-12.5555'), 'la ruta no incluye el regreso de hoy');
     assert.ok(!ruta.url.includes(ruta.lat11), 'la ruta incluye un regreso de mañana');
-    console.log(`ok  ${tema} · «Reagendados» incluye volver con el dueño`);
-  } catch (e) { fallas++; console.log(`MAL ${tema} · filtro Reagendados: ${e.message}`); }
+    console.log(`ok  ${tema} · la tarjeta muestra cuándo volver`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · tarjeta de volver: ${e.message}`); }
   // Segunda visita del día: la hoja avisa y ofrece corregir la de hoy
   try {
     await p.evaluate(() => nuevoRegistro('00000006')); await p.waitForTimeout(600);

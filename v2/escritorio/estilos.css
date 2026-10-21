@@ -451,3 +451,22 @@ table.datos tr.fuera td{background:var(--hover)}
 .pq-col{display:grid;gap:16px;align-content:start}
 .pq-ceros{font-size:11.5px;color:var(--muted);line-height:1.45;margin-top:4px}
 .lnk{border:0;background:none;padding:0;color:var(--azul-txt);cursor:pointer;font:inherit;text-decoration:underline;text-underline-offset:2px}
+/* Base 2026-11: selector de ejecutivo, ojo de privacidad, Base y bloques y «ver su celular» */
+#gEj{font-weight:700;color:var(--ink);min-width:150px}
+#gEj:disabled{opacity:.55}
+.btn[hidden]{display:none}
+.btn.ojo.cerrado{background:var(--navy);border-color:var(--navy);color:#fff}
+:root[data-theme="dark"] .btn.ojo.cerrado{background:var(--azul);border-color:var(--azul)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .btn.ojo.cerrado{background:var(--azul);border-color:var(--azul)} }
+.oculto{letter-spacing:.12em;color:var(--muted);font-weight:700}
+.btn.chico{padding:4px 8px;font-size:11.5px;gap:5px;text-decoration:none}
+.btn.chico svg{width:13px;height:13px}
+.split2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:1100px){ .split2{grid-template-columns:1fr} }
+table.datos tr.total td{background:var(--suelo);border-top:2px solid var(--linea)}
+table.datos th[colspan]{text-align:center;border-bottom:1px solid var(--linea)}
+.velo{position:fixed;inset:0;background:rgba(12,17,55,.55);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
+.cel-marco{background:var(--tarjeta);border:1px solid var(--linea);border-radius:22px;box-shadow:var(--sombra);width:min(420px,100%);height:min(900px,100%);display:flex;flex-direction:column;overflow:hidden}
+.cel-cab{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--linea)}
+.cel-cab .lbl{font-size:11.5px;color:var(--muted);flex:1;min-width:160px}
+.cel-marco iframe{flex:1;width:100%;border:0;background:var(--suelo)}
