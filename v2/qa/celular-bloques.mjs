@@ -13,7 +13,7 @@ const BASE = [
   nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3 }),
   nuevo(4, { potencial: 0, grupo_ubicacion: 3 }), nuevo(5, { potencial: 70000 }), nuevo(6, { potencial: 20000 }), nuevo(7, { potencial: 5000, grupo_ubicacion: 2 }),
   // visitado del bloque: no entra a «Los 5» ni a «Por visitar»
-  nuevo(8, { potencial: 99000, visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Reunión concretada' }),
+  nuevo(8, { potencial: 99000, visitas: 1, visitas_validas: 1, estado: 'rea', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Reunión concretada' }),
   // base anterior: uno con contacto y otro cerrado (sin contacto)
   comercio(9, { origen: 'base_anterior', visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Reunión concretada' }),
   comercio(10, { origen: 'base_anterior', visitas: 1, visitas_validas: 1, estado: 'vis', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Sin éxito', ultima_motivo: 'Cerrado' })
@@ -21,7 +21,7 @@ const BASE = [
 const FX = (extra = {}) => Object.assign({
   sesion: { user: { email: EJECUTIVO.correo }, access_token: 'prueba' },
   tablas: { usuarios: EJECUTIVO, v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' } },
-  rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_visitas_de: [], v2_mis_seguimientos: [], v2_mis_reactivados_bbva: [], v2_mis_recuperos: [] }
+  rpc: { v2_mi_base: BASE, v2_mis_revisiones: [], v2_actividad: [], v2_avance: [], v2_visitas_de: [], v2_mis_seguimientos: [], v2_mis_reactivados_bbva: [{ customer_id: '00000009', dias_trx: 2, con_contacto: true, ultima_visita_id: 'v9' }], v2_mis_recuperos: [] }
 }, extra);
 
 let fallas = 0;
@@ -40,6 +40,7 @@ for (const tema of ['light', 'dark']) {
     assert.match(t, /1\s*\/8/, 'visitados del bloque');
     assert.match(t, /1\s*\/225/, 'visitados del periodo sobre 225');
     assert.match(t, /\+2 base anterior/, 'no muestra aparte las visitas de la base anterior');
+    assert.equal(await p.evaluate(() => metricas().reactivados), 1, 'reactivados que cuentan: lista de BBVA + 2 días (incluye base anterior; no el que solo tiene 2 días)');
     assert.ok(!/Base compartida|libres/i.test(t), 'sigue la base compartida');
     const cinco = await p.$$eval('.card', cs => [...cs.find(c => c.textContent.includes('Los 5 de mayor potencial')).querySelectorAll('[data-ficha]')].map(x => x.dataset.ficha));
     assert.deepEqual(cinco, ['00000002', '00000005', '00000003', '00000006', '00000001'], 'orden por potencial, sin el visitado ni el que no tiene potencial');
@@ -64,7 +65,7 @@ for (const tema of ['light', 'dark']) {
   await prueba(`${tema} · Mi base: por potencial, chips de ubicación y sin «Falta reactivar» mientras no haga falta`, async () => {
     await p.evaluate(() => { S.vista = 'base'; S.filtroVisita = 'todos'; pintar(); }); await p.waitForTimeout(150);
     const chips = await p.$$eval('.barra-filtros .chips .chip', cs => cs.map(c => c.textContent.replace(/\s+\d+$/, '').trim()));
-    assert.deepEqual(chips, ['Por visitar', 'Al 100 %', 'Cercanos', 'Llamar antes', 'Falta reactivar', 'Todos']);
+    assert.deepEqual(chips, ['Por visitar', 'Al 100 %', 'Cercanos', 'Llamar antes', 'Falta reactivar', 'Reactivados', 'Todos']);
     const ids = await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha));
     assert.deepEqual(ids.slice(0, 3), ['00000008', '00000002', '00000005'], 'no va ordenada por potencial');
     await p.click('[data-visita=g3]'); await p.waitForTimeout(150);
