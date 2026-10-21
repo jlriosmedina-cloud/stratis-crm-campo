@@ -12,6 +12,8 @@ var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ 
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
 const PREVIA = /\/prueba\//.test(location.pathname);
+// «Ver su celular» (21/10): el escritorio abre ?como=<correo>. Solo vale para Jose (analista o manager) y es de solo lectura.
+const COMO = (new URLSearchParams(location.search).get("como") || "").trim().toLowerCase();
 if (PREVIA){ const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance","v2_mis_seguimientos"]);
   const rpcReal = sb.rpc.bind(sb);
   sb.rpc = (fn, args) => LECTURAS.has(fn) ? rpcReal(fn, args) : Promise.resolve({ data:null, error:{ message:"Vista previa: aquí no se guardan cambios." } });
@@ -33,7 +35,7 @@ const ESTADOS = {
 const CERRO = { t:"Cerró definitivamente", c:"e-can", ayuda:"En tu última visita el local había cerrado definitivamente. La visita cuenta." };
 const estadoCom = c => c.estado === "sin" && c.ultima_motivo === "Cerró definitivamente" ? CERRO : ESTADOS[c.estado] || ESTADOS.por;
 const S = { sesion:null, yo:null, admin:false, periodo:null, base:[], cargando:true, error:"", vista:"inicio", ficha:null,
-  filtroVisita:"todos", masFiltros:false, corr:null, filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", filtroDueno:"todos", q:"", reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", avanceEn:null, act:null, actErr:"", actEn:null, actDia:"hoy", accion:null, cola:leerCola() };
+  filtroVisita:"todos", masFiltros:false, corr:null, filtroEstado:"todos", filtroDistrito:"", filtroRuta:"", filtroEjecutivo:"", q:"", ver:false, como:null, reg:null, toast:null, editando:null, hist:{}, avance:null, avanceErr:"", avanceEn:null, act:null, actErr:"", actEn:null, actDia:"hoy", accion:null, cola:leerCola() };
 
 /* ---------------- utilidades ---------------- */
 const $ = s => document.querySelector(s);
@@ -49,7 +51,7 @@ const fISO = s => { const [a,m,d] = String(s).split("-"); return `${d}/${m}`; };
 const tasa = v => v == null ? "—" : (Number(v) * 100).toFixed(2).replace(".", ",") + "%";
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2));
 function leerCola(){ try { return JSON.parse(localStorage.getItem("stratis-v2-cola") || "[]"); } catch(e){ return []; } }
-function guardarCola(){ try { localStorage.setItem("stratis-v2-cola", JSON.stringify(S.cola)); } catch(e){} }
+function guardarCola(){ if (S.como) return; try { localStorage.setItem("stratis-v2-cola", JSON.stringify(S.cola)); } catch(e){} }
 // Tipos de feedback del comercio definidos por BBVA (textos exactos), agrupados para el ejecutivo
 // Árbol de feedback (26/09/2026): rama → detalle → qué ofreciste. Igual que v2_feedback_tipos y v2_feedback_acciones.
 const FEEDBACK = [
@@ -213,7 +215,39 @@ function urlRuta(cs){
   const dest = lista[lista.length-1], way = lista.slice(0, -1);
   return "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(dest) + (way.length ? "&waypoints=" + encodeURIComponent(way.join("|")) : "");
 }
-const CALIDAD = { comercio:"ubicado por el nombre del comercio", numero:"ubicado por calle y número", calle:"ubicación aproximada: la calle", lugar:"ubicación aproximada: la zona", distrito:"solo el distrito: confirma la dirección en campo" };
+const CALIDAD = { comercio:"ubicado por el nombre del comercio", numero:"ubicado por calle y número", calle:"ubicación aproximada: la calle", lugar:"ubicación aproximada: la zona", distrito:"solo el distrito: confirma la dirección en campo", sin_ubicar:"sin punto en el mapa" };
+/* Base 2026-11 en bloques (ESPEC_nueva_estructura_2026-11, sección 2, aprobada por Jose el 20/10).
+   225 comercios por ejecutivo y periodo, en dos bloques quincenales. «origen» separa la base nueva de la base anterior
+   (visitados antes de la base nueva: no son pendientes, pero cuentan si BBVA los reactiva). Con la base vieja,
+   que no trae «origen», el celular se ve como antes. */
+const META_PERIODO = 225;
+const GRUPO = { 1:{ t:"Ubicado al 100 %", c:"g1", chip:"Al 100 %" }, 2:{ t:"Rango cercano", c:"g2", chip:"Cercanos" }, 3:{ t:"Llama antes de ir", c:"g3", chip:"Llamar antes" } };
+const hayBloques = () => S.base.some(c => c.origen);
+const esNueva = c => c.origen === "base_nueva";
+const esAnterior = c => c.origen === "base_anterior";
+const potDe = c => Number(c.potencial) || 0;
+const porPotencial = (a, b) => potDe(b) - potDe(a);
+function bloqueInfo(){
+  const hoy = diaLima(Date.now()), mios = S.base.filter(c => esMio(c) && esNueva(c)), fechas = {};
+  mios.forEach(c => { if (c.bloque && c.bloque_ini && c.bloque_fin) fechas[c.bloque] = { ini:c.bloque_ini, fin:c.bloque_fin }; });
+  const hay = [...new Set(mios.map(c => c.bloque).filter(Boolean))].sort();
+  const n = hay.find(b => fechas[b] && fechas[b].ini <= hoy && hoy <= fechas[b].fin) || hay[hay.length - 1] || null;
+  const f = fechas[n] || null;
+  const quedan = f ? Math.max(0, Math.ceil((new Date(f.fin + "T23:59:59-05:00") - new Date()) / 86400000)) : null;
+  return { n, f, quedan, del: mios.filter(c => c.bloque === n), mios };
+}
+/* Ojo de privacidad (20/10): cerrado al entrar y sin recordar el estado. Oculta montos, potenciales y volúmenes;
+   de los celulares deja ver los 3 últimos dígitos y de los correos la primera letra y el dominio. */
+const OCULTO = '<span class="oculto">••••</span>';
+const sol = n => n == null || n === "" ? "Sin dato" : S.ver ? "S/ " + Math.round(Number(n)).toLocaleString("es-PE") : "S/ " + OCULTO;
+const tapar = t => String(t).replace(/[^\s@,;]+@([^\s@,;]+)/g, (m, d) => m[0] + "•••@" + d).replace(/\d(?=(?:\D*\d){3})/g, "•");
+const privado = t => !t ? "" : S.ver ? esc(t) : esc(tapar(t));
+function botonOjo(){
+  return `<button type="button" class="ojo${S.ver ? " on" : ""}" data-ojo aria-pressed="${S.ver}">${S.ver ? ICON.ojo : ICON.ojoNo}<span>${S.ver ? "Datos visibles" : "Datos ocultos"}</span></button>`;
+}
+// Vista «como» (solo lectura): se quita todo lo que escribe
+const SOLO_ESCRITURA = "[data-registrar],[data-dictar-visita],[data-editar],[data-guardar-datos],[data-corr],[data-acc],[data-seg],[data-recup-accion],[data-enviar-cola],[data-corregir-cola],[data-corregir-hoy]";
+const baseVisible = l => S.como ? l.filter(c => c.correo === S.como.correo && (c.origen !== "salida" || (c.visitas || 0) > 0)) : l;
 function avisar(msg, ms){ S.toast = msg; pintar(); clearTimeout(avisar._t); avisar._t = setTimeout(() => { S.toast = null; pintar(); }, ms || 3600); }
 
 const ICON = {
@@ -228,7 +262,9 @@ const ICON = {
   pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
   reloj:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   act:'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-  atras:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>'
+  atras:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
+  ojo:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  ojoNo:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.6 19.6 0 0 1 5.1-5.9M9.9 5.2A9.9 9.9 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>'
 };
 
 /* ---------------- datos ---------------- */
@@ -246,7 +282,16 @@ async function cargar(){
     S.rev = (r && r.data && r.data[0]) || null;
     if (!u.data || !u.data.activo) throw new Error("Tu usuario no está activo en el CRM. Escríbele a Jose.");
     S.yo = u.data; S.admin = ["Analista","Manager"].includes(u.data.rol);
-    S.periodo = p.data || null; S.base = b.data || [];
+    if (COMO && S.admin && !S.como){
+      const q = await sb.from("usuarios").select("correo,nombre,nombre_corto").eq("correo", COMO).maybeSingle();
+      S.como = { correo: COMO, nombre: (q.data && (q.data.nombre_corto || q.data.nombre)) || COMO.split("@")[0] };
+      S.yo = Object.assign({}, S.yo, { correo: COMO, nombre_corto: S.como.nombre, nombre: S.como.nombre }); S.admin = false; S.cola = [];
+      // solo lectura de verdad: además de quitar los botones, solo pasan las lecturas
+      const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance","v2_mis_seguimientos","v2_mis_reactivados_bbva","v2_mis_recuperos"]);
+      const rpcReal = sb.rpc.bind(sb);
+      sb.rpc = (fn, args) => LECTURAS.has(fn) ? rpcReal(fn, args) : Promise.resolve({ data:null, error:{ message:"Vista de Jose: aquí no se guardan cambios." } });
+    }
+    S.periodo = p.data || null; S.base = baseVisible(b.data || []);
   } catch(e){ S.error = e.message || String(e); }
   S.cargando = false; pintar(); vaciarCola(); cargarRevisiones(); cargarSeguimientos().then(() => { S._mantenerScroll = true; pintar(); });
 }
@@ -302,7 +347,7 @@ async function sincronizarRetenidas(){
   } catch(e){}
 }
 async function vaciarCola(){
-  if (!S.cola.length || !navigator.onLine) return;
+  if (S.como || (COMO && !S.yo) || !S.cola.length || !navigator.onLine) return;
   await sincronizarRetenidas();
   const pend = S.cola.filter(v => !v._rechazo); let ok = 0, tarde = 0, rech = 0; const hoy = diaLima(Date.now());
   for (const v of pend){
@@ -313,7 +358,7 @@ async function vaciarCola(){
   guardarCola();
   if (ok){ avisar(`Se enviaron ${ok} visita(s) que estaban guardadas en el celular.${tarde ? ` ${tarde === 1 ? "Una llegó" : tarde + " llegaron"} fuera de plazo: ${tarde === 1 ? "queda" : "quedan"} en tu historial, pero no ${tarde === 1 ? "cuenta" : "cuentan"} para el bono.` : ""}`, tarde ? 8000 : undefined); recargarBase(); }
 }
-async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones"), cargarSeguimientos()]); if (!b.error){ S.base = b.data || []; S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
+async function recargarBase(){ const [b, r] = await Promise.all([sb.rpc("v2_mi_base"), sb.rpc("v2_mis_revisiones"), cargarSeguimientos()]); if (!b.error){ S.base = baseVisible(b.data || []); S.rev = (r && r.data && r.data[0]) || S.rev; S._mantenerScroll = true; pintar(); } S.avance = null; S.act = null; cargarRevisiones(); }
 async function cargarActividad(){
   if (S._actCargando) return;
   S._actCargando = true; S.actErr = "";
@@ -323,7 +368,7 @@ async function cargarActividad(){
             : { p_desde: (S.periodo && S.periodo.ini) || menos(30), p_hasta: hoy };
   const { data, error } = await sb.rpc("v2_actividad", arg);
   S._actCargando = false;
-  if (error){ S.actErr = error.message || String(error); } else { S.act = data || []; S.actEn = new Date(); }
+  if (error){ S.actErr = error.message || String(error); } else { S.act = (data || []).filter(v => !S.como || v.correo === S.como.correo); S.actEn = new Date(); }
   S._mantenerScroll = true; pintar();
 }
 async function cargarAvance(){
@@ -339,10 +384,12 @@ const miCorreo = () => (S.yo && S.yo.correo || "").toLowerCase();
 const esMio = c => S.admin ? !!c.correo : c.correo === miCorreo();
 function metricas(){
   const mios = S.base.filter(esMio);
-  const visitados = mios.filter(c => c.visitas_validas > 0).length;
+  const bl = hayBloques();
+  const visitados = mios.filter(c => c.visitas_validas > 0 && (!bl || esNueva(c))).length;
   const reactivados = mios.filter(c => c.estado === "rea").length;
   const conv = visitados ? reactivados / visitados * 100 : 0;
-  return { visitados, reactivados, conv, total: mios.length, libres: S.base.filter(c => !c.correo).length };
+  const ejecutivos = new Set(mios.map(c => c.correo)).size || 1;
+  return { visitados, reactivados, conv, total: mios.filter(c => !bl || esNueva(c)).length, meta: S.admin ? META_PERIODO * ejecutivos : META_PERIODO };
 }
 function rutas(){
   const m = new Map();
@@ -366,11 +413,13 @@ function pintar(){
   else if (S.vista === "avance") h = vistaAvance();
   else if (S.vista === "actividad") h = vistaActividad();
   h += nav();
-  if (S.reg) h += hojaRegistro();
+  if (S.como) h = `<div class="aviso-proto franja-como">Vista de Jose · celular de ${esc(S.como.nombre)} · no registra visitas</div>` + h;
+  if (S.reg && !S.como) h += hojaRegistro();
   if (S.toast) h += `<div class="toast" role="status"><div>${S.toast}</div></div>`;
   const vs = p.querySelector(".vista"), hs = p.querySelector(".hoja .scroll");
   const s1 = vs ? vs.scrollTop : 0, s2 = hs ? hs.scrollTop : 0;
   p.innerHTML = h;
+  if (S.como) p.querySelectorAll(SOLO_ESCRITURA).forEach(e => e.remove());
   if (S._mantenerScroll){ const a = p.querySelector(".vista"), b = p.querySelector(".hoja .scroll"); if (a) a.scrollTop = s1; if (b) b.scrollTop = s2; }
   S._mantenerScroll = false;
   enlazar();
@@ -407,15 +456,23 @@ function vistaInicio(){
   const mios = S.base.filter(esMio).sort((a,b) => String(b.ultima_visita||"").localeCompare(String(a.ultima_visita||"")));
   const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
-  const meta = S.admin ? 640 : 160, metaR = S.admin ? 160 : 40;
+  const bl = hayBloques(), B = bl ? bloqueInfo() : null;
+  const meta = m.meta, metaR = S.admin ? 160 : 40;
+  const bVis = B ? B.del.filter(c => c.visitas_validas > 0).length : 0;
+  const antVis = bl ? S.base.filter(c => esMio(c) && esAnterior(c) && c.visitas_validas > 0).length : 0;
+  const subBloque = B && B.n ? `Bloque ${B.n} de 2 · ${B.quedan != null ? `quedan ${B.quedan} días del bloque` : `quedan ${diasQuedan()} días del periodo`}` : "";
   return `<div class="vista">
     <div class="cab">
-      <div class="fila"><div><h1>Hola, ${esc(nombre)}</h1><div class="sub">${diaLargo(new Date())}${S.periodo ? ` · quedan ${diasQuedan()} días del periodo` : ""}</div></div>${cabeceraMenu()}</div>
-      <div class="kpis">
+      <div class="fila"><div><h1>Hola, ${esc(nombre)}</h1><div class="sub">${subBloque || (diaLargo(new Date()) + (S.periodo ? ` · quedan ${diasQuedan()} días del periodo` : ""))}</div></div>${cabeceraMenu()}</div>
+      ${B && B.n ? `<div class="kpis">
+        <div class="kpi naranja"><b>${bVis}<small> /${B.del.length}</small></b><span>Visitados del<br>bloque ${B.n}</span></div>
+        <div class="kpi"><b>${m.visitados}<small> /${meta}</small></b><span>Visitados del<br>periodo${S.admin ? " · equipo" : ""}${antVis ? `<br>+${antVis} base anterior` : ""}</span></div>
+        <div class="kpi verde"><b>${m.reactivados}</b><span>Reactivados<br>que cuentan</span></div>
+      </div>` : `<div class="kpis">
         <div class="kpi naranja"><b>${m.visitados}<small> /${meta}</small></b><span>Comercios visitados${S.admin?"<br>equipo":""}</span></div>
         <div class="kpi verde"><b>${m.reactivados}<small> /${metaR}</small></b><span>Reactivados<br>que cuentan</span></div>
         <div class="kpi"><b>${pct(m.conv).replace("%","")}<small>%</small></b><span>Conversión<br>meta 25%</span></div>
-      </div>
+      </div>`}
     </div>
     <div class="cuerpo">
       ${!S.admin && S.rev && S.rev.en_revision ? `<div class="card" style="border:1.5px solid var(--ambar)"><div class="eyebrow" style="color:var(--ambar)">Revisión del analista</div><h2>${S.rev.en_revision} ${S.rev.en_revision === 1 ? "visita en revisión" : "visitas en revisión"}</h2><div class="nota">Siguen contando. Toca cada una para ver el motivo y corregirla dentro del plazo.</div>
@@ -433,9 +490,7 @@ function vistaInicio(){
       ${colaEsperando().length ? `<div class="card" style="border:1.5px solid var(--ambar-t)"><h2>${colaEsperando().length} ${colaEsperando().length === 1 ? "visita guardada" : "visitas guardadas"} en el celular</h2><div class="nota">Se envían solas cuando vuelve la señal. ${(() => { const hoy = diaLima(Date.now()), pl = colaEsperando().map(v => plazoDe(v.p_visitado_en)).sort(), venc = pl.filter(p => p < hoy).length;
         const uno = venc === 1; return venc ? `<b style="color:var(--rojo)">${uno ? "Una ya pasó su plazo" : venc + " ya pasaron su plazo"}:</b> ${uno ? "se registra, pero no cuenta" : "se registran, pero no cuentan"} para tu bono.` : colaEsperando().length === 1 ? `Tiene que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llega después, se registra pero no cuenta para tu bono.` : `Tienen que llegar a más tardar el <b>${fISO(pl[0])}</b>; si llegan después, se registran pero no cuentan para tu bono.`; })()}</div><button class="btn btn-sec btn-full" style="margin-top:10px" data-enviar-cola>Enviar ahora</button></div>` : ""}
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
-      ${m.libres ? `<div class="card"><div class="eyebrow">Base compartida</div><h2>${m.libres} comercios libres${S.admin ? "" : ` · ${m.total} ya son tuyos`}</h2>
-        <div class="nota">Mientras se termina la asignación, cualquier ejecutivo puede visitar un comercio libre. El primero que registra la visita se queda con él y desde ahí aparece solo en su base.</div>
-        <button class="btn btn-sec btn-full" style="margin-top:10px" data-vista="base">Buscar un comercio</button></div>` : ""}
+      ${B ? tarjetasBloque(B) : ""}
       ${!hayRutas && mios.length ? `<div class="card ruta-hoy"><div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Comercios tomados" : "Tus comercios"}</div><h2>Últimos visitados</h2></div><span class="pill e-por">${mios.length}</span></div>
         <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
@@ -454,6 +509,32 @@ function vistaInicio(){
     </div></div>`;
 }
 const fueVisitado = c => (c.visitas || 0) > 0;
+// La última visita tuvo contacto: «No se pudo hacer la visita» y «no está en esta dirección» guardan un motivo
+const conContacto = c => fueVisitado(c) && !c.ultima_motivo;
+function itemPotencial(c){
+  const g = GRUPO[c.grupo_ubicacion];
+  return `<button class="parada" data-ficha="${esc(c.customer_id)}"><span class="ub-dot ${g ? g.c : ""}" title="${g ? g.t : ""}"></span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · "))}</small></span>${potDe(c) > 0 ? `<span class="pot">${sol(c.potencial)}</span>` : ""}</button>`;
+}
+// Tarjetas de Inicio con la base en bloques: tu bloque (con 🟢🟡🔴), los 5 de mayor potencial, base anterior y antes de salir
+function tarjetasBloque(B){
+  if (!B.n) return "";
+  const L = B.del, pend = L.filter(c => !fueVisitado(c)), g = { 1:0, 2:0, 3:0 };
+  L.forEach(c => { if (g[c.grupo_ubicacion] != null) g[c.grupo_ubicacion]++; });
+  const pot = L.reduce((x, c) => x + potDe(c), 0), conPot = pend.filter(c => potDe(c) > 0).sort(porPotencial);
+  const ant = S.base.filter(c => esMio(c) && esAnterior(c)), antCon = ant.filter(conContacto).length;
+  const llamar = pend.filter(c => c.grupo_ubicacion === 3).sort(porPotencial);
+  return `<div class="card bloque-card"><div class="fila-ent"><div class="eyebrow">${S.admin ? `Bloque ${B.n} · equipo` : "Tu bloque de esta quincena"}</div>${botonOjo()}</div>
+      <h2>${L.length} comercios · ${sol(pot)} de potencial</h2>
+      <div class="nota">${conPot.length ? `Empieza por ${conPot.length === 1 ? "el que tiene" : `los ${conPot.length} que tienen`} potencial y aún no visitas: son los que más mueven con la competencia.` : pend.length ? "Ya visitaste los que tienen potencial: sigue con el resto del bloque." : "Visitaste todo el bloque."}</div>
+      <div class="grp3">${[1, 2, 3].map(k => `<button type="button" class="${GRUPO[k].c}" data-grupo="${k}"><b>${g[k]}</b>${GRUPO[k].t}</button>`).join("")}</div>
+      ${B.f ? `<div class="nota" style="margin-top:8px">Bloque ${B.n}: del ${fISO(B.f.ini)} al ${fISO(B.f.fin)}. Lo que no visites se queda contigo.</div>` : ""}</div>
+    ${conPot.length && !S.admin ? `<div class="card"><div class="eyebrow">Empieza hoy por aquí</div><h2>Los 5 de mayor potencial</h2><div class="paradas">${conPot.slice(0, 5).map(itemPotencial).join("")}</div></div>` : ""}
+    ${ant.length ? `<div class="card ant-card"><div class="eyebrow">Base anterior</div><h2>${ant.length} ${ant.length === 1 ? "comercio que visitaste" : "comercios que visitaste"} antes de la base nueva</h2>
+      <div class="nota">Ya no están por visitar. Si BBVA los reporta como reactivados, cuentan para ti igual que los de tu bloque. ${antCon} ${antCon === 1 ? "fue" : "fueron"} con contacto.</div></div>`
+      : ""}
+    ${llamar.length ? `<div class="card antes-card"><div class="eyebrow">Antes de salir</div><h2>${llamar.length} ${llamar.length === 1 ? "comercio para confirmar" : "comercios para confirmar"} por teléfono</h2>
+      <div class="nota">Su punto en el mapa no es seguro: llama y confirma la dirección antes de ir.</div><div class="paradas">${llamar.slice(0, 8).map(itemPotencial).join("")}</div></div>` : ""}`;
+}
 /* «Falta reactivar» (15/10/2026): visitados que todavía no le cuentan al ejecutivo, del más cercano a lograrse al más lejano.
    No incluye los reactivados, los que desistieron (van a Recupero), los cancelados ni los que cerraron definitivamente. */
 const faltaReactivar = c => fueVisitado(c) && (porContactar(c) || !(["rea","des","can"].includes(c.estado) || c.ultima_motivo === "Cerró definitivamente"));
@@ -477,55 +558,54 @@ function accionFalta(c){
   if (c.estado === "sin" && !c.ultima_motivo) return "No estaba quien decide: vuelve con el dueño";
   return c.ultima_motivo === "Zona insegura" ? "Zona insegura: llámalo, no vuelvas" : "Sin contacto: vuelve o llama";
 }
-const FILTRO_INICIO = { bbva:"Reactivados BBVA por contactar", recup:"Recupero del POS", sinseg:"Sin contacto · falta seguimiento", rag:"Reagendados" };
+const FILTRO_INICIO = { bbva:"Reactivados BBVA por contactar", recup:"Recupero del POS", sinseg:"Sin contacto · falta seguimiento" };
 function filtrar(omitir){
   const q = S.q.trim().toLowerCase();
   const l = S.base.filter(c => {
     if (omitir !== "visita"){
       if (S.filtroVisita === "por" && fueVisitado(c)) return false;
-      if (S.filtroVisita === "vis" && !fueVisitado(c)) return false;
       if (S.filtroVisita === "falta" && !faltaReactivar(c)) return false;
       if (S.filtroVisita === "rea" && c.estado !== "rea") return false;
+      if (/^g[123]$/.test(S.filtroVisita) && (fueVisitado(c) || c.grupo_ubicacion !== +S.filtroVisita[1])) return false;
     }
-    // «Reagendados» incluye a los que quedaron en volver con el dueño o encargado (volver_el, desde el 29/09)
-    if (S.filtroEstado === "rag" ? !(c.estado === "rag" || volverPendiente(c)) : S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "recup" ? !recupDe(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
+    if (S.filtroEstado === "bbva" ? !porContactar(c) : S.filtroEstado === "recup" ? !recupDe(c) : S.filtroEstado === "sinseg" ? !faltaSeguimiento(c) : S.filtroEstado !== "todos" && c.estado !== S.filtroEstado) return false;
     if (S.filtroDistrito && c.distrito !== S.filtroDistrito) return false;
     if (S.filtroRuta && (c.ruta || ("Distrito · " + (c.distrito || "sin distrito"))) !== S.filtroRuta) return false;
     if (S.filtroEjecutivo && c.correo !== S.filtroEjecutivo) return false;
-    if (S.filtroDueno === "mios" && !esMio(c)) return false;
-    if (S.filtroDueno === "libres" && c.correo) return false;
-    if (q && !(String(c.customer_id).includes(q) || String(c.ruc || "").includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
+    if (q && !(String(c.customer_id).includes(q) || String(c.documento || "").includes(q) || String(c.ruc || "").includes(q) || String(c.razon_social).toLowerCase().includes(q) || String(c.nombre_comercial||"").toLowerCase().includes(q))) return false;
     return true;
   });
-  return omitir !== "visita" && S.filtroVisita === "falta" ? l.map((c, i) => [c, i]).sort((a, b) => (prioridadFalta(a[0]) - prioridadFalta(b[0])) || (a[1] - b[1])).map(x => x[0]) : l;
+  if (omitir !== "visita" && S.filtroVisita === "falta") return l.map((c, i) => [c, i]).sort((a, b) => (prioridadFalta(a[0]) - prioridadFalta(b[0])) || (a[1] - b[1])).map(x => x[0]);
+  // con la base en bloques, Mi base va ordenada por potencial (salvo una ruta, que conserva su orden)
+  return hayBloques() && !S.filtroRuta ? l.map((c, i) => [c, i]).sort((a, b) => porPotencial(a[0], b[0]) || (a[1] - b[1])).map(x => x[0]) : l;
 }
 function tarjeta(c){
   const e = estadoCom(c), hacer = (S.filtroVisita === "falta" || S.filtroEstado === "bbva") && faltaReactivar(c) ? accionFalta(c) : "";
   return `<button class="com" data-ficha="${c.customer_id}">
-    <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span>${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}</div>
-    <b>${esc(nombreDe(c))}</b>
+    <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span><span class="l1-der">${potDe(c) > 0 ? `<span class="pot">${sol(c.potencial)}</span>` : ""}<span class="pill ${e.c}">${e.t}</span></span></div>
+    <b>${GRUPO[c.grupo_ubicacion] ? `<span class="ub-dot ${GRUPO[c.grupo_ubicacion].c}" title="${GRUPO[c.grupo_ubicacion].t}"></span>` : ""}${esc(nombreDe(c))}</b>
     ${(() => { const k = etiquetaComision(c); return k ? `<div class="bbva-rea ${k.c}">${k.t}</div>` : ""; })()}
     ${hacer ? `<div class="hacer">→ ${esc(hacer)}</div>` : ""}
-    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}</span></div>
+    <div class="l3"><span>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "Sin dirección todavía")}</span><span>${volverPendiente(c) ? "Vuelves el " + fISO(c.volver_el) : c.ultima_visita ? "Visitado " + fechaCorta(c.ultima_visita) : ""}${esAnterior(c) ? " · base anterior" : ""}</span></div>
   </button>`;
 }
 function vistaBase(){
   const sinVisita = filtrar("visita");
-  const nVis = sinVisita.filter(fueVisitado).length, nPor = sinVisita.length - nVis, nFalta = sinVisita.filter(faltaReactivar).length, nRea = sinVisita.filter(c => c.estado === "rea").length;
-  let todo = filtrar();
-  if (S.filtroVisita === "vis") todo = todo.slice().sort((a,b) => new Date(b.ultima_visita || 0) - new Date(a.ultima_visita || 0));
+  const nPor = sinVisita.filter(c => !fueVisitado(c)).length, nFalta = sinVisita.filter(faltaReactivar).length, nRea = sinVisita.filter(c => c.estado === "rea").length;
+  const bl = hayBloques(), nG = k => sinVisita.filter(c => !fueVisitado(c) && c.grupo_ubicacion === k).length;
+  const todo = filtrar();
   const total = todo.length, lista = todo.slice(0, 300);
   const distritos = [...new Set(S.base.map(c => c.distrito).filter(Boolean))].sort();
   const rs = rutas();
   const ejec = [...new Set(S.base.map(c => c.correo).filter(Boolean))].sort();
-  const hayLibres = S.base.some(c => !c.correo);
-  const extras = [!!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo, S.filtroDueno !== "todos"].filter(Boolean).length;
+  const extras = [!!S.filtroDistrito, !!S.filtroRuta, !!S.filtroEjecutivo].filter(Boolean).length;
   const chip = (k, t, n) => `<button class="chip ${S.filtroVisita===k?"on":""}" data-visita="${k}">${t}${n == null ? "" : ` <span class="cuenta">${n}</span>`}</button>`;
   return `<div class="vista">
-    <div class="barra"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>
-      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por customer ID, RUC o razón social" value="${esc(S.q)}" autocomplete="off"></label></div>
+    <div class="barra"><div class="fila-ent"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>${bl ? botonOjo() : ""}</div>
+      ${bl ? `<div style="color:var(--cabecera-sub);font-size:13px">Ordenada por potencial</div>` : ""}
+      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por nombre, documento o customer ID" value="${esc(S.q)}" autocomplete="off"></label></div>
     <div class="barra-filtros">
-      <div class="chips">${chip("por","Por visitar",nPor)}${chip("falta","Falta reactivar",nFalta)}${chip("rea","Reactivados",nRea)}${chip("todos","Todos",sinVisita.length)}</div>
+      <div class="chips">${chip("por","Por visitar",nPor)}${bl ? [1, 2, 3].map(k => chip("g" + k, GRUPO[k].chip, nG(k))).join("") : ""}${!bl || nFalta ? chip("falta","Falta reactivar",nFalta) : ""}${!bl || nRea ? chip("rea","Reactivados",nRea) : ""}${chip("todos","Todos",sinVisita.length)}</div>
       <button class="chip fijo ${S.masFiltros||extras?"on":""}" data-mas aria-label="Más filtros" title="Más filtros">${ICON.filtro}${extras ? ` <span class="cuenta">${extras}</span>` : ""}</button>
     </div>
     ${S.filtroEstado !== "todos" ? `<div class="filtro-inicio"><span>${esc(FILTRO_INICIO[S.filtroEstado] || "Filtro de Inicio")}</span><button data-quitar-estado aria-label="Quitar el filtro">✕</button></div>` : ""}
@@ -536,12 +616,11 @@ function vistaBase(){
         <select id="fRuta" aria-label="Ruta"><option value="">Todas las rutas</option>${rs.map(r => `<option ${S.filtroRuta===r.nombre?"selected":""}>${esc(r.nombre)}</option>`).join("")}</select>
       </div>
       ${S.admin ? `<div class="filtros"><select id="fEjec" aria-label="Ejecutivo"><option value="">Todos los ejecutivos</option>${ejec.map(e => `<option value="${esc(e)}" ${S.filtroEjecutivo===e?"selected":""}>${esc(e.split("@")[0])}</option>`).join("")}</select></div>` : ""}
-      ${hayLibres ? `<div class="filtros"><select id="fDueno" aria-label="Dueño">${[["todos","Míos y libres"],["mios",S.admin?"Solo tomados":"Solo míos"],["libres","Solo libres"]].map(([k,t]) => `<option value="${k}" ${S.filtroDueno===k?"selected":""}>${esc(t)}</option>`).join("")}</select></div>` : ""}
       ${extras ? `<div class="filtros"><button class="btn btn-lin btn-full" data-limpiar>${extras === 1 ? "Quitar el filtro" : "Quitar los " + extras + " filtros"}</button></div>` : ""}
     </div>` : ""}
     ${S.filtroRuta ? `<div style="padding:10px 16px 0"><a class="btn btn-sec btn-full" href="${urlRuta(filtrar())}" target="_blank" rel="noopener">${ICON.ruta} Abrir esta ruta en Google Maps</a></div>` : ""}
-    <div class="conteo">${total} de ${S.base.length} comercios${S.filtroVisita==="vis" && total ? " · del más reciente al más antiguo" : ""}${total > 300 ? " · se muestran los primeros 300, usa el buscador" : ""}</div>
-    <div class="lista">${lista.length ? lista.map(tarjeta).join("") : `<div class="vacio">${!S.base.length ? "Tu base todavía no está cargada." : S.filtroVisita==="vis" && !extras && !S.q ? "Todavía no registras ninguna visita en este periodo." : "No hay comercios con este filtro."}</div>`}</div>
+    <div class="conteo">${total} de ${S.base.length} comercios${total > 300 ? " · se muestran los primeros 300, usa el buscador" : ""}</div>
+    <div class="lista">${lista.length ? lista.map(tarjeta).join("") : `<div class="vacio">${!S.base.length ? "Tu base todavía no está cargada." : "No hay comercios con este filtro."}</div>`}</div>
   </div>`;
 }
 function vistaRutas(){
@@ -572,15 +651,14 @@ function vistaFicha(c){
     <div class="cuerpo">
       ${bloqueRecupero(c)}
       <div class="card">
-        <div class="fila-ent">${c.correo ? `<span class="pill ${e.c}">${e.t}</span>` : `<span class="pill e-seg">Libre</span>`}<span class="nota">${esc(c.ruta || "")}</span></div>
-        ${!c.correo ? `<div class="explica" style="margin-top:10px">Comercio libre de la base compartida. Si registras la visita, pasa a tu base.</div>` : e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
+        <div class="fila-ent"><span class="pill ${e.c}">${e.t}</span><span class="nota">${esc(c.ruta || "")}</span></div>
+        ${e.ayuda ? `<div class="explica" style="margin-top:10px">${e.ayuda}</div>` : ""}
+        ${esAnterior(c) ? `<div class="explica" style="margin-top:10px"><b>Base anterior.</b> Lo visitaste antes de la base nueva: ya no está por visitar, pero cuenta si BBVA lo reporta como reactivado.</div>` : ""}
         ${(() => { const k = etiquetaComision(c); return k ? `<div class="explica bbva-rea-ficha"><b>${k.t}</b> (BBVA, corte del ${fISO(c.bbva_reactivado)}). ${k.ayuda}</div>` : ""; })()}
         <dl class="datos">
           <dt>Razón social</dt><dd>${esc(c.razon_social)}</dd>
-          ${c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
-          <dt>Dirección</dt><dd>${esc(dirDe(c))}</dd>
-          ${refDe(c) ? `<dt>Referencia</dt><dd>${esc(refDe(c))}</dd>` : ""}
-          ${c.contacto ? `<dt>Contacto</dt><dd>${esc(c.contacto)}</dd>` : ""}
+          ${c.documento ? `<dt>${c.documento.length === 8 ? "DNI" : "RUC"}</dt><dd>${esc(c.documento)}</dd>` : c.ruc ? `<dt>RUC</dt><dd>${esc(c.ruc)}</dd>` : ""}
+          ${c.contacto ? `<dt>Contacto</dt><dd>${privado(c.contacto)}</dd>` : ""}
           <dt>Distrito</dt><dd>${esc(c.distrito)}</dd>
           <dt>Provincia · Depto.</dt><dd>${esc(c.provincia)} · ${esc(c.departamento)}</dd>
           <dt>Zona</dt><dd>${esc(c.zona)}</dd>
@@ -590,14 +668,9 @@ function vistaFicha(c){
         <div class="tasas"><div class="tasa"><b>${tasa(c.tasa_debito)}</b><small>Débito</small></div><div class="tasa"><b>${tasa(c.tasa_credito)}</b><small>Crédito</small></div><div class="tasa"><b>${tasa(c.tasa_foranea)}</b><small>Foránea</small></div></div>
         ${c.tasa_debito != null && c.tasas_aprox !== false ? `<div class="aprox" style="text-align:center;margin-top:8px">Tasas referenciales · confirmar la vigente con BBVA</div>` : ""}
       </div>
-      <div class="btns">
-        <a class="btn btn-sec" href="${urlGoogle(c)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a>
-        <a class="btn btn-waze" href="${urlWaze(c)}" target="_blank" rel="noopener">${ICON.pin} Waze</a>
-      </div>
-      ${c.geo_calidad ? `<div class="aprox" style="text-align:center;margin-top:-6px">${esc(CALIDAD[c.geo_calidad] || "")}</div>` : ""}
-      ${dirsExtra(c).length ? `<div class="dx-aviso">Este comercio tiene ${dirsExtra(c).length === 1 ? "1 dirección más" : dirsExtra(c).length + " direcciones más"} en BBVA · <button type="button" class="lnk-dx" data-ir-extra>verlas</button></div>` : ""}
-      ${tarjetaSunat(c)}
-      <div id="dirExtra">${tarjetaDirsExtra(c)}</div>
+      ${tarjetaDireccion(c)}
+      ${tarjetaPotencial(c)}
+      ${tarjetaContacto(c)}
       ${S.admin ? "" : VOZ_IA ? `<div class="reg-btns"><button class="btn btn-pri btn-full" data-dictar-visita="${esc(c.customer_id)}">${ICON.mic} Dictar la visita</button>
         <button class="btn btn-sec btn-full" data-registrar="${esc(c.customer_id)}">Registrar sin dictar</button></div>` : `<button class="btn btn-pri btn-full" data-registrar="${esc(c.customer_id)}">Registrar visita</button>`}
       <div class="card">
@@ -606,7 +679,7 @@ function vistaFicha(c){
             <input class="campo" id="eNombre" placeholder="Nombre comercial (el del letrero)" value="${esc(c.nombre_comercial||"")}">
             <input class="campo" id="eDir" placeholder="Dirección correcta" value="${esc(c.direccion_corregida||c.direccion||"")}">
             <input class="campo" id="eRef" placeholder="Referencia (frente a, dentro de…)" value="${esc(c.referencia||"")}">
-            <input class="campo" id="eCont" placeholder="Contacto en el comercio" value="${esc(c.contacto||"")}">
+            ${S.ver || !c.contacto ? `<input class="campo" id="eCont" placeholder="Contacto en el comercio" value="${esc(c.contacto||"")}">` : `<div class="nota">Para ver o corregir el contacto, abre el ojo de los datos.</div>`}
             <div class="nota">El customer ID, la razón social y las tasas vienen de BBVA y no se cambian. Tu corrección queda registrada con tu nombre.</div>
             <button class="btn btn-pri btn-full" data-guardar-datos="${esc(c.customer_id)}">Guardar corrección</button></div>`
           : `<div class="nota" style="margin-top:6px">Si la dirección o el nombre no coinciden con lo que ves en la calle, corrígelos aquí.</div>`}
@@ -936,72 +1009,64 @@ const selloFresco = (cuando, cargando, attr) => `<div class="fresco">
   <span>${cargando ? "Actualizando…" : cuando ? "Actualizado a las " + horaCorta(cuando) : ""}</span>
   <button class="btn btn-lin mini" ${attr} ${cargando ? "disabled" : ""}>Actualizar</button></div>`;
 
-/* ---------- Otras direcciones del mismo RUC (BBVA) ----------
-   v2_mi_base las entrega ya ordenadas: mismo distrito, luego la zona del comercio, luego fuera de zona.
-   Waze navega a un solo destino, así que cada dirección tiene su botón; la ruta por todas va en Google Maps. */
-const normDir = t => String(t || "").split("·")[0].normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
-  .replace(/\b(AV|JR|CAL|CALLE|PROL|URB|NRO|GRAL|GENERAL)\b\.?/g, " ").replace(/[^A-Z0-9]+/g, " ").trim();
-const sunatVisible = c => !!c.sunat_direccion && (c.sunat_metros == null || c.sunat_metros >= 300);
-function dirsExtra(c){
-  const l = Array.isArray(c.dir_extra) ? c.dir_extra : [];
-  const ks = sunatVisible(c) ? normDir(c.sunat_direccion) : null;   // la tarjeta SUNAT ya la muestra
-  return l.filter(d => d && d.direccion && normDir(d.direccion) !== ks);
+/* Ficha con una sola dirección, la de BBVA (20/10): salen «Segunda dirección · SUNAT» y «Otras direcciones».
+   Las otras direcciones del negocio, si las hay, vienen en la nota de ubicación. */
+function tarjetaDireccion(c){
+  const g = GRUPO[c.grupo_ubicacion];
+  return `<div class="card dir-card"><div class="eyebrow">Dirección de BBVA</div>
+    <h2 style="margin-top:4px">${esc(c.direccion || "Sin dirección en la base")}</h2>
+    <div class="nota">${esc([c.distrito, refDe(c)].filter(Boolean).join(" · "))}</div>
+    ${c.direccion_corregida && c.direccion_corregida !== c.direccion ? `<div class="explica" style="margin-top:8px">Corrección registrada en campo: ${esc(c.direccion_corregida)}</div>` : ""}
+    ${g || c.geo_calidad ? `<div class="ub-fila">${g ? `<span class="pill ub ${g.c}">${g.t}</span>` : ""}${c.geo_calidad && CALIDAD[c.geo_calidad] ? `<span class="nota">${esc(CALIDAD[c.geo_calidad])}</span>` : ""}</div>` : ""}
+    ${c.geo_nota ? `<div class="nota" style="margin-top:6px">${esc(c.geo_nota)}</div>` : ""}
+    ${!tieneGeo(c) || c.grupo_ubicacion === 3 ? `<div class="explica aviso-ub">Llama al comercio y confirma la dirección antes de ir.</div>` : ""}
+    <div class="btns" style="margin-top:12px">
+      <a class="btn btn-sec" href="${urlGoogle(c)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a>
+      <a class="btn btn-waze" href="${urlWaze(c)}" target="_blank" rel="noopener">${ICON.pin} Waze</a>
+    </div></div>`;
 }
-const destinoExtra = d => [String(d.direccion).split("·")[0].trim(), d.distrito, "Lima"].filter(Boolean).join(", ");
-const geoExtra = d => d.lat != null && d.lng != null;
-const puntoExtra = d => geoExtra(d) ? d.lat + "," + d.lng : destinoExtra(d);
-const urlGoogleExtra = d => "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(puntoExtra(d));
-const urlWazeExtra = d => geoExtra(d) ? `https://waze.com/ul?ll=${d.lat},${d.lng}&navigate=yes` : "https://waze.com/ul?navigate=yes&q=" + encodeURIComponent(destinoExtra(d));
-// Resultado de la revisión en Google Maps (25/09): qué tan seguro es que el comercio esté ahí
-const VERIF = { confirmado:["Verificada en Google Maps","ok"], reemplazar:["Verificada en Google Maps","ok"],
-  comercio_cerca:["El comercio está a pocos metros","prob"], probable:["Probable · confírmalo en la visita","prob"],
-  direccion_existe:["Dirección ubicada · sin letrero del comercio en Maps","dir"] };
-// Ruta en Google Maps: la dirección del comercio y luego las otras, en el orden de prioridad (máx. 3 paradas intermedias en el celular)
-function urlRutaExtra(c, l){
-  const pts = [tieneGeo(c) ? c.geo_lat + "," + c.geo_lng : destinoTxt(c)].concat(l.map(puntoExtra)).slice(0, 4);
-  const dest = pts[pts.length - 1], way = pts.slice(0, -1);
-  return "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(dest) + (way.length ? "&waypoints=" + encodeURIComponent(way.join("|")) : "");
+function tarjetaPotencial(c){
+  if (c.potencial == null && c.vol_092026 == null && !c.vinculacion && !c.tipo_equipo) return "";
+  return `<div class="card"><div class="fila-ent"><div class="eyebrow">Por qué vale la pena</div>${botonOjo()}</div>
+    <div class="cifras">
+      <div><span>Potencial</span><b>${potDe(c) > 0 ? sol(c.potencial) : "Sin dato"}</b></div>
+      <div><span>Vinculación BBVA</span><b>${esc(c.vinculacion || "—")}</b></div>
+      <div><span>Vol. BBVA set.</span><b>${c.vol_092026 == null ? "—" : sol(c.vol_092026)}</b></div>
+      <div><span>Equipo</span><b>${esc(c.tipo_equipo || "—")}</b></div>
+    </div></div>`;
 }
-function tarjetaDirsExtra(c){
-  const l = dirsExtra(c); if (!l.length) return "";
-  const enZona = l.filter(d => d.en_zona).length;
-  return `<div class="card dir-extra">
-    <div class="eyebrow">Otras direcciones de este comercio</div>
-    <div class="nota" style="margin:4px 0 10px">${l.length === 1 ? "Otra dirección" : l.length + " direcciones más"} del mismo comercio según BBVA, revisada${l.length === 1 ? "" : "s"} una por una en Google Maps. Si no lo encuentras arriba, prueba acá${enZona && enZona < l.length ? "; primero las de tu zona" : ""}.</div>
-    ${l.map((d, i) => `<div class="dx">
-      <div class="dx-cab"><span class="dx-n">${i + 1}</span><div><b>${esc(d.direccion)}</b><small>${esc(d.distrito)} · <span class="${d.en_zona ? "dx-zona" : "dx-fuera"}">${d.en_zona ? "En tu zona" : "Fuera de tu zona"}</span></small>${VERIF[d.verificacion] ? `<span class="dx-verif ${VERIF[d.verificacion][1]}">${VERIF[d.verificacion][0]}</span>` : ""}</div></div>
-      <div class="nav2"><a class="btn btn-sec" href="${urlGoogleExtra(d)}" target="_blank" rel="noopener">${ICON.pin} Google Maps</a><a class="btn btn-waze" href="${urlWazeExtra(d)}" target="_blank" rel="noopener">${ICON.pin} Waze</a></div>
-    </div>`).join("")}
-    ${l.length ? `<a class="btn btn-lin btn-full" style="margin-top:10px" href="${urlRutaExtra(c, l)}" target="_blank" rel="noopener">${ICON.pin} Ruta por ${l.length === 1 ? "las dos direcciones" : "todas las direcciones"} en Google Maps</a>
-    <div class="nota" style="margin-top:6px;text-align:center">Waze lleva a una dirección a la vez; la ruta con varias paradas se abre en Google Maps.</div>` : ""}
-  </div>`;
+function tarjetaContacto(c){
+  if (!c.contacto_celular && !c.contacto_correo) return "";
+  const cel = c.contacto_celular, mail = c.contacto_correo;
+  return `<div class="card"><div class="fila-ent"><div class="eyebrow">Contacto de BBVA</div>${botonOjo()}</div>
+    <dl class="datos">
+      ${cel ? `<dt>Celular</dt><dd>${S.ver ? `<a href="tel:${esc(String(cel).replace(/[^\d+]/g, ""))}">${esc(cel)}</a>` : privado(cel)}</dd>` : ""}
+      ${mail ? `<dt>Correo</dt><dd>${S.ver ? `<a href="mailto:${esc(mail)}">${esc(mail)}</a>` : privado(mail)}</dd>` : ""}
+    </dl>${S.ver ? "" : `<div class="nota" style="margin-top:6px">Datos ocultos · abre el ojo para verlos.</div>`}</div>`;
 }
-function tarjetaSunat(c){
-  if (!c.sunat_direccion) return "";
-  const lejos = c.sunat_metros == null || c.sunat_metros >= 300;
-  if (!lejos) return "";
-  const dist = c.sunat_metros == null ? "" :
-    c.sunat_metros < 1000 ? `a ${c.sunat_metros} m de la dirección de arriba`
-    : `a ${(Math.round(c.sunat_metros/100)/10).toFixed(1).replace(".", ",")} km de la dirección de arriba`;
-  return `<div class="card sunat">
-    <div class="eyebrow">Segunda dirección · SUNAT</div>
-    <h2>${esc(c.sunat_direccion)}</h2>
-    <div class="nota">Es el domicilio que el titular declara ante SUNAT${dist ? " · " + dist : ""}. Si en la dirección de arriba no está el comercio, prueba acá.</div>
-    ${c.sunat_estado ? `<div class="aprox" style="margin-top:8px">En SUNAT este comercio figura en ${esc(c.sunat_estado.toLowerCase())}</div>` : ""}
-    ${c.sunat_lat != null ? `<div class="nav2">
-        <a class="btn btn-sec" href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${c.sunat_lat},${c.sunat_lng}" target="_blank" rel="noopener">${ICON.pin} Ir con Google Maps</a>
-        <a class="btn btn-waze" href="https://waze.com/ul?ll=${c.sunat_lat},${c.sunat_lng}&navigate=yes" target="_blank" rel="noopener">${ICON.pin} Waze</a>
-      </div>`
-      : `<div class="nota" style="margin-top:8px">No se pudo ubicar esta dirección en el mapa; búscala por el texto.</div>`}
-  </div>`;
+// Avance con la base en bloques: el bloque de hoy, el siguiente, el periodo completo (225) y la base anterior
+function tarjetaBloques(){
+  if (!hayBloques()) return "";
+  const B = bloqueInfo(), m = metricas();
+  const fila = (t, v, n) => `<div class="av-fila"><div class="fila-ent"><span>${t}</span><b>${v} / ${n}</b></div><div class="pista"><i style="width:${n ? Math.min(100, v / n * 100) : 0}%;background:var(--naranja)"></i></div></div>`;
+  const vis = l => l.filter(c => c.visitas_validas > 0).length, con = l => l.filter(conContacto).length;
+  const bloques = [1, 2].map(k => {
+    const l = B.mios.filter(c => c.bloque === k), f = (l[0] && l[0].bloque_ini) ? ` · ${fISO(l[0].bloque_ini)} al ${fISO(l[0].bloque_fin)}` : "";
+    if (!l.length) return `<div class="card"><div class="eyebrow">Bloque ${k}${k > (B.n || 1) ? " · próximo" : ""}</div><div class="nota">${META_PERIODO - B.mios.length > 0 ? `${META_PERIODO - B.mios.length} comercios nuevos` : "Los comercios nuevos"} llegan cuando empiece el bloque. Lo que no visites del bloque anterior se queda contigo.</div></div>`;
+    return `<div class="card"><div class="eyebrow">Bloque ${k}${f}</div>${fila("Comercios visitados", vis(l), l.length)}${fila("Con contacto", con(l), l.length)}</div>`;
+  }).join("");
+  const ant = S.base.filter(c => esMio(c) && esAnterior(c)), antVis = ant.filter(c => c.visitas_validas > 0).length;
+  return `${bloques}
+    <div class="card"><div class="eyebrow">Periodo completo</div>${fila("Comercios visitados", m.visitados, m.meta)}${antVis ? `<div class="nota" style="margin-top:6px">Además, ${antVis} ${antVis === 1 ? "visita" : "visitas"} de la base anterior, que se cuentan aparte.</div>` : ""}
+      <div class="nota" style="margin-top:6px">${m.reactivados} ${m.reactivados === 1 ? "reactivado cuenta" : "reactivados cuentan"} para ti. Cuenta un reactivado cuando BBVA lo reporta y transacciona 2 días distintos después de tu visita con contacto.</div></div>
+    ${ant.length ? `<div class="card"><div class="eyebrow">Base anterior</div><h2>${ant.length} visitados · ${ant.filter(conContacto).length} con contacto</h2><div class="nota">Se suman a tu avance si BBVA los reporta como reactivados.</div></div>` : ""}`;
 }
-
 function vistaAvance(){
   if (S.avance === null) cargarAvance();
   const tit = S.admin ? "Avance del equipo" : "Mi avance";
   const sub = S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)} · quedan ${diasQuedan()} días` : "";
   const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>`;
-  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${c}</div></div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${S.admin ? "" : tarjetaBloques()}${c}</div></div>`;
 
   if (S.avanceErr) return envolver(`<div class="card"><h2>No se pudo calcular el avance</h2>
     <div class="nota">${esc(S.avanceErr)}</div>
@@ -1222,6 +1287,7 @@ function corregirDeCola(uidV){
 
 /* ---------------- registrar visita ---------------- */
 function nuevoRegistro(id, dictar){
+  if (S.como) return;
   S.reg = { id: id || null, busca:"", gps:"buscando", lat:null, lng:null, precision:null, hora:new Date(), modo:null, modo2:null, conQuien:null, con:null, motivo:null, que:null, decision:null, equipo:null, fechaNueva:"", comentario:"", dirOk:null, ubicado:null, feedback:[], feedbackNota:"", fbAbierto:false, fbAcc:[], fbExt:extVacio(), voz:"", dictando:false, ia:null, iaCargando:false, iaError:"", motivosSi:[], msiAbierto:false, intento:false, enviando:false, uid:uid() };
   pintar(); pedirGPS();
   if (dictar){
@@ -1255,10 +1321,10 @@ function hojaRegistro(){
   const yaCuenta = c && c.visitas_validas > 0 && !hoyV, sinContar = c && c.visitas > 0 && !yaCuenta && !hoyV;
   const ultTxt = c && c.ultima_visita ? `${diaLima(c.ultima_visita) === diaLima(Date.now()) ? "hoy" : "el " + fechaCorta(c.ultima_visita)} a las ${horaCorta(c.ultima_visita)}${c.ultima_que ? " (" + esc(c.ultima_que.toLowerCase()) + ")" : ""}` : "";
   let pasos = `<div class="paso" data-paso="comercio"><span class="eyebrow">Comercio</span>${c
-    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}${c.correo ? "" : " · libre: pasa a tu base al guardar"}</small></div><button data-cambiar-comercio>Cambiar</button></div>
-       ${yaCuenta ? `<div class="ya-cuenta"><b>Este comercio ya cuenta en tus 160.</b> Lo visitaste ${ultTxt}. Esta visita se guarda como seguimiento y <b>no suma otra</b>.
+    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}</small></div><button data-cambiar-comercio>Cambiar</button></div>
+       ${yaCuenta ? `<div class="ya-cuenta"><b>Este comercio ya cuenta en tus visitados del periodo.</b> Lo visitaste ${ultTxt}. Esta visita se guarda como seguimiento y <b>no suma otra</b>.
           <span>¿Estás en otro negocio? Búscalo en tu base para que sí sume.</span><button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div>`
-        : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus 160.</div>` : ""}`
+        : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus visitados.</div>` : ""}`
     : `<input class="campo" id="busca" type="search" placeholder="Customer ID, RUC o razón social" value="${esc(r.busca)}" autocomplete="off">
        <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
   if (hoyV) return `<div class="velo" data-cerrar-velo><div class="hoja" role="dialog" aria-label="Registrar visita">
@@ -1289,7 +1355,7 @@ function hojaRegistro(){
   return `<div class="velo" data-cerrar-velo><div class="hoja" role="dialog" aria-label="Registrar visita">
     <header><div class="asa"></div><div class="fila-ent"><h2>Registrar visita</h2><button class="btn btn-lin" style="padding:6px 12px;font-size:13px" data-cancelar>Cancelar</button></div></header>
     <div class="scroll">${pasos}</div>
-    <footer>${r.intento && faltan.length ? `<div class="falta-caja" role="alert"><b>No se guardó todavía.</b> ${faltan.length === 1 ? "Te falta 1 dato" : "Te faltan " + faltan.length + " datos"}: ${faltan.join(", ")}. Están marcados en rojo arriba.</div>` : ""}${r.error ? `<div class="falta-caja" role="alert"><b>No se guardó:</b> ${esc(r.error)}<br><span>Revisa y toca «Guardar visita» otra vez. Si sigue fallando, avísale al analista.</span></div>` : ""}${yaCuenta && !(r.intento && faltan.length) ? `<div class="nota-seg">Se guarda como seguimiento: no suma a las 160.</div>` : ""}<button class="btn btn-pri btn-full" data-guardar-visita ${r.enviando?"disabled":""}>${r.enviando ? "Guardando…" : "Guardar visita"}</button></footer>
+    <footer>${r.intento && faltan.length ? `<div class="falta-caja" role="alert"><b>No se guardó todavía.</b> ${faltan.length === 1 ? "Te falta 1 dato" : "Te faltan " + faltan.length + " datos"}: ${faltan.join(", ")}. Están marcados en rojo arriba.</div>` : ""}${r.error ? `<div class="falta-caja" role="alert"><b>No se guardó:</b> ${esc(r.error)}<br><span>Revisa y toca «Guardar visita» otra vez. Si sigue fallando, avísale al analista.</span></div>` : ""}${yaCuenta && !(r.intento && faltan.length) ? `<div class="nota-seg">Se guarda como seguimiento: no suma otra visita.</div>` : ""}<button class="btn btn-pri btn-full" data-guardar-visita ${r.enviando?"disabled":""}>${r.enviando ? "Guardando…" : "Guardar visita"}</button></footer>
   </div></div>`;
 }
 // ¿Ya hay una visita de este comercio hoy (enviada o esperando señal)?
@@ -1667,7 +1733,7 @@ async function guardarVisita(){
     S.reg = null; delete S.hist[v.p_customer_id];
     await recargarBase();
     const m = metricas();
-    avisar(nueva && v.p_lat != null ? `Visita guardada. Llevas <b>${m.visitados} de 160</b> comercios visitados.` : nueva ? "Visita guardada sin ubicación: no suma a las 160." : `Visita guardada como seguimiento. Sigues en <b>${m.visitados} de 160</b>.`);
+    avisar(nueva && v.p_lat != null ? `Visita guardada. Llevas <b>${m.visitados} de ${m.meta}</b> comercios visitados.` : nueva ? "Visita guardada sin ubicación: no suma a tus visitados." : `Visita guardada como seguimiento. Sigues en <b>${m.visitados} de ${m.meta}</b>.`);
   } catch(e){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
       S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); S.cola.push(v); guardarCola(); S.reg = null;
@@ -1726,12 +1792,13 @@ function enlazar(){
   p.querySelectorAll("[data-ficha]").forEach(b => b.onclick = () => { S.ficha = b.dataset.ficha; S.editando = null; S.corr = null; pintar(); });
   p.querySelectorAll("[data-ruta]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroRuta = b.dataset.ruta; S.filtroEstado = "todos"; S.filtroVisita = "todos"; S.masFiltros = true; pintar(); });
   p.querySelectorAll("[data-cerrar-ficha]").forEach(b => b.onclick = () => { S.ficha = null; pintar(); });
-  p.querySelectorAll("[data-ir-extra]").forEach(b => b.onclick = () => { const t = document.getElementById("dirExtra"); if (t) t.scrollIntoView({ behavior:"smooth", block:"start" }); });
+  p.querySelectorAll("[data-ojo]").forEach(b => b.onclick = () => { S.ver = !S.ver; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-grupo]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroVisita = "g" + b.dataset.grupo; S.filtroEstado = "todos"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.filtroEstado = "todos"; S.corr = null; pintar(); });
   p.querySelectorAll("[data-quitar-estado]").forEach(b => b.onclick = () => { S.filtroEstado = "todos"; pintar(); });
   p.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => { S.masFiltros = !S.masFiltros; pintar(); });
   p.querySelectorAll("[data-limpiar]").forEach(b => b.onclick = () => {
-    S.filtroEstado = "todos"; S.filtroDistrito = ""; S.filtroRuta = ""; S.filtroEjecutivo = ""; S.filtroDueno = "todos"; pintar(); });
+    S.filtroEstado = "todos"; S.filtroDistrito = ""; S.filtroRuta = ""; S.filtroEjecutivo = ""; pintar(); });
   p.querySelectorAll("[data-corr]").forEach(b => b.onclick = () => abrirCorreccion(b.dataset.corr));
   p.querySelectorAll("[data-corregir-hoy]").forEach(b => b.onclick = () => corregirVisitaDeHoy(b.dataset.corregirHoy));
   p.querySelectorAll("[data-corr-cancelar]").forEach(b => b.onclick = () => { S.corr = null; S._mantenerScroll = true; pintar(); });
@@ -1754,12 +1821,11 @@ function enlazar(){
   p.querySelectorAll("[data-editar]").forEach(b => b.onclick = () => { S.editando = S.editando === b.dataset.editar ? null : b.dataset.editar; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll("[data-guardar-datos]").forEach(b => b.onclick = async () => {
     const cid = b.dataset.guardarDatos;
-    const { error } = await sb.rpc("v2_corregir_comercio", { p_customer_id:cid, p_nombre:$("#eNombre").value, p_direccion:$("#eDir").value, p_referencia:$("#eRef").value, p_contacto:$("#eCont").value });
+    const { error } = await sb.rpc("v2_corregir_comercio", { p_customer_id:cid, p_nombre:$("#eNombre").value, p_direccion:$("#eDir").value, p_referencia:$("#eRef").value, p_contacto:$("#eCont") ? $("#eCont").value : ((S.base.find(x => x.customer_id === cid) || {}).contacto || "") });
     if (error) return avisar("No se guardó la corrección: " + esc(error.message), 6000);
     S.editando = null; await recargarBase(); avisar("Corrección guardada con tu nombre."); });
   const q = $("#q"); if (q){ q.oninput = () => { S.q = q.value; const pos = q.selectionStart; pintar(); const n = $("#q"); n.focus(); n.setSelectionRange(pos,pos); }; }
 
-  const fu = $("#fDueno"); if (fu) fu.onchange = () => { S.filtroDueno = fu.value; pintar(); };
   const fd = $("#fDistrito"); if (fd) fd.onchange = () => { S.filtroDistrito = fd.value; pintar(); };
   const fr = $("#fRuta"); if (fr) fr.onchange = () => { S.filtroRuta = fr.value; pintar(); };
   const fe = $("#fEjec"); if (fe) fe.onchange = () => { S.filtroEjecutivo = fe.value; pintar(); };
