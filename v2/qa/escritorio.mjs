@@ -361,7 +361,11 @@ await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de pr
   await p.selectOption('#gEj', EJECUTIVO.correo); await p.waitForTimeout(300);
   assert.match(await tile('Bloque 1 · visitados'), /2 \/ 4/, 'bloque 1 del ejecutivo');
   assert.match(await tile('Periodo · visitados'), /2 \/ 225/, 'periodo del ejecutivo');
+  // «Por ejecutivo» y Visitas cuentan contra la meta solo la base nueva (Jose, 21/10); la base anterior va aparte
+  await p.evaluate(() => { S.vista = 'equipo'; pintar(); }); await p.waitForTimeout(300);
+  assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160/i, 'Por ejecutivo suma la base anterior o comercios de antes: ' + (await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()));
   await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; pintar(); }); await p.waitForTimeout(300);
+  assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160.*1 de la base anterior, aparte/i, 'Visitas suma la base anterior');
   const coms = (await p.locator('td.com b').allInnerTexts()).join(' | ');
   assert.ok(coms.includes('Comercio Prueba 11') && !coms.includes('Comercio Prueba 21'), 'Visitas no se filtró por ejecutivo: ' + coms);
   await p.click('#btnCel'); await p.waitForTimeout(200);

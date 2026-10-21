@@ -495,7 +495,7 @@ table.datos th[colspan]{text-align:center;border-bottom:1px solid var(--linea)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "159664";
+const BUILD = "07f5cf";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -740,13 +740,20 @@ async function cargarRetenidas(){
   if (!error) S.retenidas = data || [];
 }
 async function cargarBase(){
-  const { data } = await sb.rpc("v2_mi_base");
+  const { data, error } = await sb.rpc("v2_mi_base");
+  if (error){ toast("No se pudo leer la base: " + error.message); return; }
   // Base 2026-11: los de «salida» siguen en v2_asignaciones (regla n.º 1), pero ya no son cartera salvo que reciban una visita.
   // baseMap guarda todos, para leer el comercio de cualquier visita.
   S.base = (data || []).filter(enCartera); S.baseMap = {}; S.docMap = {};
-  (data || []).forEach(c => { if (c.documento) S.docMap[c.documento] = c.customer_id; }); (data || []).forEach(c => { S.baseMap[c.customer_id] = c; });
+  (data || []).forEach(c => { if (c.documento) S.docMap[c.documento] = c.customer_id; });
+  S.hayOrigen = (data || []).some(c => c.origen); (data || []).forEach(c => { S.baseMap[c.customer_id] = c; });
 }
 const enCartera = c => c.origen !== "salida" || (c.visitas || 0) > 0;
+// Comercio que suma a la meta de visitados (Jose, 21/10): solo la base nueva, igual que v2_avance. La base anterior va aparte.
+// En un periodo sin bloques (sin origen) cuenta todo, como antes.
+// Comercios de la base anterior con visita válida: van aparte, se muestran al lado del total
+const notaAnterior = act => { if (!S.hayOrigen) return ""; const n = new Set(act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo && (S.baseMap[v.customer_id] || {}).origen === "base_anterior").map(v => v.customer_id)).size; return n ? ` · ${n} de la base anterior, aparte` : ""; };
+const sumaMeta = cid => { const c = S.baseMap[cid]; return !S.hayOrigen || (!!c && c.origen === "base_nueva"); };
 // Selector de ejecutivo (base 2026-11): todas las vistas se leen con el ejecutivo elegido o con el equipo.
 // Solo filtra mientras se pinta; las descargas y las acciones siempre usan los datos completos.
 function elegirEj(correo){
@@ -963,7 +970,7 @@ function vistaValidacion(){
   const sinGps = hoy.filter(v => v.estado_anul !== "anulada" && v.lat == null).length;
   const pedidos = S.act.filter(v => v.estado_anul === "pendiente").length;
   const validas = S.act.filter(v => estadoDe(v) === "val").length, cuentan = S.act.filter(v => v.estado_anul !== "anulada").length;
-  const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size;
+  const comerciosVis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size;
   const cnt = k => S.act.filter(v => (k === "todos" || estadoDe(v) === k) && (S.dia !== "hoy" || esHoy(v)) && (S.dia !== "ayer" || esAyer(v)) && (!/^\d{4}-/.test(S.dia) || iso(v.visitado_en) === S.dia) && (S.ej === "todos" || v.correo === S.ej)).length;
   const lista = filtradas();
   if (S.sel && !S.act.find(v => v.id === S.sel)) S.sel = null;
@@ -982,7 +989,7 @@ function vistaValidacion(){
     <div class="tile ${sinGps ? "bad" : "ok"}"><div class="k">Sin GPS hoy</div><div class="v num">${sinGps}</div><div class="d">sin ubicación no cuentan como visita</div></div>
     <div class="tile ${nRev ? "warn" : ""}" title="Visitas con «Zona insegura» u «Otro motivo» sobre todas las visitas no anuladas del periodo de cada ejecutivo, incluidas las sin GPS o fuera de plazo (no es la misma base que «Comercios visitados»). Cuentan como visita; solo es para revisar el comentario."><div class="k">Zona insegura u otro motivo</div><div class="v num">${nRev}</div><div class="d">${porEj.map(x => `${esc(x.e.ini)} ${x.p} %`).join(" · ") || "sin visitas"}</div></div>
     <div class="tile ${pedidos ? "warn" : ""}"><div class="k">Pedidos de anulación</div><div class="v num">${pedidos}</div><div class="d">esperan tu decisión</div></div>
-    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${comerciosVis}<small> / ${metaEq}</small></div><div class="d">${cuentan} visitas en el periodo · ${validas} validadas</div></div>
+    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${comerciosVis}<small> / ${metaEq}</small></div><div class="d">${cuentan} visitas en el periodo · ${validas} validadas${notaAnterior(S.act)}</div></div>
   </div>
   <div class="split">
     <div class="panel">
@@ -1173,11 +1180,11 @@ function vistaEquipo(){
     const vs = todas.filter(v => v.estado_anul !== "anulada");
     const porDia = {};
     vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { com:new Set(), n:0, h1:null, h2:null, obs:0, pend:0 }; o.n++; if (v.lat != null && !v.fuera_plazo) o.com.add(v.customer_id); if (v.fuera_plazo) o.tarde = (o.tarde || 0) + 1; const t = D(v.visitado_en); if (!o.h1 || t < o.h1) o.h1 = t; if (!o.h2 || t > o.h2) o.h2 = t; if (estadoDe(v) === "obs") o.obs++; if (estadoDe(v) === "pend") o.pend++; });
-    const com = new Set(vs.filter(v => v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size;
+    const com = new Set(vs.filter(v => v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size;
     const restantes = Math.max(1, H.total - H.antes);
     return { e, porDia, com, reg:vs.length,
       val: vs.filter(v => estadoDe(v) === "val").length, pend: vs.filter(v => estadoDe(v) === "pend").length, obs: vs.filter(v => estadoDe(v) === "obs").length, anu: todas.length - vs.length,
-      contacto: vs.filter(v => v.con !== "Nadie").length, comContacto: new Set(vs.filter(v => v.con !== "Nadie" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id)).size, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
+      contacto: vs.filter(v => v.con !== "Nadie").length, comContacto: new Set(vs.filter(v => v.con !== "Nadie" && v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
       lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length, tarde: vs.filter(v => v.fuera_plazo).length,
       ritmo: H.hastaHoy ? com / H.hastaHoy : 0, necesario: Math.max(0, metaEj - com) / restantes, esperado: metaDia * H.hastaHoy };
   });
@@ -1214,7 +1221,7 @@ function vistaEquipo(){
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
   return `
   <div class="resumen">
-    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${T.com}<small> / ${metaEq}</small></div><div class="d">${pct(T.com, metaEq)} % de la meta del periodo · ${T.reg} registros</div></div>
+    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${T.com}<small> / ${metaEq}</small></div><div class="d">${pct(T.com, metaEq)} % de la meta del periodo · ${T.reg} registros${notaAnterior(S.act)}</div></div>
     <div class="tile"><div class="k">Días hábiles</div><div class="v num">${H.hastaHoy}<small> de ${H.total}</small></div><div class="d">${pct(H.hastaHoy, H.total)} % del periodo corrido, contando hoy</div></div>
     <div class="tile ${ritmoEq >= metaDiaEq ? "ok" : "warn"}"><div class="k">Ritmo del equipo</div><div class="v num">${ritmoEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">meta ${Math.round(metaDiaEq)} por día hábil (${Math.round(metaDia)} por ejecutivo)</div></div>
     <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${necEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
@@ -1246,7 +1253,7 @@ function vistaEquipo(){
         <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
         <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
       </tbody></table></div>
-    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra ${metaEj}). Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
+    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono), y la base anterior se ve en «Base y bloques». Comercios con contacto también es solo de la base nueva; el gráfico, los días y las columnas de visitas (con contacto, reunión, consumos, fuera de plazo) cuentan toda la actividad. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
   </div>`;
 }
 
