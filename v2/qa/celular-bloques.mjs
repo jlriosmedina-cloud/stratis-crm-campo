@@ -105,8 +105,12 @@ for (const tema of ['light', 'dark']) {
       S.base = ruta('', o => o > 8); S.vista = 'inicio'; pintar(); out.a = hoy();                       // del día hecho, quedan opcionales
       S.base = ruta('todo', () => false); pintar(); out.b = hoy();                                    // solo quedan la 98 y la 99
       S.base = ruta('', () => true); pintar(); out.c = hoy(); out.opc = document.querySelectorAll('.ruta-hoy .parada.opcional').length;
+      // ruta armada por el ejecutivo: todas sus paradas son del día
+      // solo una parada marcada (v2_armar_ruta no marca las que quedaron en su lugar): igual cuenta toda la ruta
+      S.base = ruta('', o => o > 8).map(c => c.customer_id === 'R12' ? Object.assign({}, c, { ruta_propia: 'Ruta 01' }) : c); pintar(); out.d = hoy(); out.opcD = document.querySelectorAll('.ruta-hoy .parada.opcional').length;
       S.base = orig; pintar(); return out;
     });
+    assert.equal(r.d, 'Ruta 01', 'en la ruta armada por el ejecutivo, las paradas 9 y 10 deben contar'); assert.equal(r.opcD, 0);
     assert.equal(r.a, 'Ruta 02', 'los opcionales traban la ruta');
     assert.ok(r.b && !/98|99/.test(r.b), 'propone la 98 o la 99: ' + r.b);
     assert.equal(r.c, 'Ruta 01'); assert.equal(r.opc, 2, 'no marca los opcionales');

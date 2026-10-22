@@ -406,7 +406,9 @@ function rutas(){
 // Rutas del bloque (20/10): en la ruta recomendada, el orden 1 a 8 es «del día» y del 9 en adelante son opcionales que
 // no traban la ruta. Si el ejecutivo armó la ruta (ruta_propia), todas sus paradas son del día.
 // «Ruta 98 · Base anterior» y «Ruta 99 · Por ubicar» nunca son la ruta de hoy.
-const esOpcional = c => hayBloques() && !c.ruta_propia && c.orden > DEL_DIA;
+// la regla va por ruta: v2_armar_ruta solo marca los comercios que se movieron, no los que quedaron en su lugar
+const rutaArmada = n => !!n && S.base.some(x => x.ruta === n && x.ruta_propia);
+const esOpcional = c => hayBloques() && c.orden > DEL_DIA && !rutaArmada(c.ruta);
 const rutaEspecial = r => hayBloques() && RUTA_ESPECIAL.test(r.nombre);
 // La ruta de hoy: la de la última visita si le quedan comercios del día por visitar; si no, la primera con pendientes del día
 function rutaHoyDe(rs){
@@ -520,7 +522,7 @@ function vistaInicio(){
         <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
-        <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs.some(c => !opcional(c) && c.estado === "por") ? rutaHoy.cs.filter(c => !opcional(c)) : rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
+        <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs.some(c => !opcional(c) && c.estado === "por") ? rutaHoy.cs.filter(c => !opcional(c)) : rutaHoy.cs.filter(c => c.estado === "por").length ? rutaHoy.cs.filter(c => c.estado === "por") : rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
         <div class="paradas">${rutaHoy.cs.slice(0, enBloques ? 13 : 12).map((c,i) => `<button class="parada${opcional(c) ? " opcional" : ""}" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${opcional(c) ? "Opcional · " : ""}${esc(dirDe(c))}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div>
       </div>` : ""}
       ${volver.length ? `<div class="card"><div class="eyebrow" style="color:var(--ambar)">Vale la pena volver</div><h2>${volver.length} comercio(s) con un solo día de transacción</h2><div class="nota">Un segundo día distinto antes del cierre los convierte en reactivados.</div>
@@ -665,7 +667,7 @@ function tarjetaArmar(rs){
   if (S.admin || !misRutas().length) return "";
   const a = S.armar;
   if (!a){ const h = rutaHoyDe(rs.filter(r => misRutas().includes(r.nombre)));
-    return `<div class="lista" style="padding-bottom:0"><div class="card armar-card"><div><div class="eyebrow">Tu ruta de hoy</div><h2>${esc(h ? h.nombre : "")}</h2></div>
+    return `<div class="lista" style="padding-bottom:0"><div class="card armar-card"><div><div class="eyebrow">Tu ruta de hoy</div><h2>${esc(h ? h.nombre : "Elige una ruta")}</h2></div>
       <div class="nota">Cámbiale el orden o súmale comercios de otras rutas. La ruta recomendada no se pierde.</div>
       <button class="btn btn-sec btn-full" data-armar="${esc(h ? h.nombre : "")}">${ICON.ruta} Armar mi ruta de hoy</button></div></div>`; }
   const porId = id => S.base.find(c => c.customer_id === id);
