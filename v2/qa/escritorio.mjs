@@ -381,6 +381,54 @@ await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de pr
   assert.match(r[4].err || '', /no está en la base/); assert.match(r[5].err || '', /ni un RUC/); assert.match(r[6].err || '', /RUC no está/);
   await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
 });
+await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta, con la ruta de hoy y el historial', async () => {
+  // Los dos ejecutivos tienen una «Ruta 01 · Lima» y una «Ruta 99 · Por ubicar»: nunca se mezclan
+  const E2 = 'ejecutivo2.prueba@ejemplo.com', R1 = 'Ruta 01 · Lima', R99 = 'Ruta 99 · Por ubicar', en = '2026-10-21T15:00:00Z';
+  const r = (i, ruta, orden, x) => comercio(i, Object.assign({ ruta, orden }, x));
+  const propia = (ruta_propia, orden_propio) => ({ ruta_propia, orden_propio, ruta_propia_en: en });
+  const filas = [
+    r(31, R1, 1, { estado: 'seg', visitas: 1, visitas_validas: 1, ultima_visita: '2026-10-21T14:00:00Z' }),   // sigue igual (sin línea: no hubo cambio)
+    r(32, R1, 2, propia(R1, 4)), r(33, R1, 3), r(34, R1, 4, propia('Mi ruta de la tarde', 1)), r(35, R1, 5, propia('Mi ruta de la tarde', 2)),
+    r(36, R99, 1, propia(R1, 2)), r(37, R99, 2),   // 36 traído de la Ruta 99; 37 se movió y volvió
+    r(41, R1, 1, { correo: E2 }), r(42, R1, 2, { correo: E2 }), r(43, R1, 3, { correo: E2 }), r(44, R99, 1, { correo: E2 })];
+  const lin = (cid, por, antes, despues, x) => Object.assign({ visita_id: null, periodo: 'PRUEBA', customer_id: String(cid).padStart(8, '0'), accion: 'ruta', por, antes, despues, en }, x);
+  const bit = [lin(32, EJECUTIVO.correo, R1 + ' · 2', R1 + ' · 4'), lin(34, EJECUTIVO.correo, R1 + ' · 4', 'Mi ruta de la tarde · 1'), lin(35, EJECUTIVO.correo, R1 + ' · 5', 'Mi ruta de la tarde · 2'),
+    lin(36, EJECUTIVO.correo, R99 + ' · 1', R1 + ' · 2'), lin(37, EJECUTIVO.correo, R99 + ' · 2', R1 + ' · 6', { en: '2026-10-20T15:00:00Z' }),
+    lin(37, EJECUTIVO.correo, R1 + ' · 6', 'vuelve a la recomendada · ' + R99 + ' · 2', { en: '2026-10-20T16:00:00Z' }),
+    lin(41, E2, R1 + ' · 1', R99 + ' · 2'), lin(41, E2, R99 + ' · 2', 'vuelve a la recomendada · ' + R1 + ' · 1', { en: '2026-10-21T16:00:00Z' }),
+    lin(33, EJECUTIVO.correo, 'x', 'y', { periodo: 'OTRO' }), lin(33, EJECUTIVO.correo, 'x', 'y', { accion: 'comentario' })];   // de otro periodo y de otra acción: no cuentan
+  await p.evaluate(async ([filas, bit, E2]) => { window.__FX.rpc.v2_mi_base = filas; window.__FX.tablas.v2_bitacora_visita = bit; await cargarBase();
+    if (!S.ejecutivos.some(e => e.correo === E2)) S.ejecutivos.push({ correo: E2, nombre: 'Segundo', ini: 'SE', color: 'var(--ej2)' });
+    S.rutasBit = null; S.rutaHist = null; elegirEj('todos'); S.vista = 'rutas'; pintar(); }, [filas, bit, E2]);
+  await p.waitForTimeout(400);
+  const tile = async k => (await p.locator('.tile', { hasText: k }).first().innerText()).replace(/\s+/g, ' ');
+  assert.match(await tile('Movidos de ruta'), /3 \/ 11/, 'movidos del equipo');
+  assert.match(await tile('Otro orden'), /\b1\b/); assert.match(await tile('Volvieron a la recomendada'), /\b2\b/);
+  assert.match(await tile('Rutas armadas'), /\b2\b.*1 con un nombre/, 'rutas armadas por correo y ruta');
+  assert.match(await tile('Cambios en la bitácora'), /\b8\b/, 'cuenta líneas de otro periodo u otra acción');
+  const fila = async t => (await p.locator('table.datos tr', { hasText: t }).first().innerText()).replace(/\s+/g, ' ');
+  assert.match(await fila('Prueba'), /Prueba 7 3 1 1 2 \(1 nueva\) 6 21\/10 \d\d:\d\d Ruta 01 · Lima cambiada 3 de 5 de la recomendada · 1 traído · 2 sacados · otro orden/, 'fila del ejecutivo: ' + await fila('Prueba'));
+  assert.match(await fila('Segundo'), /Segundo 4 0 0 1 0 2 .*Ruta 01 · Lima la recomendada/, 'la ruta del segundo se mezcló con la del primero: ' + await fila('Segundo'));
+  // ruta de hoy lado a lado: la recomendada y la que armó, sin comercios del otro ejecutivo
+  const hoy1 = await p.locator('.ruta-hoy', { hasText: 'Prueba · ruta de hoy' }).innerText();
+  assert.ok(/Recomendada · 5 comercios/i.test(hoy1) && /La que armó en el celular · 4 comercios/i.test(hoy1), 'ruta de hoy: ' + hoy1);
+  assert.ok(/viene de Ruta 99 · Por ubicar · 1/.test(hoy1) && /la sacó · ahora en Mi ruta de la tarde/.test(hoy1) && /antes parada 2/.test(hoy1), 'faltan las marcas de la comparación');
+  assert.ok(!hoy1.includes('Comercio Prueba 41'), 'se mezclaron las rutas con el mismo nombre');
+  assert.match(await p.locator('.ruta-hoy', { hasText: 'Segundo · ruta de hoy' }).innerText(), /Recomendada · 3 comercios/i);
+  // historial de un comercio: se movió y volvió
+  await p.click('#contenido td.com [data-ruta-hist="00000037"]'); await p.waitForTimeout(200);
+  const h = (await p.locator('#rutaHist').innerText()).replace(/\s+/g, ' ');
+  assert.ok(h.includes('Historial de ruta · Comercio Prueba 37') && h.includes('Ruta 99 · Por ubicar · 2 Ruta 01 · Lima · 6') && h.includes('vuelve a la recomendada · Ruta 99 · Por ubicar · 2'), 'historial: ' + h);
+  assert.equal(await p.locator('#rutaHist tbody tr').count(), 2);
+  if (process.env.CAPTURAS) await p.screenshot({ path: `${process.env.CAPTURAS}/escritorio-rutas.png`, fullPage: true });
+  // con el selector, solo el ejecutivo elegido (el historial de otro ejecutivo se cierra)
+  await p.selectOption('#gEj', E2); await p.waitForTimeout(300);
+  assert.match(await tile('Movidos de ruta'), /0 \/ 4/); assert.match(await tile('Cambios en la bitácora'), /\b2\b/);
+  assert.equal(await p.locator('#rutaHist').count(), 0, 'quedó abierto el historial de otro ejecutivo');
+  assert.deepEqual((await p.locator('table.datos').first().locator('tbody tr').allInnerTexts()).map(t => t.trim().split(/\s+/)[1]), ['Segundo'], 'con el selector se ve otro ejecutivo');
+  assert.ok((await p.locator('#contenido').innerText()).includes('Este ejecutivo todavía no armó rutas') === false, 'el que volvió a la recomendada sí tiene cambios');
+  await p.evaluate(() => { window.__FX.tablas.v2_bitacora_visita = []; S.rutasBit = null; elegirEj('todos'); S.vista = 'validacion'; pintar(); });
+});
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : '\nTodas las pruebas del escritorio pasaron');
