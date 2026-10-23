@@ -68,6 +68,15 @@ await prueba('señal «Revisar motivo» y porcentaje por ejecutivo de zona inseg
   const t = await p.locator('.tile', { hasText: 'Zona insegura u otro motivo' }).innerText();
   assert.match(t, /14 %/, 'el porcentaje del ejecutivo no es 1 de 7: ' + t);
 });
+await prueba('identificador visible: documento de BBVA si lo tiene, Customer ID si no; Trazabilidad busca por documento', async () => {
+  await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; S.filtro = 'todos'; pintar(); }); await p.waitForTimeout(300);
+  const t = (await p.locator('td.com small').allInnerTexts()).join(' | ');
+  assert.ok(t.includes('Doc. BBVA 00999001') && t.includes('Customer ID 00000002'), 'tabla de visitas: ' + t);
+  await p.evaluate(() => { S.vista = 'auditoria'; S.tab = 'traza'; S.busca = '00999001'; S.traza = null; pintar(); }); await p.waitForTimeout(300);
+  const l = await p.locator('.lista button').allInnerTexts();
+  assert.equal(l.length, 1, 'la búsqueda por documento no encontró una sola visita'); assert.ok(l[0].includes('Comercio Prueba 1'));
+  await p.evaluate(() => { S.busca = ''; S.vista = 'validacion'; pintar(); });
+});
 await prueba('señal «Revisar marcación» solo en la visita contradictoria', async () => {
   const n = await p.evaluate(() => S.act.filter(v => revisarMarcacion(v)).map(v => v.customer_id));
   assert.deepEqual(n, ['00000006']);
@@ -97,13 +106,16 @@ await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin no
   // tipificaciones del 29/09 al final de Base, sin correr las columnas de antes; después, Comercio_Cerro_Definitivamente y Ejecutivo
   const cb = xw.getWorksheet('Base').getRow(1).values.slice(1).map(String);
   const NUEVAS = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
-  // 21/10: «Documento» (RUC o DNI, como texto) va al lado de Customer_ID; las demás se corren una
-  assert.deepEqual(cb.slice(0, 3), ['Customer_ID', 'Documento', 'Visitado'], 'Base: falta Documento al lado de Customer_ID');
+  // 22/10: «Documento» (RUC o DNI, como texto) va primero y Customer_ID segundo; las demás se corren una
+  assert.deepEqual(cb.slice(0, 3), ['Documento', 'Customer_ID', 'Visitado'], 'Base: Documento debe ir primero y Customer_ID segundo');
+  assert.equal(xw.getWorksheet('Base').getColumn(1).numFmt, '@', 'Documento debe ir como texto');
   assert.equal(xw.getWorksheet('Base').getColumn(2).numFmt, '@', 'Documento debe ir como texto');
   assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 50, 'Base: la última columna de antes se movió');
   assert.deepEqual(cb.slice(50), NUEVAS.concat('Comercio_Cerro_Definitivamente', 'Ejecutivo'));
   assert.equal(xw.getWorksheet('Base').getCell(2, cb.length).value, 'Prueba', 'Base: falta el ejecutivo asignado');
-  assert.equal(xw.getWorksheet('Base').getCell(2, 2).value, '00999001', 'Documento con su cero a la izquierda');
+  assert.equal(xw.getWorksheet('Base').getCell(2, 1).value, '00999001', 'Documento con su cero a la izquierda');
+  assert.equal(xw.getWorksheet('Base').getCell(2, 2).value, '00000001', 'Customer_ID en la segunda columna');
+  assert.equal(xw.getWorksheet('Base').getCell(3, 1).value, '', 'sin documento, la celda queda vacía (base anterior)');
   const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
   assert.ok(txt.includes('zona insegura u otro motivo'), 'falta «zona insegura» en «Sin contacto»');
   // KPIs: todas las fórmulas sobre la hoja Base, sin la fila 2 ni las notas al pie
@@ -112,6 +124,7 @@ await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin no
   const formulas = celdas.filter(v => v && v.formula).map(v => v.formula);
   assert.ok(formulas.length > 40 && formulas.every(x => !/Visitas!|Feedback_Detalle!/.test(x)), 'hay KPIs que no salen de la hoja Base');
   assert.equal(k.getCell('A2').value, null, 'la fila 2 no está vacía');
+  assert.ok(formulas.some(x => /^COUNTA\(Base!\$B\$2:\$B\$\d+\)$/.test(x)), 'el universo debe contar Customer_ID (columna B), que está en todas las filas');
   for (const t of ['Todo sale de la hoja Base', 'Éxito = el comercio declaró', 'Fuente del feedback', 'Reactivación en 0', 'llave: Customer_ID', 'la hoja Base no trae el ejecutivo'])
     assert.ok(!celdas.some(v => typeof v === 'string' && v.includes(t)), 'quedó la nota: ' + t);
   fs.unlinkSync(f);
@@ -378,6 +391,8 @@ await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de pr
   const r = await p.evaluate(() => ['20000000013', '999014', '999014.0', '12', '123', '1234567890', '20000000099'].map(x => idDeBBVA(x)));
   assert.equal(r[0].cid, '00000013', 'RUC'); assert.equal(r[1].cid, '00000014', 'DNI sin el cero'); assert.equal(r[2].cid, '00000014', 'el «.0» de Excel');
   assert.match(r[3].err || '', /revisar a mano/, 'Customer ID y DNI de otro comercio: no se adivina');
+  const fila = await p.evaluate(() => validarBBVA(['RUC', 'Gestion_Con_Contacto', 'Reactivado'], [['20000000013.0', 'Si', 'Si']]).res[0]);
+  assert.deepEqual([fila.cid, fila.doc, fila.err], ['00000013', '20000000013', []], 'el RUC de un comercio con Customer ID antiguo no se enlaza');
   assert.match(r[4].err || '', /no está en la base/); assert.match(r[5].err || '', /ni un RUC/); assert.match(r[6].err || '', /RUC no está/);
   await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
 });

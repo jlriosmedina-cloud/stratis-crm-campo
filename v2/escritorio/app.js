@@ -260,6 +260,10 @@ async function cargarBase(){
   (data || []).forEach(c => { if (c.documento) S.docMap[c.documento] = c.customer_id; });
   S.hayOrigen = (data || []).some(c => c.origen); (data || []).forEach(c => { S.baseMap[c.customer_id] = c; });
 }
+// Identificador visible (Jose, 22/10): el documento de BBVA (RUC o DNI) si el comercio lo tiene; si no (base anterior), el Customer ID.
+// Los comercios que ya existían conservan su Customer ID antiguo, que no es el que manejan BBVA y Jose.
+const docDe = cid => (S.baseMap[cid] || {}).documento || "";
+const idTxt = cid => docDe(cid) ? "Doc. BBVA " + docDe(cid) : "Customer ID " + (cid || "—");
 const enCartera = c => c.origen !== "salida" || (c.visitas || 0) > 0;
 // Comercio que suma a la meta de visitados (Jose, 21/10): solo la base nueva, igual que v2_avance. La base anterior va aparte.
 // En un periodo sin bloques (sin origen) cuenta todo, como antes.
@@ -428,7 +432,7 @@ function cascaron(){
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
-        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hoja KPIs y hoja Base (una fila por Customer ID)">Base para BBVA</button>
+        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hoja KPIs y hoja Base (una fila por comercio, con su documento de BBVA)">Base para BBVA</button>
         <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
         <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
@@ -470,7 +474,7 @@ function panelRetenidas(){
   if (!l.length) return "";
   return `<div class="panel" style="margin-bottom:14px;border-color:var(--rojo)"><div class="barra"><b>${l.length === 1 ? "Una visita retenida" : l.length + " visitas retenidas"} en el celular</b><span class="lbl">El servidor las rechazó y todavía no están registradas. El ejecutivo puede corregirlas y reenviarlas; si la descartas, su celular la quita al sincronizar.</span></div>
     <div class="tabla-wrap"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Visita</th><th>Qué respondió el servidor</th><th class="n">Intentos</th><th class="n">Días retenida</th><th></th></tr></thead><tbody>
-    ${l.map(r => `<tr><td>${esc(r.ejecutivo || r.correo)}</td><td>${esc(r.comercio || "—")}<br><small class="muted">ID ${esc(r.customer_id || "—")}</small></td>
+    ${l.map(r => `<tr><td>${esc(r.ejecutivo || r.correo)}</td><td>${esc(r.comercio || "—")}<br><small class="muted">${esc(idTxt(r.customer_id))}</small></td>
       <td>${r.visitado_en ? ddhh(r.visitado_en) : "—"}<br><small class="muted">${esc(r.payload && r.payload.p_con === "Nadie" ? (r.payload.p_motivo === "Dirección errada" ? "El comercio no está en esta dirección" : "No se pudo hacer la visita") : r.payload && r.payload.p_que || "")}</small></td>
       <td>${esc(r.mensaje)}</td><td class="n num">${r.intentos}</td><td class="n num">${Math.max(0, Math.floor((Date.now() - new Date(r.reportada_en || Date.now())) / 86400000))}</td>
       <td><button class="btn" data-descartar-ret="${esc(r.cliente_uid)}">Descartar</button></td></tr>`).join("")}
@@ -522,7 +526,7 @@ function vistaValidacion(){
           <td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>
           <td class="num"><b>${hh(v.visitado_en)}</b>${esHoy(v) ? "" : `<br><small style="color:var(--muted)">${dd(v.visitado_en)}</small>`}</td>
           <td title="${esc(e.nombre)}"><span class="ej">${AVATAR(e)}<span class="ej-n">${esc(nombreCorto(e.nombre))}</span></span></td>
-          <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(v.customer_id)} · ${esc(v.distrito || "sin distrito")}</small></td>
+          <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(idTxt(v.customer_id))} · ${esc(v.distrito || "sin distrito")}</small></td>
           <td class="res">${resumenRes(v)}</td>
           <td class="sn">${sn.length ? `<div class="sn-l" style="margin-top:0">${sn.map(([k,t]) => `<span class="senal ${k}">${esc(t)}</span>`).join("")}</div>` : `<span class="muted" style="font-size:12px">—</span>`}</td>
           ${S.filtro === "todos" ? `<td>${pill(v)}</td>` : ""}
@@ -611,7 +615,7 @@ function ficha(v){
   return `<div class="panel ficha">
     <div class="cab">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><h2>${esc(v.comercio)}</h2>${pill(v)}</div>
-      <div class="meta">${esc(v.razon_social || "")}${v.ruc ? " · RUC " + esc(v.ruc) : ""} · Customer ID <b>${esc(v.customer_id)}</b><br>${esc(v.direccion || "sin dirección")}${v.distrito ? ", " + esc(v.distrito) : ""}${v.ruta ? ` · ${esc(v.ruta)}${v.orden ? " orden " + v.orden : ""}` : ""}${v.terminales ? ` · ${v.terminales} terminal${v.terminales>1?"es":""}` : ""}${v.tasa_debito != null ? ` · débito ${tasa(v.tasa_debito)} · crédito ${tasa(v.tasa_credito)}` : ""}${c.estado ? ` · en el CRM: ${esc(c.estado)}` : ""}</div>
+      <div class="meta">${esc(v.razon_social || "")}${v.ruc && v.ruc !== docDe(v.customer_id) ? " · RUC " + esc(v.ruc) : ""} · ${docDe(v.customer_id) ? "Doc. BBVA" : "Customer ID"} <b>${esc(docDe(v.customer_id) || v.customer_id)}</b><br>${esc(v.direccion || "sin dirección")}${v.distrito ? ", " + esc(v.distrito) : ""}${v.ruta ? ` · ${esc(v.ruta)}${v.orden ? " orden " + v.orden : ""}` : ""}${v.terminales ? ` · ${v.terminales} terminal${v.terminales>1?"es":""}` : ""}${v.tasa_debito != null ? ` · débito ${tasa(v.tasa_debito)} · crédito ${tasa(v.tasa_credito)}` : ""}${c.estado ? ` · en el CRM: ${esc(c.estado)}` : ""}</div>
     </div>
     <div class="cuerpo">
       ${v.estado_anul === "pendiente" ? `<div class="aviso warn"><b>${esc(nomDe(v.anul_pedida_por))} pide anular esta visita</b> (${ddhh(v.anul_pedida_en)}): «${esc(v.anul_motivo || "")}». Si la anulas, deja de contar; si rechazas el pedido, sigue contando.</div>` : ""}
@@ -893,13 +897,13 @@ function vistaAuditoria(){
 }
 function traza(){
   const q = S.busca.trim().toLowerCase();
-  const lista = S.act.filter(v => !q || (v.comercio||"").toLowerCase().includes(q) || v.customer_id.includes(q) || (v.ruc||"").includes(q) || (v.ejecutivo||"").toLowerCase().includes(q) || (v.distrito||"").toLowerCase().includes(q)).slice(0, 80);
+  const lista = S.act.filter(v => !q || (v.comercio||"").toLowerCase().includes(q) || v.customer_id.includes(q) || docDe(v.customer_id).includes(q) || (v.ruc||"").includes(q) || (v.ejecutivo||"").toLowerCase().includes(q) || (v.distrito||"").toLowerCase().includes(q)).slice(0, 80);
   if (!S.traza || !S.act.find(v=>v.id===S.traza)) S.traza = lista[0]?.id || null;
   const v = S.act.find(x => x.id === S.traza);
   return `<div class="grid2">
     <div class="panel">
-      <div class="barra"><div class="buscar" style="flex:1">${ICON.lupa}<input id="qTraza" placeholder="Comercio, Customer ID, RUC, distrito o ejecutivo" value="${esc(S.busca)}"></div></div>
-      <div class="lista" style="max-height:calc(100vh - 300px);overflow:auto">${lista.map(x => `<button class="${S.traza===x.id?"on":""}" data-traza="${x.id}">${AVATAR(ejDe(x.correo))}<div class="t"><b>${esc(x.comercio)}</b><small class="num">${ddhh(x.visitado_en)} · ${esc(x.customer_id)}</small></div>${pill(x)}</button>`).join("") || `<div class="vacio">Sin resultados</div>`}</div>
+      <div class="barra"><div class="buscar" style="flex:1">${ICON.lupa}<input id="qTraza" placeholder="Comercio, documento BBVA, Customer ID, RUC, distrito o ejecutivo" value="${esc(S.busca)}"></div></div>
+      <div class="lista" style="max-height:calc(100vh - 300px);overflow:auto">${lista.map(x => `<button class="${S.traza===x.id?"on":""}" data-traza="${x.id}">${AVATAR(ejDe(x.correo))}<div class="t"><b>${esc(x.comercio)}</b><small class="num">${ddhh(x.visitado_en)} · ${esc(docDe(x.customer_id) || x.customer_id)}</small></div>${pill(x)}</button>`).join("") || `<div class="vacio">Sin resultados</div>`}</div>
     </div>
     ${v ? trazaDetalle(v) : `<div class="card"><div class="vacio">Elige una visita.</div></div>`}
   </div>`;
@@ -912,10 +916,10 @@ function trazaDetalle(v){
   const lag = Math.round((D(v.recibido_en) - D(v.visitado_en))/60000);
   const ev = eventos(v); const corr = ev.filter(b => ["resultado","comentario","traslado","ubicacion"].includes(b.accion)).length;
   const c = S.baseMap[v.customer_id] || {};
-  const texto = [`Visita ${v.id} · ${v.comercio} (Customer ID ${v.customer_id})`, `Ejecutivo: ${e.nombre}`, `Declarada ${ddhh(v.visitado_en)} · recibida ${ddhh(v.recibido_en)} (+${lag} min)`, `GPS: ${v.lat==null?"sin ubicación":`${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} ±${Math.round(v.precision_m)} m · a ${mDist(v.distancia_m)} del comercio`}`, `Cómo fue: ${comoFue(v).join(" · ")} (base: ${v.con}${v.motivo?" · "+v.motivo:""} · ${v.que}${v.decision?" · "+v.decision:""})`, `Comentario: ${v.comentario||""}`, `Estado: ${ESTADO[estadoDe(v)][1]}${v.validacion_motivo ? " · " + v.validacion_motivo : ""}${v.fuera_plazo ? " · FUERA DE PLAZO (tenía hasta el " + fISO(v.plazo_hasta) + "), no cuenta" : ""}`, "", "Bitácora:", ...ev.map(b => `- ${ddhh(b.en)} · ${b.accion} · ${nomDe(b.por)}${b.antes?` · antes: ${b.antes} · después: ${b.despues}`:b.despues?` · ${b.despues}`:""}`)].join("\n");
+  const texto = [`Visita ${v.id} · ${v.comercio} (${idTxt(v.customer_id)})`, `Ejecutivo: ${e.nombre}`, `Declarada ${ddhh(v.visitado_en)} · recibida ${ddhh(v.recibido_en)} (+${lag} min)`, `GPS: ${v.lat==null?"sin ubicación":`${v.lat.toFixed(5)}, ${v.lng.toFixed(5)} ±${Math.round(v.precision_m)} m · a ${mDist(v.distancia_m)} del comercio`}`, `Cómo fue: ${comoFue(v).join(" · ")} (base: ${v.con}${v.motivo?" · "+v.motivo:""} · ${v.que}${v.decision?" · "+v.decision:""})`, `Comentario: ${v.comentario||""}`, `Estado: ${ESTADO[estadoDe(v)][1]}${v.validacion_motivo ? " · " + v.validacion_motivo : ""}${v.fuera_plazo ? " · FUERA DE PLAZO (tenía hasta el " + fISO(v.plazo_hasta) + "), no cuenta" : ""}`, "", "Bitácora:", ...ev.map(b => `- ${ddhh(b.en)} · ${b.accion} · ${nomDe(b.por)}${b.antes?` · antes: ${b.antes} · después: ${b.despues}`:b.despues?` · ${b.despues}`:""}`)].join("\n");
   return `<div class="card">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
-      <div><h2>${esc(v.comercio)} ${pill(v)}</h2><div class="sub">Customer ID ${esc(v.customer_id)}${v.ruc ? " · RUC " + esc(v.ruc) : ""} · ${esc(v.distrito || "")} · ${esc(e.nombre)}${c.estado ? " · en el CRM: " + esc(c.estado) : ""}</div></div>
+      <div><h2>${esc(v.comercio)} ${pill(v)}</h2><div class="sub">${esc(idTxt(v.customer_id))}${docDe(v.customer_id) ? " · Customer ID " + esc(v.customer_id) : ""}${v.ruc && v.ruc !== docDe(v.customer_id) ? " · RUC " + esc(v.ruc) : ""} · ${esc(v.distrito || "")} · ${esc(e.nombre)}${c.estado ? " · en el CRM: " + esc(c.estado) : ""}</div></div>
       <div style="display:flex;gap:8px"><button class="btn" data-copiar>Copiar como texto</button><button class="btn q" data-ir-cola="${v.id}">Abrir en validación</button></div>
     </div>
     <div class="mini" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
@@ -1028,7 +1032,7 @@ function cuadroComision(){
     ${fila("<b>Total</b>", fs)}
   </tbody></table></div>
   <details style="margin-top:8px"><summary>Detalle por comercio (${fs.length})</summary><div style="overflow:auto"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Primera visita con contacto</th><th class="n">Días con trx</th><th>Estado</th><th>Contactado</th></tr></thead><tbody>
-    ${det.map(f => `<tr><td class="com"><b>${esc(f.c.nombre_comercial || f.c.razon_social || "")}</b><small>${esc(f.c.customer_id)}</small></td><td>${esc(nombreCorto(ejDe(f.c.correo).nombre))}</td><td class="num">${fISO(f.d1)}</td><td class="n num">${f.c.dias_trx || 0}</td><td><span class="pill ${PILL[f.est]}">${COL.find(x => x[0] === f.est)[1]}</span></td><td>${f.cont ? "Sí" : "—"}</td></tr>`).join("")}
+    ${det.map(f => `<tr><td class="com"><b>${esc(f.c.nombre_comercial || f.c.razon_social || "")}</b><small>${esc(idTxt(f.c.customer_id))}</small></td><td>${esc(nombreCorto(ejDe(f.c.correo).nombre))}</td><td class="num">${fISO(f.d1)}</td><td class="n num">${f.c.dias_trx || 0}</td><td><span class="pill ${PILL[f.est]}">${COL.find(x => x[0] === f.est)[1]}</span></td><td>${f.cont ? "Sí" : "—"}</td></tr>`).join("")}
   </tbody></table></div></details></div>`;
 }
 /* Recupero del POS (09/10/2026): lo que hizo cada ejecutivo con los comercios que desistieron. Jose valida u observa. */
@@ -1057,7 +1061,7 @@ function cuadroRecupero(){
     ${fila("<b>Total</b>", l, sg)}
   </tbody></table></div>
   ${det.length ? `<div style="overflow:auto;margin-top:10px"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Paso</th><th class="n">Días sin avance</th><th class="n">Llamadas sin respuesta</th><th>Caso de Soporte</th><th>Lo último</th><th></th></tr></thead><tbody>
-    ${det.map(x => { const u = (x.historial || []).at(-1); return `<tr><td class="com"><b>${esc(nom(x.customer_id))}</b><small>${esc(x.customer_id)}</small></td><td>${esc(nombreCorto(ejDe(x.correo).nombre))}</td>
+    ${det.map(x => { const u = (x.historial || []).at(-1); return `<tr><td class="com"><b>${esc(nom(x.customer_id))}</b><small>${esc(idTxt(x.customer_id))}</small></td><td>${esc(nombreCorto(ejDe(x.correo).nombre))}</td>
       <td><span class="pill ${x.paso === "validado" ? "val" : x.paso === "trabado" || x.paso === "cambio" ? "anu" : x.paso === "entregado" || x.paso === "sigue" ? "obs" : "pend"}">${RECUP_NOM[x.paso] || x.paso}</span></td>
       <td class="n num ${recupLento(x) ? "mal" : ""}">${dias(x)}</td><td class="n num">${x.intentos || 0}</td><td>${esc(x.caso_soporte || "—")}</td>
       <td>${u ? `${fISO(diaLimaE(u.en))} · ${esc(u.detalle || u.accion)}${u.nota ? " · " + esc(u.nota) : ""}` : "Sin acciones todavía"}</td>
@@ -1086,7 +1090,7 @@ function cruceBBVA(){
   </div>
   <div class="panel"><div class="barra"><b>Reuniones concretadas y lo que hizo el POS después</b><span class="lbl">Reactivado = transacciona en dos días distintos después de la visita. Lo confirma la data, no el ejecutivo.</span></div>
   <div style="overflow:auto"><table class="datos"><thead><tr><th>Visita</th><th>Ejecutivo</th><th>Comercio</th><th>Lo que dijo</th><th class="n">Días con trx</th><th>Estado</th></tr></thead><tbody>
-    ${filas.map(f => `<tr><td class="num">${ddhh(f.v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(f.v.correo))}${esc(nombreCorto(ejDe(f.v.correo).nombre))}</span></td><td class="com"><b>${esc(f.v.comercio)}</b><small>${esc(f.v.customer_id)}</small></td><td>${esc(f.v.decision||"—")}</td><td class="n"><span class="puntos"><i class="${f.dias>=1?(f.dias>=2?"on":"mid"):""}"></i><i class="${f.dias>=2?"on":""}"></i></span> <span class="num">${f.dias}</span></td><td>${PILL[f.est]}</td></tr>`).join("") || `<tr><td colspan="6" class="vacio">Todavía no hay reuniones concretadas en el periodo.</td></tr>`}
+    ${filas.map(f => `<tr><td class="num">${ddhh(f.v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(f.v.correo))}${esc(nombreCorto(ejDe(f.v.correo).nombre))}</span></td><td class="com"><b>${esc(f.v.comercio)}</b><small>${esc(idTxt(f.v.customer_id))}</small></td><td>${esc(f.v.decision||"—")}</td><td class="n"><span class="puntos"><i class="${f.dias>=1?(f.dias>=2?"on":"mid"):""}"></i><i class="${f.dias>=2?"on":""}"></i></span> <span class="num">${f.dias}</span></td><td>${PILL[f.est]}</td></tr>`).join("") || `<tr><td colspan="6" class="vacio">Todavía no hay reuniones concretadas en el periodo.</td></tr>`}
   </tbody></table></div></div>`;
 }
 
@@ -1097,7 +1101,7 @@ const TIPOS = {
   diario: { t:"Transacciones diarias", d:"Una fila por comercio y día: cuántas transacciones hubo ese día. Es la carga que confirma las reactivaciones.", ej:"2026-09-24,41000123,4,312.50" },
   acumulado_mes: { t:"Acumulado del mes por corte", d:"Una fila por comercio y fecha de corte con el acumulado del mes. El CRM cuenta un día cuando el acumulado sube.", ej:"2026-09-24,41000123,38,4120.00" },
   totales_bbva: { t:"Totales de BBVA por corte", d:"Lo que ves en el drive de BBVA: reactivados, facturación y transacciones por grupo. Se tipea, sin archivo. Es lo que usa la presentación.", ej:"" },
-  resultados_bbva: { t:"Resultados de BBVA (reactivación)", d:"Tu Excel de BBVA: una fila por Customer ID con gestión con contacto, reactivado y, si lo tienes, el monto facturado. Solo lo ves tú.", ej:"00000001,Si,Si,12500.00" },
+  resultados_bbva: { t:"Resultados de BBVA (reactivación)", d:"Tu Excel de BBVA: una fila por comercio (RUC, DNI o Customer ID) con gestión con contacto, reactivado y, si lo tienes, el monto facturado. Solo lo ves tú.", ej:"00000001,Si,Si,12500.00" },
 };
 const COLS = ["fecha_corte","customer_id","trx","vol"];
 const ALIAS = { fecha_corte:["fecha_corte","fecha","fecha corte","corte","date","fec_corte"], customer_id:["customer_id","customer id","customerid","cid","cliente","codigo","código","id","documento","documento_bbva2","ruc","dni","nro_documento","nro documento","numero_documento","ruc_dni","ruc/dni"], trx:["trx","transacciones","nro_trx","n_trx","cantidad","operaciones","txs"], vol:["vol","volumen","monto","importe","facturacion","facturación","venta","amount"] };
@@ -1689,8 +1693,8 @@ const FUERA_LISTA = ["Falla del POS sin detalle", "Sus clientes no quieren pagar
 function csvFeedback(){
   const q = x => `"${String(x == null ? "" : x).replace(/"/g, '""')}"`;
   const filas = visitasFeedback().filter(o => o.f.fuente && tipoCoincide(o)).sort((a, b) => a.v.visitado_en < b.v.visitado_en ? -1 : 1);
-  const cab = ["Fecha","Hora","Ejecutivo","Customer ID","Comercio","Distrito","Con quién habló","Qué pasó","Decisión","Feedback (tipos BBVA)","Feedback agregado por Stratis","Fuera de la lista de BBVA","Qué ofreció el ejecutivo","POS de otra marca","Demora del abono","Fuente","Confianza","Comentario del ejecutivo","Feedback adicional"];
-  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(({ v, f }) => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", f.tipos.filter(t => FB_BBVA.has(t) || t === FB_NINGUNO).join(" | "), f.tipos.filter(t => !FB_BBVA.has(t) && t !== FB_NINGUNO).join(" | "), f.fuera.join(" | "), (f.acc || []).join(" | "), competidorTxt(f.ext), demoraTxt(f.ext), (f.delComentario ? "Ejecutivo + inferido del comentario" : FUENTE_TXT[f.fuente]), f.confianza || "", (v.comentario || "").replace(/\s+/g, " "), f.nota || ""].map(q).join(";"))).join("\r\n");
+  const cab = ["Fecha","Hora","Ejecutivo","Documento BBVA","Customer ID","Comercio","Distrito","Con quién habló","Qué pasó","Decisión","Feedback (tipos BBVA)","Feedback agregado por Stratis","Fuera de la lista de BBVA","Qué ofreció el ejecutivo","POS de otra marca","Demora del abono","Fuente","Confianza","Comentario del ejecutivo","Feedback adicional"];
+  const txt = "﻿" + [cab.map(q).join(";")].concat(filas.map(({ v, f }) => [fISO(iso(v.visitado_en)), hh(v.visitado_en), ejDe(v.correo).nombre, docDe(v.customer_id), v.customer_id, v.comercio, v.distrito, v.con, v.que, v.decision || "", f.tipos.filter(t => FB_BBVA.has(t) || t === FB_NINGUNO).join(" | "), f.tipos.filter(t => !FB_BBVA.has(t) && t !== FB_NINGUNO).join(" | "), f.fuera.join(" | "), (f.acc || []).join(" | "), competidorTxt(f.ext), demoraTxt(f.ext), (f.delComentario ? "Ejecutivo + inferido del comentario" : FUENTE_TXT[f.fuente]), f.confianza || "", (v.comentario || "").replace(/\s+/g, " "), f.nota || ""].map(q).join(";"))).join("\r\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type:"text/csv;charset=utf-8" }));
   a.download = `feedback_visitas_${S.periodo ? S.periodo.id : ""}${S.fbSemana ? "_semana_" + S.fbSemana : ""}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   toast(`Se descargó el CSV con ${filas.length} visita${filas.length === 1 ? "" : "s"}.`);
@@ -1872,8 +1876,8 @@ function pqEtiqueta(k){
 function csvPq(){
   const q = x => `"${String(x == null ? "" : x).replace(/"/g, '""')}"`;
   const l = comerciosPq().filter(pqCoincide).sort((a, b) => a.v.customer_id < b.v.customer_id ? -1 : 1);
-  const cab = ["Customer ID","Comercio","Distrito","Ejecutivo","Visitas","Última visita","Con quién habló","Por qué no hubo contacto","Qué pasó","Decisión","Resultado","Qué lo convenció","Fuente (qué lo convenció)","Feedback (tipos BBVA)","Fuera de la lista de BBVA","Fuente (feedback)","Dirección correcta","Comercio ubicado","Comentario"];
-  const txt = "﻿" + [cab.map(q).join(";")].concat(l.map(({ v, r, f, m, n }) => [v.customer_id, v.comercio, v.distrito, ejDe(v.correo).nombre, n, fISO(iso(v.visitado_en)) + " " + hh(v.visitado_en), v.con, v.con === "Nadie" ? v.motivo : "", v.con === "Nadie" ? "" : v.que, v.decision || "", RES_TXT[r],
+  const cab = ["Documento BBVA","Customer ID","Comercio","Distrito","Ejecutivo","Visitas","Última visita","Con quién habló","Por qué no hubo contacto","Qué pasó","Decisión","Resultado","Qué lo convenció","Fuente (qué lo convenció)","Feedback (tipos BBVA)","Fuera de la lista de BBVA","Fuente (feedback)","Dirección correcta","Comercio ubicado","Comentario"];
+  const txt = "﻿" + [cab.map(q).join(";")].concat(l.map(({ v, r, f, m, n }) => [docDe(v.customer_id), v.customer_id, v.comercio, v.distrito, ejDe(v.correo).nombre, n, fISO(iso(v.visitado_en)) + " " + hh(v.visitado_en), v.con, v.con === "Nadie" ? v.motivo : "", v.con === "Nadie" ? "" : v.que, v.decision || "", RES_TXT[r],
     m ? m.motivos.join(" | ") : "", m && m.fuente ? FUENTE_TXT[m.fuente] : "", f ? f.tipos.join(" | ") : "", f ? f.fuera.join(" | ") : "", f && f.fuente ? FUENTE_TXT[f.fuente] : "",
     v.direccion_ok === true ? "Sí" : v.direccion_ok === false ? "No" : "",
     v.direccion_ok === false ? (v.comercio_ubicado === true ? "Sí, en otra dirección" : v.comercio_ubicado === false ? "No" : "No se preguntó") : "", (v.comentario || "").replace(/\s+/g, " ")].map(q).join(";"))).join("\r\n");
@@ -1997,7 +2001,7 @@ function vistaIndicadores(){
 
 /* =========================================================================
    Base para BBVA (Excel) · modelo de Jose del 30/09/2026
-   Llave Customer_ID (texto, 8 dígitos). Dos hojas: KPIs · Base. Todos los KPIs son fórmulas sobre la hoja Base.
+   Documento (RUC o DNI) primero y Customer_ID después, los dos como texto; una fila por comercio. Dos hojas: KPIs · Base. Todos los KPIs son fórmulas sobre la hoja Base.
    ========================================================================= */
 const FB_29 = ["Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS", "Solicitó cambio de equipo", "Le falta una función"];
 const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "POS no enciende", "Soporte no ayudó al comercio",
@@ -2035,9 +2039,10 @@ async function baseBBVA(){
       ws.getColumn(1).numFmt = "@"; ws.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
       ws.eachRow((row, n) => { if (n > 1) row.eachCell(c => c.font = { name:"Arial", size:10 }); });
     };
-    // Base: una fila por Customer ID. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
-    // «Documento» (Jose, 21/10): RUC de 11 o DNI de 8 de la base 2026-11, como texto, al lado de Customer_ID (que no cambia).
-    const colsB = ["Customer_ID","Documento","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
+    // Base: una fila por comercio. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
+    // «Documento» (Jose, 22/10) va primero: RUC de 11 o DNI de 8, la llave de BBVA en la base 2026-11, como texto. Customer_ID va segundo
+    // y queda para la base anterior, que no tiene documento. El universo se cuenta por Customer_ID, que está en todas las filas.
+    const colsB = ["Documento","Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
     const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
       const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
       l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); if (f.delComentario) fuentes.add("Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
@@ -2047,7 +2052,7 @@ async function baseBBVA(){
       // Para el cruce con los volúmenes de BBVA: primera visita válida (con GPS y a tiempo) en la que habló con alguien del comercio,
       // aunque haya sido en otra dirección (dirección errada pero comercio ubicado)
       const gc = l.find(v => valida(v) && v.con !== "Nadie"), fGc = gc ? iso(gc.visitado_en).split("-").map(Number) : null;
-      return [c.customer_id, c.documento || "",
+      return [c.documento || "", c.customer_id,
         l.some(valida) ? "SI" : "NO", gc ? "SI" : "NO", fGc ? new Date(Date.UTC(fGc[0], fGc[1] - 1, fGc[2])) : null,
         gc ? (l.some(v => valida(v) && v.con !== "Nadie" && v.direccion_ok === false) ? "SI" : "NO") : "", l.length, l.filter(valida).length, l.filter(v => v.con !== "Nadie").length, l.length ? dmy(iso(l[0].visitado_en)) : "", ult ? dmy(iso(ult.visitado_en)) : "",
         ult ? ult.con : "", ult ? ult.que + (ult.motivo ? " · " + ult.motivo : "") : "", ult ? ult.decision || "" : "", ult ? String(ult.comentario || "").replace(/\s+/g, " ") : "",
@@ -2057,9 +2062,9 @@ async function baseBBVA(){
         FB_29.map(t => fb.has(t) ? 1 : 0), [ult && ult.motivo === "Cerró definitivamente" ? "SI" : "NO", c.correo ? ejDe(c.correo).nombre : ""]); });
     const wsB = wb.addWorksheet("Base");
     const nB0 = colsB.length - FB_29.length - 2;   // columnas antes de las agregadas al final
-    tabla(wsB, "Base", colsB, filasB, [12,13,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
+    tabla(wsB, "Base", colsB, filasB, [13,12,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
       { k:i => (i >= 3 && i <= 19) || i >= colsB.length - 1, fb:i => i >= 20 && i < colsB.length - 1, si:i => i > nB0 - 3 && i <= nB0 });
-    wsB.getColumn(2).numFmt = "@"; wsB.getColumn(colsB.indexOf("Fecha_Primera_Gestion_Con_Contacto") + 1).numFmt = "dd/mm/yyyy";
+    wsB.getColumn(2).numFmt = "@"; wsB.views = [{ state:"frozen", xSplit:2, ySplit:1 }]; wsB.getColumn(colsB.indexOf("Fecha_Primera_Gestion_Con_Contacto") + 1).numFmt = "dd/mm/yyyy";
     const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || (t === FB_NINGUNO ? "Sin observaciones" : "Otro");
     // KPIs: fórmulas sobre la hoja Base (rangos fijos, se recalculan en Excel). Sin notas al pie (Jose, 30/09).
     const nB = filasB.length + 1;
@@ -2133,7 +2138,7 @@ document.addEventListener("click", async ev => {
   if (t.hasAttribute("data-recup-observar")){ validarRecupero(t.dataset.recupObservar, false); return; }
   if (t.hasAttribute("data-descartar-ret")){
     const uid = t.dataset.descartarRet, r = (S.retenidas || []).find(x => x.cliente_uid === uid); if (!r) return;
-    const nota = prompt(`¿Descartar la visita retenida de ${r.ejecutivo || r.correo} en ${r.comercio || "ID " + r.customer_id}? Su celular la quita al sincronizar.\n\nNota (opcional):`, "");
+    const nota = prompt(`¿Descartar la visita retenida de ${r.ejecutivo || r.correo} en ${r.comercio || idTxt(r.customer_id)}? Su celular la quita al sincronizar.\n\nNota (opcional):`, "");
     if (nota === null) return;
     const { error } = await sb.rpc("v2_descartar_retenida", { p_cliente_uid: uid, p_nota: nota.trim() || null });
     if (error){ toast("No se descartó: " + error.message); return; }
@@ -2774,7 +2779,7 @@ function armarLaminas(pres, D){
     }
     lectura(s, B ? `${B.cuentan === 1 ? "1 comercio reactivado cuenta" : `${numPE(B.cuentan)} comercios reactivados cuentan`} para Stratis (${pc(B.cuentan, D.visitados)} % de conversión frente a una meta de ${D.meta.conv} %)${B.facturado != null ? ` y facturan ${soles(B.facturado)}` : ""}.` : "BBVA confirmará la reactivación y la facturación cuando su data esté actualizada.",
       B ? "sostener la entrega de la data de BBVA para seguir cada reactivación por corte." : "");
-    pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (Customer ID, gestión con contacto y reactivado), cruzada con la cartera de Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: registro de visitas de Stratis al ${dd}.`); }
+    pie(s, B ? `Fuente: data de BBVA al ${fISO(B.corte)} (documento BBVA (RUC o DNI), gestión con contacto y reactivado), cruzada con la cartera de Stratis. Cifras en soles.${B.fueraCartera ? ` ${B.fueraCartera} filas de la data no están en la cartera del periodo y no se cuentan.` : ""}` : `Fuente: registro de visitas de Stratis al ${dd}.`); }
 
   // 8. La voz del comercio. Formato validado con BBVA (01/10): una sola tabla que se lee como línea de tiempo, de izquierda a
   // derecha: la visita, lo que dijo el comercio y lo que hizo el ejecutivo (en frases). Con contacto arriba, sin contacto abajo.
