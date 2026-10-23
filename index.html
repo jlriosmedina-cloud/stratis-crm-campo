@@ -430,7 +430,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "e2a57c";
+const BUILD = "f83afb";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -2432,6 +2432,47 @@ setTimeout(revisarVersion, 15000);
 setInterval(revisarVersion, 5 * 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") revisarVersion(); });
 window.addEventListener("online", revisarVersion);
+
+/* ---------- mudanza al GitHub de Stratis (22/10) ----------
+   El CRM pasa a publicarse en el link de Stratis. La cola sin señal y la sesión viven en el navegador y no pasan solas
+   a otra dirección, así que en la dirección anterior el celular primero envía lo que tenga guardado y solo con la cola
+   vacía pide pasar al link nuevo. Con visitas pendientes o por revisar, la app sigue funcionando aquí (Regla n.º 1).
+   Sin señal tampoco pide nada: aquí se puede seguir registrando en la cola, y en el link nuevo todavía no hay sesión.
+   URL_NUEVA vacía = sin mudanza. En el link nuevo no hace nada, porque el host ya es otro. */
+const URL_NUEVA = "https://crm-bbva-peru-qa.mystratis.com/";
+const HOST_ANTERIOR = "jlriosmedina-cloud.github.io";
+const MUDANZA = !!URL_NUEVA && location.hostname === HOST_ANTERIOR && !PREVIA && !COMO;
+// «Todavía no puedo entrar» o el link nuevo sin responder: el aviso se aparta un rato y el ejecutivo sigue aquí.
+// La hora se guarda en el navegador para que recargar la app no lo vuelva a mostrar antes de tiempo.
+const mudanzaLuego = () => { try { return Number(localStorage.getItem("stratis-v2-mudanza-luego")) || 0; } catch(e){ return 0; } };
+function posponerMudanza(ms){
+  try { localStorage.setItem("stratis-v2-mudanza-luego", String(Date.now() + ms)); } catch(e){}
+  clearTimeout(S._mudanzaTimer); S._mudanzaTimer = setTimeout(revisarMudanza, ms + 1000);
+  const hay = document.getElementById("avisoMudanza"); if (hay) hay.remove();
+}
+function revisarMudanza(){
+  if (!MUDANZA) return;
+  const hay = document.getElementById("avisoMudanza");
+  if ((S.cola || []).length || ocupadoParaActualizar() || S.versionNueva || !navigator.onLine || mudanzaLuego() > Date.now()){ if (hay) hay.remove(); return; }
+  if (hay) return;
+  document.body.insertAdjacentHTML("beforeend", `<div id="avisoMudanza" class="av-velo" role="alertdialog" aria-modal="true" aria-labelledby="muTit" aria-describedby="muTxt">
+    <div class="av-caja"><div class="av-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></div>
+    <h2 id="muTit">El CRM de campo cambió de link</h2>
+    <p id="muTxt">Tus visitas ya están enviadas. Desde ahora entras por el link nuevo, con tu mismo correo y contraseña. Al abrirlo, guárdalo en la pantalla de inicio de tu celular.</p>
+    <button type="button" class="btn btn-pri" data-ir-nuevo>Ir al CRM nuevo</button>
+    <button type="button" class="btn btn-sec" data-mudanza-luego>Todavía no puedo entrar</button></div></div>`);
+  const b = document.querySelector("[data-ir-nuevo]");
+  // Antes de dejar este link, confirma que el nuevo responde; si no, el ejecutivo sigue aquí y se vuelve a pedir más tarde.
+  b.onclick = async () => { b.disabled = true; b.textContent = "Abriendo…";
+    try { await fetch(URL_NUEVA, { mode:"no-cors", cache:"no-store" }); location.replace(URL_NUEVA); }
+    catch(e){ posponerMudanza(10 * 60 * 1000); avisar("El link nuevo no responde ahora. Sigue registrando aquí; te lo volveremos a pedir más tarde.", 7000); } };
+  document.querySelector("[data-mudanza-luego]").onclick = () => { posponerMudanza(60 * 60 * 1000);
+    avisar("Sigue registrando aquí. En una hora te lo volvemos a pedir; si no recuerdas tu contraseña, avísale a Jose.", 7000); };
+  setTimeout(() => b.focus(), 50);
+}
+{ const pintarSinMudanza = pintar; pintar = function(){ const r = pintarSinMudanza.apply(this, arguments); revisarMudanza(); return r; }; }
+window.addEventListener("offline", revisarMudanza);
+window.addEventListener("online", () => setTimeout(revisarMudanza, 3000));
 
 (async () => {
   const { data } = await sb.auth.getSession();
