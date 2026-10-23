@@ -430,7 +430,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "d9d49d";
+const BUILD = "f83afb";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -2439,7 +2439,7 @@ window.addEventListener("online", revisarVersion);
    vacía pide pasar al link nuevo. Con visitas pendientes o por revisar, la app sigue funcionando aquí (Regla n.º 1).
    Sin señal tampoco pide nada: aquí se puede seguir registrando en la cola, y en el link nuevo todavía no hay sesión.
    URL_NUEVA vacía = sin mudanza. En el link nuevo no hace nada, porque el host ya es otro. */
-const URL_NUEVA = "";
+const URL_NUEVA = "https://crm-bbva-peru-qa.mystratis.com/";
 const HOST_ANTERIOR = "jlriosmedina-cloud.github.io";
 const MUDANZA = !!URL_NUEVA && location.hostname === HOST_ANTERIOR && !PREVIA && !COMO;
 // «Todavía no puedo entrar» o el link nuevo sin responder: el aviso se aparta un rato y el ejecutivo sigue aquí.
