@@ -115,6 +115,7 @@ const ICON = {
   equipo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   luna:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
   sol:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+  ruta:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/></svg>',
   bloques:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h4M7 16.5h7"/></svg>',
   ojo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   ojoNo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19C5 19 1 12 1 12a19.6 19.6 0 0 1 5.1-5.9M9.9 5.2A9.9 9.9 0 0 1 12 5c7 0 11 7 11 7a19.7 19.7 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>',
@@ -243,7 +244,7 @@ async function cargarActividad(silencio){
     setTimeout(() => { nuevas.forEach(v => S.nuevas.delete(v.id)); }, 2500);
   }
   // se invalidan las bitácoras cargadas, por si hubo cambios
-  if (!silencio) S.bit = {};
+  if (!silencio){ S.bit = {}; S.rutasBit = null; }
   pintar();
 }
 // Visitas retenidas en los celulares: el servidor las rechazó y el ejecutivo no puede corregirlas. Decide Jose.
@@ -354,6 +355,7 @@ function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textC
 const VISTAS = [
   ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["bloques","Base y bloques", ICON.bloques, null],
+  ["rutas","Rutas", ICON.ruta, null],
   ["equipo","Por ejecutivo", ICON.equipo, null],
   ["mapa","Mapa de distritos", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
@@ -382,6 +384,7 @@ function pintar(){
   const c = $("#contenido");
   const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
               bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
+              rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
@@ -402,7 +405,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -862,6 +865,116 @@ function vistaBloques(){
         <td>${c.geo_lat != null ? `<a class="btn chico" target="_blank" rel="noopener" href="${gmaps(c.geo_lat, c.geo_lng)}">Maps</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>` : `<div class="vacio">No hay comercios por buscar${S.ej !== "todos" ? " para este ejecutivo" : ""}.</div>`}</div>`;
 }
+
+/* ---------- Rutas: la recomendada frente a la que arma cada ejecutivo en su celular (21/10) ----------
+   ruta y orden son la recomendada (la carga el analista); la del ejecutivo es ruta_propia/orden_propio si la armó (v2_armar_ruta).
+   Los nombres de ruta se repiten entre ejecutivos («Ruta 99 · Por ubicar»), así que todo se agrupa por correo y ruta.
+   Cada cambio deja una línea en v2_bitacora_visita con accion = 'ruta', sin visita, leída por periodo y customer_id. */
+const rutaRec = c => c.ruta || ("Distrito · " + (c.distrito || "sin distrito"));   // igual que rutas() del celular
+const rutaSuya = c => c.ruta_propia || rutaRec(c);
+const ordenSuyo = c => c.ruta_propia ? c.orden_propio : c.orden;
+const cambioRuta = c => !c.ruta_propia ? "" : c.ruta_propia !== c.ruta ? "movido" : c.orden_propio !== c.orden ? "orden" : "igual";
+const paradaTxt = (r, o) => `${esc(r)}${o ? ` · ${o}` : ""}`;
+async function cargarRutasBit(){
+  const per = S.periodo && S.periodo.id; if (!per || (S.rutasBit && S.rutasBit.per === per)) return;
+  S.rutasBit = { per, cargando:true, l:[] };
+  const l = [];
+  for (let i = 0; ; i += 1000){
+    const { data, error } = await sb.from("v2_bitacora_visita").select("*").eq("periodo", per).eq("accion", "ruta").order("en").range(i, i + 999);
+    if (error){ S.rutasBit = { per, err:error.message, l:[] }; pintar(); return; }
+    l.push(...(data || [])); if (!data || data.length < 1000) break;
+  }
+  S.rutasBit = { per, l:l.filter(x => x.accion === "ruta" && x.periodo === per && x.customer_id) }; pintar();
+}
+// La ruta de hoy, como la calcula el celular (rutaHoyDe): la de su última visita si le quedan comercios por visitar;
+// si no, la primera (por nombre) con pendientes. Solo con sus comercios, agrupados por su correo.
+function rutaHoyEj(correo){
+  const mios = S.base.filter(c => c.correo === correo), m = new Map();
+  mios.forEach(c => { const k = rutaSuya(c); if (!m.has(k)) m.set(k, []); m.get(k).push(c); });
+  const rs = [...m.entries()].map(([nombre, cs]) => ({ nombre, cs:cs.sort((a, b) => (ordenSuyo(a) || 999) - (ordenSuyo(b) || 999)) }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { numeric:true }));
+  const pendiente = r => r.cs.some(c => c.estado === "por");
+  const ultima = mios.filter(c => c.ultima_visita).sort((a, b) => String(b.ultima_visita).localeCompare(String(a.ultima_visita)))[0];
+  const rU = ultima ? rs.find(r => r.cs.includes(ultima)) : null;
+  const hoy = (rU && pendiente(rU) ? rU : null) || rs.find(pendiente) || rs[0];
+  if (!hoy) return null;
+  const rec = mios.filter(c => rutaRec(c) === hoy.nombre).sort((a, b) => (a.orden || 999) - (b.orden || 999));
+  return { nombre:hoy.nombre, suya:hoy.cs, rec };
+}
+// Cuánto se parece la ruta de hoy a la recomendada del mismo nombre
+function comparaHoy(h){
+  const enRec = new Set(h.rec.map(c => c.customer_id)), enSuya = new Set(h.suya.map(c => c.customer_id));
+  const comunes = h.suya.filter(c => enRec.has(c.customer_id)).map(c => c.customer_id);
+  return { igual:comunes.length, traidos:h.suya.length - comunes.length, sacados:h.rec.filter(c => !enSuya.has(c.customer_id)).length,
+    mismoOrden:comunes.join() === h.rec.filter(c => enSuya.has(c.customer_id)).map(c => c.customer_id).join() };
+}
+function vistaRutas(){
+  cargarRutasBit();
+  const RB = S.rutasBit || { cargando:true, l:[] }, ids = new Set(S.base.map(c => c.customer_id));
+  const bit = RB.l.filter(x => ids.has(x.customer_id));   // con el selector, solo los comercios del ejecutivo elegido
+  const porCom = {}; bit.forEach(x => { (porCom[x.customer_id] ||= []).push(x); });
+  const nombre = c => c.nombre_comercial || c.razon_social || c.customer_id;
+  const ultCambio = c => c.ruta_propia_en || ((porCom[c.customer_id] || []).slice(-1)[0] || {}).en || "";
+  const cifras = cs => { const rutas = new Set(cs.filter(c => c.ruta_propia).map(c => c.correo + "|" + c.ruta_propia));
+    const nuevas = [...rutas].filter(k => !cs.some(c => c.correo + "|" + c.ruta === k)), cids = new Set(cs.map(c => c.customer_id));
+    return { n:cs.length, mov:cs.filter(c => cambioRuta(c) === "movido").length, ord:cs.filter(c => cambioRuta(c) === "orden").length,
+      volvieron:cs.filter(c => !c.ruta_propia && porCom[c.customer_id]).length, rutas:rutas.size, nuevas:nuevas.length,
+      ult:cs.reduce((m, c) => ultCambio(c) > m ? ultCambio(c) : m, ""), lin:bit.filter(x => cids.has(x.customer_id)).length }; };
+  const filas = S.ejecutivos.filter(e => S.base.some(c => c.correo === e.correo)).map(e => ({ e, x:cifras(S.base.filter(c => c.correo === e.correo)), h:rutaHoyEj(e.correo) }));
+  const T = cifras(S.base.filter(c => c.correo));
+  const nomEj = e => `<span class="ej">${AVATAR(e)}${esc(nombreCorto(e.nombre))}</span>`;
+  const leeHoy = h => { if (!h) return `<span class="muted">sin comercios</span>`;
+    if (!h.suya.some(c => c.ruta_propia) && h.suya.length === h.rec.length) return `<b>${esc(h.nombre)}</b> <span class="pill val">la recomendada</span>`;
+    if (!h.rec.length) return `<b>${esc(h.nombre)}</b> <span class="pill obs">ruta nueva</span> <span class="muted">${h.suya.length} comercios de otras rutas</span>`;
+    const k = comparaHoy(h);
+    return `<b>${esc(h.nombre)}</b> <span class="pill obs">cambiada</span> <span class="muted">${k.igual} de ${h.rec.length} de la recomendada${k.traidos ? ` · ${k.traidos} traído${k.traidos === 1 ? "" : "s"}` : ""}${k.sacados ? ` · ${k.sacados} sacado${k.sacados === 1 ? "" : "s"}` : ""}${k.igual > 1 && !k.mismoOrden ? " · otro orden" : ""}</span>`; };
+  const filaEj = (nom, x, hoy) => `<tr><td>${nom}</td><td class="n num">${x.n}</td><td class="n num"><b>${x.mov}</b></td><td class="n num">${x.ord}</td><td class="n num">${x.volvieron}</td>
+    <td class="n num">${x.rutas}${x.nuevas ? ` <span class="muted">(${x.nuevas} nueva${x.nuevas === 1 ? "" : "s"})</span>` : ""}</td><td class="n num">${RB.cargando ? "…" : x.lin}</td><td class="num">${x.ult ? ddhh(x.ult) : "—"}</td><td>${hoy}</td></tr>`;
+  // La ruta de hoy lado a lado: la recomendada a la izquierda, la que armó a la derecha
+  const lista = (cs, lado, h) => cs.length ? `<ol class="ruta-lista">${cs.map(c => { const s = rutaSuya(c);
+      const nota = lado === "rec" ? (s !== h.nombre ? `<span class="pill anu">la sacó · ahora en ${esc(s)}</span>` : ordenSuyo(c) !== c.orden ? `<span class="pill pend">ahora parada ${ordenSuyo(c) || "—"}</span>` : "")
+        : (rutaRec(c) !== h.nombre ? `<span class="pill obs">viene de ${paradaTxt(rutaRec(c), c.orden)}</span>` : c.orden !== ordenSuyo(c) ? `<span class="pill pend">antes parada ${c.orden || "—"}</span>` : "");
+      return `<li><button class="ruta-com" data-ruta-hist="${esc(c.customer_id)}" title="Ver el historial de cambios de ruta"><span class="t"><b>${esc(nombre(c))}</b><small>${esc(c.distrito || "")}${c.estado === "por" ? "" : " · visitado"}</small></span>${nota}</button></li>`; }).join("")}</ol>`
+    : `<div class="vacio" style="padding:18px">${lado === "rec" ? "Esta ruta no está en la recomendada: la armó él." : "Sin comercios."}</div>`;
+  const panelHoy = r => !r.h ? "" : `<div class="panel ruta-hoy" style="margin-bottom:16px"><div class="barra"><b>${esc(nombreCorto(r.e.nombre))} · ruta de hoy</b><span class="lbl">${leeHoy(r.h)}</span></div>
+      <div class="split2" style="padding:12px"><div><div class="ruta-cab">Recomendada · ${r.h.rec.length} comercios</div>${lista(r.h.rec, "rec", r.h)}</div>
+        <div><div class="ruta-cab">La que armó en el celular · ${r.h.suya.length} comercios</div>${lista(r.h.suya, "suya", r.h)}</div></div></div>`;
+  // Comercios con ruta propia o con líneas en la bitácora (también los que volvieron a la recomendada)
+  const tocados = S.base.filter(c => c.ruta_propia || porCom[c.customer_id]).sort((a, b) => String(ultCambio(b)).localeCompare(String(ultCambio(a))));
+  const ESTADO_R = { movido:["obs","Movido de ruta"], orden:["pend","Otro orden"], igual:["val","Igual a la recomendada"], "":["val","Volvió a la recomendada"] };
+  const hc = S.rutaHist && ids.has(S.rutaHist) ? S.baseMap[S.rutaHist] : null, hl = hc ? (porCom[hc.customer_id] || []) : [];
+  const hist = !hc ? "" : `<div class="panel" id="rutaHist" style="margin-bottom:16px"><div class="barra"><b>Historial de ruta · ${esc(nombre(hc))}</b><span class="lbl">${esc(hc.documento || hc.customer_id)} · ${esc(nombreCorto(ejDe(hc.correo).nombre))} · recomendada ${paradaTxt(rutaRec(hc), hc.orden)} · hoy en ${paradaTxt(rutaSuya(hc), ordenSuyo(hc))}</span><button class="btn chico" data-ruta-hist="" title="Cerrar el historial" style="margin-left:auto">Cerrar</button></div>
+    ${hl.length ? `<table class="datos"><thead><tr><th>Cuándo</th><th>Quién</th><th>Antes</th><th>Después</th></tr></thead><tbody>${hl.map(x => `<tr><td class="num">${ddhh(x.en)}</td><td>${esc(nomDe(x.por))}</td><td>${esc(x.antes || "—")}</td><td>${esc(x.despues || "—")}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="vacio">${RB.cargando ? "Leyendo la bitácora…" : "Sin cambios de ruta en la bitácora de este periodo."}</div>`}</div>`;
+  return `
+  ${RB.err ? `<div class="aviso mal" style="margin-bottom:12px">No se pudo leer la bitácora de rutas: ${esc(RB.err)}</div>` : ""}
+  <div class="resumen">
+    <div class="tile acc"><div class="k">Movidos de ruta</div><div class="v num">${T.mov}<small> / ${T.n}</small></div><div class="d">comercios que hoy están en otra ruta que la recomendada</div></div>
+    <div class="tile"><div class="k">Otro orden</div><div class="v num">${T.ord}</div><div class="d">misma ruta, otra parada</div></div>
+    <div class="tile"><div class="k">Volvieron a la recomendada</div><div class="v num">${T.volvieron}</div><div class="d">los movió y después los regresó</div></div>
+    <div class="tile"><div class="k">Rutas armadas</div><div class="v num">${T.rutas}</div><div class="d">${T.nuevas} con un nombre que no está en su recomendada</div></div>
+    <div class="tile"><div class="k">Cambios en la bitácora</div><div class="v num">${RB.cargando ? "…" : T.lin}</div><div class="d">una línea por comercio cada vez que guarda una ruta</div></div>
+  </div>
+  <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Rutas por ejecutivo</b><span class="lbl">la recomendada (la que carga el analista) frente a la que arma cada uno en su celular</span></div>
+    <div style="overflow:auto"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Comercios</th><th class="n">Movidos de ruta</th><th class="n">Otro orden</th><th class="n">Volvieron</th><th class="n">Rutas armadas</th><th class="n">Cambios</th><th>Último cambio</th><th>Ruta de hoy</th></tr></thead><tbody>
+      ${filas.map(r => filaEj(nomEj(r.e), r.x, leeHoy(r.h))).join("")}
+      ${filas.length > 1 ? filaEj("<b>Equipo</b>", T, "").replace("<tr>", `<tr class="total">`) : ""}
+    </tbody></table></div>
+    <div class="atajos">La ruta de hoy se calcula como en Inicio del celular: la de su última visita si le quedan comercios por visitar; si no, la primera con pendientes. Mover un comercio de ruta no cambia la visita, el avance ni el bono.</div></div>
+  ${hist}
+  ${filas.map(panelHoy).join("")}
+  <div class="panel"><div class="barra"><b>Comercios con cambios de ruta · ${tocados.length}</b><span class="lbl">haz clic en un comercio para ver su historial</span></div>
+    ${tocados.length ? `<div class="tabla-wrap" style="max-height:480px"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Recomendada</th><th>La suya</th><th>Estado</th><th class="n">Cambios</th><th>Último cambio</th></tr></thead><tbody>
+      ${tocados.map(c => { const e = ESTADO_R[cambioRuta(c)]; return `<tr class="${S.rutaHist === c.customer_id ? "sel" : ""}"><td class="com"><button class="ruta-com" data-ruta-hist="${esc(c.customer_id)}" title="Ver el historial de cambios de ruta"><span class="t"><b>${esc(nombre(c))}</b><small>${esc(c.documento || c.customer_id)}</small></span></button></td>
+        <td>${esc(nombreCorto(ejDe(c.correo).nombre))}</td><td>${paradaTxt(rutaRec(c), c.orden)}</td><td>${c.ruta_propia ? paradaTxt(c.ruta_propia, c.orden_propio) : `<span class="muted">la recomendada</span>`}</td>
+        <td><span class="pill ${e[0]}">${e[1]}</span></td><td class="n num">${RB.cargando ? "…" : (porCom[c.customer_id] || []).length}</td><td class="num">${ultCambio(c) ? ddhh(ultCambio(c)) : "—"}</td></tr>`; }).join("")}
+    </tbody></table></div>` : `<div class="vacio">${S.ej !== "todos" ? "Este ejecutivo todavía no armó" : "Nadie armó todavía"} rutas en el celular: todos siguen la recomendada.</div>`}</div>`;
+}
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-ruta-hist]"); if (!t) return;
+  S.rutaHist = t.dataset.rutaHist && S.rutaHist !== t.dataset.rutaHist ? t.dataset.rutaHist : null; pintar();
+  if (S.rutaHist) document.getElementById("rutaHist")?.scrollIntoView({ block:"nearest" });
+});
 
 /* ---------- Ver su celular tal como lo ve él (solo lectura; el celular lo resuelve con ?como=) ---------- */
 function abrirCelular(correo){
@@ -2216,7 +2329,7 @@ document.addEventListener("keydown", ev => {
 
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["validacion","bloques","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["validacion","bloques","rutas","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
