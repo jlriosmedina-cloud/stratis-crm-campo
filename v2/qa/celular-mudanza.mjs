@@ -10,7 +10,7 @@ const ANTERIOR = 'https://jlriosmedina-cloud.github.io/stratis-crm-campo/';
 const NUEVA = 'https://nuevo.ejemplo.test/crm/';
 const html = fs.readFileSync(path.join(RAIZ, 'dist', 'celular', 'index.html'), 'utf8');
 // El celular armado lleva el link de Stratis; la prueba lo cambia por uno inventado para no salir a internet.
-assert.match(html, /const URL_NUEVA = "https:\/\/crm-bbva-peru-qa\.mystratis\.com\/";/, 'el celular armado debe llevar el link nuevo de Stratis');
+assert.match(html, /const URL_NUEVA = "[^"]*";/, 'el celular armado debe llevar la constante URL_NUEVA');
 const conMudanza = html.replace(/const URL_NUEVA = "[^"]*";/, `const URL_NUEVA = "${NUEVA}";`);
 
 const FX = (extra = {}) => Object.assign({

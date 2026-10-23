@@ -2016,7 +2016,7 @@ window.addEventListener("online", revisarVersion);
    vacía pide pasar al link nuevo. Con visitas pendientes o por revisar, la app sigue funcionando aquí (Regla n.º 1).
    Sin señal tampoco pide nada: aquí se puede seguir registrando en la cola, y en el link nuevo todavía no hay sesión.
    URL_NUEVA vacía = sin mudanza. En el link nuevo no hace nada, porque el host ya es otro. */
-const URL_NUEVA = "https://crm-bbva-peru-qa.mystratis.com/";
+const URL_NUEVA = "";
 const HOST_ANTERIOR = "jlriosmedina-cloud.github.io";
 const MUDANZA = !!URL_NUEVA && location.hostname === HOST_ANTERIOR && !PREVIA && !COMO;
 // «Todavía no puedo entrar» o el link nuevo sin responder: el aviso se aparta un rato y el ejecutivo sigue aquí.
