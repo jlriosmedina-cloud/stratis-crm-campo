@@ -198,6 +198,9 @@ function plazoDe(visitadoEn){
   return fin && diaLima(visitadoEn) <= fin && p > fin ? fin : p;
 }
 const nombreDe = c => c.nombre_comercial || c.razon_social;
+// Identificador visible (Jose, 22/10): el documento de BBVA (RUC de 11 o DNI de 8); el customer ID solo si no hay documento.
+// customer_id sigue siendo la llave interna (RPC, fichas y cola).
+const idVisible = c => c && c.documento ? (String(c.documento).length === 8 ? "DNI " : "RUC ") + c.documento : "Customer ID " + (c ? c.customer_id : "");
 const dirDe = c => c.direccion_corregida || c.direccion || "";
 const refDe = c => c.referencia || c.referencia_base || "";
 // quedó en volver (reagendada o con el dueño) y la fecha es de hoy en adelante
@@ -507,7 +510,7 @@ function vistaInicio(){
       ${(() => { const n = S.admin ? 0 : S.base.filter(faltaSeguimiento).length; return n ? `<div class="card seg-card"><div class="eyebrow">Seguimiento remoto</div><h2>${n} ${n === 1 ? "comercio sin contacto espera" : "comercios sin contacto esperan"} tu seguimiento</h2><div class="nota">La visita ya cuenta. Llámalo o escríbele por WhatsApp o correo y registra qué respondió: así ninguna visita queda sin feedback.</div><button class="btn btn-sec" data-ir-sinseg>Ver los comercios</button></div>` : ""; })()}
       ${(() => { if (S.admin || !S.recup) return ""; const ord = { llamar:0, trabado:1, tramite:2 }; const l = recupAbiertos().sort((x, y) => ord[x.paso] - ord[y.paso]); const n = l.length;
         return n ? `<div class="card recup-card"><div class="eyebrow">Recupero del POS</div><h2>${n} ${n === 1 ? "equipo por recuperar" : "equipos por recuperar"}</h2><div class="nota">Comercios que desistieron. Tú no recoges el equipo: llama a Soporte de Openpay y marca cada paso.</div>
-        <div class="paradas">${l.map(x => { const c = S.base.find(b => b.customer_id === x.customer_id); return `<button class="parada" data-ficha="${esc(x.customer_id)}"><span class="n">${x.paso === "trabado" ? "!" : RECUP_PASOS.findIndex(p => p[0] === x.paso) + 1}</span><span class="t"><b>${esc(c ? nombreDe(c) : (x.comercio || "ID " + x.customer_id))}</b><small>${esc(RECUP[x.paso].frase)}</small></span></button>`; }).join("")}</div>
+        <div class="paradas">${l.map(x => { const c = S.base.find(b => b.customer_id === x.customer_id); return `<button class="parada" data-ficha="${esc(x.customer_id)}"><span class="n">${x.paso === "trabado" ? "!" : RECUP_PASOS.findIndex(p => p[0] === x.paso) + 1}</span><span class="t"><b>${esc(c ? nombreDe(c) : (x.comercio || idVisible(x)))}</b><small>${esc(RECUP[x.paso].frase)}</small></span></button>`; }).join("")}</div>
         <button class="btn btn-sec" data-ir-recup>Ver los comercios</button></div>` : ""; })()}
       ${(() => { if (S.admin || S.seg == null) return ""; const l = S.base.filter(c => porContactar(c) && !contactadoDesde(c)).sort((x, y) => (rbbvaDe(y).dias_trx - rbbvaDe(x).dias_trx) || (rbbvaDe(y).con_contacto - rbbvaDe(x).con_contacto)); const n = l.length;
         return n ? `<div class="card rea-card"><div class="eyebrow">Reactivados BBVA · comisión</div><h2>${n} ${n === 1 ? "reactivado por contactar" : "reactivados por contactar"}</h2><div class="nota">BBVA los reporta reactivados, pero todavía no cuentan para ti: necesitan transacciones en 2 días distintos después de tu visita con contacto. Llámalos o escríbeles y registra el contacto.</div>
@@ -519,7 +522,7 @@ function vistaInicio(){
       ${!S.base.length ? `<div class="card"><h2>Tu base del periodo todavía no está cargada</h2><div class="nota">Apenas el analista la cargue, aquí vas a ver tus comercios y tus rutas. ${S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)}.` : ""}</div></div>` : ""}
       ${B ? tarjetasBloque(B) : ""}
       ${!hayRutas && mios.length ? `<div class="card ruta-hoy"><div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Comercios tomados" : "Tus comercios"}</div><h2>Últimos visitados</h2></div><span class="pill e-por">${mios.length}</span></div>
-        <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || "ID " + c.customer_id)}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
+        <div class="paradas">${mios.slice(0,10).map((c,i) => `<button class="parada" data-ficha="${c.customer_id}"><span class="n">${i+1}</span><span class="t"><b>${esc(nombreDe(c))}</b><small>${esc([c.distrito, dirDe(c)].filter(Boolean).join(" · ") || idVisible(c))}</small></span><span class="pill ${estadoCom(c).c}">${estadoCom(c).t}</span></button>`).join("")}</div></div>` : ""}
       ${rutaHoy ? `<div class="card ruta-hoy">
         <div class="fila-ent"><div><div class="eyebrow">${S.admin ? "Primera ruta pendiente" : "Tu ruta de hoy"}</div><h2>${esc(rutaHoy.nombre)}</h2></div><span class="pill e-por">${rutaHoy.cs.length} comercios</span></div>
         <div class="nav2" style="grid-template-columns:1fr"><a class="btn btn-sec" href="${urlRuta(rutaHoy.cs.some(c => !opcional(c) && c.estado === "por") ? rutaHoy.cs.filter(c => !opcional(c)) : rutaHoy.cs.filter(c => c.estado === "por").length ? rutaHoy.cs.filter(c => c.estado === "por") : rutaHoy.cs)}" target="_blank" rel="noopener">${ICON.ruta} Abrir la ruta en Google Maps</a></div>
@@ -609,7 +612,7 @@ function filtrar(omitir){
 function tarjeta(c){
   const e = estadoCom(c), hacer = (S.filtroVisita === "falta" || S.filtroEstado === "bbva") && faltaReactivar(c) ? accionFalta(c) : "";
   return `<button class="com" data-ficha="${c.customer_id}">
-    <div class="l1"><span>ID ${esc(c.customer_id)}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span><span class="l1-der">${potDe(c) > 0 ? `<span class="pot">${sol(c.potencial)}</span>` : ""}<span class="pill ${e.c}">${e.t}</span></span></div>
+    <div class="l1"><span>${esc(idVisible(c))}${S.admin && c.correo ? " · " + esc(c.correo.split("@")[0]) : ""}</span><span class="l1-der">${potDe(c) > 0 ? `<span class="pot">${sol(c.potencial)}</span>` : ""}<span class="pill ${e.c}">${e.t}</span></span></div>
     <b>${GRUPO[c.grupo_ubicacion] ? `<span class="ub-dot ${GRUPO[c.grupo_ubicacion].c}" title="${GRUPO[c.grupo_ubicacion].t}"></span>` : ""}${esc(nombreDe(c))}</b>
     ${(() => { const k = etiquetaComision(c); return k ? `<div class="bbva-rea ${k.c}">${k.t}</div>` : ""; })()}
     ${hacer ? `<div class="hacer">→ ${esc(hacer)}</div>` : ""}
@@ -630,7 +633,7 @@ function vistaBase(){
   return `<div class="vista">
     <div class="barra"><div class="fila-ent"><h1>${S.admin?"Base del periodo":"Mi base"}</h1>${bl ? botonOjo() : ""}</div>
       ${bl ? `<div style="color:var(--cabecera-sub);font-size:13px">Ordenada por potencial</div>` : ""}
-      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por nombre, documento o customer ID" value="${esc(S.q)}" autocomplete="off"></label></div>
+      <label class="buscar">${ICON.lista}<input id="q" type="search" placeholder="Busca por documento BBVA, nombre o customer ID" value="${esc(S.q)}" autocomplete="off"></label></div>
     <div class="barra-filtros">
       <div class="chips">${chip("por","Por visitar",nPor)}${bl ? [1, 2, 3].map(k => chip("g" + k, GRUPO[k].chip, nG(k))).join("") : ""}${!bl || nFalta ? chip("falta","Falta reactivar",nFalta) : ""}${!bl || nRea ? chip("rea","Reactivados",nRea) : ""}${chip("todos","Todos",sinVisita.length)}</div>
       <button class="chip fijo ${S.masFiltros||extras?"on":""}" data-mas aria-label="Más filtros" title="Más filtros">${ICON.filtro}${extras ? ` <span class="cuenta">${extras}</span>` : ""}</button>
@@ -737,7 +740,7 @@ function vistaFicha(c){
   return `<div class="vista">
     <div class="cab" style="padding-bottom:56px">
       <button class="volver" data-cerrar-ficha>${ICON.atras} Volver</button>
-      <div class="eyebrow" style="color:var(--cabecera-sub)">Customer ID ${esc(c.customer_id)}</div>
+      <div class="eyebrow" style="color:var(--cabecera-sub)">${esc(idVisible(c))}</div>
       <h1 style="margin-top:4px">${esc(nombreDe(c))}</h1>
       <div class="sub">${esc(c.rubro || "")}</div>
     </div>
@@ -774,7 +777,7 @@ function vistaFicha(c){
             <input class="campo" id="eDir" placeholder="Dirección correcta" value="${esc(c.direccion_corregida||c.direccion||"")}">
             <input class="campo" id="eRef" placeholder="Referencia (frente a, dentro de…)" value="${esc(c.referencia||"")}">
             ${S.ver || !c.contacto ? `<input class="campo" id="eCont" placeholder="Contacto en el comercio" value="${esc(c.contacto||"")}">` : `<div class="nota">Para ver o corregir el contacto, abre el ojo de los datos.</div>`}
-            <div class="nota">El customer ID, la razón social y las tasas vienen de BBVA y no se cambian. Tu corrección queda registrada con tu nombre.</div>
+            <div class="nota">El documento, la razón social y las tasas vienen de BBVA y no se cambian. Tu corrección queda registrada con tu nombre.</div>
             <button class="btn btn-pri btn-full" data-guardar-datos="${esc(c.customer_id)}">Guardar corrección</button></div>`
           : `<div class="nota" style="margin-top:6px">Si la dirección o el nombre no coinciden con lo que ves en la calle, corrígelos aquí.</div>`}
       </div>
@@ -827,7 +830,7 @@ const recupAbiertos = () => S.admin || !S.recup ? [] : [...S.recup.values()].fil
 // Ficha mínima para un caso cuyo comercio no está en la base actual del ejecutivo
 function vistaFichaRecupero(x){
   return `<div class="vista">
-    <div class="cab"><button class="volver" data-cerrar-ficha>${ICON.atras} Volver</button><h1>${esc(x.comercio || "ID " + x.customer_id)}</h1><div class="sub">ID ${esc(x.customer_id)} · recupero de un periodo anterior</div></div>
+    <div class="cab"><button class="volver" data-cerrar-ficha>${ICON.atras} Volver</button><h1>${esc(x.comercio || idVisible(x))}</h1><div class="sub">${esc(idVisible(x))} · recupero de un periodo anterior</div></div>
     <div class="cuerpo">${bloqueRecupero({ customer_id:x.customer_id, correo:x.correo })}</div></div>`;
 }
 function abrirRecupero(cid, accion){ S.accion = null; S.recupReg = { cid, accion, detalle:null, caso:"", nota:"", enviando:false, error:"" }; S._mantenerScroll = true; pintar(); }
@@ -1356,7 +1359,7 @@ function colaRechazadas(){
     <h2>${uno ? "Una visita no se pudo registrar" : l.length + " visitas no se pudieron registrar"}</h2>
     <div class="nota">${uno ? "Sigue guardada" : "Siguen guardadas"} en este celular con su hora y ubicación. ${uno ? "Corrígela y reenvíala" : "Corrígelas y reenvíalas"}: no se borran solas. Si no se puede corregir, tu analista la ve y decide.</div>
     ${l.map(v => { const c = S.base.find(x => x.customer_id === v.p_customer_id);
-      return `<div class="parada" style="display:block"><span class="t"><b>${esc(c ? nombreDe(c) : "ID " + v.p_customer_id)}</b><small>${fechaCorta(v.p_visitado_en)} · ${horaCorta(v.p_visitado_en)}</small></span>
+      return `<div class="parada" style="display:block"><span class="t"><b>${esc(c ? nombreDe(c) : "Customer ID " + v.p_customer_id)}</b><small>${fechaCorta(v.p_visitado_en)} · ${horaCorta(v.p_visitado_en)}</small></span>
         <div class="revision fuera"><b>El servidor respondió:</b> ${esc(v._rechazo.msg)}${v._rechazo.avisada ? "<br><small>Tu analista ya fue avisado.</small>" : ""}</div>
         <button class="btn btn-pri btn-full" data-corregir-cola="${esc(v.p_cliente_uid)}">Corregir y reenviar</button></div>`; }).join("")}</div>`;
 }
@@ -1410,17 +1413,17 @@ function hojaRegistro(){
   const r = S.reg, c = r.id ? S.base.find(x => x.customer_id === r.id) : null;
   const op = (campo, val, t, sub, tono) => `<button class="op ${r[campo]===val?"on "+(tono||""):""}" data-op="${campo}" data-val="${val}">${t}${sub?`<small>${sub}</small>`:""}</button>`;
   const q = r.busca.trim().toLowerCase();
-  const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.ruc || "").includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
+  const res = q.length >= 2 ? S.base.filter(x => String(x.customer_id).includes(q) || String(x.documento || "").includes(q) || String(x.ruc || "").includes(q) || String(x.razon_social).toLowerCase().includes(q) || String(x.nombre_comercial||"").toLowerCase().includes(q)).slice(0,8) : [];
   const hoyV = c ? visitaDeHoy(c) : null;
   const yaCuenta = c && c.visitas_validas > 0 && !hoyV, sinContar = c && c.visitas > 0 && !yaCuenta && !hoyV;
   const ultTxt = c && c.ultima_visita ? `${diaLima(c.ultima_visita) === diaLima(Date.now()) ? "hoy" : "el " + fechaCorta(c.ultima_visita)} a las ${horaCorta(c.ultima_visita)}${c.ultima_que ? " (" + esc(c.ultima_que.toLowerCase()) + ")" : ""}` : "";
   let pasos = `<div class="paso" data-paso="comercio"><span class="eyebrow">Comercio</span>${c
-    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>ID ${esc(c.customer_id)}${c.distrito ? " · " + esc(c.distrito) : ""}</small></div><button data-cambiar-comercio>Cambiar</button></div>
+    ? `<div class="elegido"><div><b>${esc(nombreDe(c))}</b><small>${esc(idVisible(c))}${c.distrito ? " · " + esc(c.distrito) : ""}</small></div><button data-cambiar-comercio>Cambiar</button></div>
        ${yaCuenta ? `<div class="ya-cuenta"><b>Este comercio ya cuenta en tus visitados del periodo.</b> Lo visitaste ${ultTxt}. Esta visita se guarda como seguimiento y <b>no suma otra</b>.
           <span>¿Estás en otro negocio? Búscalo en tu base para que sí sume.</span><button class="btn btn-sec" data-cambiar-comercio>Es otro comercio: buscarlo</button></div>`
         : sinContar ? `<div class="explica" style="margin-top:8px">Tiene una visita anterior que no contó (sin ubicación o fuera de plazo). Si esta se guarda con ubicación, sí suma a tus visitados.</div>` : ""}`
-    : `<input class="campo" id="busca" type="search" placeholder="Customer ID, RUC o razón social" value="${esc(r.busca)}" autocomplete="off">
-       <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>ID ${esc(x.customer_id)}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
+    : `<input class="campo" id="busca" type="search" placeholder="Documento BBVA, nombre o customer ID" value="${esc(r.busca)}" autocomplete="off">
+       <div class="resultados">${res.map(x => `<button data-elegir="${esc(x.customer_id)}"><b>${esc(nombreDe(x))}</b><small>${esc(idVisible(x))}${x.distrito ? " · " + esc(x.distrito) : ""}${x.correo ? "" : " · libre"}</small></button>`).join("")}</div>`}</div>`;
   if (hoyV) return `<div class="velo" data-cerrar-velo><div class="hoja" role="dialog" aria-label="Registrar visita">
     <header><div class="asa"></div><div class="fila-ent"><h2>Registrar visita</h2><button class="btn btn-lin" style="padding:6px 12px;font-size:13px" data-cancelar>Cancelar</button></div></header>
     <div class="scroll">${pasos}<div class="paso"><div class="ya-cuenta"><b>Ya registraste este comercio hoy${hoyV.hora ? " a las " + hoyV.hora : ""}</b><br>

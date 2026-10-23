@@ -10,7 +10,7 @@ const nuevo = (i, extra) => comercio(i, Object.assign({ origen: 'base_nueva', bl
   potencial: 0, vinculacion: 'Vinculado', vol_092026: 1200, tipo_equipo: 'POS inalámbrico', contacto_celular: '987654321', contacto_correo: 'ana.prueba@ejemplo.com',
   geo_nota: 'Nota de ubicación de prueba' }, extra));
 const BASE = [
-  nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3 }),
+  nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3, documento: '20999999991' }),
   nuevo(4, { potencial: 0, grupo_ubicacion: 3 }), nuevo(5, { potencial: 70000 }), nuevo(6, { potencial: 20000 }), nuevo(7, { potencial: 5000, grupo_ubicacion: 2 }),
   // visitado del bloque: no entra a «Los 5» ni a «Por visitar»
   nuevo(8, { potencial: 99000, visitas: 1, visitas_validas: 1, estado: 'rea', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Reunión concretada' }),
@@ -69,6 +69,10 @@ for (const tema of ['light', 'dark']) {
     const ids = await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha));
     assert.deepEqual(ids.slice(0, 3), ['00000008', '00000002', '00000005'], 'no va ordenada por potencial');
     await p.click('[data-visita=g3]'); await p.waitForTimeout(150);
+    assert.ok((await texto()).includes('RUC 20999999991'), 'la lista no muestra el documento');
+    await p.fill('#q', '2099999'); await p.waitForTimeout(200);
+    assert.deepEqual(await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha)), ['00000003'], 'no busca por documento');
+    await p.fill('#q', ''); await p.waitForTimeout(150);
     assert.deepEqual(await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha)), ['00000003', '00000004']);
   });
 
@@ -76,6 +80,7 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.ficha = '00000003'; pintar(); }); await p.waitForTimeout(250);
     let t = await texto();
     assert.ok(t.includes('Dirección de BBVA') && t.includes('AV. INVENTADA 103'));
+    assert.ok(t.includes('RUC 20999999991') && !t.includes('Customer ID 00000003'), 'la ficha no muestra el documento como identificador');
     assert.ok(!/SUNAT|Otras direcciones|Segunda dirección|Libre/.test(t), 'siguen las tarjetas que salen');
     assert.ok(t.includes('Llama antes de ir') && t.includes('Nota de ubicación de prueba'));
     assert.equal(await p.locator('.dir-card a[href*="waze.com"]').count(), 1, 'falta Waze');
