@@ -10,7 +10,7 @@ const nuevo = (i, extra) => comercio(i, Object.assign({ origen: 'base_nueva', bl
   potencial: 0, vinculacion: 'Vinculado', vol_092026: 1200, tipo_equipo: 'POS inalámbrico', contacto_celular: '987654321', contacto_correo: 'ana.prueba@ejemplo.com',
   geo_nota: 'Nota de ubicación de prueba' }, extra));
 const BASE = [
-  nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3 }),
+  nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3, documento: '20999999991' }),
   nuevo(4, { potencial: 0, grupo_ubicacion: 3 }), nuevo(5, { potencial: 70000 }), nuevo(6, { potencial: 20000 }), nuevo(7, { potencial: 5000, grupo_ubicacion: 2 }),
   // visitado del bloque: no entra a «Los 5» ni a «Por visitar»
   nuevo(8, { potencial: 99000, visitas: 1, visitas_validas: 1, estado: 'rea', ultima_visita: '2026-01-02T15:00:00Z', ultima_que: 'Reunión concretada' }),
@@ -69,6 +69,10 @@ for (const tema of ['light', 'dark']) {
     const ids = await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha));
     assert.deepEqual(ids.slice(0, 3), ['00000008', '00000002', '00000005'], 'no va ordenada por potencial');
     await p.click('[data-visita=g3]'); await p.waitForTimeout(150);
+    assert.ok((await texto()).includes('RUC 20999999991'), 'la lista no muestra el documento');
+    await p.fill('#q', '2099999'); await p.waitForTimeout(200);
+    assert.deepEqual(await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha)), ['00000003'], 'no busca por documento');
+    await p.fill('#q', ''); await p.waitForTimeout(150);
     assert.deepEqual(await p.$$eval('.lista [data-ficha]', xs => xs.map(x => x.dataset.ficha)), ['00000003', '00000004']);
   });
 
@@ -76,6 +80,7 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.ficha = '00000003'; pintar(); }); await p.waitForTimeout(250);
     let t = await texto();
     assert.ok(t.includes('Dirección de BBVA') && t.includes('AV. INVENTADA 103'));
+    assert.ok(t.includes('RUC 20999999991') && !t.includes('Customer ID 00000003'), 'la ficha no muestra el documento como identificador');
     assert.ok(!/SUNAT|Otras direcciones|Segunda dirección|Libre/.test(t), 'siguen las tarjetas que salen');
     assert.ok(t.includes('Llama antes de ir') && t.includes('Nota de ubicación de prueba'));
     assert.equal(await p.locator('.dir-card a[href*="waze.com"]').count(), 1, 'falta Waze');
@@ -93,6 +98,27 @@ for (const tema of ['light', 'dark']) {
     assert.match(t, /Bloque 1 · /); assert.match(t, /Bloque 2 · próximo/); assert.match(t, /217 comercios nuevos llegan/);
     assert.match(t, /Comercios visitados\s*1 \/ 225/); assert.match(t, /2 visitados · 1 con contacto/);
     await p.evaluate(() => { S.vista = 'inicio'; pintar(); });
+  });
+  await prueba(`${tema} · ruta de hoy: los opcionales no la traban y la 98 y la 99 nunca salen`, async () => {
+    const r = await p.evaluate(() => {
+      const orig = S.base, hoy = () => { const c = [...document.querySelectorAll('.ruta-hoy')].find(x => x.textContent.includes('Tu ruta de hoy')); return c ? c.querySelector('h2').textContent : null; };
+      const mk = (id, ruta, orden, vis) => Object.assign({}, orig[0], { customer_id: id, ruta, orden, visitas: vis ? 1 : 0, visitas_validas: vis ? 1 : 0, estado: vis ? 'vis' : 'por',
+        ultima_visita: vis ? '2026-01-03T15:00:00Z' : null, ultima_que: vis ? 'Reunión concretada' : null, ultima_motivo: null });
+      const ruta = (n, pend) => { const l = []; for (let o = 1; o <= 10; o++) l.push(mk('R1' + o, 'Ruta 01', o, !pend(o))); for (let o = 1; o <= 3; o++) l.push(mk('R2' + o, 'Ruta 02', o, n === 'todo'));
+        l.push(mk('R98', 'Ruta 98 · Base anterior · ya visitados', 1, false), mk('R99', 'Ruta 99 · Por ubicar · llamar antes', 1, false)); return l; };
+      const out = {};
+      S.base = ruta('', o => o > 8); S.vista = 'inicio'; pintar(); out.a = hoy();                       // del día hecho, quedan opcionales
+      S.base = ruta('todo', () => false); pintar(); out.b = hoy();                                    // solo quedan la 98 y la 99
+      S.base = ruta('', () => true); pintar(); out.c = hoy(); out.opc = document.querySelectorAll('.ruta-hoy .parada.opcional').length;
+      // ruta armada por el ejecutivo: todas sus paradas son del día
+      // solo una parada marcada (v2_armar_ruta no marca las que quedaron en su lugar): igual cuenta toda la ruta
+      S.base = ruta('', o => o > 8).map(c => c.customer_id === 'R12' ? Object.assign({}, c, { ruta_propia: 'Ruta 01' }) : c); pintar(); out.d = hoy(); out.opcD = document.querySelectorAll('.ruta-hoy .parada.opcional').length;
+      S.base = orig; pintar(); return out;
+    });
+    assert.equal(r.d, 'Ruta 01', 'en la ruta armada por el ejecutivo, las paradas 9 y 10 deben contar'); assert.equal(r.opcD, 0);
+    assert.equal(r.a, 'Ruta 02', 'los opcionales traban la ruta');
+    assert.ok(r.b && !/98|99/.test(r.b), 'propone la 98 o la 99: ' + r.b);
+    assert.equal(r.c, 'Ruta 01'); assert.equal(r.opc, 2, 'no marca los opcionales');
   });
   if (errs.length) { fallas++; console.log(`MAL ${tema} · errores de consola:`, errs); }
   await b.close();
