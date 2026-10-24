@@ -420,6 +420,16 @@ textarea.campo{min-height:78px;resize:vertical}
 .ordenar{display:flex;gap:4px;flex:none}
 .ordenar button{width:34px;height:34px;border:1px solid var(--linea);border-radius:9px;background:var(--tarjeta);color:var(--azul);font-weight:700;font-size:13px}
 .ordenar button[disabled],.armar-card .btn[disabled],.mover .btn[disabled]{opacity:.4}
+/* Mis cierres (24/10) */
+.ci-mini{display:flex;align-items:flex-end;gap:10px;height:130px;margin-top:6px}
+.ci-mini .c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px}
+.ci-mini i{display:block;width:100%;max-width:56px;background:var(--azul);border-radius:6px 6px 0 0}
+.ci-mini .curso i{background:var(--linea)}
+.ci-mini .v{font-size:12px;font-weight:700;color:var(--ink)}.ci-mini .e{font-size:11px;color:var(--muted);text-align:center}
+.ci-fila{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--linea)}
+.ci-fila:last-child{border-bottom:0}.ci-fila b{color:var(--ink);text-align:right}
+.ci-cerrado{font-size:11.5px;font-weight:700;color:var(--verde);background:var(--verde-t);border-radius:999px;padding:3px 9px}
+.ci-bolsa{background:var(--navy);color:#fff;display:grid;gap:4px}.ci-bolsa .eyebrow{color:#AEB6E8}.ci-bolsa b{font-size:28px;font-weight:800}.ci-bolsa span{font-size:12.5px;color:#C9CEF2}
 </style>
 
 </head><body>
@@ -434,7 +444,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "0e8957";
+const BUILD = "b03c72";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -721,7 +731,7 @@ async function cargar(){
       S.como = { correo: COMO, nombre: (q.data && (q.data.nombre_corto || q.data.nombre)) || COMO.split("@")[0] };
       S.yo = Object.assign({}, S.yo, { correo: COMO, nombre_corto: S.como.nombre, nombre: S.como.nombre }); S.admin = false; S.cola = [];
       // solo lectura de verdad: además de quitar los botones, solo pasan las lecturas
-      const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance","v2_mis_seguimientos","v2_mis_reactivados_bbva","v2_mis_recuperos"]);
+      const LECTURAS = new Set(["v2_mi_base","v2_mis_revisiones","v2_actividad","v2_visitas_de","v2_avance","v2_mis_seguimientos","v2_mis_reactivados_bbva","v2_mis_recuperos","v2_mis_cierres"]);
       const rpcReal = sb.rpc.bind(sb);
       sb.rpc = (fn, args) => LECTURAS.has(fn) ? rpcReal(fn, args) : Promise.resolve({ data:null, error:{ message:"Vista de Jose: aquí no se guardan cambios." } });
     }
@@ -804,6 +814,40 @@ async function cargarActividad(){
   S._actCargando = false;
   if (error){ S.actErr = error.message || String(error); } else { S.act = (data || []).filter(v => !S.como || v.correo === S.como.correo); S.actEn = new Date(); }
   S._mantenerScroll = true; pintar();
+}
+/* ---------- Mis cierres (24/10) ----------
+   Los periodos cerrados del ejecutivo, como se firmaron en su acta: alcances, incentivo (pagado / retenido) y su bolsa
+   retenida. Todo en % del sueldo base: los sueldos no viven en el CRM. Solo ve lo suyo (v2_mis_cierres); Jose lo ve en
+   «Ver su celular». Los porcentajes se tapan con el ojo de privacidad. */
+const pestanasAvance = () => `<div class="chips" role="tablist"><button class="chip ${S.avTab === "cierres" ? "" : "on"}" data-av-tab="periodo" role="tab" aria-selected="${S.avTab !== "cierres"}">Este periodo</button><button class="chip ${S.avTab === "cierres" ? "on" : ""}" data-av-tab="cierres" role="tab" aria-selected="${S.avTab === "cierres"}">Mis cierres</button></div>`;
+async function cargarMisCierres(){
+  if (S._cierresCargando) return;
+  S._cierresCargando = true; S.cierresErr = "";
+  const { data, error } = await sb.rpc("v2_mis_cierres", S.como ? { p_correo:S.como.correo } : {});
+  S._cierresCargando = false;
+  if (error) S.cierresErr = error.message || String(error); else S.misCierres = data || [];
+  S._mantenerScroll = true; pintar();
+}
+const pctCi = v => v == null ? "—" : S.ver ? (Math.round(Number(v) * 100) / 100).toFixed(2).replace(".", ",").replace(/,?0+$/, "") + " %" : OCULTO + " %";
+function vistaMisCierres(){
+  if (S.misCierres === undefined && !S.cierresErr) cargarMisCierres();
+  const cab = `<div class="barra"><div class="fila-ent"><h1>Mi avance</h1>${botonOjo()}</div><div style="color:var(--cabecera-sub);font-size:13px">Mis periodos cerrados · en % del sueldo base</div></div>${pestanasAvance()}`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${c}</div></div>`;
+  if (S.cierresErr) return envolver(`<div class="card"><h2>No se pudieron leer tus cierres</h2><div class="nota">${esc(S.cierresErr)}</div>
+    <button class="btn btn-sec btn-full" style="margin-top:10px" data-reintentar-cierres>Reintentar</button></div>`);
+  if (!S.misCierres) return envolver(`<div class="card"><div class="nota">Leyendo tus cierres…</div></div>`);
+  if (!S.misCierres.length) return envolver(`<div class="card"><h2>Todavía no tienes periodos cerrados</h2><div class="nota">Cuando se cierre un periodo, aquí vas a ver lo que lograste y tu incentivo.</div></div>`);
+  const l = S.misCierres, mx = Math.max(30, ...l.map(r => Number(r.incentivo_pct)));
+  const bolsa = l.reduce((n, r) => n + Number(r.retenido_pct || 0), 0);
+  const corto = r => String(r.nombre).split("·").pop().trim();
+  const barras = `<div class="card"><h2>Mi incentivo por periodo</h2><div class="ci-mini">${l.map(r => `<div class="c"><span class="v">${pctCi(r.incentivo_pct)}</span><i style="height:${S.ver ? Math.max(4, Number(r.incentivo_pct) / mx * 90) : 4}px"></i><span class="e">${esc(corto(r))}</span></div>`).join("")}${S.periodo && !l.some(r => r.periodo === S.periodo.id) ? `<div class="c curso"><span class="v">—</span><i style="height:4px"></i><span class="e">en curso</span></div>` : ""}</div></div>`;
+  const tarjetas = [...l].reverse().map(r => `<div class="card"><div class="fila-ent"><h2 style="margin:0">${esc(r.nombre)}</h2><span class="ci-cerrado">cerrado</span></div>
+    <div class="nota" style="margin:2px 0 8px">${fISO(r.ini)} al ${fISO(r.fin)}</div>
+    ${(r.alcances || []).map(a => `<div class="ci-fila"><span>${esc(a.k)}</span><b>${esc(a.v)}</b></div>`).join("")}
+    <div class="ci-fila"><span>Incentivo</span><b>${pctCi(r.incentivo_pct)}</b></div>
+    <div class="ci-fila"><span>Pagado / retenido</span><b>${pctCi(r.pagado_pct)} / ${pctCi(r.retenido_pct)}</b></div></div>`).join("");
+  const bolsaCard = `<div class="card ci-bolsa"><div class="eyebrow">Mi bolsa retenida</div><b>${pctCi(bolsa)}</b><span>del sueldo base · es lo retenido de cada cierre, que se guarda para el cierre del proyecto</span></div>`;
+  return envolver(barras + bolsaCard + tarjetas);
 }
 async function cargarAvance(){
   if (S._avanceCargando) return;
@@ -1586,10 +1630,11 @@ function tarjetaBloques(){
     ${ant.length ? `<div class="card"><div class="eyebrow">Base anterior</div><h2>${ant.length} visitados · ${ant.filter(conContacto).length} con contacto</h2><div class="nota">Se suman a tu avance si BBVA los reporta como reactivados.</div></div>` : ""}`;
 }
 function vistaAvance(){
+  if (!S.admin && S.avTab === "cierres") return vistaMisCierres();
   if (S.avance === null) cargarAvance();
   const tit = S.admin ? "Avance del equipo" : "Mi avance";
   const sub = S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)} · quedan ${diasQuedan()} días` : "";
-  const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>`;
+  const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>${S.admin ? "" : pestanasAvance()}`;
   const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${S.admin ? "" : tarjetaBloques()}${c}</div></div>`;
 
   if (S.avanceErr) return envolver(`<div class="card"><h2>No se pudo calcular el avance</h2>
@@ -2333,6 +2378,8 @@ function enlazar(){
   const ar = p.querySelector("#armarRuta"); if (ar) ar.onchange = () => abrirArmar(ar.value);
   const ag = p.querySelector("#armarAgregar"); if (ag) ag.onchange = () => { if (!ag.value) return; S.armar.ids.push(ag.value); S.armar.nuevos.push(ag.value); S.armar.cambiado = true; S._mantenerScroll = true; pintar(); };
   p.querySelectorAll("[data-ojo]").forEach(b => b.onclick = () => { S.ver = !S.ver; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll("[data-av-tab]").forEach(b => b.onclick = () => { S.avTab = b.dataset.avTab; if (S.avTab === "cierres" && S.misCierres === undefined) cargarMisCierres(); pintar(); });
+  p.querySelectorAll("[data-reintentar-cierres]").forEach(b => b.onclick = () => { S.cierresErr = ""; S.misCierres = undefined; cargarMisCierres(); });
   p.querySelectorAll("[data-grupo]").forEach(b => b.onclick = () => { S.vista = "base"; S.filtroVisita = "g" + b.dataset.grupo; S.filtroEstado = "todos"; S.ficha = null; window.scrollTo(0, 0); pintar(); });
   p.querySelectorAll("[data-visita]").forEach(b => b.onclick = () => { S.filtroVisita = b.dataset.visita; S.filtroEstado = "todos"; S.corr = null; pintar(); });
   p.querySelectorAll("[data-quitar-estado]").forEach(b => b.onclick = () => { S.filtroEstado = "todos"; pintar(); });

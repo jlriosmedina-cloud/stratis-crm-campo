@@ -103,6 +103,7 @@ const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, erro
   tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"", retenidas:[] };
 
 const ICON = {
+  cierre:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   pq:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M4 12h6M4 18h9"/><path d="M16 8l2 2 4-4"/><path d="M16 15l5 5M21 15l-5 5"/></svg>',
   fb:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 14h4"/></svg>',
   cola:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
@@ -367,6 +368,7 @@ const VISTAS = [
   ["auditoria","Auditoría", ICON.aud, null],
   ["cargas","Cargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
+  ["cierres","Cierres de periodo", ICON.cierre, null],
 ];
 function pintarNav(){
   $("#nav").innerHTML = `<div class="sec">Mi trabajo</div>` + VISTAS.map(([k,t,i,c]) => `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
@@ -395,7 +397,8 @@ function pintar(){
               porque:["Por qué sí / por qué no","Por qué tenemos éxito en unas visitas y en otras no: el resultado de cada comercio por su última visita, qué convenció a los que dijeron que sí y qué frenó a los demás."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
               cargas:["Cargas","Carga la data que envía BBVA: transacciones y resultados de reactivación. La base y la presentación para BBVA se descargan con los botones de arriba."],
-              indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."] };
+              indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."],
+              cierres:["Cierres de periodo","Lo que se aprobó y pagó en cada periodo cerrado, congelado como se firmó, en % del sueldo base. Elige un ejecutivo arriba para ver su evolutivo."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#gEj").innerHTML = `<option value="todos">Equipo completo</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}`;
   $("#gEj").disabled = S.vista === "cargas"; $("#gEj").title = S.vista === "cargas" ? "Las cargas son de todo el equipo" : "Ver todas las vistas de un ejecutivo o del equipo";
@@ -409,7 +412,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -974,6 +977,90 @@ function vistaRutas(){
         <td><span class="pill ${e[0]}">${e[1]}</span></td><td class="n num">${RB.cargando ? "…" : (porCom[c.customer_id] || []).length}</td><td class="num">${ultCambio(c) ? ddhh(ultCambio(c)) : "—"}</td></tr>`; }).join("")}
     </tbody></table></div>` : `<div class="vacio">${S.ej !== "todos" ? "Este ejecutivo todavía no armó" : "Nadie armó todavía"} rutas en el celular: todos siguen la recomendada.</div>`}</div>`;
 }
+/* ---------- Cierres de periodo (24/10) ----------
+   El histórico congelado de cada periodo cerrado, tal como se firmó en el acta. Todo en % del sueldo base: los sueldos
+   no viven en el CRM, y lo retenido es lo que se acumula para el cierre del proyecto. Con «Equipo completo» se ve el
+   histórico y el detalle de un periodo (con el cuadre: visitados y con contacto se vuelven a contar); con un ejecutivo
+   elegido, su evolutivo. Los porcentajes se tapan con el ojo de privacidad. */
+async function cargarCierres(){
+  if (S.cierres) return;
+  S.cierres = { cargando:true, l:[], cuadre:{} };
+  const { data, error } = await sb.rpc("v2_cierres_equipo");
+  S.cierres = error ? { err:error.message, l:[], cuadre:{} } : { l:data || [], cuadre:{} };
+  pintar();
+}
+async function cargarCuadre(per){
+  const C = S.cierres; if (!C || C.cuadre[per]) return;
+  C.cuadre[per] = { cargando:true };
+  const { data, error } = await sb.rpc("v2_cierre_cuadre", { p_periodo:per });
+  C.cuadre[per] = error ? { err:error.message } : { m:new Map((data || []).map(r => [r.correo, r])) };
+  pintar();
+}
+const pctC = v => v == null ? "—" : priv((Math.round(Number(v) * 100) / 100).toFixed(2).replace(".", ",").replace(/,?0+$/, "") + " %");
+const solesC = v => v == null ? "—" : priv("S/ " + Number(v).toFixed(2).replace(".", ","));
+const alcancesC = r => (r.alcances || []).map(a => `<div class="ci-lin"><span>${esc(a.k)}</span><b>${esc(a.v)}</b></div>`).join("");
+function vistaCierres(){
+  cargarCierres();
+  const C = S.cierres || { cargando:true, l:[] };
+  if (C.cargando) return `<div class="panel"><div class="vacio">Leyendo los cierres…</div></div>`;
+  if (C.err) return `<div class="panel"><div class="vacio">No se pudieron leer los cierres: ${esc(C.err)}</div></div>`;
+  if (!C.l.length) return `<div class="panel"><div class="vacio">Todavía no hay periodos cerrados cargados.</div></div>`;
+  const pers = [...new Map(C.l.map(r => [r.periodo, r])).values()].sort((a, b) => String(a.ini).localeCompare(String(b.ini)));
+  const enCurso = S.periodo && !pers.some(p => p.periodo === S.periodo.id) ? S.periodo : null;
+  const de = (correo, per) => C.l.find(r => r.correo === correo && r.periodo === per);
+  const ejs = S.ejecutivos.filter(e => C.l.some(r => r.correo === e.correo));
+  const bolsa = correo => C.l.filter(r => r.correo === correo).reduce((n, r) => n + Number(r.retenido_pct || 0), 0);
+  const pagado = correo => C.l.filter(r => r.correo === correo).reduce((n, r) => n + Number(r.pagado_pct || 0), 0);
+  const fechas = p => `${fISO(p.ini)} al ${fISO(p.fin)}`;
+  const nomEj = e => `<span class="ej">${AVATAR(e)}${esc(e.nombre)}</span>`;
+  const pieCurso = enCurso ? `<div class="ci-per curso"><span class="t">Periodo en curso</span><span class="f">${fechas(enCurso)} · <span class="pill obs">en curso</span></span><span class="big">—</span><div class="ci-lin"><span>Su avance</span><b>en «Por ejecutivo» e «Indicadores»</b></div></div>` : "";
+  // ----- evolutivo de un ejecutivo -----
+  if (S.ej !== "todos"){
+    const e = S.ejecutivos[0], mios = pers.map(p => de(e && e.correo, p.periodo)).filter(Boolean);
+    if (!e || !mios.length) return `<div class="panel"><div class="vacio">Este ejecutivo todavía no tiene periodos cerrados.</div></div>`;
+    const mx = Math.max(30, ...mios.map(r => Number(r.incentivo_pct)));
+    return `<div class="ci-grid">
+      <div class="panel"><div class="barra"><b>El recorrido de ${esc(e.nombre)}, periodo por periodo</b></div><div class="ci-linea">
+      ${mios.map(r => `<div class="ci-per"><span class="t">${esc(r.nombre)}</span><span class="f">${fechas(r)} · <span class="pill val">cerrado</span></span>
+        <span class="big">${pctC(r.incentivo_pct)}</span><div class="ci-lin"><span>pagado / retenido</span><b>${pctC(r.pagado_pct)} / ${pctC(r.retenido_pct)}</b></div>${alcancesC(r)}
+        ${r.detalle && r.detalle.ajuste ? `<div class="ci-nota">${priv(esc(r.detalle.ajuste))}</div>` : ""}</div>`).join("")}${pieCurso}</div>
+      <div class="ci-pie">Los indicadores cambian de un periodo a otro cuando cambió el modelo de incentivo: cada periodo se muestra con lo que se midió en su acta.</div></div>
+      <div class="panel"><div class="barra"><b>Incentivo y bolsa retenida</b></div><div class="ci-cuerpo">
+        <div class="ci-barras">${mios.map(r => `<div class="c"><span class="v">${pctC(r.incentivo_pct)}</span><div class="b r" style="height:${S.ver ? Number(r.retenido_pct) / mx * 130 : 0}px"></div><div class="b" style="height:${S.ver ? Number(r.pagado_pct) / mx * 130 : 0}px"></div><span class="e">${esc(String(r.nombre).split(" ")[0])}</span></div>`).join("")}</div>
+        <div class="ci-kpis"><div><b>${pctC(pagado(e.correo))}</b><span>pagado con la remuneración</span></div><div><b>${pctC(bolsa(e.correo))}</b><span>bolsa retenida al cierre del proyecto</span></div></div>
+        <div class="ci-pie"><span class="ci-cuad"></span> pagado en el mes &nbsp; <span class="ci-cuad r"></span> retenido · todo en % del sueldo base</div></div></div>
+    </div>`;
+  }
+  // ----- equipo: histórico o detalle de un periodo -----
+  const tab = S.cTab || "hist";
+  const tabs = `<div class="chips" style="margin-bottom:12px"><button class="chip ${tab === "hist" ? "on" : ""}" data-ctab="hist" aria-pressed="${tab === "hist"}">Histórico del equipo</button>${pers.map(p => `<button class="chip ${tab === p.periodo ? "on" : ""}" data-ctab="${esc(p.periodo)}" aria-pressed="${tab === p.periodo}">${esc(p.nombre)}</button>`).join("")}</div>`;
+  if (tab === "hist"){
+    const modelos = pers.map(p => { const notas = [...new Set(C.l.filter(r => r.periodo === p.periodo && r.detalle && r.detalle.nota_periodo).map(r => r.detalle.nota_periodo))];
+      return `<tr><td><b>${esc(p.nombre)}</b><span class="ci-sub">${fechas(p)}</span></td><td>${esc(p.modelo)}</td><td>${notas.length ? priv(notas.map(esc).join("<br>")) : "—"}</td><td class="n">${p.aprobado_en ? fISO(p.aprobado_en) : "—"}</td></tr>`; }).join("");
+    return tabs + `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Incentivo por periodo · % del sueldo base</b><span class="lbl">arriba el total; abajo pagado / retenido</span></div><div class="tabla-wrap"><table class="datos">
+      <thead><tr><th>Ejecutivo</th>${pers.map(p => `<th class="n">${esc(p.nombre)}<span class="ci-sub">${fechas(p)}</span></th>`).join("")}${enCurso ? `<th class="n">En curso<span class="ci-sub">${fechas(enCurso)}</span></th>` : ""}<th class="n">Bolsa retenida</th></tr></thead>
+      <tbody>${ejs.map(e => `<tr><td>${nomEj(e)}</td>${pers.map(p => { const r = de(e.correo, p.periodo);
+        return `<td class="n num">${r ? `<b>${pctC(r.incentivo_pct)}</b><span class="ci-sub">${pctC(r.pagado_pct)} / ${pctC(r.retenido_pct)}</span>` : "—"}</td>`; }).join("")}${enCurso ? `<td class="n"><span class="pill obs">en curso</span></td>` : ""}<td class="n num"><b>${pctC(bolsa(e.correo))}</b></td></tr>`).join("")}</tbody></table></div>
+      <div class="ci-pie">Cada celda es el incentivo firmado en el acta. La bolsa retenida suma lo retenido de cada cierre y se liquida al cerrar el proyecto.</div></div>
+      <div class="panel"><div class="barra"><b>Cómo se midió cada periodo</b></div><div class="tabla-wrap"><table class="datos"><thead><tr><th>Periodo</th><th>Modelo</th><th>Ajustes y notas del periodo</th><th class="n">Aprobado</th></tr></thead><tbody>${modelos}</tbody></table></div></div>`;
+  }
+  const P = pers.find(p => p.periodo === tab) || pers[pers.length - 1], filas = ejs.map(e => ({ e, r:de(e.correo, P.periodo) })).filter(x => x.r);
+  const conCuadre = filas.some(x => x.r.detalle && x.r.detalle.visitas_desde);
+  if (conCuadre) cargarCuadre(P.periodo);
+  const Q = (C.cuadre || {})[P.periodo] || {};
+  const cuadra = (crm, acta) => crm == null || acta == null ? `<span class="muted">—</span>` : crm === Number(acta) ? `${crm} · ${acta} <span class="ci-ok" title="Cuadra con el acta">✓<span class="sr">cuadra</span></span>` : `${crm} · ${acta} <span class="ci-dif" title="El registro de hoy no coincide con el acta">≠<span class="sr">no cuadra</span></span>`;
+  return tabs + `<div class="panel"><div class="barra"><b>${esc(P.nombre)} · ${fechas(P)}</b><span class="pill val">cerrado${P.aprobado_en ? " · aprobado el " + fISO(P.aprobado_en) : ""}</span>${P.enviado_en ? `<span class="pill">enviado el ${fISO(P.enviado_en)}</span>` : ""}<span class="lbl">${esc(P.modelo)}</span></div><div class="tabla-wrap"><table class="datos">
+    <thead><tr><th>Ejecutivo</th><th>Alcances del acta</th>${conCuadre ? `<th class="n">Visitados<br>CRM · acta</th><th class="n">Con contacto<br>CRM · acta</th><th class="n">Reactivados<br>en la lista</th>` : ""}<th class="n">Incentivo</th><th class="n">Pagado / retenido</th><th class="n">Viáticos por reembolsar</th></tr></thead>
+    <tbody>${filas.map(({ e, r }) => { const d = r.detalle || {}, q = Q.m ? Q.m.get(e.correo) : null;
+      return `<tr><td>${nomEj(e)}${d.ajuste ? `<span class="ci-sub">${priv(esc(d.ajuste))}</span>` : ""}</td><td class="ci-alc">${alcancesC(r)}</td>
+      ${conCuadre ? `<td class="n num">${Q.cargando ? "…" : cuadra(q ? q.visitados : null, d.visitados)}</td><td class="n num">${Q.cargando ? "…" : cuadra(q ? q.con_contacto : null, d.con_contacto)}</td><td class="n num">${r.reactivados_lista || "—"}${r.reactivados_ya_facturaban ? `<span class="ci-sub">${r.reactivados_ya_facturaban} ya facturaban</span>` : ""}</td>` : ""}
+      <td class="n num"><b>${pctC(r.incentivo_pct)}</b></td><td class="n num">${pctC(r.pagado_pct)} / ${pctC(r.retenido_pct)}</td><td class="n num">${d.viaticos_por_reembolsar == null ? "—" : solesC(d.viaticos_por_reembolsar)}</td></tr>`; }).join("")}</tbody></table></div>
+    ${conCuadre ? `<div class="ci-pie">Visitados y con contacto se vuelven a contar en el registro de visitas, con la misma ventana del acta (${fISO(filas[0].r.detalle.visitas_desde)} al ${fISO(filas[0].r.detalle.visitas_hasta)}). Los reactivados no se recalculan: el cierre guarda la lista aprobada, comercio por comercio.${Q.err ? " No se pudo hacer el cuadre: " + esc(Q.err) : ""}</div>` : `<div class="ci-pie">Periodo medido con el CRM anterior: las cifras son las del acta firmada.</div>`}</div>`;
+}
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-ctab]"); if (!t) return;
+  S.cTab = t.dataset.ctab; pintar();
+});
 document.addEventListener("click", ev => {
   const t = ev.target.closest("[data-ruta-hist]"); if (!t) return;
   S.rutaHist = t.dataset.rutaHist && S.rutaHist !== t.dataset.rutaHist ? t.dataset.rutaHist : null; pintar();

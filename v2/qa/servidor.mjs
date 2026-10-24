@@ -901,6 +901,51 @@ caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para an
   assert.deepEqual(r, { anon_lee: false, anon_vacia: false, auth_lee: true, auth_vacia: false, anon_seq: false, auth_setval: false });
 });
 
+// ---------- cierres de periodo (24/10) ----------
+caso('cierres: el ejecutivo ve solo los suyos y sin el detalle; el analista ve todo; nadie lee las tablas directo', async () => {
+  await db.query(`insert into v2_cierres(periodo, correo, nombre, ini, fin, modelo, aprobado_en, incentivo_pct, pagado_pct, retenido_pct, alcances, detalle) values
+    ('2099-00', $1, 'P0 · prueba', '2098-12-19', '2099-01-18', 'Modelo de prueba', '2099-01-20', 20, 16, 4, '[{"k":"Visitados","v":"10 / 8"}]', '{"viaticos_por_reembolsar":12.5,"visitas_desde":"${await diaMas(-10)}","visitas_hasta":"${hoy}"}'),
+    ('2099-00', $2, 'P0 · prueba', '2098-12-19', '2099-01-18', 'Modelo de prueba', '2099-01-20', 15, 12, 3, '[]', '{"visitas_desde":"${await diaMas(-10)}","visitas_hasta":"${hoy}"}')`, [EJ, OTRO]);
+  await db.query(`insert into v2_cierre_reactivados(periodo, correo, customer_id, ya_facturaba) values ('2099-00', $1, '00000001', false), ('2099-00', $1, '00000002', true)`, [EJ]);
+  const mios = (await como(EJ, `select * from public.v2_mis_cierres()`)).rows;
+  assert.equal(mios.length, 1); assert.equal(Number(mios[0].incentivo_pct), 20); assert.equal(Number(mios[0].retenido_pct), 4);
+  assert.ok(!('detalle' in mios[0]), 'el ejecutivo recibe el detalle (viáticos, puntajes)');
+  assert.deepEqual(mios[0].alcances, [{ k: 'Visitados', v: '10 / 8' }]);
+  // pedir los de otro no sirve: le devuelve los suyos
+  assert.deepEqual((await como(EJ, `select periodo from public.v2_mis_cierres($1)`, [OTRO])).rows.map(r => r.periodo), ['2099-00']);
+  assert.equal(Number((await como(EJ, `select incentivo_pct from public.v2_mis_cierres($1)`, [OTRO])).rows[0].incentivo_pct), 20);
+  assert.equal((await como(EJ, `select * from public.v2_cierres_equipo()`)).rows.length, 0, 'el ejecutivo ve los cierres del equipo');
+  assert.equal((await como(EJ, `select * from public.v2_cierre_cuadre('2099-00')`)).rows.length, 0, 'el ejecutivo ve el cuadre');
+  assert.equal((await como(EJ, `select * from v2_cierres`)).rows.length, 0, 'el ejecutivo lee la tabla directo');
+  assert.equal((await como(EJ, `select * from v2_cierre_reactivados`)).rows.length, 0);
+  assert.equal((await como(ANA, `select * from v2_cierres`)).rows.length, 0, 'el analista lee la tabla directo (solo por las funciones)');
+  await falla(como(EJ, `update v2_cierres set incentivo_pct = 99`));
+  await falla(como(ANA, `insert into v2_cierres(periodo, correo, nombre, ini, fin, modelo, incentivo_pct, pagado_pct, retenido_pct) values ('2099-09', $1, 'x', '2099-01-01', '2099-01-31', 'x', 10, 8, 2)`, [EJ]));
+  assert.equal((await como(INA, `select * from public.v2_mis_cierres()`)).rows.length, 0, 'un inactivo ve cierres');
+  // el analista: todo, con el detalle y la lista de reactivados; y los de un ejecutivo para «Ver su celular»
+  const eq = (await como(ANA, `select * from public.v2_cierres_equipo()`)).rows;
+  assert.equal(eq.length, 2);
+  const e1 = eq.find(r => r.correo === EJ);
+  assert.equal(e1.detalle.viaticos_por_reembolsar, 12.5); assert.equal(e1.reactivados_lista, 2); assert.equal(e1.reactivados_ya_facturaban, 1);
+  assert.equal(Number((await como(ANA, `select incentivo_pct from public.v2_mis_cierres($1)`, [OTRO])).rows[0].incentivo_pct), 15);
+  // pagado + retenido tiene que ser el incentivo
+  await falla(db.query(`insert into v2_cierres(periodo, correo, nombre, ini, fin, modelo, incentivo_pct, pagado_pct, retenido_pct) values ('2099-08', $1, 'x', '2099-01-01', '2099-01-31', 'x', 20, 10, 2)`, [EJ]), /ck_cierres_pct/);
+});
+caso('cierres: el cuadre vuelve a contar visitados y con contacto en la ventana del acta, con la regla de visita válida', async () => {
+  const [a, b, c] = [await nuevoComercio(271), await nuevoComercio(272), await nuevoComercio(273)];
+  await visitaPasada(a, 2, 'Dueño', { que: 'Reunión concretada' });
+  await visitaPasada(a, 1, 'Nadie');                       // el mismo comercio cuenta una vez
+  await visitaPasada(b, 3, 'Nadie');                       // visitado, sin contacto
+  const anulada = await visitaPasada(c, 2, 'Dueño', { que: 'Reunión concretada' });
+  await db.query(`update v2_visitas set anulada_en = now() where id = $1`, [anulada]);   // anulada: no cuenta
+  await visitaPasada(c, 30, 'Dueño', { que: 'Reunión concretada' });                    // fuera de la ventana: no cuenta
+  const r = (await como(ANA, `select * from public.v2_cierre_cuadre('2099-00')`)).rows.find(x => x.correo === EJ);
+  const esperado = (await db.query(`select count(distinct customer_id)::int n, count(distinct customer_id) filter (where con <> 'Nadie')::int k from v2_visitas
+      where correo = $1 and anulada_en is null and lat is not null and not coalesce(fuera_plazo, false) and (visitado_en at time zone 'America/Lima')::date between $2::date and $3::date`, [EJ, await diaMas(-10), hoy])).rows[0];
+  assert.equal(r.visitados, esperado.n); assert.equal(r.con_contacto, esperado.k);
+  assert.ok(r.visitados >= 2 && r.con_contacto >= 1);
+});
+
 let fallas = 0;
 for (const [n, fn] of CASOS){
   try { await fn(); console.log(`ok  ${n}`); }

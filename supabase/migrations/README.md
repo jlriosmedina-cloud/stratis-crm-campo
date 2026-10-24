@@ -27,6 +27,7 @@ Se aplican solo con el OK de Jose.
 | `20261021120000_avance_base_2026_11.sql` | 21/10/2026, con el OK de Jose (v2_avance: base y visitados solo con la base nueva; 2026-10 sin cambios) | `avance_base_2026_11` |
 | `20261020150000_respaldo_antes_base_2026_11.sql` | 20/10/2026, con el OK de Jose (solo copia en el esquema `respaldo`; no toca `public`) | `20261020213955` |
 | `20261021130000_ruta_propia_del_ejecutivo.sql` | 21/10/2026, con el OK de Jose (ruta propia del ejecutivo; celular publicado el mismo día) | `20261021002550` |
+| `20261024100000_cierres_de_periodo.sql` | 23/10/2026, con el OK de Jose (cierres congelados por periodo; P1–P3 cargados aparte, fuera del repositorio; apps publicadas el mismo día) | `20261023212621` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 

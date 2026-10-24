@@ -444,6 +444,35 @@ await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta
   assert.ok((await p.locator('#contenido').innerText()).includes('Este ejecutivo todavía no armó rutas') === false, 'el que volvió a la recomendada sí tiene cambios');
   await p.evaluate(() => { window.__FX.tablas.v2_bitacora_visita = []; S.rutasBit = null; elegirEj('todos'); S.vista = 'validacion'; pintar(); });
 });
+await prueba('Cierres de periodo: histórico, detalle con cuadre, ojo de privacidad y evolutivo del ejecutivo', async () => {
+  const c = (periodo, nombre, ini, fin, inc, pag, ret, extra = {}) => Object.assign({ periodo, correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre, nombre, ini, fin, modelo: 'Modelo de prueba',
+    aprobado_en: fin, enviado_en: null, incentivo_pct: inc, pagado_pct: pag, retenido_pct: ret, alcances: [{ k: 'Visitados', v: '10 / 8' }], detalle: {}, reactivados_lista: 0, reactivados_ya_facturaban: 0 }, extra);
+  await p.evaluate(rows => { window.__FX.rpc.v2_cierres_equipo = rows; window.__FX.rpc.v2_cierre_cuadre = [{ correo: rows[0].correo, visitados: 12, con_contacto: 7 }];
+    S.cierres = null; S.cTab = 'hist'; S.ver = true; elegirEj('todos'); S.vista = 'cierres'; pintar(); },
+    [c('2099-01', 'P1 · prueba', '2098-12-19', '2099-01-18', 15, 12, 3, { detalle: { nota_periodo: 'Marcha blanca de prueba' } }),
+     c('2099-02', 'P2 · prueba', '2099-01-19', '2099-02-18', 22.5, 18, 4.5, { detalle: { visitas_desde: '2099-01-19', visitas_hasta: '2099-02-18', visitados: 12, con_contacto: 8, viaticos_por_reembolsar: 194.86, ajuste: 'Ajuste de prueba' }, reactivados_lista: 5, reactivados_ya_facturaban: 1 })]);
+  await p.waitForTimeout(500);
+  let t = await p.locator('#contenido').innerText();
+  assert.match(t, /Incentivo por periodo/); assert.match(t, /15 %/); assert.match(t, /22,5 %/); assert.match(t, /18 % \/ 4,5 %/);
+  assert.match(t, /7,5 %/, 'la bolsa retenida no suma lo retenido de cada cierre');
+  assert.match(t, /Marcha blanca de prueba/);
+  // el detalle de un periodo: el cuadre marca lo que cuadra y lo que no
+  await p.click('[data-ctab="2099-02"]'); await p.waitForTimeout(500);
+  t = await p.locator('#contenido').innerText();
+  assert.match(t, /12 · 12/); assert.match(t, /7 · 8/); assert.equal(await p.locator('.ci-ok').count(), 1); assert.equal(await p.locator('.ci-dif').count(), 1);
+  assert.match(t, /S\/ 194,86/); assert.match(t, /1 ya facturaban/); assert.match(t, /Ajuste de prueba/);
+  assert.ok((await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_cierre_cuadre').map(x => x[1].p_periodo))).includes('2099-02'));
+  // con el ojo cerrado no se ven los porcentajes ni los viáticos
+  await p.evaluate(() => { S.ver = false; pintar(); }); await p.waitForTimeout(200);
+  t = await p.locator('#contenido').innerText();
+  assert.ok(!/22,5 %|194,86/.test(t), 'el ojo cerrado deja ver el incentivo o los viáticos');
+  // con un ejecutivo elegido: su evolutivo
+  await p.evaluate(() => { S.ver = true; pintar(); });
+  await p.selectOption('#gEj', EJECUTIVO.correo); await p.waitForTimeout(400);
+  t = await p.locator('#contenido').innerText();
+  assert.match(t, /El recorrido de/); assert.equal(await p.locator('.ci-per:not(.curso)').count(), 2); assert.match(t, /30 %/, 'falta lo pagado en total'); assert.match(t, /bolsa retenida al cierre del proyecto/);
+  await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
+});
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : '\nTodas las pruebas del escritorio pasaron');
