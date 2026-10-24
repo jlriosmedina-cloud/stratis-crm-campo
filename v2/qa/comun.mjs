@@ -30,7 +30,9 @@ export const STUB = `
       getSession: () => ok({ session: window.__FX.sesion }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe(){} } } }),
       signOut: () => ok(null),
-      signInWithPassword: () => ok({ session: window.__FX.sesion })
+      signInWithPassword: () => ok({ session: window.__FX.sesion }),
+      // cambiar la clave: se anota solo el largo, nunca la clave
+      updateUser: a => { window.__llamadas.push(['auth.updateUser', { largo: (a && a.password || '').length }]); return window.__FX.claveError ? mal(window.__FX.claveError) : ok({ user: {} }); }
     },
     channel: () => ({ on(){ return this; }, subscribe(){ return this; } }),
     removeChannel: () => {},

@@ -90,19 +90,60 @@ for (const tema of ['light', 'dark']) {
     assert.deepEqual(errs, []); await p.close();
   });
 
-  await prueba(`${tema} · «Todavía no puedo entrar»: lo aparta una hora, aunque recargue, y deja registrar`, async () => {
+  await prueba(`${tema} · una sola salida: no hay «Todavía no puedo entrar»`, async () => {
     const { p, errs } = await abrir([]);
-    await p.click('[data-mudanza-luego]'); await p.waitForTimeout(300);
+    assert.equal(await p.locator('#avisoMudanza [data-ir-nuevo]').count(), 1);
+    assert.equal(await p.locator('#avisoMudanza [data-mudanza-luego]').count(), 0);
+    assert.ok(!/Todavía no puedo entrar/.test(await p.locator('#avisoMudanza').textContent()));
+    assert.deepEqual(errs, []); await p.close();
+  });
+
+  await prueba(`${tema} · «No recuerdo mi clave»: valida, guarda la clave nueva y lleva al link nuevo`, async () => {
+    const { p, errs } = await abrir([]);
+    await p.click('[data-mudanza-clave]'); await p.waitForTimeout(150);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /Crea tu clave nueva/);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /ejecutivo\.prueba@ejemplo\.com/);
+    const llamadas = () => p.evaluate(() => window.__llamadas.filter(x => x[0] === 'auth.updateUser'));
+    await p.fill('#muClave1', 'corta'); await p.fill('#muClave2', 'corta'); await p.click('[data-mudanza-form] button[type=submit]'); await p.waitForTimeout(150);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /al menos 8 caracteres/);
+    await p.fill('#muClave1', 'claveprueba1'); await p.fill('#muClave2', 'claveprueba2'); await p.click('[data-mudanza-form] button[type=submit]'); await p.waitForTimeout(150);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /no coinciden/);
+    assert.equal((await llamadas()).length, 0, 'guardó una clave que no pasó la validación');
+    // un repintado de la app no corta el formulario
+    await p.evaluate(() => pintar()); await p.waitForTimeout(100);
+    assert.equal(await p.locator('#muClave1').count(), 1, 'un repintado borró el formulario');
+    await p.fill('#muClave1', 'claveprueba1'); await p.fill('#muClave2', 'claveprueba1'); await p.click('[data-mudanza-form] button[type=submit]'); await p.waitForTimeout(300);
+    assert.deepEqual(await llamadas(), [['auth.updateUser', { largo: 12 }]]);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /Tu clave nueva quedó guardada/);
+    await Promise.all([p.waitForURL(NUEVA), p.click('[data-ir-nuevo]')]);
+    assert.deepEqual(errs, []); await p.close();
+  });
+
+  await prueba(`${tema} · si Supabase no guarda la clave, lo dice y deja seguir registrando aquí`, async () => {
+    const { p, errs } = await abrir([]);
+    await p.evaluate(() => { window.__FX.claveError = 'Password is too weak'; });
+    await p.click('[data-mudanza-clave]'); await p.waitForTimeout(100);
+    await p.fill('#muClave1', 'claveprueba1'); await p.fill('#muClave2', 'claveprueba1'); await p.click('[data-mudanza-form] button[type=submit]'); await p.waitForTimeout(300);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /No se guardó tu clave \(Password is too weak\)/);
+    // sin clave no queda trabado: puede seguir registrando aquí mientras Jose se la cambia
+    await p.click('[data-mudanza-aqui]'); await p.waitForTimeout(200);
     assert.equal(await p.locator('#avisoMudanza').count(), 0);
-    assert.match(await p.textContent('body'), /En una hora te lo volvemos a pedir/);
-    const luego = await p.evaluate(() => Number(localStorage.getItem('stratis-v2-mudanza-luego')) - Date.now());
-    assert.ok(luego > 59 * 60 * 1000 && luego <= 60 * 60 * 1000, 'debe apartarlo una hora');
-    await p.reload(); await p.waitForTimeout(1200);
-    assert.equal(await p.locator('#avisoMudanza').count(), 0, 'recargar lo vuelve a mostrar antes de la hora');
     await p.evaluate(() => nuevoRegistro('00000001')); await p.waitForTimeout(150);
     assert.equal(await p.evaluate(() => !!S.reg), true, 'no deja registrar');
-    await p.evaluate(() => { S.reg = null; localStorage.setItem('stratis-v2-mudanza-luego', String(Date.now() - 1000)); pintar(); }); await p.waitForTimeout(150);
-    assert.equal(await p.locator('#avisoMudanza').count(), 1, 'pasada la hora debe volver a pedirlo');
+    await p.evaluate(() => { S.reg = null; pintar(); });
+    // una excepción tampoco deja el botón trabado
+    await p.evaluate(() => { localStorage.removeItem('stratis-v2-mudanza-luego'); window.__FX.claveError = null; sb.auth.updateUser = () => Promise.reject(new Error('sin red')); pintar(); }); await p.waitForTimeout(150);
+    await p.click('[data-mudanza-clave]'); await p.waitForTimeout(100);
+    await p.fill('#muClave1', 'claveprueba1'); await p.fill('#muClave2', 'claveprueba1'); await p.click('[data-mudanza-form] button[type=submit]'); await p.waitForTimeout(300);
+    assert.match(await p.locator('#avisoMudanza').textContent(), /No se guardó tu clave \(sin red\)/);
+    assert.equal(await p.locator('[data-mudanza-form] button[type=submit][disabled]').count(), 0, 'el botón quedó trabado');
+    assert.deepEqual(errs, []); await p.close();
+  });
+
+  await prueba(`${tema} · sin sesión no ofrece crear clave`, async () => {
+    const { p, errs } = await abrir([], false, FX({ sesion: null }));
+    assert.equal(await p.locator('#avisoMudanza').count(), 1);
+    assert.equal(await p.locator('[data-mudanza-clave]').count(), 0);
     assert.deepEqual(errs, []); await p.close();
   });
 
