@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Pruebas mínimas del CRM v2 con datos inventados (nunca reales)",
   "scripts": {
-    "test": "node celular.mjs && node celular-bloques.mjs && node celular-rutas.mjs && node celular-mudanza.mjs && node escritorio.mjs && node servidor.mjs"
+    "test": "node celular.mjs && node celular-bloques.mjs && node celular-rutas.mjs && node celular-mudanza.mjs && node celular-cierres.mjs && node escritorio.mjs && node servidor.mjs"
   },
   "dependencies": {
     "exceljs": "4.4.0",

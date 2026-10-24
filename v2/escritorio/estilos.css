@@ -483,3 +483,25 @@ table.datos th[colspan]{text-align:center;border-bottom:1px solid var(--linea)}
 td.com .ruta-com{border:0;padding:0}
 table.datos tr.sel td{background:var(--naranja-t)}
 .ruta-hoy .barra .lbl{flex-wrap:wrap}
+/* Cierres de periodo (24/10) */
+.ci-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px}@media(max-width:1100px){.ci-grid{grid-template-columns:1fr}}
+.ci-linea{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;padding:12px}
+.ci-per{border:1px solid var(--linea);border-radius:12px;padding:12px;background:var(--suelo);display:grid;gap:6px;align-content:start}
+.ci-per .t{font-weight:800;color:var(--ink)}.ci-per .f{font-size:11.5px;color:var(--muted)}.ci-per .big{font-size:26px;font-weight:800;color:var(--azul)}
+.ci-per.curso{border-style:dashed}.ci-per.curso .big{color:var(--muted)}
+.ci-lin{display:flex;justify-content:space-between;gap:8px;font-size:12.5px}.ci-lin b{color:var(--ink);text-align:right}
+.ci-alc{min-width:220px}.ci-alc .ci-lin{gap:16px}
+.ci-nota{font-size:11.5px;color:var(--ambar-txt);background:var(--ambar-t);border-radius:8px;padding:6px 8px}
+.ci-sub{display:block;font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+.ci-pie{font-size:12px;color:var(--muted);padding:10px 12px;line-height:1.5}
+.ci-cuerpo{padding:12px}
+.ci-barras{display:flex;align-items:flex-end;gap:14px;height:190px;border-bottom:1px solid var(--linea);padding-bottom:22px;position:relative}
+.ci-barras .c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+.ci-barras .b{width:100%;max-width:64px;background:var(--azul)}.ci-barras .b.r{background:var(--naranja);border-radius:8px 8px 0 0}
+.ci-barras .v{font-weight:800;color:var(--ink);font-size:12.5px;margin-bottom:4px}.ci-barras .e{position:absolute;bottom:-20px;font-size:11.5px;color:var(--muted)}
+.ci-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.ci-kpis div{background:var(--suelo);border-radius:12px;padding:10px 12px;display:grid;gap:2px}
+.ci-kpis b{font-size:20px;color:var(--ink)}.ci-kpis span{font-size:11.5px;color:var(--muted)}
+.ci-cuad{display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--azul);vertical-align:-1px}.ci-cuad.r{background:var(--naranja)}
+.ci-ok{color:var(--verde-txt);font-weight:800}.ci-dif{color:var(--rojo-txt);font-weight:800}
+.chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
+.ci-ok .sr,.ci-dif .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
