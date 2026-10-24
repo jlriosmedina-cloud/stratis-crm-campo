@@ -350,6 +350,10 @@ textarea.campo{min-height:78px;resize:vertical}
 .av-caja h2{margin:4px 0 0;font-size:18px;font-weight:800;color:var(--ink);line-height:1.25}
 .av-caja p{margin:0;font-size:14px;line-height:1.45;color:var(--texto)}
 .av-caja .btn{width:100%;margin-top:8px;min-height:48px;font-size:15.5px}
+.av-link{background:none;border:0;color:var(--azul);font-size:14px;font-weight:600;text-decoration:underline;padding:8px;min-height:44px;cursor:pointer}
+.av-form{width:100%;display:grid;gap:8px}
+.av-lbl{font-size:13px;font-weight:600;color:var(--ink);text-align:left;margin-bottom:-4px}
+.av-error{font-size:13.5px;color:var(--rojo,#C62828);text-align:left}
 @keyframes avEntra{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){.av-velo{animation:none}}
 

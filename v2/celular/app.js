@@ -2019,7 +2019,7 @@ window.addEventListener("online", revisarVersion);
 const URL_NUEVA = "https://crm-bbva-peru-qa.mystratis.com/";
 const HOST_ANTERIOR = "jlriosmedina-cloud.github.io";
 const MUDANZA = !!URL_NUEVA && location.hostname === HOST_ANTERIOR && !PREVIA && !COMO;
-// «Todavía no puedo entrar» o el link nuevo sin responder: el aviso se aparta un rato y el ejecutivo sigue aquí.
+// Si el link nuevo no responde, el aviso se aparta 10 minutos y el ejecutivo sigue aquí.
 // La hora se guarda en el navegador para que recargar la app no lo vuelva a mostrar antes de tiempo.
 const mudanzaLuego = () => { try { return Number(localStorage.getItem("stratis-v2-mudanza-luego")) || 0; } catch(e){ return 0; } };
 function posponerMudanza(ms){
@@ -2027,25 +2027,68 @@ function posponerMudanza(ms){
   clearTimeout(S._mudanzaTimer); S._mudanzaTimer = setTimeout(revisarMudanza, ms + 1000);
   const hay = document.getElementById("avisoMudanza"); if (hay) hay.remove();
 }
+const ICO_MUDANZA = `<div class="av-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></div>`;
+// Una sola salida: «Ir al CRM nuevo» (pedido de Jose, 23/10). Con la sesión abierta aquí, el ejecutivo que no recuerda
+// su clave crea una nueva (sb.auth.updateUser) y entra al link nuevo con su correo y esa clave. Sin sesión, la cambia Jose.
+function cajaMudanza(){
+  const caja = document.querySelector("#avisoMudanza .av-caja"); if (!caja) return;
+  const correo = S.sesion && S.sesion.user && S.sesion.user.email;
+  const m = S._mudanzaClave;
+  if (!m){
+    caja.innerHTML = `${ICO_MUDANZA}<h2 id="muTit">El CRM de campo cambió de link</h2>
+      <p id="muTxt">Tus visitas ya están enviadas. Desde ahora entras por el link nuevo, con tu mismo correo y contraseña. Al abrirlo, guárdalo en la pantalla de inicio de tu celular.</p>
+      <button type="button" class="btn btn-pri" data-ir-nuevo>Ir al CRM nuevo</button>
+      ${correo ? `<button type="button" class="av-link" data-mudanza-clave>¿No recuerdas tu clave? Crea una nueva</button>` : ""}`;
+  } else if (m.lista){
+    caja.innerHTML = `${ICO_MUDANZA}<h2 id="muTit">Tu clave nueva quedó guardada</h2>
+      <p id="muTxt">En el link nuevo entra con tu correo <b>${esc(correo)}</b> y la clave que acabas de crear.</p>
+      <button type="button" class="btn btn-pri" data-ir-nuevo>Ir al CRM nuevo</button>`;
+  } else {
+    caja.innerHTML = `${ICO_MUDANZA}<h2 id="muTit">Crea tu clave nueva</h2>
+      <p id="muTxt">Es para entrar al link nuevo con tu correo <b>${esc(correo)}</b>. Usa al menos 8 caracteres.</p>
+      <form class="av-form" data-mudanza-form novalidate>
+        <label class="av-lbl" for="muClave1">Clave nueva</label>
+        <input class="campo" id="muClave1" type="password" autocomplete="new-password">
+        <label class="av-lbl" for="muClave2">Repite la clave</label>
+        <input class="campo" id="muClave2" type="password" autocomplete="new-password">
+        ${m.error ? `<div class="av-error" role="alert">${esc(m.error)}</div>` : ""}
+        <button type="submit" class="btn btn-pri" ${m.enviando ? "disabled" : ""}>${m.enviando ? "Guardando…" : "Guardar mi clave nueva"}</button>
+      </form>
+      ${m.fallo ? `<button type="button" class="av-link" data-mudanza-aqui>Seguir registrando aquí por ahora</button>` : `<button type="button" class="av-link" data-mudanza-volver>Volver</button>`}`;
+  }
+  const b = caja.querySelector("[data-ir-nuevo]");
+  // Antes de dejar este link, confirma que el nuevo responde; si no, el ejecutivo sigue aquí y se vuelve a pedir más tarde.
+  if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Abriendo…";
+    try { await fetch(URL_NUEVA, { mode:"no-cors", cache:"no-store" }); location.replace(URL_NUEVA); }
+    catch(e){ S._mudanzaClave = null; posponerMudanza(10 * 60 * 1000); avisar("El link nuevo no responde ahora. Sigue registrando aquí; te lo volveremos a pedir más tarde.", 7000); } };
+  const c = caja.querySelector("[data-mudanza-clave]"); if (c) c.onclick = () => { S._mudanzaClave = {}; cajaMudanza(); };
+  const v = caja.querySelector("[data-mudanza-volver]"); if (v) v.onclick = () => { S._mudanzaClave = null; cajaMudanza(); };
+  // Solo si Supabase no guardó la clave: el ejecutivo no queda sin poder registrar (Regla n.º 1) mientras Jose se la cambia.
+  const aqui = caja.querySelector("[data-mudanza-aqui]"); if (aqui) aqui.onclick = () => { S._mudanzaClave = null; posponerMudanza(10 * 60 * 1000);
+    avisar("Sigue registrando aquí. Avísale a Jose para que te dé una clave; en unos minutos te volvemos a mostrar el link nuevo.", 8000); };
+  const f = caja.querySelector("[data-mudanza-form]"); if (f) f.onsubmit = async ev => { ev.preventDefault();
+    const c1 = $("#muClave1").value, c2 = $("#muClave2").value, st = S._mudanzaClave;
+    if (c1.length < 8){ st.error = "La clave debe tener al menos 8 caracteres."; return cajaMudanza(); }
+    if (c1 !== c2){ st.error = "Las dos claves no coinciden. Escríbelas de nuevo."; return cajaMudanza(); }
+    st.error = ""; st.enviando = true; cajaMudanza();
+    let error = null;
+    try { ({ error } = await sb.auth.updateUser({ password: c1 })); } catch(e){ error = e; } finally { st.enviando = false; }
+    // ya era su clave: sirve igual
+    if (error && (error.code === "same_password" || /different|igual|same/i.test(error.message || ""))){ st.lista = true; return cajaMudanza(); }
+    if (error){ st.error = "No se guardó tu clave (" + (error.message || "error desconocido") + "). Avísale a Jose."; st.fallo = true; return cajaMudanza(); }
+    st.lista = true; cajaMudanza(); };
+  // El foco va a lo que sigue: el botón, o la primera clave si hubo un error
+  const foco = m && !m.lista ? $("#muClave1") : b;
+  if (foco && !(m && m.enviando)) setTimeout(() => foco.focus(), 50);
+}
 function revisarMudanza(){
   if (!MUDANZA) return;
   const hay = document.getElementById("avisoMudanza");
-  if ((S.cola || []).length || ocupadoParaActualizar() || S.versionNueva || !navigator.onLine || mudanzaLuego() > Date.now()){ if (hay) hay.remove(); return; }
+  if (hay && S._mudanzaClave && navigator.onLine) return;   // a mitad de crear su clave: no se interrumpe
+  if ((S.cola || []).length || ocupadoParaActualizar() || S.versionNueva || !navigator.onLine || mudanzaLuego() > Date.now()){ if (hay) hay.remove(); S._mudanzaClave = null; return; }
   if (hay) return;
-  document.body.insertAdjacentHTML("beforeend", `<div id="avisoMudanza" class="av-velo" role="alertdialog" aria-modal="true" aria-labelledby="muTit" aria-describedby="muTxt">
-    <div class="av-caja"><div class="av-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></div>
-    <h2 id="muTit">El CRM de campo cambió de link</h2>
-    <p id="muTxt">Tus visitas ya están enviadas. Desde ahora entras por el link nuevo, con tu mismo correo y contraseña. Al abrirlo, guárdalo en la pantalla de inicio de tu celular.</p>
-    <button type="button" class="btn btn-pri" data-ir-nuevo>Ir al CRM nuevo</button>
-    <button type="button" class="btn btn-sec" data-mudanza-luego>Todavía no puedo entrar</button></div></div>`);
-  const b = document.querySelector("[data-ir-nuevo]");
-  // Antes de dejar este link, confirma que el nuevo responde; si no, el ejecutivo sigue aquí y se vuelve a pedir más tarde.
-  b.onclick = async () => { b.disabled = true; b.textContent = "Abriendo…";
-    try { await fetch(URL_NUEVA, { mode:"no-cors", cache:"no-store" }); location.replace(URL_NUEVA); }
-    catch(e){ posponerMudanza(10 * 60 * 1000); avisar("El link nuevo no responde ahora. Sigue registrando aquí; te lo volveremos a pedir más tarde.", 7000); } };
-  document.querySelector("[data-mudanza-luego]").onclick = () => { posponerMudanza(60 * 60 * 1000);
-    avisar("Sigue registrando aquí. En una hora te lo volvemos a pedir; si no recuerdas tu contraseña, avísale a Jose.", 7000); };
-  setTimeout(() => b.focus(), 50);
+  document.body.insertAdjacentHTML("beforeend", `<div id="avisoMudanza" class="av-velo" role="alertdialog" aria-modal="true" aria-labelledby="muTit" aria-describedby="muTxt"><div class="av-caja"></div></div>`);
+  cajaMudanza();
 }
 { const pintarSinMudanza = pintar; pintar = function(){ const r = pintarSinMudanza.apply(this, arguments); revisarMudanza(); return r; }; }
 window.addEventListener("offline", revisarMudanza);
