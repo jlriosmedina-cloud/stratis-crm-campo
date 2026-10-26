@@ -1,5 +1,5 @@
 // Prueba del escritorio: carga sin errores, «Cómo fue la visita», señal «Revisar marcación»,
-// visitas retenidas en el celular y la base para BBVA (hojas KPIs y Base). Datos inventados.
+// visitas retenidas en el celular y la base para BBVA (modelo de 55 columnas: Resumen y Base). Datos inventados.
 // Uso: node v2/qa/escritorio.mjs   (antes: python v2/build.py y npm install en v2/qa)
 import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima } from './comun.mjs';
 import assert from 'node:assert/strict';
@@ -95,41 +95,63 @@ await prueba('visitas retenidas: se ven con el mensaje y Jose las descarta', asy
   assert.deepEqual(d[1], { p_cliente_uid: 'uid-retenida-prueba', p_nota: 'Periodo cerrado, no se recupera' });
   assert.equal(await p.locator('text=Una visita retenida').count(), 0, 'el panel no se actualizó');
 });
-await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin notas', async () => {
+await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y Base), Documento como llave', async () => {
   await p.evaluate(() => { S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
   const f = path.join(RAIZ, 'qa', 'salida_base_prueba.xlsx'); await d.saveAs(f);
-  const z = await JSZip.loadAsync(fs.readFileSync(f));
-  assert.equal(Object.keys(z.files).filter(n => /^xl\/pivotTables\//.test(n)).length, 0, 'quedaron tablas dinámicas');
   const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
-  assert.deepEqual(xw.worksheets.map(w => w.name), ['KPIs', 'Base']);
-  // tipificaciones del 29/09 al final de Base, sin correr las columnas de antes; después, Comercio_Cerro_Definitivamente y Ejecutivo
-  const cb = xw.getWorksheet('Base').getRow(1).values.slice(1).map(String);
-  const NUEVAS = ['Desconfía de la visita (duda que representemos a BBVA)', 'No pidió el POS', 'Solicitó cambio de equipo', 'Le falta una función'];
-  // 22/10: «Documento» (RUC o DNI, como texto) va primero y Customer_ID segundo; las demás se corren una
-  assert.deepEqual(cb.slice(0, 3), ['Documento', 'Customer_ID', 'Visitado'], 'Base: Documento debe ir primero y Customer_ID segundo');
-  assert.equal(xw.getWorksheet('Base').getColumn(1).numFmt, '@', 'Documento debe ir como texto');
-  assert.equal(xw.getWorksheet('Base').getColumn(2).numFmt, '@', 'Documento debe ir como texto');
-  assert.equal(cb.indexOf('Fuente_Motivos_Si') + 1, 50, 'Base: la última columna de antes se movió');
-  assert.deepEqual(cb.slice(50), NUEVAS.concat('Comercio_Cerro_Definitivamente', 'Ejecutivo'));
-  assert.equal(xw.getWorksheet('Base').getCell(2, cb.length).value, 'Prueba', 'Base: falta el ejecutivo asignado');
-  assert.equal(xw.getWorksheet('Base').getCell(2, 1).value, '00999001', 'Documento con su cero a la izquierda');
-  assert.equal(xw.getWorksheet('Base').getCell(2, 2).value, '00000001', 'Customer_ID en la segunda columna');
-  // 26/10: la base anterior no tiene documento pero sí RUC; va el RUC para que la llave de la columna A la encuentre
-  assert.equal(xw.getWorksheet('Base').getCell(3, 1).value, '20999000002', 'sin documento, debe ir el RUC (base anterior)');
-  assert.equal(xw.getWorksheet('Base').getCell(4, 1).value, '', 'sin documento ni RUC, la celda queda vacía');
-  const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
-  assert.ok(txt.includes('zona insegura u otro motivo'), 'falta «zona insegura» en «Sin contacto»');
-  // KPIs: todas las fórmulas sobre la hoja Base, sin la fila 2 ni las notas al pie
-  const k = xw.getWorksheet('KPIs'), celdas = [];
-  k.eachRow(r => r.eachCell(c => celdas.push(c.value)));
-  const formulas = celdas.filter(v => v && v.formula).map(v => v.formula);
-  assert.ok(formulas.length > 40 && formulas.every(x => !/Visitas!|Feedback_Detalle!/.test(x)), 'hay KPIs que no salen de la hoja Base');
-  assert.equal(k.getCell('A2').value, null, 'la fila 2 no está vacía');
-  assert.ok(formulas.some(x => /^COUNTA\(Base!\$B\$2:\$B\$\d+\)$/.test(x)), 'el universo debe contar Customer_ID (columna B), que está en todas las filas');
-  for (const t of ['Todo sale de la hoja Base', 'Éxito = el comercio declaró', 'Fuente del feedback', 'Reactivación en 0', 'llave: Customer_ID', 'la hoja Base no trae el ejecutivo'])
-    assert.ok(!celdas.some(v => typeof v === 'string' && v.includes(t)), 'quedó la nota: ' + t);
+  assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'Base']);
+  const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String);
+  // 26/10: las 55 columnas del modelo de Jose, en su orden (Gestion_Stratis_visitados_base_nueva_corte_23-10-2026.xlsx)
+  assert.equal(cb.length, 57, 'Base debe tener las 55 columnas del modelo más las 2 de fuente');
+  assert.deepEqual(cb.slice(0, 10), ['Documento','Customer_ID','Nombre_Comercial','Razon_Social','Distrito','Periodo','Bloque','Origen','Ejecutivo','Grupo_Ubicacion']);
+  assert.deepEqual(cb.slice(50, 55), ['Reactivado_BBVA','Dias_Con_Trx_Post_Visita','Cuenta_Para_Comision','Validacion','Fuera_De_Plazo']);
+  // la fuente del feedback va después de la columna 55 (Jose, 26/10)
+  assert.deepEqual(cb.slice(55), ['Fuente_Feedback','Fuente_Que_Lo_Convencio']);
+  assert.equal(cb[26], 'Resultado', 'Resultado debe ir en la columna AA'); assert.equal(cb[40], 'Numero_Ticket', 'Numero_Ticket debe ir en la columna AO');
+  assert.equal(b.getColumn(1).numFmt, '@', 'Documento debe ir como texto'); assert.equal(b.getColumn(2).numFmt, '@', 'Customer_ID debe ir como texto');
+  const v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
+  assert.equal(v(2, 'Documento'), '00999001', 'Documento con su cero a la izquierda');
+  assert.equal(v(3, 'Documento'), '20999000002', 'sin documento, debe ir el RUC');
+  assert.equal(v(4, 'Documento') || '', '', 'sin documento ni RUC, la celda queda vacía');
+  assert.equal(v(2, 'Customer_ID'), '00000001');
+  assert.equal(v(2, 'Como_Fue_La_Visita'), 'Hablé con el dueño o el encargado');
+  assert.equal(v(3, 'Como_Fue_La_Visita'), 'No estaba quien decide · quedamos en volver');
+  assert.equal(v(5, 'Como_Fue_La_Visita'), 'No se pudo hacer la visita'); assert.equal(v(5, 'Motivo_Sin_Visita'), 'Cerrado hoy');
+  assert.equal(v(6, 'Como_Fue_La_Visita'), 'El comercio no está en esta dirección'); assert.equal(v(6, 'Direccion_Correcta'), 'NO');
+  assert.equal(v(3, 'Rama_Feedback'), 'Decisión y necesidad'); assert.equal(v(3, 'Fuente_Feedback'), 'Ejecutivo'); assert.equal(v(3, 'Que_Ofrecio'), 'Reagendé con quien decide');
+  assert.ok(v(3, 'Fecha_Volver') instanceof Date, 'Fecha_Volver debe ser fecha');
+  // Las que el celular todavía no captura van vacías y con cabecera naranja
+  for (const h of ['Nombre_Cargo_Contacto','Sentir_Del_Cliente','Punto_De_Dolor_Principal','Numero_Ticket','Proxima_Accion']){
+    assert.equal(v(2, h) || '', '', h + ' debe ir vacía');
+    assert.equal(b.getCell(1, cb.indexOf(h) + 1).fill.fgColor.argb, 'FFF86F35', h + ' debe ir en naranja'); }
+  assert.equal(b.getCell(1, 1).fill.fgColor.argb, 'FF0C1137');
+  // Sin corte de BBVA en el periodo no se afirma «NO»
+  assert.equal(v(2, 'Reactivado_BBVA'), 'Sin dato en el corte'); assert.equal(v(2, 'Cuenta_Para_Comision'), 'Sin dato en el corte');
+  // Resumen: fórmulas sobre la hoja Base, por ejecutivo
+  const r = xw.getWorksheet('Resumen'), formulas = [];
+  r.eachRow(row => row.eachCell(c => { if (c.value && c.value.formula) formulas.push(c.value.formula); }));
+  assert.ok(formulas.length >= 9 && formulas.every(x => /Base!|SUM\(/.test(x)), 'el Resumen debe salir de la hoja Base');
+  assert.ok(formulas.some(x => /COUNTIFS\(Base!\$I\$2:\$I\$\d+,\$A5,Base!\$K\$2:\$K\$\d+,"SI"\)/.test(x)), 'falta Comercios visitados por ejecutivo (columnas I y K)');
   fs.unlinkSync(f);
+});
+await prueba('base para BBVA: solo la base nueva, y con corte de BBVA en el periodo dice SI o NO', async () => {
+  // Periodo con bloques: 1-3 base nueva, 4 base anterior, 5 salida. Corte de BBVA dentro del periodo; el 1 reactivado con 2 días de trx.
+  await p.evaluate(() => { const fx = window.__FX; fx._base = fx.rpc.v2_mi_base;
+    fx.rpc.v2_mi_base = fx._base.slice(0, 5).map((c, i) => Object.assign({}, c, { origen: i < 3 ? 'base_nueva' : i === 3 ? 'base_anterior' : 'salida', bloque: 1, visitas: 1 },
+      i === 0 ? { bbva_reactivado: '2026-02-01', dias_trx: 2 } : {}));
+    fx.tablas.v2_resultados_bbva = [{ corte: '2026-02-01' }]; S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
+  const f = path.join(RAIZ, 'qa', 'salida_base_prueba_bloques.xlsx'); await d.saveAs(f);
+  const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
+  const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String), v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
+  const cids = []; for (let r = 2; r <= b.rowCount; r++) cids.push(v(r, 'Customer_ID'));
+  assert.deepEqual(cids, ['00000001', '00000002', '00000003'], 'solo deben ir los de la base nueva');
+  assert.equal(v(2, 'Origen'), 'Base nueva');
+  assert.equal(v(2, 'Reactivado_BBVA'), 'SI'); assert.equal(v(2, 'Cuenta_Para_Comision'), 'SI');
+  assert.equal(v(3, 'Reactivado_BBVA'), 'NO'); assert.equal(v(3, 'Cuenta_Para_Comision'), 'NO');
+  fs.unlinkSync(f);
+  await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_mi_base = fx._base; delete fx.tablas.v2_resultados_bbva; });
 });
 await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no está en la base y envía el corte', async () => {
   await p.evaluate(() => { window.__FX.rpc.v2_cargar_resultados_bbva = a => ({ carga_id: 7, corte: a.p_corte, leidas: a.p_filas.length, cargadas: a.p_filas.length, rechazadas: 0, reemplazo: false, reactivados: 2, con_contacto: 1, detalle: [] });
