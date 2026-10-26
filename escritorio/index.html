@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "dbd7fd";
+const BUILD = "aeb7bb";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -2765,6 +2765,8 @@ async function baseBBVA(){
     // Base: una fila por comercio. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
     // «Documento» (Jose, 22/10) va primero: RUC de 11 o DNI de 8, la llave de BBVA en la base 2026-11, como texto. Customer_ID va segundo
     // y queda para la base anterior, que no tiene documento. El universo se cuenta por Customer_ID, que está en todas las filas.
+    // 26/10: la base anterior salía con Documento vacío (49 de 501 filas) y la búsqueda por esa llave no la encontraba. Los 49 tienen
+    // RUC de 11 dígitos en v2_comercios.ruc y ninguno choca con el documento de otro comercio: sin documento, va el RUC.
     const colsB = ["Documento","Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
     const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
       const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
@@ -2775,7 +2777,7 @@ async function baseBBVA(){
       // Para el cruce con los volúmenes de BBVA: primera visita válida (con GPS y a tiempo) en la que habló con alguien del comercio,
       // aunque haya sido en otra dirección (dirección errada pero comercio ubicado)
       const gc = l.find(v => valida(v) && v.con !== "Nadie"), fGc = gc ? iso(gc.visitado_en).split("-").map(Number) : null;
-      return [c.documento || "", c.customer_id,
+      return [c.documento || c.ruc || "", c.customer_id,
         l.some(valida) ? "SI" : "NO", gc ? "SI" : "NO", fGc ? new Date(Date.UTC(fGc[0], fGc[1] - 1, fGc[2])) : null,
         gc ? (l.some(v => valida(v) && v.con !== "Nadie" && v.direccion_ok === false) ? "SI" : "NO") : "", l.length, l.filter(valida).length, l.filter(v => v.con !== "Nadie").length, l.length ? dmy(iso(l[0].visitado_en)) : "", ult ? dmy(iso(ult.visitado_en)) : "",
         ult ? ult.con : "", ult ? ult.que + (ult.motivo ? " · " + ult.motivo : "") : "", ult ? ult.decision || "" : "", ult ? String(ult.comentario || "").replace(/\s+/g, " ") : "",

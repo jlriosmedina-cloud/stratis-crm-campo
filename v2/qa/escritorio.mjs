@@ -9,7 +9,7 @@ import JSZip from 'jszip';
 
 const NM = path.join(RAIZ, 'qa', 'node_modules');
 const ANALISTA = { correo: 'analista.prueba@ejemplo.com', nombre: 'Analista Prueba', nombre_corto: 'Analista', rol: 'Analista', activo: true };
-const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i, i === 1 ? { documento: '00999001' } : {}));
+const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i, i === 1 ? { documento: '00999001' } : i === 2 ? { ruc: '20999000002' } : {}));
 const hoy = hoyLima();
 const visita = (i, extra) => Object.assign({
   id: `00000000-0000-0000-0000-00000000000${i}`, periodo: 'PRUEBA', customer_id: String(i).padStart(8, '0'), comercio: `Comercio Prueba ${i}`, razon_social: `COMERCIO DE PRUEBA ${i} SAC`,
@@ -115,7 +115,9 @@ await prueba('base para BBVA: solo KPIs y Base, KPIs desde la hoja Base y sin no
   assert.equal(xw.getWorksheet('Base').getCell(2, cb.length).value, 'Prueba', 'Base: falta el ejecutivo asignado');
   assert.equal(xw.getWorksheet('Base').getCell(2, 1).value, '00999001', 'Documento con su cero a la izquierda');
   assert.equal(xw.getWorksheet('Base').getCell(2, 2).value, '00000001', 'Customer_ID en la segunda columna');
-  assert.equal(xw.getWorksheet('Base').getCell(3, 1).value, '', 'sin documento, la celda queda vacía (base anterior)');
+  // 26/10: la base anterior no tiene documento pero sí RUC; va el RUC para que la llave de la columna A la encuentre
+  assert.equal(xw.getWorksheet('Base').getCell(3, 1).value, '20999000002', 'sin documento, debe ir el RUC (base anterior)');
+  assert.equal(xw.getWorksheet('Base').getCell(4, 1).value, '', 'sin documento ni RUC, la celda queda vacía');
   const txt = (await Promise.all(Object.keys(z.files).filter(n => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
   assert.ok(txt.includes('zona insegura u otro motivo'), 'falta «zona insegura» en «Sin contacto»');
   // KPIs: todas las fórmulas sobre la hoja Base, sin la fila 2 ni las notas al pie
