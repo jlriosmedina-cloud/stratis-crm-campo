@@ -438,7 +438,7 @@ function cascaron(){
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
-        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hoja KPIs y hoja Base (una fila por comercio, con su documento de BBVA)">Base para BBVA</button>
+        <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hojas Resumen y Base, modelo Gestión Stratis de 55 columnas (una fila por comercio de la base nueva; llave: Documento)">Base para BBVA</button>
         <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
         <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
@@ -2200,8 +2200,11 @@ function vistaIndicadores(){
 }
 
 /* =========================================================================
-   Base para BBVA (Excel) · modelo de Jose del 30/09/2026
-   Documento (RUC o DNI) primero y Customer_ID después, los dos como texto; una fila por comercio. Dos hojas: KPIs · Base. Todos los KPIs son fórmulas sobre la hoja Base.
+   Base para BBVA (Excel) · modelo «Gestión Stratis» de 55 columnas (Jose, 26/10/2026)
+   Reemplaza al modelo del 30/09 (KPIs · Base). Dos hojas: Resumen (fórmulas sobre Base) · Base, una fila por comercio de la
+   base nueva del periodo, con Documento como llave en la columna A. Mismo orden y nombres que
+   Escritorio\Gestion_Stratis_visitados_base_nueva_corte_23-10-2026.xlsx. Las columnas en naranja son las que el celular todavía
+   no captura: van vacías hasta el rediseño del celular.
    ========================================================================= */
 const FB_29 = ["Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS", "Solicitó cambio de equipo", "Le falta una función"];
 const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "POS no enciende", "Soporte no ayudó al comercio",
@@ -2210,111 +2213,133 @@ const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No nec
   // agregados por Stratis (árbol del 26/09)
   "Usa POS de otra marca", "Pide una tasa más baja", "Los abonos le llegan con demora", "Cobra con Yape o Plin para no pagar comisión", "Solo acepta efectivo",
   "No tiene contómetros o le quedan pocos", "Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Su funcionario de BBVA no responde",
-  // agregados por Stratis (tipificaciones del 29/09, aprobadas por Gabriel): en el Excel van al final de Base
+  // agregados por Stratis (tipificaciones del 29/09, aprobadas por Gabriel)
   ...FB_29];
+const BASE55 = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Distrito","Periodo","Bloque","Origen","Ejecutivo","Grupo_Ubicacion",
+  "Visitado","Fecha_Primera_Visita","Fecha_Ultima_Visita","Visitas_Validas","Como_Fue_La_Visita","Motivo_Sin_Visita","Direccion_Correcta",
+  "Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Con_Quien","Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario",
+  "Decision","Que_Lo_Convencio","Sentir_Del_Cliente","Resultado","Feedback","Rama_Feedback","Punto_De_Dolor_Principal","Severidad",
+  "POS_Otra_Marca","Tasa_Competidor","Prefiere_Competidor_Por","Dias_Demora_Abono","Banco_Abono","Por_Que_No_Necesita","Comentario",
+  "Que_Ofrecio","Derivado_A","Numero_Ticket","Estado_Del_Problema","Fecha_Resolucion","Proxima_Accion","Fecha_Volver","Seguimiento_Canal",
+  "Seguimiento_Resultado","Fecha_Seguimiento","Recupero_Paso","Caso_Soporte","Reactivado_BBVA","Dias_Con_Trx_Post_Visita",
+  "Cuenta_Para_Comision","Validacion","Fuera_De_Plazo",
+  // 26/10 (Jose): Feedback y Que_Lo_Convencio mezclan lo marcado y lo inferido del comentario; la fuente va después de la columna 55
+  "Fuente_Feedback","Fuente_Que_Lo_Convencio"];
+// Lo que el celular todavía no captura: cabecera naranja y celda vacía (regla de ausencia: vacío = no consta, no «no tiene»)
+const BASE55_FALTA = new Set(["Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad",
+  "Numero_Ticket","Estado_Del_Problema","Fecha_Resolucion","Proxima_Accion"]);
+const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22];
+// Opción que marcó el ejecutivo, con el texto exacto del celular (pregunta única «¿Cómo fue la visita?», 26/09). comoFue() es la
+// versión del escritorio («Habló con…», con detalle), por eso aquí va aparte: el modelo de Jose usa las palabras del celular.
+function comoFueTexto(v){
+  if (v.con === "Nadie") return v.motivo === "Dirección errada" ? "El comercio no está en esta dirección" : "No se pudo hacer la visita";
+  // Dirección errada pero lo encontró en otro lugar: la visita sigue con contacto y el modelo lo anota al final
+  const otra = v.direccion_ok === false && v.comercio_ubicado === true ? " (lo encontré en otro lugar)" : "";
+  if (v.que === "Reunión concretada") return "Hablé con el dueño o el encargado" + otra;
+  if (v.que === "Reagendada") return "No estaba quien decide · quedamos en volver" + otra;
+  if (v.que === "Sin éxito") return "No estaba quien decide · sin compromiso" + otra;
+  return v.que || "";
+}
+// Derivado_A sale de lo que marcó el ejecutivo en «qué ofreció»
+const DERIVA_A = { "Llamé a soporte":"Soporte Openpay", "Generé ticket de atención":"Soporte Openpay", "Derivé a postventa":"Postventa", "Derivé a BBVA con urgencia":"BBVA" };
 function cargarScript(src){ return new Promise((ok, mal) => { const e = document.createElement("script"); e.src = src; e.onload = ok; e.onerror = () => mal(new Error("No se pudo cargar " + src)); document.head.appendChild(e); }); }
 async function baseBBVA(){
   if (S._bajandoBase) return; S._bajandoBase = true; toast("Armando la base para BBVA…");
   try {
     if (!window.ExcelJS) await cargarScript("https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js");
-    await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido(), cargarMsiInferido()]);
     const per = S.periodo ? S.periodo.id : null;
-    // TIPOS: todas las columnas por tipo. Las del 29/09 (FB_29) van al final de Base para no correr las columnas de antes.
-    const TIPOS = BBVA_ORDEN.concat(FB_NINGUNO), T_ANT = TIPOS.filter(t => !FB_29.includes(t));
-    const dmy = s => s ? String(s).slice(0, 10).split("-").reverse().join("/") : "";
+    // Último corte de la lista de BBVA: si no hay ninguno dentro del periodo, Reactivado_BBVA dice «Sin dato en el corte» (no «NO»)
+    const corteQ = sb.from("v2_resultados_bbva").select("corte").order("corte", { ascending:false }).limit(1);
+    const recQ = sb.rpc("v2_mis_recuperos", per ? { p_periodo: per } : {});
+    const [, , , , , rc, rr] = await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido(), cargarMsiInferido(), cargarSeguimientos(), corteQ, recQ]);
+    const ultCorte = rc && !rc.error && rc.data && rc.data[0] ? rc.data[0].corte : null;
+    const hayCorte = !!(ultCorte && (!S.periodo || ultCorte >= S.periodo.ini));
+    const recPor = {}; ((rr && !rr.error && rr.data) || []).forEach(x => { recPor[x.customer_id] = x; });
+    const segPor = {}; (S.seg || []).forEach(x => { const u = segPor[x.customer_id]; if (!u || x.hecho_en > u.hecho_en) segPor[x.customer_id] = x; });
+    const fecha = s => { if (!s) return null; const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
     const vs = S.act.filter(v => v.estado_anul !== "anulada" && (!per || v.periodo === per)).sort((a, b) => a.visitado_en < b.visitado_en ? -1 : 1);
     const valida = v => v.lat != null && !v.fuera_plazo;
     const porCid = {}; vs.forEach(v => (porCid[v.customer_id] ||= []).push(v));
-    const base = S.base.slice().sort((a, b) => a.customer_id < b.customer_id ? -1 : 1);
-    const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
-    const k = wb.addWorksheet("KPIs"); // primera hoja; se llena al final, cuando ya se conocen los rangos
-    const AZ = "FF0C1137", NA = "FFF86F35", IN = "FF232C86", GR = "FF5B6680", VE = "FF07785F";
-    const cab = (ws, cols, grupos) => { const r = ws.getRow(1); r.height = 62;
-      cols.forEach((c, i) => { const x = r.getCell(i + 1); x.font = { name:"Arial", bold:true, color:{ argb:"FFFFFFFF" }, size:10 };
-        x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: grupos.si && grupos.si(i + 1) ? VE : grupos.fb && grupos.fb(i + 1) ? NA : grupos.k && grupos.k(i + 1) ? IN : AZ } };
-        x.alignment = { wrapText:true, vertical:"middle" }; }); };
-    const tabla = (ws, nombre, cols, filas, anchos, grupos) => {
-      ws.addTable({ name:nombre, ref:"A1", headerRow:true, style:{ theme:"TableStyleLight1", showRowStripes:true }, columns:cols.map(c => ({ name:c, filterButton:true })), rows:filas.length ? filas : [cols.map(() => "")] });
-      cab(ws, cols, grupos); anchos.forEach((w, i) => ws.getColumn(i + 1).width = w);
-      ws.getColumn(1).numFmt = "@"; ws.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
-      ws.eachRow((row, n) => { if (n > 1) row.eachCell(c => c.font = { name:"Arial", size:10 }); });
-    };
-    // Base: una fila por comercio. «Ejecutivo» (al final) es la asignación del periodo en el CRM: de ahí salen los KPIs por ejecutivo.
-    // «Documento» (Jose, 22/10) va primero: RUC de 11 o DNI de 8, la llave de BBVA en la base 2026-11, como texto. Customer_ID va segundo
-    // y queda para la base anterior, que no tiene documento. El universo se cuenta por Customer_ID, que está en todas las filas.
-    // 26/10: la base anterior salía con Documento vacío (49 de 501 filas) y la búsqueda por esa llave no la encontraba. Los 49 tienen
-    // RUC de 11 dígitos en v2_comercios.ruc y ninguno choca con el documento de otro comercio: sin documento, va el RUC.
-    const colsB = ["Documento","Customer_ID","Visitado","Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Contacto_En_Otra_Direccion","Visitas_Registradas","Visitas_Validas","Visitas_Con_Contacto","Fecha_Primera_Visita","Fecha_Ultima_Visita","Ultimo_Con_Quien","Ultimo_Que_Paso","Ultima_Decision","Ultimo_Comentario","Dias_Con_Trx","Reactivado","Derivado_Recuperacion","Equipo_Recuperado","Feedback","Fuente_Feedback"].concat(T_ANT, ["Fuera_de_la_Lista_BBVA","Feedback_Adicional","Que_Ofrecio","POS_Otra_Marca","Demora_Abono","Resultado","Motivos_Si","Fuente_Motivos_Si"], FB_29, ["Comercio_Cerro_Definitivamente","Ejecutivo"]);
-    const filasB = base.map(c => { const l = porCid[c.customer_id] || [], ult = l[l.length - 1];
-      const fb = new Set(), fuentes = new Set(), fuera = new Set(), notas = [], acc = new Set(), comp = [], dem = [];
-      l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t)); if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); if (f.delComentario) fuentes.add("Inferido del comentario"); f.fuera.forEach(t => fuera.add(t)); if (f.nota) notas.push(f.nota);
-        (f.acc || []).forEach(a => acc.add(a)); const ct = competidorTxt(f.ext); if (ct && !comp.includes(ct)) comp.push(ct); const dt = demoraTxt(f.ext); if (dt && !dem.includes(dt)) dem.push(dt); });
+    // Filas: solo la base nueva del periodo (Jose, 26/10). La base anterior (visitas del 19 y 20/10) fue el cierre del periodo
+    // anterior, ampliado por excepción, y no va. En un periodo sin bloques (sin origen) van todos los comercios en cartera.
+    const ejN = c => c.correo ? ejDe(c.correo).nombre : "";
+    const base = S.base.filter(c => !c.origen || c.origen === "base_nueva").map(c => ({ c, l:porCid[c.customer_id] || [] }))
+      .sort((a, b) => ejN(a.c).localeCompare(ejN(b.c)) || (a.l.length ? 0 : 1) - (b.l.length ? 0 : 1)
+        || String(a.l[0] ? a.l[0].visitado_en : "").localeCompare(String(b.l[0] ? b.l[0].visitado_en : "")) || String(a.c.documento || a.c.customer_id).localeCompare(String(b.c.documento || b.c.customer_id)));
+    const RAMA = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || "";
+    const TIPOS = BBVA_ORDEN.concat(FB_NINGUNO);
+    const filas = base.map(({ c, l }) => {
+      const ult = l[l.length - 1], gc = l.find(v => valida(v) && v.con !== "Nadie"), uc = l.filter(v => v.con !== "Nadie").pop();
+      const fb = new Set(), acc = new Set(), comp = [], pref = new Set(), fuentes = new Set(); let tasa = null, dias = null, banco = "", noNec = "";
+      l.forEach(v => { const f = fbDe(v); if (!f || !f.fuente) return; f.tipos.forEach(t => fb.add(t));
+        if (f.tipos.length) fuentes.add(f.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario"); if (f.delComentario) fuentes.add("Inferido del comentario"); (f.acc || []).forEach(a => acc.add(a));
+        const x = f.ext; if (!x) return;
+        (x.competidores || []).forEach(k => { const n = k === "Otro" && x.competidor_otro ? x.competidor_otro : k; if (!comp.includes(n)) comp.push(n); });
+        (x.prefiere_por || []).forEach(p => pref.add(p));
+        if (x.tasa_competidor != null) tasa = Number(x.tasa_competidor); if (x.dias_demora_abono != null) dias = Number(x.dias_demora_abono);
+        if (x.banco_abono) banco = x.banco_abono; if (x.no_necesita_por) noNec = x.no_necesita_por; });
       if (fb.has(FB_NINGUNO) && fb.size > 1) fb.delete(FB_NINGUNO);
-      const des = l.filter(v => v.decision === "Desiste del producto"), m = ult ? msiDe(ult) : null;
-      // Para el cruce con los volúmenes de BBVA: primera visita válida (con GPS y a tiempo) en la que habló con alguien del comercio,
-      // aunque haya sido en otra dirección (dirección errada pero comercio ubicado)
-      const gc = l.find(v => valida(v) && v.con !== "Nadie"), fGc = gc ? iso(gc.visitado_en).split("-").map(Number) : null;
-      return [c.documento || c.ruc || "", c.customer_id,
-        l.some(valida) ? "SI" : "NO", gc ? "SI" : "NO", fGc ? new Date(Date.UTC(fGc[0], fGc[1] - 1, fGc[2])) : null,
-        gc ? (l.some(v => valida(v) && v.con !== "Nadie" && v.direccion_ok === false) ? "SI" : "NO") : "", l.length, l.filter(valida).length, l.filter(v => v.con !== "Nadie").length, l.length ? dmy(iso(l[0].visitado_en)) : "", ult ? dmy(iso(ult.visitado_en)) : "",
-        ult ? ult.con : "", ult ? ult.que + (ult.motivo ? " · " + ult.motivo : "") : "", ult ? ult.decision || "" : "", ult ? String(ult.comentario || "").replace(/\s+/g, " ") : "",
-        c.dias_trx || 0, (c.dias_trx || 0) >= 2 ? "SI" : "NO", des.length ? "SI" : "NO", des.length ? des[des.length - 1].equipo || "" : "",
-        TIPOS.filter(t => fb.has(t)).join(" | "), [...fuentes].sort().join(" + ")].concat(T_ANT.map(t => fb.has(t) ? 1 : 0), [[...fuera].sort().join(" | "), notas.join(" / "), ACCIONES.filter(a => acc.has(a)).join(" | "), comp.join(" / "), dem.join(" / "),
-        ult ? RES_TXT[resultadoDe(ult)] : "Sin visita", m ? m.motivos.join(" | ") : "", m && m.fuente ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : ""],
-        FB_29.map(t => fb.has(t) ? 1 : 0), [ult && ult.motivo === "Cerró definitivamente" ? "SI" : "NO", c.correo ? ejDe(c.correo).nombre : ""]); });
-    const wsB = wb.addWorksheet("Base");
-    const nB0 = colsB.length - FB_29.length - 2;   // columnas antes de las agregadas al final
-    tabla(wsB, "Base", colsB, filasB, [13,12,9,11,13,11,10,9,10,11,11,10,22,18,44,9,10,12,11,40,16].concat(T_ANT.map(() => 13), [30,30,40,22,20,14,40,16], FB_29.map(() => 13), [14,20]),
-      { k:i => (i >= 3 && i <= 19) || i >= colsB.length - 1, fb:i => i >= 20 && i < colsB.length - 1, si:i => i > nB0 - 3 && i <= nB0 });
-    wsB.getColumn(2).numFmt = "@"; wsB.views = [{ state:"frozen", xSplit:2, ySplit:1 }]; wsB.getColumn(colsB.indexOf("Fecha_Primera_Gestion_Con_Contacto") + 1).numFmt = "dd/mm/yyyy";
-    const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || (t === FB_NINGUNO ? "Sin observaciones" : "Otro");
-    // KPIs: fórmulas sobre la hoja Base (rangos fijos, se recalculan en Excel). Sin notas al pie (Jose, 30/09).
-    const nB = filasB.length + 1;
-    const col = (cols, nombre) => { let n = cols.indexOf(nombre) + 1, s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
-    const RB = n => `Base!$${col(colsB, n)}$2:$${col(colsB, n)}$${nB}`;
-    k.views = [{ showGridLines:false }];
-    const put = (r, c, v, st) => { const x = k.getCell(r, c); x.value = v; x.font = Object.assign({ name:"Arial", size:10 }, st || {}); return x; };
-    const nota = { size:9, italic:true, color:{ argb:GR } };
-    const encab = (r, cols, color) => cols.forEach((h, i) => { const x = put(r, i + 1, h, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:color } }; x.alignment = { wrapText:true, vertical:"middle" }; });
-    put(1, 1, "Campaña BBVA Adquirencia · periodo " + (per || "") + " · base para BBVA", { size:14, bold:true, color:{ argb:AZ } });
-    const tit = (r, t) => put(r, 1, t, { size:11, bold:true, color:{ argb:IN } });
-    const fil = (r, a, f, c) => { put(r, 1, a); put(r, 2, { formula:f }, { bold:true }); if (c) put(r, 3, c, nota); };
-    tit(4, "Definición de KPIs a medir");
-    fil(5, "Universo", `COUNTA(${RB("Customer_ID")})`, `Total de clientes: los ${numPE(base.length)} leads del periodo`);
-    fil(6, "Visitas registradas", `SUM(${RB("Visitas_Registradas")})`, "Todas las visitas no anuladas, con o sin contacto (suma de Visitas_Registradas de la hoja Base)");
-    fil(7, "Comercios visitados", `COUNTIF(${RB("Visitado")},"SI")`, "Con al menos una visita válida y registrada a tiempo (la que cuenta)");
-    fil(8, "Reactivación", `COUNTIF(${RB("Reactivado")},"SI")`, "Comercios con transacciones en 2 días distintos después de la visita, según la data de BBVA");
-    fil(9, "Recuperados (derivados a recuperación)", `COUNTIF(${RB("Derivado_Recuperacion")},"SI")`, "Comercios que desistieron del producto: se derivan a la recuperación del POS");
-    fil(10, "   con el equipo ya recuperado", `COUNTIFS(${RB("Derivado_Recuperacion")},"SI",${RB("Equipo_Recuperado")},"Sí")`, "Según lo que marcó el ejecutivo en la visita");
-    tit(12, "Visitas por grupo de ejecutivo");
-    encab(13, ["Ejecutivo","Base asignada","Visitas registradas","Comercios visitados","Visitas con contacto"], AZ);
-    const ejs = [...new Set(base.filter(c => c.correo).map(c => ejDe(c.correo).nombre))].sort();
-    ejs.forEach((e, i) => { const r = 14 + i; put(r, 1, e);
-      put(r, 2, { formula:`COUNTIF(${RB("Ejecutivo")},A${r})` }, { bold:true });
-      put(r, 3, { formula:`SUMIF(${RB("Ejecutivo")},A${r},${RB("Visitas_Registradas")})` }, { bold:true });
-      put(r, 4, { formula:`COUNTIFS(${RB("Ejecutivo")},A${r},${RB("Visitado")},"SI")` }, { bold:true });
-      put(r, 5, { formula:`SUMIF(${RB("Ejecutivo")},A${r},${RB("Visitas_Con_Contacto")})` }, { bold:true }); });
-    const rt = 14 + ejs.length; put(rt, 1, "Total", { bold:true }); if (ejs.length) ["B","C","D","E"].forEach((L, i) => put(rt, i + 2, { formula:`SUM(${L}14:${L}${rt - 1})` }, { bold:true }));
-    const r0 = rt + 3; tit(r0, "KPIs adicionales · feedback de comercios"); put(r0, 3, "Un comercio puede tener más de un tipo", nota);
-    encab(r0 + 1, ["Tipo de feedback (texto de BBVA)","Comercios","Rama"], NA);
-    TIPOS.forEach((t, i) => { const r = r0 + 2 + i; put(r, 1, t + (FB_BBVA.has(t) ? "" : "  (agregada por Stratis)")); put(r, 2, { formula:`SUM(${RB(t)})` }, { bold:true }); put(r, 3, ramaDe(t), { size:9, color:{ argb:GR } }); });
-    const rf = r0 + 2 + TIPOS.length;
-    fil(rf, "Comercios con contacto sin feedback registrado", `COUNTIFS(${RB("Gestion_Con_Contacto")},"SI",${RB("Feedback")},"")`, "Gestión con contacto y sin tipo de feedback en la hoja Base");
-    const ra = rf + 2; encab(ra, ["Qué ofreció el ejecutivo (desde el 26/09)","Comercios"], NA);
-    ACCIONES.forEach((t, i) => { const r = ra + 1 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Que_Ofrecio")},"*${t.replace(/[*?~]/g, "~$&")}*")` }, { bold:true }); });
-    const rq = ra + 2 + ACCIONES.length; tit(rq, "Por qué sí / por qué no · resultado por comercio"); put(rq, 3, "Por la última visita de cada comercio visitado", nota);
-    encab(rq + 1, ["Resultado","Comercios","Qué incluye"], VE);
-    RESULTADOS.forEach(([, t, d], i) => { const r = rq + 2 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Resultado")},"${t}")` }, { bold:true }); put(r, 3, d, nota); });
-    const rs = rq + 2 + RESULTADOS.length; put(rs, 1, "Total de comercios visitados", { bold:true }); put(rs, 2, { formula:`SUM(B${rq + 2}:B${rs - 1})` }, { bold:true });
-    const rm = rs + 2; encab(rm, ["Qué lo convenció (comercios con éxito)","Comercios"], VE);
-    MOTIVOS_SI.forEach((t, i) => { const r = rm + 1 + i; put(r, 1, t); put(r, 2, { formula:`COUNTIF(${RB("Motivos_Si")},"*${t}*")` }, { bold:true }); });
-    const rsd = rm + 1 + MOTIVOS_SI.length; put(rsd, 1, "Éxito sin detalle de qué lo convenció"); put(rsd, 2, { formula:`COUNTIFS(${RB("Resultado")},"Éxito",${RB("Motivos_Si")},"")` }, { bold:true });
-    k.getColumn(1).width = 62; [2,3,5].forEach(i => k.getColumn(i).width = 14); k.getColumn(4).width = 30; k.getRow(13).height = 30;
+      const tipos = TIPOS.filter(t => fb.has(t)), ramas = FEEDBACK.map(g => g[0]).filter(r => tipos.some(t => RAMA(t) === r));
+      const m = uc ? msiDe(uc) : null, s = segPor[c.customer_id], r = recPor[c.customer_id];
+      const deriva = [...new Set(ACCIONES.filter(a => acc.has(a) && DERIVA_A[a]).map(a => DERIVA_A[a]))];
+      const reac = c.bbva_reactivado ? "SI" : hayCorte ? "NO" : "Sin dato en el corte";
+      const val = {
+        Documento: c.documento || c.ruc || "", Customer_ID: c.customer_id, Nombre_Comercial: c.nombre_comercial || "", Razon_Social: c.razon_social || "",
+        Distrito: c.distrito || "", Periodo: per || "", Bloque: c.bloque != null ? Number(c.bloque) : "", Origen: c.origen === "base_nueva" ? "Base nueva" : (c.origen || ""),
+        Ejecutivo: ejN(c), Grupo_Ubicacion: GRUPO_UB[c.grupo_ubicacion] ? GRUPO_UB[c.grupo_ubicacion][1] : "",
+        Visitado: l.some(valida) ? "SI" : "NO", Fecha_Primera_Visita: l.length ? fecha(iso(l[0].visitado_en)) : null, Fecha_Ultima_Visita: ult ? fecha(iso(ult.visitado_en)) : null,
+        Visitas_Validas: l.filter(valida).length, Como_Fue_La_Visita: ult ? comoFueTexto(ult) : "",
+        Motivo_Sin_Visita: ult && ult.con === "Nadie" ? (MOTIVO_TXT[ult.motivo] || ult.motivo || "") : "",
+        Direccion_Correcta: ult ? (ult.direccion_ok === true ? "SI" : ult.direccion_ok === false ? "NO" : "Sin dato") : "",
+        Gestion_Con_Contacto: gc ? "SI" : "NO", Fecha_Primera_Gestion_Con_Contacto: gc ? fecha(iso(gc.visitado_en)) : null, Con_Quien: uc ? uc.con : "",
+        Decision: uc ? uc.decision || "" : "", Que_Lo_Convencio: m ? m.motivos.join("; ") : "",
+        Resultado: ult ? RES_TXT[resultadoDe(ult)] : "Sin visita", Feedback: tipos.join("; "), Rama_Feedback: ramas.join("; "),
+        POS_Otra_Marca: comp.join("; "), Tasa_Competidor: tasa != null ? tasa : "", Prefiere_Competidor_Por: [...pref].join("; "),
+        Dias_Demora_Abono: dias != null ? dias : "", Banco_Abono: banco, Por_Que_No_Necesita: noNec,
+        Comentario: ult ? String(ult.comentario || "").replace(/\s+/g, " ").trim() : "", Que_Ofrecio: ACCIONES.filter(a => acc.has(a)).join("; "),
+        Derivado_A: deriva.join("; "), Fecha_Volver: ult && ult.fecha_reagenda ? fecha(ult.fecha_reagenda) : null,
+        Seguimiento_Canal: s ? s.canal || "" : "", Seguimiento_Resultado: s ? s.resultado || "" : "", Fecha_Seguimiento: s ? fecha(iso(s.hecho_en)) : null,
+        Recupero_Paso: r ? RECUP_NOM[r.paso] || r.paso || "" : "", Caso_Soporte: r ? r.caso_soporte || "" : "",
+        Reactivado_BBVA: reac, Dias_Con_Trx_Post_Visita: c.dias_trx || 0, Cuenta_Para_Comision: c.bbva_reactivado && (c.dias_trx || 0) >= 2 ? "SI" : hayCorte ? "NO" : "Sin dato en el corte",
+        Validacion: ult ? ult.validacion || "" : "", Fuera_De_Plazo: l.length ? (l.some(v => v.fuera_plazo) ? "SI" : "NO") : "",
+        Fuente_Feedback: tipos.length ? [...fuentes].sort().join(" + ") : "", Fuente_Que_Lo_Convencio: m && m.motivos.length ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : "" };
+      return BASE55.map(h => BASE55_FALTA.has(h) ? "" : val[h] == null ? null : val[h]); });
+    const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
+    const AZ = "FF0C1137", NA = "FFF86F35", GR = "FF5A607A";
+    const res = wb.addWorksheet("Resumen"), wsB = wb.addWorksheet("Base");
+    // Base: cabecera azul, las que faltan capturar en naranja; Documento y Customer_ID como texto (no pierden ceros)
+    wsB.addRow(BASE55); filas.forEach(f => wsB.addRow(f));
+    const h1 = wsB.getRow(1); h1.height = 40;
+    BASE55.forEach((h, i) => { const x = h1.getCell(i + 1); x.font = { name:"Arial", bold:true, size:10, color:{ argb:"FFFFFFFF" } };
+      x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: BASE55_FALTA.has(h) ? NA : AZ } }; x.alignment = { wrapText:true, vertical:"middle" }; });
+    wsB.eachRow((row, n) => { if (n > 1) row.eachCell({ includeEmpty:true }, c => c.font = { name:"Arial", size:10 }); });
+    BASE55_ANCHO.forEach((w, i) => wsB.getColumn(i + 1).width = w);
+    [1, 2].forEach(i => wsB.getColumn(i).numFmt = "@");
+    ["Fecha_Primera_Visita","Fecha_Ultima_Visita","Fecha_Primera_Gestion_Con_Contacto","Fecha_Volver","Fecha_Seguimiento","Fecha_Resolucion"].forEach(h => wsB.getColumn(BASE55.indexOf(h) + 1).numFmt = "dd/mm/yyyy");
+    wsB.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
+    wsB.autoFilter = { from:{ row:1, column:1 }, to:{ row:1, column:BASE55.length } };
+    // Resumen: fórmulas sobre la hoja Base (se recalculan en Excel)
+    const nB = Math.max(filas.length + 1, 2), L = n => { let s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+    const RB = h => `Base!$${L(BASE55.indexOf(h) + 1)}$2:$${L(BASE55.indexOf(h) + 1)}$${nB}`;
+    const put = (r, c, v, st) => { const x = res.getCell(r, c); x.value = v; x.font = Object.assign({ name:"Arial", size:10 }, st || {}); return x; };
+    const ahora = new Date().toLocaleString("en-GB", { timeZone:TZ, day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:false }).replace(",", "");
+    put(1, 1, "Comercios de la base nueva · periodo " + (per || ""), { size:15, bold:true, color:{ argb:AZ } });
+    put(2, 1, `Corte: ${ahora} (hora de Lima). Fuente: CRM de campo (Supabase). Una fila por comercio en la hoja Base; la llave es el Documento (columna A). Las columnas en naranja son las del modelo que el CRM todavía no captura: van vacías.`, { color:{ argb:GR } });
+    const cab = ["Ejecutivo","Comercios en la base","Comercios visitados","Con contacto","Éxito","En proceso","No éxito","No se encontró","Sin contacto"];
+    cab.forEach((t, i) => { const x = put(4, i + 1, t, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; x.alignment = { wrapText:true, vertical:"middle" }; });
+    const ejs = [...new Set(base.map(o => ejN(o.c)).filter(Boolean))].sort();
+    ejs.forEach((e, i) => { const r = 5 + i, q = `${RB("Ejecutivo")},$A${r}`; put(r, 1, e);
+      put(r, 2, { formula:`COUNTIF(${q})` }); put(r, 3, { formula:`COUNTIFS(${q},${RB("Visitado")},"SI")` }); put(r, 4, { formula:`COUNTIFS(${q},${RB("Gestion_Con_Contacto")},"SI")` });
+      ["Éxito","En proceso","No éxito","No se encontró","Sin contacto"].forEach((t, j) => put(r, 5 + j, { formula:`COUNTIFS(${q},${RB("Resultado")},"${t}")` })); });
+    const rt = 5 + ejs.length; put(rt, 1, "Total", { bold:true });
+    if (ejs.length) cab.slice(1).forEach((_, j) => { const C = L(j + 2); put(rt, j + 2, { formula:`SUM(${C}5:${C}${rt - 1})` }, { bold:true }); });
+    put(rt + 2, 1, "Ojo: el comentario libre puede traer nombres o teléfonos; revísalo antes de compartir el archivo fuera de Stratis. Archivo con datos de comercios: solo en el OneDrive de Stratis.", { size:9, color:{ argb:NA } });
+    res.getColumn(1).width = 22; for (let i = 2; i <= cab.length; i++) res.getColumn(i).width = 14; res.getRow(4).height = 30; res.views = [{ showGridLines:false }];
     const buf = await wb.xlsx.writeBuffer();
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast(`Base para BBVA descargada: ${filasB.length} comercios, hojas KPIs y Base.`);
+    toast(`Base para BBVA descargada: ${filas.length} comercios de la base nueva, hojas Resumen y Base (55 columnas del modelo + fuente del feedback).`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
 }
