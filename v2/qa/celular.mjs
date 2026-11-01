@@ -40,12 +40,13 @@ const FX = {
 
 const CASOS = [
   { cid: '00000001', modo: 'hable', pasos: async p => { await p.click('[data-op=conQuien][data-val=Dueño]'); await p.click('[data-op=decision][data-val="Aún no decide"]');
-      await p.click('[data-fb-toggle]'); await p.click(`[data-fb="${SINOBS}"]`); await p.click('.fb-pie [data-fb-toggle]'); },
+      await p.click(`[data-fb="${SINOBS}"]`); },
     ok: v => { assert.equal(v.p_con, 'Dueño'); assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.deepEqual(v.p_feedback, [SINOBS]); assert.equal(v.p_fecha_reagenda, null); } },
   // 29/09: con el dueño se puede anotar la fecha para volver (opcional) y marcar el feedback nuevo
   { cid: '00000008', modo: 'hable', nombre: 'hable · quedaron en volver con el dueño', pasos: async p => { await p.click('[data-op=conQuien][data-val=Dueño]'); await p.click('[data-op=decision][data-val="Aún no decide"]');
       await p.fill('#fechaNueva', mananaLima()); await p.dispatchEvent('#fechaNueva', 'change');
-      await p.click('[data-fb-toggle]'); await p.click(`[data-fb="${NOPIDIO}"]`); await p.click('.fb-pie [data-fb-toggle]');
+      // 01/11: sin desplegable; «No pidió el POS» está en el tema «No lo necesita» (Mala venta - falta de necesidad, BBVA)
+      await p.click('[data-fb-tema="Mala venta - falta de necesidad"]'); await p.click(`[data-fb="${NOPIDIO}"]`);
       await p.click('[data-fb-acc="Mostré los beneficios de cobrar con tarjeta"]'); },
     ok: v => { assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.equal(v.p_fecha_reagenda, mananaLima());
       assert.deepEqual(v.p_feedback, [NOPIDIO]); assert.deepEqual(v.p_fb_acciones, ['Mostré los beneficios de cobrar con tarjeta'], 'no debe marcar «' + REAG + '»'); } },
@@ -238,6 +239,10 @@ for (const tema of ['light', 'dark']) {
     await p.click('[data-corregir-hoy]'); await p.waitForTimeout(600);
     await p.click('[data-cop=modo][data-val=volver]'); await p.waitForTimeout(100);
     await p.fill('#corrFecha', mananaLima()); await p.dispatchEvent('#corrFecha', 'change');
+    // 01/11: el feedback de la corrección usa el mismo paso nuevo (temas de BBVA); se marca en orden inverso al del catálogo
+    await p.click('[data-cfb-tema="Problema técnico"]'); await p.click('[data-cfb="POS rechaza los pagos con tarjeta"]');
+    await p.click('[data-cfb="Usa POS de otra marca"]'); await p.click('[data-cfb-comp="Niubiz"]');
+    await p.click('[data-cfb-acc="Evaluar mejora de tasa"]'); await p.click('[data-cfb-acc="Validé el estado del equipo"]');
     await p.click('[data-corr-enviar]'); await p.waitForTimeout(700);
     const llam = await p.evaluate(n => window.__llamadas.slice(n), antes);
     const ed = llam.find(x => x[0] === 'v2_editar_resultado');
@@ -249,6 +254,10 @@ for (const tema of ['light', 'dark']) {
     assert.ok((v.p_feedback || []).includes(DEC), 'falta «' + DEC + '»');
     assert.ok(!(v.p_feedback || []).includes(SINOBS), '«' + SINOBS + '» no se combina con quedamos en volver');
     assert.ok((v.p_fb_acciones || []).includes(REAG), 'falta «' + REAG + '»');
+    // se guarda el texto oficial y en el orden del catálogo, aunque se haya marcado al revés
+    const fb = v.p_feedback || [];
+    assert.ok(fb.includes('Usa POS de otra marca') && fb.includes('POS rechaza los pagos con tarjeta'), 'faltan frases marcadas por tema: ' + fb.join(' | '));
+    assert.ok(fb.indexOf('Usa POS de otra marca') < fb.indexOf('POS rechaza los pagos con tarjeta'), 'el orden guardado no es el del catálogo');
     assert.ok(!llam.some(x => x[0] === 'v2_registrar_visita'), 'llamó a v2_registrar_visita');
     console.log(`ok  ${tema} · corregir la visita de hoy a «quedamos en volver»`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · corrección: ${e.message}`); }

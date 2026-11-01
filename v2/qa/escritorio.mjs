@@ -103,14 +103,17 @@ await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y 
   assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'Base']);
   const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String);
   // 26/10: las 55 columnas del modelo de Jose, en su orden (Gestion_Stratis_visitados_base_nueva_corte_23-10-2026.xlsx)
-  assert.equal(cb.length, 57, 'Base debe tener las 55 columnas del modelo más las 2 de fuente');
+  assert.equal(cb.length, 59, 'Base debe tener las 55 columnas del modelo, las 2 de fuente y las 2 de tipificación BBVA');
   assert.deepEqual(cb.slice(0, 10), ['Documento','Customer_ID','Nombre_Comercial','Razon_Social','Distrito','Periodo','Bloque','Origen','Ejecutivo','Grupo_Ubicacion']);
   assert.deepEqual(cb.slice(50, 55), ['Reactivado_BBVA','Dias_Con_Trx_Post_Visita','Cuenta_Para_Comision','Validacion','Fuera_De_Plazo']);
   // la fuente del feedback va después de la columna 55 (Jose, 26/10)
-  assert.deepEqual(cb.slice(55), ['Fuente_Feedback','Fuente_Que_Lo_Convencio']);
+  assert.deepEqual(cb.slice(55), ['Fuente_Feedback','Fuente_Que_Lo_Convencio','Motivo_BBVA','Submotivo_BBVA']);
   assert.equal(cb[26], 'Resultado', 'Resultado debe ir en la columna AA'); assert.equal(cb[40], 'Numero_Ticket', 'Numero_Ticket debe ir en la columna AO');
   assert.equal(b.getColumn(1).numFmt, '@', 'Documento debe ir como texto'); assert.equal(b.getColumn(2).numFmt, '@', 'Customer_ID debe ir como texto');
   const v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
+  // 01/11: tipificación oficial de BBVA de cada frase
+  assert.equal(v(2, 'Motivo_BBVA'), 'Sin causa identificada'); assert.equal(v(3, 'Motivo_BBVA'), 'Contacto pendiente');
+  assert.equal(v(3, 'Submotivo_BBVA'), 'Decisor ausente en visita');
   assert.equal(v(2, 'Documento'), '00999001', 'Documento con su cero a la izquierda');
   assert.equal(v(3, 'Documento'), '20999000002', 'sin documento, debe ir el RUC');
   assert.equal(v(4, 'Documento') || '', '', 'sin documento ni RUC, la celda queda vacía');

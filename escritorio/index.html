@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "3fd5ec";
+const BUILD = "00096d";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -2747,11 +2747,13 @@ const BASE55 = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Dis
   "Seguimiento_Resultado","Fecha_Seguimiento","Recupero_Paso","Caso_Soporte","Reactivado_BBVA","Dias_Con_Trx_Post_Visita",
   "Cuenta_Para_Comision","Validacion","Fuera_De_Plazo",
   // 26/10 (Jose): Feedback y Que_Lo_Convencio mezclan lo marcado y lo inferido del comentario; la fuente va después de la columna 55
-  "Fuente_Feedback","Fuente_Que_Lo_Convencio"];
+  "Fuente_Feedback","Fuente_Que_Lo_Convencio",
+  // 01/11 (Jose): tipificación oficial de BBVA de cada frase de Feedback, después de la columna 55 sin mover las de antes
+  "Motivo_BBVA","Submotivo_BBVA"];
 // Lo que el celular todavía no captura: cabecera naranja y celda vacía (regla de ausencia: vacío = no consta, no «no tiene»)
 const BASE55_FALTA = new Set(["Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad",
   "Numero_Ticket","Estado_Del_Problema","Fecha_Resolucion","Proxima_Accion"]);
-const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22];
+const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22,30,34];
 // Opción que marcó el ejecutivo, con el texto exacto del celular (pregunta única «¿Cómo fue la visita?», 26/09). comoFue() es la
 // versión del escritorio («Habló con…», con detalle), por eso aquí va aparte: el modelo de Jose usa las palabras del celular.
 function comoFueTexto(v){
@@ -2764,6 +2766,34 @@ function comoFueTexto(v){
   return v.que || "";
 }
 // Derivado_A sale de lo que marcó el ejecutivo en «qué ofreció»
+// Tipificaciones oficiales de BBVA (01/11/2026, definitivas): frase → [motivo, submotivo]. Igual que v2_feedback_tipos
+// (migración 20261101100000) y que el celular. Incluye las dos que no se eligen de la lista.
+const TIPI_BBVA = {
+  "Usa POS de otra marca":["Preferencia por competencia","Utiliza POS de otro adquirente (marca adquirente)"],
+  "Cobra con Yape o Plin para no pagar comisión":["Mala venta - falta de necesidad","Prefiere exclusivamente otros medios de pago"],
+  "Solo acepta efectivo":["Mala venta - falta de necesidad","No acepta pagos con tarjeta (solo efectivo / transferencia)"],
+  "No necesitaba los POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS"],
+  "No pidió el POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS"],
+  "Pide una tasa más baja":["Condiciones comerciales","Condiciones comerciales poco atractivas"],
+  "POS no cuenta con la tarifa acordada":["Mala venta - expectativa comercial incorrecta","Condiciones comerciales informadas incorrectamente"],
+  "POS problema con abonos":["Liquidaciones / abonos","Problemas con liquidación de pagos"],
+  "Los abonos le llegan con demora":["Liquidaciones / abonos","Problemas con liquidación de pagos"],
+  "POS no enciende":["Problema técnico","POS no enciende"],
+  "Mala Señal en el POS":["Problema técnico","POS lento o falla de conexión"],
+  "POS no tiene señal y no puedo cobrar":["Problema técnico","POS lento o falla de conexión"],
+  "POS queda procesando el pago , se demora":["Problema técnico","POS lento o falla de conexión"],
+  "El cobro a través del POS tarda demasiado cuando existe alta demanda":["Problema técnico","POS lento o falla de conexión"],
+  "POS rechaza los pagos con tarjeta":["Problema técnico","POS rechaza pagos con tarjeta"],
+  "Solicitó cambio de equipo":["Problema técnico","Problemas técnicos previos"],
+  "No tiene contómetros o le quedan pocos":["Barrera operativa del comercio","No tiene contómetro"],
+  "Le parece complicado usar el POS":["Adopción / conocimiento","No sabe usar el POS"],
+  "No sabe revisar sus ventas o abonos":["Adopción / conocimiento","No sabe usar el POS"],
+  "Le falta una función":["Producto / funcionalidad","Identificar la funcionalidad faltante"],
+  "Soporte no ayudó al comercio":["Disconformidad con el servicio","Atención al cliente insatisfactoria"],
+  "Su funcionario de BBVA no responde":["Disconformidad con el servicio","Atención al cliente insatisfactoria"],
+  "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad","Desconfianza de representante en visita"],
+  "No se encontraba la persona que tomaba decisiones":["Contacto pendiente","Decisor ausente en visita"],
+  "Sin observaciones del comercio":["Sin causa identificada","Sin observaciones registradas"] };
 const DERIVA_A = { "Llamé a soporte":"Soporte Openpay", "Generé ticket de atención":"Soporte Openpay", "Derivé a postventa":"Postventa", "Derivé a BBVA con urgencia":"BBVA" };
 function cargarScript(src){ return new Promise((ok, mal) => { const e = document.createElement("script"); e.src = src; e.onload = ok; e.onerror = () => mal(new Error("No se pudo cargar " + src)); document.head.appendChild(e); }); }
 async function baseBBVA(){
@@ -2825,6 +2855,8 @@ async function baseBBVA(){
         Recupero_Paso: r ? RECUP_NOM[r.paso] || r.paso || "" : "", Caso_Soporte: r ? r.caso_soporte || "" : "",
         Reactivado_BBVA: reac, Dias_Con_Trx_Post_Visita: c.dias_trx || 0, Cuenta_Para_Comision: c.bbva_reactivado && (c.dias_trx || 0) >= 2 ? "SI" : hayCorte ? "NO" : "Sin dato en el corte",
         Validacion: ult ? ult.validacion || "" : "", Fuera_De_Plazo: l.length ? (l.some(v => v.fuera_plazo) ? "SI" : "NO") : "",
+        Motivo_BBVA: [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[0]).filter(Boolean))].join("; "),
+        Submotivo_BBVA: [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[1]).filter(Boolean))].join("; "),
         Fuente_Feedback: tipos.length ? [...fuentes].sort().join(" + ") : "", Fuente_Que_Lo_Convencio: m && m.motivos.length ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : "" };
       return BASE55.map(h => BASE55_FALTA.has(h) ? "" : val[h] == null ? null : val[h]); });
     const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
