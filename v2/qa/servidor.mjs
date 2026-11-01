@@ -691,7 +691,7 @@ caso('recupero: problemas, quién puede avanzar y quién deja de aparecer', asyn
   await falla(como(EJ, `select * from public.v2_recuperos_del_periodo('2099-01')`), /permission denied/);
   await falla(como(EJ, `select public.v2_recupero_para_escribir($1)`, [c.cid]), /permission denied/);
 });
-caso('recupero: si la visita cambia, el caso se cierra solo; los casos abiertos pasan al periodo siguiente', async () => {
+caso('recupero: si la visita cambia, el caso se cierra solo; solo cuentan los casos del periodo en curso (26/10)', async () => {
   // con caso creado: una visita posterior en que ya no desiste lo cierra («cambio») y no se puede avanzar
   const h = await desiste(97, 'No', 8);
   assert.equal(await avanzar(EJ, h.cid, 'llame_soporte', 'Programaron el recojo'), 'tramite');
@@ -704,39 +704,33 @@ caso('recupero: si la visita cambia, el caso se cierra solo; los casos abiertos 
   await avanzar(EJ, k.cid, 'llame_soporte', 'Programaron el recojo');
   await db.query(`update v2_visitas set anulada_en = now(), anulada_por = $2 where id = $1`, [k.id, ANA]);
   assert.equal((await recup(EJ, k.cid)).paso, 'cambio');
-  // caso abierto de un periodo anterior: sigue en la lista y se puede avanzar
-  const cid = await nuevoComercio(99);
+  // 26/10 (Jose): solo los recuperos del periodo en curso. Lo de periodos anteriores ya no se arrastra ni se puede avanzar,
+  // pero no se borra: el escritorio lo sigue leyendo pasando ese periodo.
   await db.query(`insert into v2_periodos(id, ini, fin) values ('2098-12', '2098-12-01', '2098-12-31') on conflict do nothing`);
+  // caso abierto de un periodo anterior: no aparece y no se puede avanzar
+  const cid = await nuevoComercio(99);
   const vv = await visitaPasada(cid, 50, 'Dueño', { que: 'Reunión concretada' });
   await db.query(`update v2_visitas set periodo = '2098-12', decision = 'Desiste del producto', equipo = 'No' where id = $1`, [vv]);
   await db.query(`insert into v2_recuperos(periodo, customer_id, correo, visita_id, paso) values ('2098-12', $1, $2, $3, 'tramite')`, [cid, EJ, vv]);
-  assert.equal((await recup(EJ, cid)).paso, 'tramite', 'el caso abierto del periodo anterior no aparece');
-  assert.equal(await avanzar(EJ, cid, 'entregado', null), 'entregado');
-  assert.equal((await como(ANA, `select public.v2_validar_recupero($1, true) p`, [cid])).rows[0].p, 'validado');
-  assert.equal(await recup(EJ, cid), undefined, 'un caso cerrado de otro periodo no debe seguir en la lista');
-  // deducido de un periodo anterior (nadie lo tocó): también pasa, con el nombre del comercio, y se puede avanzar
+  assert.equal(await recup(EJ, cid), undefined, 'el caso abierto del periodo anterior se sigue arrastrando');
+  await falla(avanzar(EJ, cid, 'entregado', null), /no tiene un recupero del POS abierto/);
+  const ant = (await como(ANA, `select paso from public.v2_mis_recuperos('2098-12') where customer_id = $1`, [cid])).rows;
+  assert.deepEqual(ant.map(x => x.paso), ['tramite'], 'el escritorio ya no ve el recupero del periodo anterior');
+  // deducido de un periodo anterior (nadie lo tocó): tampoco pasa
   const cid2 = await nuevoComercio(100);
   const v2 = await visitaPasada(cid2, 50, 'Dueño', { que: 'Reunión concretada' });
   await db.query(`update v2_visitas set periodo = '2098-12', decision = 'Desiste del producto', equipo = 'No' where id = $1`, [v2]);
-  const x = await recup(EJ, cid2);
-  assert.equal(x && x.paso, 'llamar', 'el deducido del periodo anterior no pasó');
-  assert.equal(x.comercio, 'COMERCIO DE PRUEBA 100 SAC');
-  assert.equal(await avanzar(EJ, cid2, 'llame_soporte', 'Programaron el recojo'), 'tramite');
-  // un «cambio» de un periodo anterior ya no se arrastra
-  const cid3 = await nuevoComercio(101);
-  const v3 = await visitaPasada(cid3, 50, 'Dueño', { que: 'Reunión concretada' });
-  await db.query(`update v2_visitas set periodo = '2098-12', decision = 'Desiste del producto', equipo = 'No', anulada_en = now(), anulada_por = $2 where id = $1`, [v3, ANA]);
-  await db.query(`insert into v2_recuperos(periodo, customer_id, correo, visita_id, paso) values ('2098-12', $1, $2, $3, 'llamar')`, [cid3, EJ, v3]);
-  assert.equal(await recup(EJ, cid3), undefined, 'el «cambio» de otro periodo se sigue arrastrando');
-  // caso abierto de un periodo anterior y el comercio vuelve a desistir en este: un solo caso, el viejo
+  assert.equal(await recup(EJ, cid2), undefined, 'el deducido del periodo anterior se sigue arrastrando');
+  // caso abierto de un periodo anterior y el comercio vuelve a desistir en este: un solo caso, el de este periodo
   const cid4 = await nuevoComercio(102);
   const v4 = await visitaPasada(cid4, 50, 'Dueño', { que: 'Reunión concretada' });
   await db.query(`update v2_visitas set periodo = '2098-12', decision = 'Desiste del producto', equipo = 'No' where id = $1`, [v4]);
   await db.query(`insert into v2_recuperos(periodo, customer_id, correo, visita_id, paso) values ('2098-12', $1, $2, $3, 'tramite')`, [cid4, EJ, v4]);
   const v4b = await visitaPasada(cid4, 3, 'Dueño', { que: 'Reunión concretada' });
   await db.query(`update v2_visitas set decision = 'Desiste del producto', equipo = 'No' where id = $1`, [v4b]);
-  const l4 = (await como(EJ, `select paso from public.v2_mis_recuperos() where customer_id = $1`, [cid4])).rows;
-  assert.deepEqual(l4.map(x => x.paso), ['tramite'], 'el caso sale dos veces');
+  const l4 = (await como(EJ, `select paso, visita_id from public.v2_mis_recuperos() where customer_id = $1`, [cid4])).rows;
+  assert.deepEqual(l4.map(x => [x.paso, x.visita_id]), [['llamar', v4b]], 'debe salir solo el caso de este periodo');
+  assert.equal(await avanzar(EJ, cid4, 'llame_soporte', 'Programaron el recojo'), 'tramite');
 });
 const repeat300 = () => 'x'.repeat(301);
 // ---------- base 2026-11 en bloques (20/10) ----------
@@ -946,6 +940,17 @@ caso('cierres: el cuadre vuelve a contar visitados y con contacto en la ventana 
   assert.ok(r.visitados >= 2 && r.con_contacto >= 1);
 });
 
+caso('tipificaciones BBVA (01/11): cada frase del catálogo gana motivo y submotivo, sin tocar la frase ni la visita', async () => {
+  const t = (await db.query(`select texto, motivo_bbva, submotivo_bbva, accion_bbva from v2_feedback_tipos where texto in
+    ('No necesitaba los POS', 'POS no enciende', 'Le parece complicado usar el POS', 'Desconfía de la visita (duda que representemos a BBVA)') order by texto`)).rows;
+  assert.equal(t.length, 4, 'faltan frases en el catálogo');
+  assert.deepEqual(t.map(x => [x.texto, x.motivo_bbva, x.submotivo_bbva]), [
+    ['Desconfía de la visita (duda que representemos a BBVA)', 'Validación de identidad', 'Desconfianza de representante en visita'],
+    ['Le parece complicado usar el POS', 'Adopción / conocimiento', 'No sabe usar el POS'],
+    ['No necesitaba los POS', 'Mala venta - falta de necesidad', 'Negocio / rubro no requiere POS'],
+    ['POS no enciende', 'Problema técnico', 'POS no enciende']]);
+  assert.ok(t.every(x => (x.accion_bbva || '').length > 10), 'falta la acción de BBVA');
+});
 let fallas = 0;
 for (const [n, fn] of CASOS){
   try { await fn(); console.log(`ok  ${n}`); }

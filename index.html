@@ -310,6 +310,25 @@ textarea.campo{min-height:78px;resize:vertical}
 .fb-pie{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px 4px;border-top:1px solid var(--linea);background:var(--tarjeta);font-size:12.5px;color:var(--muted)}
 .fb-pie .btn{padding:8px 18px;font-size:13.5px}
 @media (prefers-reduced-motion: reduce){.fb-sel svg{transition:none}}
+/* Feedback sin desplegable (01/11): frecuentes en botones grandes, temas de BBVA que abren sus frases */
+.fb-tit{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px}
+.fb-frec{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fb-big,.fb-fr,.fb-tema{display:flex;align-items:center;gap:6px;border:1.5px solid var(--linea);background:var(--tarjeta);color:var(--ink);text-align:left;line-height:1.3}
+.fb-big{min-height:52px;padding:9px 11px;border-radius:12px;font-size:13.5px;font-weight:600}
+.fb-temas,.fb-frases{display:flex;flex-wrap:wrap;gap:6px}
+.fb-tema,.fb-fr{min-height:44px;padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600}
+.fb-big svg,.fb-fr svg,.fb-tema svg{flex:none;color:var(--naranja)}
+.fb-big.on,.fb-fr.on,.fb-tema.on{border-color:var(--naranja);background:var(--naranja-t)}
+.fb-tema.con{border-color:var(--naranja)}
+.fb-tema.abierto{border-color:var(--ink);background:var(--suelo)}
+.fb-abierto{margin-top:8px;background:var(--suelo);border-radius:12px;padding:10px}
+.fb-abierto small{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.fb-marcaste{margin-top:10px;font-size:13px;color:var(--muted)}
+.fb-marcaste b{color:var(--ink)}
+.fb-bbva{margin-top:8px;border:1px solid var(--linea);border-radius:12px;padding:8px 12px;font-size:12.5px}
+.fb-bbva summary{font-weight:700;color:var(--ink);cursor:pointer;min-height:44px;display:flex;align-items:center}
+.fb-bbva p{margin:6px 0 0;color:var(--muted);line-height:1.4}
+.fb-bbva p b{color:var(--ink)}
 .fb-label{display:block;margin:12px 0 6px;font-size:12.5px;font-weight:700;color:var(--ink)}
 .fb-label span{font-weight:400;color:var(--muted)}
 .voz-fila{display:flex;gap:8px;flex-wrap:wrap}
@@ -444,7 +463,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "b03c72";
+const BUILD = "8c5595";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -499,6 +518,49 @@ const FEEDBACK = [
   ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde"]],
   ["Decisión y necesidad", ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS"]],
 ];
+/* Tipificaciones oficiales de BBVA (01/11/2026, definitivas): cada frase de arriba (texto exacto, el que se guarda) con su
+   motivo, submotivo y lo que pide BBVA. Igual que v2_feedback_tipos (migración 20261101100000). Las ramas de arriba se
+   quedan para «Qué ofreciste» (el servidor valida las acciones por rama); el ejecutivo elige la frase por el motivo de BBVA. */
+const TIPI_BBVA = {
+  "Usa POS de otra marca":["Preferencia por competencia", "Utiliza POS de otro adquirente (marca adquirente)", "Identificar el adquirente utilizado y consultar los motivos de preferencia por la competencia."],
+  "Cobra con Yape o Plin para no pagar comisión":["Mala venta - falta de necesidad", "Prefiere exclusivamente otros medios de pago", "Antes realizar una útlima recuperación y en todo caso de no ser efectiva generar la baja por teléfono"],
+  "Solo acepta efectivo":["Mala venta - falta de necesidad", "No acepta pagos con tarjeta (solo efectivo / transferencia)", "Realizar intentos comerciales y campañas para comprometer al uso , en todo caso de no ser posible realicemos la baja por teléfono"],
+  "No necesitaba los POS":["Mala venta - falta de necesidad", "Negocio / rubro no requiere POS", "Realizar intentos comerciales y campañas para comprometer al uso , en todo caso de no ser posible realicemos la baja por teléfono"],
+  "No pidió el POS":["Mala venta - falta de necesidad", "Negocio / rubro no requiere POS", "¿ Cuál fue la necesidad de adquirir el POS ? Protocolo de baja por teléfono"],
+  "Pide una tasa más baja":["Condiciones comerciales", "Condiciones comerciales poco atractivas", "Brindar información de campañas actuales ( si aplica ) y confirmar uso"],
+  "POS no cuenta con la tarifa acordada":["Mala venta - expectativa comercial incorrecta", "Condiciones comerciales informadas incorrectamente", "Informar sobre la nueva campaña y en todo caso derivar con su ejecutivo de BBVA"],
+  "POS problema con abonos":["Liquidaciones / abonos", "Problemas con liquidación de pagos", "Si tiene problemas, derivar a la mesa para su atención."],
+  "Los abonos le llegan con demora":["Liquidaciones / abonos", "Problemas con liquidación de pagos", "Si tiene problemas, derivar a la mesa para su atención."],
+  "POS no enciende":["Problema técnico", "POS no enciende", "Validar alimentación eléctrica, batería y funcionamiento del equipo. Gestionar soporte técnico o reemplazo si corresponde."],
+  "Mala Señal en el POS":["Problema técnico", "POS lento o falla de conexión", "Generar avería para solución"],
+  "POS no tiene señal y no puedo cobrar":["Problema técnico", "POS lento o falla de conexión", "Generar avería para solución"],
+  "POS queda procesando el pago , se demora":["Problema técnico", "POS lento o falla de conexión", "Generar avería para solución"],
+  "El cobro a través del POS tarda demasiado cuando existe alta demanda":["Problema técnico", "POS lento o falla de conexión", "Generar avería para solución"],
+  "POS rechaza los pagos con tarjeta":["Problema técnico", "POS rechaza pagos con tarjeta", "Realizar diagnóstico técnico del POS, validar conectividad . Escalar a soporte técnico si corresponde."],
+  "Solicitó cambio de equipo":["Problema técnico", "Problemas técnicos previos", "Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "No tiene contómetros o le quedan pocos":["Barrera operativa del comercio", "No tiene contómetro", "Realizar solicitud de envío de contómetros"],
+  "Le parece complicado usar el POS":["Adopción / conocimiento", "No sabe usar el POS", "Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
+  "No sabe revisar sus ventas o abonos":["Adopción / conocimiento", "No sabe usar el POS", "Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
+  "Le falta una función":["Producto / funcionalidad", "Identificar la funcionalidad faltante", "Identificar la funcionalidad requerida, validar su disponibilidad y comunicar alternativas o gestionar el requerimiento."],
+  "Soporte no ayudó al comercio":["Disconformidad con el servicio", "Atención al cliente insatisfactoria", "Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "Su funcionario de BBVA no responde":["Disconformidad con el servicio", "Atención al cliente insatisfactoria", "Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad", "Desconfianza de representante en visita", "Soporte ya cuenta con las credenciales de los ejecutivos en campo"]
+};
+// Motivos en el orden en que se muestran, con el nombre corto que lee el ejecutivo
+const TEMAS_BBVA = [["Preferencia por competencia","Usa la competencia"],["Mala venta - falta de necesidad","No lo necesita"],["Condiciones comerciales","Tasa y condiciones"],
+  ["Mala venta - expectativa comercial incorrecta","Le ofrecieron otra cosa"],["Liquidaciones / abonos","Abonos"],["Problema técnico","Falla del POS"],["Barrera operativa del comercio","Contómetros"],
+  ["Adopción / conocimiento","No sabe usarlo"],["Producto / funcionalidad","Le falta una función"],["Disconformidad con el servicio","Mala atención"],["Validación de identidad","Desconfía de la visita"]];
+// 01/11 (pedido de Jose: que el feedback no se sienta pesado): las 6 frases que más marcan los ejecutivos, medido en v2_visitas
+// ese día (cubren 7 de cada 10 feedback sin contar «No se encontraba…» ni «Sin observaciones»). Van como botones grandes arriba.
+const FB_FRECUENTES = ["Usa POS de otra marca","Cobra con Yape o Plin para no pagar comisión","Soporte no ayudó al comercio",
+  "El cobro a través del POS tarda demasiado cuando existe alta demanda","POS queda procesando el pago , se demora","Pide una tasa más baja"];
+// Lo que se lee en pantalla; lo que se guarda es siempre el texto oficial
+const FB_CORTO = { "Cobra con Yape o Plin para no pagar comisión":"Cobra con Yape o Plin", "Soporte no ayudó al comercio":"Soporte no lo ayudó",
+  "El cobro a través del POS tarda demasiado cuando existe alta demanda":"El POS tarda cuando hay mucha gente", "POS queda procesando el pago , se demora":"El POS se queda procesando",
+  "No necesitaba los POS":"No necesita el POS", "POS no tiene señal y no puedo cobrar":"Sin señal, no puede cobrar", "Mala Señal en el POS":"Mala señal en el POS",
+  "Desconfía de la visita (duda que representemos a BBVA)":"Desconfía de la visita", "POS no cuenta con la tarifa acordada":"No tiene la tarifa que le ofrecieron",
+  "No tiene contómetros o le quedan pocos":"Sin contómetros o le quedan pocos", "Su funcionario de BBVA no responde":"Su funcionario BBVA no responde" };
+const fbCorto = t => FB_CORTO[t] || t;
 const RAMAS_CORTAS = { "Competencia y otros medios de cobro":"Competencia", "Tasa y abonos":"Tasa y abonos", "Equipo y contómetros":"Equipo y contómetros", "Uso del POS":"Uso del POS", "Atención y soporte":"Atención y soporte", "Decisión y necesidad":"Decisión y necesidad" };
 const ACCIONES = [
   ["Evaluar mejora de tasa", ["Competencia y otros medios de cobro","Tasa y abonos"]],
@@ -1979,26 +2041,30 @@ function faltantesPasos(){
   if (r.comentario.trim().length < 5) f.push(["coment","el comentario"]);
   return f;
 }
-// Desplegable de feedback, compartido por el registro (px="fb") y la corrección (px="cfb").
-// Se puede marcar más de una opción; «Sin observaciones del comercio» va primero y sola.
+// Feedback, compartido por el registro (px="fb") y la corrección (px="cfb").
+// 01/11 (tipificaciones oficiales de BBVA y pedido de Jose de que no se sienta pesado): sin lista desplegable. Arriba, las 6 frases
+// más frecuentes en botones grandes; abajo, los temas de BBVA, que abren solo sus frases. Se puede marcar más de una;
+// «Sin observaciones del comercio» va sola. Lo que se guarda es el texto oficial, igual que antes.
 function pasoFeedback(r, px = "fb"){
-  const sel = r.feedback || [], abierto = !!r.fbAbierto;
-  const chev = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const sel = r.feedback || [], tema = r.fbTema || null;
   const tick = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const m = modoEfectivo(r), fijo = t => (m === "volver" || m === "sin") && t === FB_DEC;
-  const visible = t => !(m === "hable" && t === FB_DEC) && !((m === "volver" || m === "sin") && t === FB_NINGUNO);
-  const op = t => { const on = sel.includes(t);
-    return `<button type="button" class="fb-op ${on ? "on" : ""} ${fijo(t) ? "fijo" : ""}" role="option" aria-selected="${on}" ${fijo(t) ? 'aria-disabled="true"' : ""} data-${px}="${esc(t)}"><span class="fb-caja">${on ? tick : ""}</span><span>${esc(t)}${fijo(t) ? " <small>(por lo que marcaste arriba)</small>" : ""}</span></button>`; };
-  const resumen = sel.length ? sel.map(esc).join(" · ") : "Elige lo que dijo el comercio";
-  return `<div class="paso" data-paso="feedback"><span class="eyebrow">Feedback de la visita <em class="fb-oblig">(obligatorio)</em></span>
-    ${m === "volver" || m === "sin" ? `<div class="explica" style="margin-bottom:8px">Ya quedó marcado «No se encontraba la persona que tomaba decisiones». Agrega lo demás que dijo el comercio, si dijo algo.</div>` : ""}
-    <button type="button" class="fb-sel ${abierto ? "abierto" : ""} ${sel.length ? "elegido" : ""}" data-${px}-toggle aria-expanded="${abierto}" aria-haspopup="listbox">
-      <span>${resumen}</span>${chev}</button>
-    ${abierto ? `<div class="fb-lista" role="listbox" aria-multiselectable="true" aria-label="Feedback de la visita">
-      ${visible(FB_NINGUNO) ? `<div class="fb-grupo fb-primero">${op(FB_NINGUNO)}</div>` : ""}
-      ${FEEDBACK.map(([g, items]) => `<div class="fb-grupo"><small>${esc(g)}</small>${items.filter(visible).map(op).join("")}</div>`).join("")}
-      <div class="fb-pie"><span>${sel.length ? (sel.length === 1 ? "1 elegido" : sel.length + " elegidos") : "Puedes marcar más de uno"}</span><button type="button" class="btn btn-sec" data-${px}-toggle>Listo</button></div></div>` : ""}
-    ${abierto ? "" : bloqueArbol(r, px)}
+  const m = modoEfectivo(r), conDec = m === "volver" || m === "sin";
+  const boton = (t, cls) => { const on = sel.includes(t);
+    return `<button type="button" class="${cls} ${on ? "on" : ""}" aria-pressed="${on}" data-${px}="${esc(t)}">${on ? tick : ""}<span>${esc(fbCorto(t))}</span></button>`; };
+  const nTema = g => sel.filter(t => (TIPI_BBVA[t] || [])[0] === g).length;
+  const frases = g => Object.keys(TIPI_BBVA).filter(t => TIPI_BBVA[t][0] === g);
+  const elegidas = sel.filter(t => t !== FB_DEC);
+  return `<div class="paso" data-paso="feedback"><span class="eyebrow">¿Qué te dijo el comercio? <em class="fb-oblig">(obligatorio)</em></span>
+    ${conDec ? `<div class="explica" style="margin-bottom:8px">Ya quedó marcado «No se encontraba la persona que tomaba decisiones». Agrega lo demás que dijo el comercio, si dijo algo.</div>` : ""}
+    <div class="fb-tit">Lo más frecuente</div>
+    <div class="fb-frec">${FB_FRECUENTES.map(t => boton(t, "fb-big")).join("")}</div>
+    <div class="fb-tit">¿Otra cosa? Elige el tema</div>
+    <div class="fb-temas">${TEMAS_BBVA.map(([g, c]) => `<button type="button" class="fb-tema ${tema === g ? "abierto" : ""} ${nTema(g) ? "con" : ""}" aria-expanded="${tema === g}" data-${px}-tema="${esc(g)}">${esc(c)}${nTema(g) ? ` · ${nTema(g)}` : ""}</button>`).join("")}</div>
+    ${tema ? `<div class="fb-abierto"><small>${esc(tema)} · BBVA</small><div class="fb-frases">${frases(tema).map(t => boton(t, "fb-fr")).join("")}</div></div>` : ""}
+    ${conDec ? "" : `<div class="fb-temas" style="margin-top:8px">${boton(FB_NINGUNO, "fb-tema fb-ninguno")}</div>`}
+    ${elegidas.length ? `<div class="fb-marcaste">Marcaste: <b>${elegidas.map(t => esc(fbCorto(t))).join(" · ")}</b></div>` : ""}
+    ${elegidas.some(t => TIPI_BBVA[t]) ? `<details class="fb-bbva"><summary>Qué pide BBVA en ${elegidas.filter(t => TIPI_BBVA[t]).length === 1 ? "este caso" : "estos casos"}</summary>${elegidas.filter(t => TIPI_BBVA[t]).map(t => `<p><b>${esc(fbCorto(t))}</b> · ${esc(TIPI_BBVA[t][1])}<br>${esc(TIPI_BBVA[t][2])}</p>`).join("")}</details>` : ""}
+    ${bloqueArbol(r, px)}
     <label class="fb-label" for="${px}Nota">Feedback adicional <span>${(r.fbAcc || []).includes("Otra acción") ? "(escribe qué hiciste tú en «Otra acción»)" : "(opcional)"}</span></label>
     <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="${(r.fbAcc || []).includes("Otra acción") ? "Ej.: coordiné el recojo de 2 POS que no usa y pedí el cambio del que falla." : "Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces."}">${esc(r.feedbackNota || "")}</textarea></div>`;
 }
@@ -2246,7 +2312,7 @@ function alternarFeedback(r, t){
 }
 function enlazarFeedback(p, r, px){
   if (!r) return;
-  p.querySelectorAll(`[data-${px}-toggle]`).forEach(b => b.onclick = () => { r.fbAbierto = !r.fbAbierto; S._mantenerScroll = true; pintar(); });
+  p.querySelectorAll(`[data-${px}-tema]`).forEach(b => b.onclick = () => { const g = b.dataset[px + "Tema"]; r.fbTema = r.fbTema === g ? null : g; S._mantenerScroll = true; pintar(); });
   p.querySelectorAll(`[data-${px}]`).forEach(b => b.onclick = () => { alternarFeedback(r, b.dataset[px]); S._mantenerScroll = true; pintar(); });
   const n = $("#" + px + "Nota"); if (n) n.oninput = () => { r.feedbackNota = n.value; };
   if (!r.fbExt) r.fbExt = extVacio(); if (!r.fbAcc) r.fbAcc = [];
