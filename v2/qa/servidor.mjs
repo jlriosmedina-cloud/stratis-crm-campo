@@ -281,6 +281,35 @@ caso('una visita sin nada observado no deja datos_observados ni bitácora', asyn
   assert.equal(v.datos_observados, null); assert.deepEqual(v.fb_extra, { competidores: ['Izipay'], tasa_competidor: 2.8 });
   assert.equal((await bitacora(id)).length, 0);
 });
+// 03/11: las 4 fases de BBVA (frase principal, estado de lo que pide BBVA y ticket) van en fb_extra
+const corregirExtra = (id, feedback, extra) => como(EJ, `select public.v2_editar_resultado($1, 'Dueño', null, 'Reunión concretada', 'Aún no decide', null, null, 'Comentario de prueba corregido', $2::text[], null, null, null, $3::jsonb)`,
+  [id, feedback, JSON.stringify(extra)]);
+caso('03/11: frase principal, estado de lo que pide BBVA y ticket se guardan; al corregir se cambian', async () => {
+  await db.exec(`insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad) values ('00000951', 'COMERCIO DE PRUEBA 951 SAC', -12.09, -77.04, 'numero'), ('00000952', 'COMERCIO DE PRUEBA 952 SAC', -12.09, -77.04, 'numero');
+    insert into v2_asignaciones(periodo, customer_id, correo) values ('2099-01', '00000951', '${EJ}'), ('2099-01', '00000952', '${EJ}');
+    -- en la foto de prueba esta frase tiene el grupo antiguo y no recibe la acción de BBVA (en Supabase sí la tiene, 25 de 25)
+    update v2_feedback_tipos set accion_bbva = 'Acción de prueba' where texto = 'Usa POS de otra marca' and accion_bbva is null;`);
+  const fb = ['Usa POS de otra marca', 'POS no enciende'];
+  const id = await registrar(EJ, { cid: '00000951', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: fb,
+    extra: { competidores: ['Niubiz'], fb_principal: 'POS no enciende', accion_estado: 'En trámite', numero_ticket: ' T-9 ' } });
+  let v = await visita(id);
+  assert.deepEqual(v.fb_extra, { competidores: ['Niubiz'], fb_principal: 'POS no enciende', accion_estado: 'En trámite', numero_ticket: 'T-9' });
+  assert.equal(v.datos_observados, null); assert.equal((await bitacora(id)).length, 0);
+  await corregirExtra(id, fb, { competidores: ['Niubiz'], fb_principal: 'Usa POS de otra marca', accion_estado: 'Hecho' });
+  v = await visita(id); assert.deepEqual(v.fb_extra, { competidores: ['Niubiz'], fb_principal: 'Usa POS de otra marca', accion_estado: 'Hecho' });
+  await falla(corregirExtra(id, fb, { fb_principal: 'Usa POS de otra marca', accion_estado: 'Listo' }), /Hecho, En trámite o No se pudo/);
+  // la principal que ya no está entre las frases se quita sin rechazar la corrección
+  await corregirExtra(id, ['POS no enciende'], { fb_principal: 'Usa POS de otra marca', accion_estado: 'Hecho' });
+  v = await visita(id); assert.equal(v.fb_extra, null);
+});
+caso('03/11: principal no marcada o estado fuera de la lista no rechazan al registrar: se anota', async () => {
+  const id = await registrar(EJ, { cid: '00000952', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: ['POS no enciende'],
+    extra: { fb_principal: 'Usa POS de otra marca', accion_estado: 'Listo', numero_ticket: 'X' } });
+  const v = await visita(id);
+  assert.equal(v.fb_extra, null);
+  assert.deepEqual(v.datos_observados, { fb_extra: { fb_principal: 'Usa POS de otra marca', accion_estado: 'Listo', numero_ticket: 'X' } });
+  assert.equal((await bitacora(id)).length, 1);
+});
 caso('retenidas: el ejecutivo avisa, Jose la ve y la descarta, y el celular se entera', async () => {
   const uid = 'uid-retenida-1', payload = { p_customer_id: '00000005', p_visitado_en: new Date().toISOString(), p_con: 'Nadie', p_motivo: 'Cerrado', p_cliente_uid: uid };
   const visitasAntes = (await db.query('select count(*)::int n from v2_visitas')).rows[0].n;

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const DEC = 'No se encontraba la persona que tomaba decisiones', REAG = 'Reagendé con quien decide', SINOBS = 'Sin observaciones del comercio';
 const HACE_UN_MINUTO = new Date(Date.now() - 60e3).toISOString();
-const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO }),
+const BASE = [1, 2, 3, 4, 5, 7, 8, 9, 10, 30].map(i => comercio(i)).concat([comercio(6, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: HACE_UN_MINUTO }),
   // quedó en volver con el dueño (29/09): sigue en «Aún no decide» y su tarjeta muestra cuándo volver
   comercio(11, { visitas: 1, visitas_validas: 1, estado: 'seg', ultima_visita: '2026-01-02T15:00:00Z', volver_el: mananaLima() }),
   // BBVA lo reporta reactivado (30/09): informativo, no cambia el estado
@@ -47,9 +47,18 @@ const CASOS = [
       await p.fill('#fechaNueva', mananaLima()); await p.dispatchEvent('#fechaNueva', 'change');
       // 01/11: sin desplegable; «No pidió el POS» está en el tema «No lo necesita» (Mala venta - falta de necesidad, BBVA)
       await p.click('[data-fb-tema="Mala venta - falta de necesidad"]'); await p.click(`[data-fb="${NOPIDIO}"]`);
-      await p.click('[data-fb-acc="Mostré los beneficios de cobrar con tarjeta"]'); },
+      // 03/11: con una sola frase es la principal; se pide cómo quedó lo que pide BBVA y «Qué ofreciste» es opcional y plegado
+      assert.ok((await p.locator('.acc-pide').innerText()).includes('Protocolo de baja por teléfono'), 'no muestra lo que pide BBVA');
+      await p.click('[data-fb-est="Hecho"]'); await p.fill('#fbTicket', 'T-001'); await p.dispatchEvent('#fbTicket', 'input');
+      await p.click('[data-fb-acc-det] summary'); await p.click('[data-fb-acc="Mostré los beneficios de cobrar con tarjeta"]'); },
     ok: v => { assert.equal(v.p_que, 'Reunión concretada'); assert.equal(v.p_decision, 'Aún no decide'); assert.equal(v.p_fecha_reagenda, mananaLima());
-      assert.deepEqual(v.p_feedback, [NOPIDIO]); assert.deepEqual(v.p_fb_acciones, ['Mostré los beneficios de cobrar con tarjeta'], 'no debe marcar «' + REAG + '»'); } },
+      assert.deepEqual(v.p_feedback, [NOPIDIO]); assert.deepEqual(v.p_fb_acciones, ['Mostré los beneficios de cobrar con tarjeta'], 'no debe marcar «' + REAG + '»');
+      assert.deepEqual(v.p_fb_extra, { fb_principal: NOPIDIO, accion_estado: 'Hecho', numero_ticket: 'T-001' }); } },
+  // 03/11: una frase con acción y sin marcar «Qué ofreciste»: se guarda igual (ya no es obligatorio)
+  { cid: '00000030', modo: 'hable', nombre: 'hable · lo que pide BBVA no se pudo, sin «Qué ofreciste»', pasos: async p => { await p.click('[data-op=conQuien][data-val=Dueño]'); await p.click('[data-op=decision][data-val="Aún no decide"]');
+      await p.click('[data-fb="Pide una tasa más baja"]'); await p.click('[data-fb-est="No se pudo"]');
+      assert.equal(await p.locator('#fbTicket').count(), 0, 'con «No se pudo» no pide ticket'); },
+    ok: v => { assert.equal(v.p_fb_acciones, null); assert.deepEqual(v.p_fb_extra, { fb_principal: 'Pide una tasa más baja', accion_estado: 'No se pudo' }); } },
   { cid: '00000002', modo: 'volver', pasos: async p => { await p.fill('#fechaNueva', mananaLima()); await p.dispatchEvent('#fechaNueva', 'input'); await p.dispatchEvent('#fechaNueva', 'change'); },
     ok: v => { assert.equal(v.p_con, 'Tercero'); assert.equal(v.p_que, 'Reagendada'); assert.equal(v.p_fecha_reagenda, mananaLima()); assert.ok(v.p_feedback.includes(DEC)); assert.ok((v.p_fb_acciones || []).includes(REAG)); } },
   { cid: '00000003', modo: 'sin', pasos: async () => {},
@@ -126,7 +135,7 @@ for (const tema of ['light', 'dark']) {
   try {
     await p.evaluate(() => { S.vista = 'base'; S.ficha = null; S.filtroEstado = 'todos'; S.filtroVisita = 'falta'; S.masFiltros = true; pintar(); }); await p.waitForTimeout(150);
     const chips = await p.locator('[data-visita]').evaluateAll(l => l.map(b => b.dataset.visita + ':' + b.innerText.replace(/\s+/g, ' ').trim()));
-    assert.deepEqual(chips, ['por:Por visitar 9', 'falta:Falta reactivar 6', 'rea:Reactivados 1', 'todos:Todos 19']);
+    assert.deepEqual(chips, ['por:Por visitar 10', 'falta:Falta reactivar 6', 'rea:Reactivados 1', 'todos:Todos 20']);
     assert.equal(await p.locator('#fEstado').count(), 0, 'sigue el desplegable de resultados');
     const orden = await p.evaluate(() => filtrar().map(c => c.customer_id));
     assert.deepEqual(orden, ['00000014', '00000012', '00000016', '00000006', '00000011', '00000013'], 'orden de Falta reactivar');
@@ -242,7 +251,13 @@ for (const tema of ['light', 'dark']) {
     // 01/11: el feedback de la corrección usa el mismo paso nuevo (temas de BBVA); se marca en orden inverso al del catálogo
     await p.click('[data-cfb-tema="Problema técnico"]'); await p.click('[data-cfb="POS rechaza los pagos con tarjeta"]');
     await p.click('[data-cfb="Usa POS de otra marca"]'); await p.click('[data-cfb-comp="Niubiz"]');
-    await p.click('[data-cfb-acc="Evaluar mejora de tasa"]'); await p.click('[data-cfb-acc="Validé el estado del equipo"]');
+    // 03/11: con dos frases con acción, la primera marcada queda como principal (se puede cambiar) y falta cómo quedó
+    assert.equal(await p.locator('[data-cfb-pr="POS rechaza los pagos con tarjeta"].on').count(), 1, 'la primera frase no quedó como principal');
+    await p.click('[data-corr-enviar]'); await p.waitForTimeout(300);
+    const falta = await p.locator('.acc-panel .falta').innerText();
+    assert.ok(falta.includes('cómo quedó lo que pide BBVA'), 'no pide cómo quedó: ' + falta);
+    await p.click('[data-cfb-pr="Usa POS de otra marca"]'); await p.click('[data-cfb-est="En trámite"]');
+    await p.fill('#cfbTicket', 'CASO 77'); await p.dispatchEvent('#cfbTicket', 'input');
     await p.click('[data-corr-enviar]'); await p.waitForTimeout(700);
     const llam = await p.evaluate(n => window.__llamadas.slice(n), antes);
     const ed = llam.find(x => x[0] === 'v2_editar_resultado');
@@ -258,9 +273,24 @@ for (const tema of ['light', 'dark']) {
     const fb = v.p_feedback || [];
     assert.ok(fb.includes('Usa POS de otra marca') && fb.includes('POS rechaza los pagos con tarjeta'), 'faltan frases marcadas por tema: ' + fb.join(' | '));
     assert.ok(fb.indexOf('Usa POS de otra marca') < fb.indexOf('POS rechaza los pagos con tarjeta'), 'el orden guardado no es el del catálogo');
+    assert.deepEqual(v.p_fb_extra, { competidores: ['Niubiz'], fb_principal: 'Usa POS de otra marca', accion_estado: 'En trámite', numero_ticket: 'CASO 77' });
     assert.ok(!llam.some(x => x[0] === 'v2_registrar_visita'), 'llamó a v2_registrar_visita');
     console.log(`ok  ${tema} · corregir la visita de hoy a «quedamos en volver»`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · corrección: ${e.message}`); }
+  // 03/11 (decisiones de Jose): «Desconfía de la visita» no pide cómo quedó; al corregir una visita anterior al 03/11 es opcional
+  try {
+    const r = await p.evaluate(() => {
+      const caso = (fb, dia) => faltaArbol({ feedback: fb, fbExt: extVacio(), fbAcc: [], feedbackNota: '', dia });
+      return { desconfia: caso(['Desconfía de la visita (duda que representemos a BBVA)']), tasa: caso(['Pide una tasa más baja']),
+        vieja: caso(['Pide una tasa más baja'], '2026-10-30'), nueva: caso(['Pide una tasa más baja'], '2026-11-03'),
+        payload: payloadArbol({ con: 'Dueño', feedback: ['Desconfía de la visita (duda que representemos a BBVA)'], fbExt: extVacio(), fbAcc: [] }).p_fb_extra };
+    });
+    const pide = l => l.includes('cómo quedó lo que pide BBVA');
+    assert.ok(!pide(r.desconfia), '«Desconfía de la visita» no debe pedir cómo quedó'); assert.ok(pide(r.tasa), 'debe pedir cómo quedó en el registro');
+    assert.ok(!pide(r.vieja), 'al corregir una visita anterior al 03/11 es opcional'); assert.ok(pide(r.nueva), 'desde el 03/11 es obligatorio');
+    assert.deepEqual(r.payload, { fb_principal: 'Desconfía de la visita (duda que representemos a BBVA)' });
+    console.log(`ok  ${tema} · cómo quedó: sin estado en «Desconfía» y opcional en correcciones anteriores al 03/11`);
+  } catch (e) { fallas++; console.log(`MAL ${tema} · cómo quedó (decisiones del 03/11): ${e.message}`); }
   // Cola: sin señal se guarda; si el servidor la rechaza, no sale de la cola; se corrige y se reenvía con el mismo identificador
   try {
     await p.evaluate(() => { window.__FX.rpc.v2_registrar_visita = () => ({ __error: 'Failed to fetch' }); });

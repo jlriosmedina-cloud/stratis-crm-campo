@@ -135,7 +135,8 @@ const FB_DEMORA = "Los abonos le llegan con demora", BANCOS_ABONO = ["BBVA", "Ot
 const ramaDe = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0];
 // ramas marcadas, en el orden del árbol
 const ramasDe = fb => FEEDBACK.map(g => g[0]).filter(g => (fb || []).some(t => ramaDe(t) === g));
-const extVacio = () => ({ competidores:[], competidor_otro:"", tasa_competidor:"", prefiere_por:[], no_necesita_por:null, dias_demora_abono:"", banco_abono:null });
+const extVacio = () => ({ competidores:[], competidor_otro:"", tasa_competidor:"", prefiere_por:[], no_necesita_por:null, dias_demora_abono:"", banco_abono:null,
+  fb_principal:null, accion_estado:null, numero_ticket:"" });
 const FB_NINGUNO = "Sin observaciones del comercio";
 /* «¿Cómo fue la visita?» (26/09, simplificación pedida por Jose). Una sola primera pregunta que llena sola
    con quién, qué pasó, motivo y dirección, para que no haya combinaciones ambiguas. */
@@ -1056,7 +1057,7 @@ function abrirCorreccion(id){
   S.accion = null;
   S.corr = { id, con:v.con || null, motivo:v.motivo || null, que:v.que || null, decision:v.decision || null,
              equipo:v.equipo || null, fechaNueva:v.fecha_reagenda || "", comentario:v.comentario || "",
-             limite:v.limite_edicion || null, enviando:false, error:"",
+             limite:v.limite_edicion || null, enviando:false, error:"", dia:diaLima(v.visitado_en),
              cid:v.customer_id, feedback:(v.feedback || []).slice(), fbAcc:(v.fb_acciones || []).slice(), fbExt:Object.assign(extVacio(), JSON.parse(JSON.stringify(v.fb_extra || {})), { tasa_competidor: v.fb_extra && v.fb_extra.tasa_competidor != null ? String(v.fb_extra.tasa_competidor).replace(".", ",") : "", dias_demora_abono: v.fb_extra && v.fb_extra.dias_demora_abono != null ? String(v.fb_extra.dias_demora_abono) : "" }), motivosSi:(v.motivos_si || []).slice(), msiAbierto:false, feedbackNota:v.feedback_nota || "", fbAbierto:false, lat0:v.lat, lng0:v.lng, prec0:v.precision_m, dist0:v.distancia_m, gps:null, nueva:null, reemplazar:false, gpsError:"" };
   Object.assign(S.corr, modoDesde(v));
   if (S.corr.modo === "nadie") S.corr.motivo = modoDesde(v).motivo;
@@ -1241,7 +1242,11 @@ function vistaAvance(){
   const tit = S.admin ? "Avance del equipo" : "Mi avance";
   const sub = S.periodo ? `Periodo ${fISO(S.periodo.ini)} al ${fISO(S.periodo.fin)} · quedan ${diasQuedan()} días` : "";
   const cab = `<div class="barra"><h1>${tit}</h1><div style="color:var(--cabecera-sub);font-size:13px">${sub}</div></div>${S.admin ? "" : pestanasAvance()}`;
-  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${S.admin ? "" : tarjetaBloques()}${c}</div></div>`;
+  // 03/11 (Jose): cada ejecutivo tiene su Drive individual de BBVA con sus alcances; se sugiere revisarlo junto al avance
+  const driveBBVA = `<div class="card drive-bbva"><div class="eyebrow">Revisa también</div>
+    <h2>Tu Drive individual de BBVA</h2>
+    <div class="nota">Ahí ves tus alcances y lo que BBVA reporta de tus comercios. Aquí cuenta lo que registras en campo; allá, lo que reporta BBVA. Revísalos juntos.</div></div>`;
+  const envolver = c => `<div class="vista">${cab}<div class="cuerpo" style="margin-top:14px">${selloFresco(S.avanceEn, S._avanceCargando, "data-refrescar-avance")}${S.admin ? "" : tarjetaBloques()}${c}${S.admin ? "" : driveBBVA}</div></div>`;
 
   if (S.avanceErr) return envolver(`<div class="card"><h2>No se pudo calcular el avance</h2>
     <div class="nota">${esc(S.avanceErr)}</div>
@@ -1607,7 +1612,7 @@ function pasoFeedback(r, px = "fb"){
     ${tema ? `<div class="fb-abierto"><small>${esc(tema)} · BBVA</small><div class="fb-frases">${frases(tema).map(t => boton(t, "fb-fr")).join("")}</div></div>` : ""}
     ${conDec ? "" : `<div class="fb-temas" style="margin-top:8px">${boton(FB_NINGUNO, "fb-tema fb-ninguno")}</div>`}
     ${elegidas.length ? `<div class="fb-marcaste">Marcaste: <b>${elegidas.map(t => esc(fbCorto(t))).join(" · ")}</b></div>` : ""}
-    ${elegidas.some(t => TIPI_BBVA[t]) ? `<details class="fb-bbva"><summary>Qué pide BBVA en ${elegidas.filter(t => TIPI_BBVA[t]).length === 1 ? "este caso" : "estos casos"}</summary>${elegidas.filter(t => TIPI_BBVA[t]).map(t => `<p><b>${esc(fbCorto(t))}</b> · ${esc(TIPI_BBVA[t][1])}<br>${esc(TIPI_BBVA[t][2])}</p>`).join("")}</details>` : ""}
+    ${bloqueAccionBBVA(r, px)}
     ${bloqueArbol(r, px)}
     <label class="fb-label" for="${px}Nota">Feedback adicional <span>${(r.fbAcc || []).includes("Otra acción") ? "(escribe qué hiciste tú en «Otra acción»)" : "(opcional)"}</span></label>
     <textarea class="campo" id="${px}Nota" rows="2" maxlength="300" placeholder="${(r.fbAcc || []).includes("Otra acción") ? "Ej.: coordiné el recojo de 2 POS que no usa y pedí el cambio del que falla." : "Ej.: el POS se reinicia solo desde hace una semana; ya llamó a soporte dos veces."}">${esc(r.feedbackNota || "")}</textarea></div>`;
@@ -1767,11 +1772,12 @@ function bloqueArbol(r, px){
     const mm = modoEfectivo(r);
     const lista = ACCIONES.filter(a => a[1].includes(g)).map(a => a[0]).filter(a => a !== ACC_REAG || mm === "volver");
     if (g === "Decisión y necesidad" && mm === "sin" && fb.filter(t => ramaDe(t) === g).every(t => t === FB_DEC)) return;   // sin compromiso: no se pregunta qué ofreciste
+    // 03/11: ya no es obligatorio (lo obligatorio es cómo quedó lo que pide BBVA); va plegado para que el formulario no pese
     const n = lista.filter(a => acc.includes(a)).length;
-    h += `<div class="fb-sub ofrec ${n ? "hecho" : ""}"><b>Qué ofreciste · ${esc(RAMAS_CORTAS[g] || g)}</b> <em class="fb-oblig">(obligatorio, puedes marcar varias)</em>
+    h += `<details class="fb-sub ofrec opc ${n ? "hecho" : ""}" ${n || r[px + "AccAbierto"] ? "open" : ""} data-${px}-acc-det><summary><b>¿Algo más que hiciste? · ${esc(RAMAS_CORTAS[g] || g)}</b> <span class="fb-opc">(opcional${n ? " · " + n + " marcada" + (n === 1 ? "" : "s") : ""})</span></summary>
       ${lista.includes(ACC_REAG) ? `<div class="explica" style="margin:6px 0 2px">«Reagendé con quien decide» queda marcado porque quedaste en volver.</div>` : ""}
       ${g === "Equipo y contómetros" && fb.includes(FB_CONTOMETROS) ? `<div class="explica" style="margin:6px 0 2px">La reposición de contómetros demora unos 3 días útiles.</div>` : ""}
-      <div class="ac-chips">${lista.map(a => chip("acc", a, acc.includes(a))).join("")}</div></div>`;
+      <div class="ac-chips">${lista.map(a => chip("acc", a, acc.includes(a))).join("")}</div></details>`;
   });
   return h;
 }
@@ -1782,7 +1788,35 @@ function podarArbol(r){
   if (!(r.feedback || []).includes(FB_OTRA_MARCA)){ e.competidores = []; e.competidor_otro = ""; e.tasa_competidor = ""; e.prefiere_por = []; }
   if (!(r.feedback || []).includes(FB_NO_NECESITA)) e.no_necesita_por = null;
   if (!(r.feedback || []).includes(FB_DEMORA)){ e.dias_demora_abono = ""; e.banco_abono = null; }
+  if (e.fb_principal && !fbConAccion(r).includes(e.fb_principal)) e.fb_principal = null;
   r.fbExt = e;
+  if (!principalDe(r)){ e.accion_estado = null; e.numero_ticket = ""; }
+}
+// 03/11 (Jose): las 4 fases de la tipificación de BBVA son motivo → submotivo → frase → acción y estado. El ejecutivo marca la
+// frase (el motivo y el submotivo salen de ella); si marca más de una, elige la principal; y dice cómo quedó lo que pide BBVA
+// para esa frase. «No se encontraba…» y «Sin observaciones» no tienen este paso: la fecha para volver ya es su acción.
+const ESTADOS_ACC = ["Hecho", "En trámite", "No se pudo"];
+// Decisiones de Jose (03/11): en «Desconfía de la visita» la acción de BBVA no es tarea del ejecutivo, así que no se pregunta
+// cómo quedó; y al corregir una visita anterior al 03/11 el estado es opcional.
+const SIN_ESTADO = new Set(["Desconfía de la visita (duda que representemos a BBVA)"]), ESTADO_DESDE = "2026-11-03";
+const pideEstado = r => !SIN_ESTADO.has(principalDe(r)) && !(r.dia && r.dia < ESTADO_DESDE);
+const fbConAccion = r => (r.feedback || []).filter(t => TIPI_BBVA[t]);
+function principalDe(r){ const l = fbConAccion(r), p = (r.fbExt || {}).fb_principal; return l.includes(p) ? p : l.length === 1 ? l[0] : null; }
+function bloqueAccionBBVA(r, px){
+  const l = fbConAccion(r); if (!l.length) return "";
+  const e = r.fbExt || extVacio(), pr = principalDe(r);
+  const chip = (grupo, val, on, txt) => `<button type="button" class="ac ${on ? "on" : ""}" aria-pressed="${on}" data-${px}-${grupo}="${esc(val)}">${esc(txt || val)}</button>`;
+  let h = `<div class="fb-sub acc-bbva ${pr && (e.accion_estado || SIN_ESTADO.has(pr)) ? "hecho" : ""}">`;
+  if (l.length > 1) h += `<b>¿Cuál es el motivo principal?</b> <em class="fb-oblig">(obligatorio, uno)</em>
+      <div class="ac-chips">${l.map(t => chip("pr", t, t === pr, fbCorto(t))).join("")}</div>`;
+  if (pr && SIN_ESTADO.has(pr)) h += `<div class="acc-pide"><small>Lo que pide BBVA${l.length > 1 ? " · " + esc(fbCorto(pr)) : ""}</small><p>${esc(TIPI_BBVA[pr][2])}</p></div>
+      <div class="explica">Aquí no tienes que marcar cómo quedó: lo resuelve BBVA.</div>`;
+  else if (pr) h += `<div class="acc-pide"><small>Lo que pide BBVA${l.length > 1 ? " · " + esc(fbCorto(pr)) : ""}</small><p>${esc(TIPI_BBVA[pr][2])}</p></div>
+      <b>¿Cómo quedó?</b> <em class="fb-oblig">(${pideEstado(r) ? "obligatorio" : "opcional en visitas anteriores al 03/11"})</em>
+      <div class="ac-chips">${ESTADOS_ACC.map(s => chip("est", s, e.accion_estado === s)).join("")}</div>
+      ${e.accion_estado === "Hecho" || e.accion_estado === "En trámite" ? `<label class="fb-label" for="${px}Ticket">N.º de ticket o caso <span>(opcional)</span></label>
+      <input class="campo" id="${px}Ticket" maxlength="40" inputmode="text" placeholder="Ej.: 4587123" value="${esc(e.numero_ticket || "")}" style="max-width:220px">` : ""}`;
+  return h + `</div>`;
 }
 // Faltantes del árbol (para el registro y la corrección)
 function faltaArbol(r){
@@ -1793,10 +1827,9 @@ function faltaArbol(r){
   if (t && !(Number(t) > 0 && Number(t) <= 15)) f.push("una tasa entre 0 y 15 %");
   const dd = String(e.dias_demora_abono || "").trim();
   if (fb.includes(FB_DEMORA) && dd && !(/^\d+$/.test(dd) && Number(dd) >= 1 && Number(dd) <= 60)) f.push("los días de demora (un número entre 1 y 60)");
-  const mm = modoEfectivo(r);
-  ramasDe(fb).forEach(g => {
-    if (g === "Decisión y necesidad" && mm === "sin" && fb.filter(t => ramaDe(t) === g).every(t => t === FB_DEC)) return;
-    if (!ACCIONES.some(a => a[1].includes(g) && acc.includes(a[0]))) f.push("qué ofreciste (" + (RAMAS_CORTAS[g] || g).toLowerCase() + ")"); });
+  // 03/11: lo obligatorio es la frase principal (si marcó más de una) y cómo quedó lo que pide BBVA para ella
+  if (fbConAccion(r).length > 1 && !principalDe(r)) f.push("cuál es el motivo principal");
+  if (principalDe(r) && !e.accion_estado && pideEstado(r)) f.push("cómo quedó lo que pide BBVA");
   if (acc.includes("Otra acción") && !(r.feedbackNota || "").trim()) f.push("cuál fue la otra acción, en el feedback adicional");
   return f;
 }
@@ -1811,6 +1844,9 @@ function payloadArbol(r){
   if (e.no_necesita_por) x.no_necesita_por = e.no_necesita_por;
   if (String(e.dias_demora_abono || "").trim()) x.dias_demora_abono = String(e.dias_demora_abono).trim();
   if (e.banco_abono) x.banco_abono = e.banco_abono;
+  const pr = principalDe(r);
+  if (pr){ x.fb_principal = pr;
+    if (e.accion_estado){ x.accion_estado = e.accion_estado; if ((e.numero_ticket || "").trim()) x.numero_ticket = e.numero_ticket.trim(); } }
   return { p_fb_acciones:(r.fbAcc || []).length ? r.fbAcc : null, p_fb_extra:Object.keys(x).length ? x : null };
 }
 function textoExtra(x){
@@ -1819,6 +1855,7 @@ function textoExtra(x){
   const p = [];
   if (comp.length) p.push("POS de " + comp.join(", ") + (x.tasa_competidor != null ? " a " + String(x.tasa_competidor).replace(".", ",") + " %" : "") + ((x.prefiere_por || []).length ? " · lo prefiere por " + x.prefiere_por.join(", ").toLowerCase() : ""));
   if (x.no_necesita_por) p.push("No lo necesita: " + x.no_necesita_por.toLowerCase());
+  if (x.fb_principal) p.push("Principal: " + fbCorto(x.fb_principal) + (x.accion_estado ? " · lo que pide BBVA: " + x.accion_estado.toLowerCase() : "") + (x.numero_ticket ? " · ticket " + x.numero_ticket : ""));
   if (x.dias_demora_abono != null || x.banco_abono) p.push("Demora del abono" + (x.dias_demora_abono != null ? ": " + x.dias_demora_abono + " día" + (Number(x.dias_demora_abono) === 1 ? "" : "s") : "") + (x.banco_abono ? " · le abonan en " + (x.banco_abono === "BBVA" ? "BBVA" : "otro banco") : ""));
   return p.length ? "<br>" + p.map(esc).join("<br>") : "";
 }
@@ -1847,11 +1884,14 @@ function alternarFeedback(r, t){
   const m = modoEfectivo(r);
   if ((m === "volver" || m === "sin") && (t === FB_DEC || t === FB_NINGUNO)) return;   // lo fija «¿Cómo fue la visita?»
   if (m === "hable" && t === FB_DEC) return;
+  const antes = principalDe(r);
   let l = r.feedback || [];
   if (t === FB_NINGUNO) l = l.includes(t) ? [] : [t];
   else { l = l.filter(x => x !== FB_NINGUNO); l = l.includes(t) ? l.filter(x => x !== t) : l.concat(t); }
   const orden = [FB_NINGUNO].concat(...FEEDBACK.map(g => g[1]));
   r.feedback = orden.filter(x => l.includes(x));
+  // Si ya había una principal (con su estado) y marca otra frase, la principal se mantiene; puede cambiarla
+  if (antes && fbConAccion(r).includes(antes) && r.fbExt) r.fbExt.fb_principal = antes;
   podarArbol(r);
 }
 function enlazarFeedback(p, r, px){
@@ -1869,6 +1909,12 @@ function enlazarFeedback(p, r, px){
   const t = $("#" + px + "Tasa"); if (t) t.oninput = () => { e.tasa_competidor = t.value; };
   p.querySelectorAll(`[data-${px}-banco]`).forEach(b => b.onclick = () => { e.banco_abono = e.banco_abono === b.dataset[px + "Banco"] ? null : b.dataset[px + "Banco"]; re(); });
   const dd = $("#" + px + "Dias"); if (dd) dd.oninput = () => { dd.value = dd.value.replace(/\D/g, "").slice(0, 2); e.dias_demora_abono = dd.value; };
+  p.querySelectorAll(`[data-${px}-pr]`).forEach(b => b.onclick = () => { const v = b.dataset[px + "Pr"];
+    if (principalDe(r) !== v){ e.fb_principal = v; e.accion_estado = null; e.numero_ticket = ""; } re(); });
+  p.querySelectorAll(`[data-${px}-est]`).forEach(b => b.onclick = () => { const v = b.dataset[px + "Est"];
+    e.fb_principal = principalDe(r); e.accion_estado = e.accion_estado === v ? null : v; if (e.accion_estado === "No se pudo" || !e.accion_estado) e.numero_ticket = ""; re(); });
+  const tk = $("#" + px + "Ticket"); if (tk) tk.oninput = () => { e.numero_ticket = tk.value; };
+  p.querySelectorAll(`[data-${px}-acc-det]`).forEach(d => d.ontoggle = () => { r[px + "AccAbierto"] = d.open; });
 }
 function faltantes(){ return faltantesPasos().map(x => x[1]); }
 const formularioConDatos = r => !!(r && (r.modo || r.con || r.ubicado || (r.comentario || "").trim() || (r.voz || "").trim() || r.fechaNueva));

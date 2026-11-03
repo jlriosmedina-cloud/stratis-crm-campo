@@ -2226,11 +2226,13 @@ const BASE55 = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Dis
   // 26/10 (Jose): Feedback y Que_Lo_Convencio mezclan lo marcado y lo inferido del comentario; la fuente va después de la columna 55
   "Fuente_Feedback","Fuente_Que_Lo_Convencio",
   // 01/11 (Jose): tipificación oficial de BBVA de cada frase de Feedback, después de la columna 55 sin mover las de antes
-  "Motivo_BBVA","Submotivo_BBVA"];
+  "Motivo_BBVA","Submotivo_BBVA",
+  // 03/11 (Jose): las 4 fases de BBVA. La frase principal y la acción que pide BBVA para ella; el estado va en AO–AR
+  "Feedback_Principal","Accion_BBVA"];
 // Lo que el celular todavía no captura: cabecera naranja y celda vacía (regla de ausencia: vacío = no consta, no «no tiene»)
-const BASE55_FALTA = new Set(["Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad",
-  "Numero_Ticket","Estado_Del_Problema","Fecha_Resolucion","Proxima_Accion"]);
-const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22,30,34];
+// 03/11: Numero_Ticket, Estado_Del_Problema, Fecha_Resolucion y Proxima_Accion ya salen del estado de lo que pide BBVA
+const BASE55_FALTA = new Set(["Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad"]);
+const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22,30,34,30,50];
 // Opción que marcó el ejecutivo, con el texto exacto del celular (pregunta única «¿Cómo fue la visita?», 26/09). comoFue() es la
 // versión del escritorio («Habló con…», con detalle), por eso aquí va aparte: el modelo de Jose usa las palabras del celular.
 function comoFueTexto(v){
@@ -2243,34 +2245,34 @@ function comoFueTexto(v){
   return v.que || "";
 }
 // Derivado_A sale de lo que marcó el ejecutivo en «qué ofreció»
-// Tipificaciones oficiales de BBVA (01/11/2026, definitivas): frase → [motivo, submotivo]. Igual que v2_feedback_tipos
+// Tipificaciones oficiales de BBVA (01/11/2026, definitivas): frase → [motivo, submotivo, acción]. Igual que v2_feedback_tipos
 // (migración 20261101100000) y que el celular. Incluye las dos que no se eligen de la lista.
 const TIPI_BBVA = {
-  "Usa POS de otra marca":["Preferencia por competencia","Utiliza POS de otro adquirente (marca adquirente)"],
-  "Cobra con Yape o Plin para no pagar comisión":["Mala venta - falta de necesidad","Prefiere exclusivamente otros medios de pago"],
-  "Solo acepta efectivo":["Mala venta - falta de necesidad","No acepta pagos con tarjeta (solo efectivo / transferencia)"],
-  "No necesitaba los POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS"],
-  "No pidió el POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS"],
-  "Pide una tasa más baja":["Condiciones comerciales","Condiciones comerciales poco atractivas"],
-  "POS no cuenta con la tarifa acordada":["Mala venta - expectativa comercial incorrecta","Condiciones comerciales informadas incorrectamente"],
-  "POS problema con abonos":["Liquidaciones / abonos","Problemas con liquidación de pagos"],
-  "Los abonos le llegan con demora":["Liquidaciones / abonos","Problemas con liquidación de pagos"],
-  "POS no enciende":["Problema técnico","POS no enciende"],
-  "Mala Señal en el POS":["Problema técnico","POS lento o falla de conexión"],
-  "POS no tiene señal y no puedo cobrar":["Problema técnico","POS lento o falla de conexión"],
-  "POS queda procesando el pago , se demora":["Problema técnico","POS lento o falla de conexión"],
-  "El cobro a través del POS tarda demasiado cuando existe alta demanda":["Problema técnico","POS lento o falla de conexión"],
-  "POS rechaza los pagos con tarjeta":["Problema técnico","POS rechaza pagos con tarjeta"],
-  "Solicitó cambio de equipo":["Problema técnico","Problemas técnicos previos"],
-  "No tiene contómetros o le quedan pocos":["Barrera operativa del comercio","No tiene contómetro"],
-  "Le parece complicado usar el POS":["Adopción / conocimiento","No sabe usar el POS"],
-  "No sabe revisar sus ventas o abonos":["Adopción / conocimiento","No sabe usar el POS"],
-  "Le falta una función":["Producto / funcionalidad","Identificar la funcionalidad faltante"],
-  "Soporte no ayudó al comercio":["Disconformidad con el servicio","Atención al cliente insatisfactoria"],
-  "Su funcionario de BBVA no responde":["Disconformidad con el servicio","Atención al cliente insatisfactoria"],
-  "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad","Desconfianza de representante en visita"],
-  "No se encontraba la persona que tomaba decisiones":["Contacto pendiente","Decisor ausente en visita"],
-  "Sin observaciones del comercio":["Sin causa identificada","Sin observaciones registradas"] };
+  "Usa POS de otra marca":["Preferencia por competencia","Utiliza POS de otro adquirente (marca adquirente)","Identificar el adquirente utilizado y consultar los motivos de preferencia por la competencia."],
+  "Cobra con Yape o Plin para no pagar comisión":["Mala venta - falta de necesidad","Prefiere exclusivamente otros medios de pago","Antes realizar una útlima recuperación y en todo caso de no ser efectiva generar la baja por teléfono"],
+  "Solo acepta efectivo":["Mala venta - falta de necesidad","No acepta pagos con tarjeta (solo efectivo / transferencia)","Realizar intentos comerciales y campañas para comprometer al uso , en todo caso de no ser posible realicemos la baja por teléfono"],
+  "No necesitaba los POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS","Realizar intentos comerciales y campañas para comprometer al uso , en todo caso de no ser posible realicemos la baja por teléfono"],
+  "No pidió el POS":["Mala venta - falta de necesidad","Negocio / rubro no requiere POS","¿ Cuál fue la necesidad de adquirir el POS ? Protocolo de baja por teléfono"],
+  "Pide una tasa más baja":["Condiciones comerciales","Condiciones comerciales poco atractivas","Brindar información de campañas actuales ( si aplica ) y confirmar uso"],
+  "POS no cuenta con la tarifa acordada":["Mala venta - expectativa comercial incorrecta","Condiciones comerciales informadas incorrectamente","Informar sobre la nueva campaña y en todo caso derivar con su ejecutivo de BBVA"],
+  "POS problema con abonos":["Liquidaciones / abonos","Problemas con liquidación de pagos","Si tiene problemas, derivar a la mesa para su atención."],
+  "Los abonos le llegan con demora":["Liquidaciones / abonos","Problemas con liquidación de pagos","Si tiene problemas, derivar a la mesa para su atención."],
+  "POS no enciende":["Problema técnico","POS no enciende","Validar alimentación eléctrica, batería y funcionamiento del equipo. Gestionar soporte técnico o reemplazo si corresponde."],
+  "Mala Señal en el POS":["Problema técnico","POS lento o falla de conexión","Generar avería para solución"],
+  "POS no tiene señal y no puedo cobrar":["Problema técnico","POS lento o falla de conexión","Generar avería para solución"],
+  "POS queda procesando el pago , se demora":["Problema técnico","POS lento o falla de conexión","Generar avería para solución"],
+  "El cobro a través del POS tarda demasiado cuando existe alta demanda":["Problema técnico","POS lento o falla de conexión","Generar avería para solución"],
+  "POS rechaza los pagos con tarjeta":["Problema técnico","POS rechaza pagos con tarjeta","Realizar diagnóstico técnico del POS, validar conectividad . Escalar a soporte técnico si corresponde."],
+  "Solicitó cambio de equipo":["Problema técnico","Problemas técnicos previos","Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "No tiene contómetros o le quedan pocos":["Barrera operativa del comercio","No tiene contómetro","Realizar solicitud de envío de contómetros"],
+  "Le parece complicado usar el POS":["Adopción / conocimiento","No sabe usar el POS","Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
+  "No sabe revisar sus ventas o abonos":["Adopción / conocimiento","No sabe usar el POS","Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
+  "Le falta una función":["Producto / funcionalidad","Identificar la funcionalidad faltante","Identificar la funcionalidad requerida, validar su disponibilidad y comunicar alternativas o gestionar el requerimiento."],
+  "Soporte no ayudó al comercio":["Disconformidad con el servicio","Atención al cliente insatisfactoria","Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "Su funcionario de BBVA no responde":["Disconformidad con el servicio","Atención al cliente insatisfactoria","Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad","Desconfianza de representante en visita","Soporte ya cuenta con las credenciales de los ejecutivos en campo"],
+  "No se encontraba la persona que tomaba decisiones":["Contacto pendiente","Decisor ausente en visita","Realizar segunda visita acorde a agenda asegurando fecha y hora con compromiso"],
+  "Sin observaciones del comercio":["Sin causa identificada","Sin observaciones registradas","Levantar información adicional para identificar el motivo de no uso del POS."] };
 const DERIVA_A = { "Llamé a soporte":"Soporte Openpay", "Generé ticket de atención":"Soporte Openpay", "Derivé a postventa":"Postventa", "Derivé a BBVA con urgencia":"BBVA" };
 function cargarScript(src){ return new Promise((ok, mal) => { const e = document.createElement("script"); e.src = src; e.onload = ok; e.onerror = () => mal(new Error("No se pudo cargar " + src)); document.head.appendChild(e); }); }
 async function baseBBVA(){
@@ -2310,6 +2312,15 @@ async function baseBBVA(){
         if (x.banco_abono) banco = x.banco_abono; if (x.no_necesita_por) noNec = x.no_necesita_por; });
       if (fb.has(FB_NINGUNO) && fb.size > 1) fb.delete(FB_NINGUNO);
       const tipos = TIPOS.filter(t => fb.has(t)), ramas = FEEDBACK.map(g => g[0]).filter(r => tipos.some(t => RAMA(t) === r));
+      // 03/11: frase principal y estado de lo que pide BBVA, de la última visita con feedback (lo marcó el ejecutivo): si esa
+      // visita ya no trae principal, no se arrastra la de una visita anterior. Sin principal marcada (visitas anteriores al
+      // 03/11), es la única frase con acción si hay una sola.
+      const uf = l.filter(v => v.con !== "Nadie" && (v.feedback || []).length).pop();
+      const pv = uf && uf.fb_extra && TIPI_BBVA[uf.fb_extra.fb_principal] ? uf : null, px = pv ? pv.fb_extra : null;
+      const ufT = uf ? ((fbDe(uf) || {}).tipos || uf.feedback || []) : [];
+      const conAcc = ufT.filter(t => TIPI_BBVA[t] && t !== FB_NINGUNO && t !== "No se encontraba la persona que tomaba decisiones");
+      const princ = px ? px.fb_principal : conAcc.length === 1 ? conAcc[0] : "", est = px ? px.accion_estado || "" : "";
+      const accP = princ ? TIPI_BBVA[princ][2] : "";
       const m = uc ? msiDe(uc) : null, s = segPor[c.customer_id], r = recPor[c.customer_id];
       const deriva = [...new Set(ACCIONES.filter(a => acc.has(a) && DERIVA_A[a]).map(a => DERIVA_A[a]))];
       const reac = c.bbva_reactivado ? "SI" : hayCorte ? "NO" : "Sin dato en el corte";
@@ -2332,13 +2343,18 @@ async function baseBBVA(){
         Recupero_Paso: r ? RECUP_NOM[r.paso] || r.paso || "" : "", Caso_Soporte: r ? r.caso_soporte || "" : "",
         Reactivado_BBVA: reac, Dias_Con_Trx_Post_Visita: c.dias_trx || 0, Cuenta_Para_Comision: c.bbva_reactivado && (c.dias_trx || 0) >= 2 ? "SI" : hayCorte ? "NO" : "Sin dato en el corte",
         Validacion: ult ? ult.validacion || "" : "", Fuera_De_Plazo: l.length ? (l.some(v => v.fuera_plazo) ? "SI" : "NO") : "",
-        Motivo_BBVA: [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[0]).filter(Boolean))].join("; "),
-        Submotivo_BBVA: [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[1]).filter(Boolean))].join("; "),
+        // Con frase principal, un solo motivo y submotivo (lo que mide BBVA); sin ella, los de todas las frases, como antes
+        Motivo_BBVA: princ ? TIPI_BBVA[princ][0] : [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[0]).filter(Boolean))].join("; "),
+        Submotivo_BBVA: princ ? TIPI_BBVA[princ][1] : [...new Set(tipos.map(t => (TIPI_BBVA[t] || [])[1]).filter(Boolean))].join("; "),
+        Feedback_Principal: princ, Accion_BBVA: accP,
+        Numero_Ticket: px && px.numero_ticket ? px.numero_ticket : "", Estado_Del_Problema: est,
+        Fecha_Resolucion: est === "Hecho" ? fecha(iso(pv.visitado_en)) : null,
+        Proxima_Accion: est === "En trámite" ? "Seguimiento hasta la solución" : est === "No se pudo" ? "Pendiente: " + accP : "",
         Fuente_Feedback: tipos.length ? [...fuentes].sort().join(" + ") : "", Fuente_Que_Lo_Convencio: m && m.motivos.length ? (m.fuente === "ejecutivo" ? "Ejecutivo" : "Inferido del comentario") : "" };
       return BASE55.map(h => BASE55_FALTA.has(h) ? "" : val[h] == null ? null : val[h]); });
     const wb = new ExcelJS.Workbook(); wb.creator = "Stratis"; wb.created = new Date();
     const AZ = "FF0C1137", NA = "FFF86F35", GR = "FF5A607A";
-    const res = wb.addWorksheet("Resumen"), wsB = wb.addWorksheet("Base");
+    const res = wb.addWorksheet("Resumen"), wsV = wb.addWorksheet("BBVA"), wsB = wb.addWorksheet("Base");
     // Base: cabecera azul, las que faltan capturar en naranja; Documento y Customer_ID como texto (no pierden ceros)
     wsB.addRow(BASE55); filas.forEach(f => wsB.addRow(f));
     const h1 = wsB.getRow(1); h1.height = 40;
@@ -2350,19 +2366,43 @@ async function baseBBVA(){
     ["Fecha_Primera_Visita","Fecha_Ultima_Visita","Fecha_Primera_Gestion_Con_Contacto","Fecha_Volver","Fecha_Seguimiento","Fecha_Resolucion"].forEach(h => wsB.getColumn(BASE55.indexOf(h) + 1).numFmt = "dd/mm/yyyy");
     wsB.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
     wsB.autoFilter = { from:{ row:1, column:1 }, to:{ row:1, column:BASE55.length } };
+    // 03/11 (Jose): hoja «BBVA» con solo lo que BBVA necesita, en su orden: comercio, visita, las 4 fases de su tipificación
+    // (con los nombres de su archivo) y su resultado. «Base» queda igual, como respaldo completo de Stratis. Sin el comentario libre
+    // (puede traer nombres o teléfonos): va solo en Base (Jose, 03/11).
+    const BBVA_COLS = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Distrito","Periodo","Ejecutivo",
+      "Visitado","Fecha_Primera_Visita","Fecha_Ultima_Visita","Visitas_Validas","Como_Fue_La_Visita","Motivo_Sin_Visita","Direccion_Correcta",
+      "Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Con_Quien","Decision","Resultado",
+      "Motivo_BBVA","Submotivo_BBVA","Feedback_Principal","Accion_BBVA","Estado_Del_Problema","Numero_Ticket","Fecha_Resolucion","Proxima_Accion",
+      "Reactivado_BBVA","Dias_Con_Trx_Post_Visita","POS_Otra_Marca","Fecha_Volver"];
+    const BBVA_NOM = { Motivo_BBVA:"Motivo", Submotivo_BBVA:"Submotivo", Feedback_Principal:"Feedback literal", Accion_BBVA:"Acción original", Estado_Del_Problema:"Estado" };
+    const AZB = "FF3B43FB", fasesV = new Set(["Motivo_BBVA","Submotivo_BBVA","Feedback_Principal","Accion_BBVA","Estado_Del_Problema","Numero_Ticket","Fecha_Resolucion","Proxima_Accion"]);
+    wsV.addRow(BBVA_COLS.map(h => BBVA_NOM[h] || h)); filas.forEach(f => wsV.addRow(BBVA_COLS.map(h => f[BASE55.indexOf(h)])));
+    const hv = wsV.getRow(1); hv.height = 40;
+    BBVA_COLS.forEach((h, i) => { const x = hv.getCell(i + 1); x.font = { name:"Arial", bold:true, size:10, color:{ argb:"FFFFFFFF" } };
+      x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb: fasesV.has(h) ? AZB : AZ } }; x.alignment = { wrapText:true, vertical:"middle" };
+      wsV.getColumn(i + 1).width = BASE55_ANCHO[BASE55.indexOf(h)];
+      if (["Fecha_Primera_Visita","Fecha_Ultima_Visita","Fecha_Primera_Gestion_Con_Contacto","Fecha_Resolucion","Fecha_Volver"].includes(h)) wsV.getColumn(i + 1).numFmt = "dd/mm/yyyy"; });
+    wsV.eachRow((row, n) => { if (n > 1) row.eachCell({ includeEmpty:true }, c => c.font = { name:"Arial", size:10 }); });
+    [1, 2].forEach(i => wsV.getColumn(i).numFmt = "@");
+    wsV.views = [{ state:"frozen", xSplit:1, ySplit:1 }];
+    wsV.autoFilter = { from:{ row:1, column:1 }, to:{ row:1, column:BBVA_COLS.length } };
     // Resumen: fórmulas sobre la hoja Base (se recalculan en Excel)
     const nB = Math.max(filas.length + 1, 2), L = n => { let s = ""; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
     const RB = h => `Base!$${L(BASE55.indexOf(h) + 1)}$2:$${L(BASE55.indexOf(h) + 1)}$${nB}`;
     const put = (r, c, v, st) => { const x = res.getCell(r, c); x.value = v; x.font = Object.assign({ name:"Arial", size:10 }, st || {}); return x; };
     const ahora = new Date().toLocaleString("en-GB", { timeZone:TZ, day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:false }).replace(",", "");
     put(1, 1, "Comercios de la base nueva · periodo " + (per || ""), { size:15, bold:true, color:{ argb:AZ } });
-    put(2, 1, `Corte: ${ahora} (hora de Lima). Fuente: CRM de campo (Supabase). Una fila por comercio en la hoja Base; la llave es el Documento (columna A). Las columnas en naranja son las del modelo que el CRM todavía no captura: van vacías.`, { color:{ argb:GR } });
-    const cab = ["Ejecutivo","Comercios en la base","Comercios visitados","Con contacto","Éxito","En proceso","No éxito","No se encontró","Sin contacto"];
+    put(2, 1, `Corte: ${ahora} (hora de Lima). Fuente: CRM de campo (Supabase). Una fila por comercio: la hoja BBVA trae lo que pide BBVA (en azul, las 4 fases de su tipificación) y la hoja Base, las 55 columnas del modelo completo; la llave es el Documento (columna A). Las columnas en naranja son las del modelo que el CRM todavía no captura: van vacías.`, { color:{ argb:GR } });
+    // 03/11: cómo quedó lo que pide BBVA para la frase principal (Estado_Del_Problema)
+    const ESTADOS_ACC = ["Hecho","En trámite","No se pudo"];
+    const cab = ["Ejecutivo","Comercios en la base","Comercios visitados","Con contacto","Éxito","En proceso","No éxito","No se encontró","Sin contacto"]
+      .concat(ESTADOS_ACC.map(t => "Lo que pide BBVA: " + t.toLowerCase()));
     cab.forEach((t, i) => { const x = put(4, i + 1, t, { bold:true, color:{ argb:"FFFFFFFF" } }); x.fill = { type:"pattern", pattern:"solid", fgColor:{ argb:AZ } }; x.alignment = { wrapText:true, vertical:"middle" }; });
     const ejs = [...new Set(base.map(o => ejN(o.c)).filter(Boolean))].sort();
     ejs.forEach((e, i) => { const r = 5 + i, q = `${RB("Ejecutivo")},$A${r}`; put(r, 1, e);
       put(r, 2, { formula:`COUNTIF(${q})` }); put(r, 3, { formula:`COUNTIFS(${q},${RB("Visitado")},"SI")` }); put(r, 4, { formula:`COUNTIFS(${q},${RB("Gestion_Con_Contacto")},"SI")` });
-      ["Éxito","En proceso","No éxito","No se encontró","Sin contacto"].forEach((t, j) => put(r, 5 + j, { formula:`COUNTIFS(${q},${RB("Resultado")},"${t}")` })); });
+      ["Éxito","En proceso","No éxito","No se encontró","Sin contacto"].forEach((t, j) => put(r, 5 + j, { formula:`COUNTIFS(${q},${RB("Resultado")},"${t}")` }));
+      ESTADOS_ACC.forEach((t, j) => put(r, 10 + j, { formula:`COUNTIFS(${q},${RB("Estado_Del_Problema")},"${t}")` })); });
     const rt = 5 + ejs.length; put(rt, 1, "Total", { bold:true });
     if (ejs.length) cab.slice(1).forEach((_, j) => { const C = L(j + 2); put(rt, j + 2, { formula:`SUM(${C}5:${C}${rt - 1})` }, { bold:true }); });
     put(rt + 2, 1, "Ojo: el comentario libre puede traer nombres o teléfonos; revísalo antes de compartir el archivo fuera de Stratis. Archivo con datos de comercios: solo en el OneDrive de Stratis.", { size:9, color:{ argb:NA } });
@@ -2371,7 +2411,7 @@ async function baseBBVA(){
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast(`Base para BBVA descargada: ${filas.length} comercios de la base nueva, hojas Resumen y Base (55 columnas del modelo + fuente del feedback).`);
+    toast(`Base para BBVA descargada: ${filas.length} comercios de la base nueva, hojas Resumen, BBVA (31 columnas) y Base (55 columnas del modelo + fuente del feedback y tipificación de BBVA).`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
 }

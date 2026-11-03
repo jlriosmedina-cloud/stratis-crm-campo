@@ -11,6 +11,7 @@ const NM = path.join(RAIZ, 'qa', 'node_modules');
 const ANALISTA = { correo: 'analista.prueba@ejemplo.com', nombre: 'Analista Prueba', nombre_corto: 'Analista', rol: 'Analista', activo: true };
 const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i, i === 1 ? { documento: '00999001' } : i === 2 ? { ruc: '20999000002' } : {}));
 const hoy = hoyLima();
+const AYER = new Date(Date.parse(hoy + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
 const visita = (i, extra) => Object.assign({
   id: `00000000-0000-0000-0000-00000000000${i}`, periodo: 'PRUEBA', customer_id: String(i).padStart(8, '0'), comercio: `Comercio Prueba ${i}`, razon_social: `COMERCIO DE PRUEBA ${i} SAC`,
   distrito: 'SAN ISIDRO', correo: EJECUTIVO.correo, visitado_en: `${hoy}T15:0${i}:00Z`, recibido_en: `${hoy}T15:0${i}:30Z`, lat: -12.0931, lng: -77.0465, precision_m: 10, distancia_m: 20,
@@ -26,10 +27,16 @@ const ACT = [
   visita(4, { con: 'Nadie', motivo: 'Cerrado', que: 'Sin éxito', decision: null, feedback: null }),
   visita(5, { con: 'Nadie', motivo: 'Dirección errada', que: 'Sin éxito', decision: null, feedback: null, direccion_ok: false, comercio_ubicado: false }),
   // contradicción a propósito: marcó Dueño pero el comentario dice que el dueño no estaba
-  visita(6, { con: 'Dueño', comentario: 'El dueño no se encontraba, regresar más tarde' }),
+  visita(6, { con: 'Dueño', comentario: 'El dueño no se encontraba, regresar más tarde',
+    // 03/11: dos frases; la principal y cómo quedó lo que pide BBVA van en fb_extra
+    feedback: ['Usa POS de otra marca', 'Pide una tasa más baja'],
+    fb_extra: { competidores: ['Niubiz'], fb_principal: 'Pide una tasa más baja', accion_estado: 'Hecho', numero_ticket: 'T-5' } }),
   // 29/09: zona insegura cuenta como visita, pero lleva la señal «Revisar motivo»
   visita(7, { con: 'Nadie', motivo: 'Zona insegura', que: 'Sin éxito', decision: null, feedback: null, direccion_ok: null })
 ];
+// 03/11: visita anterior del comercio 3 con frase principal (solo para la prueba de la principal; no entra en las demás)
+const VISITA_AYER_3 = visita(3, { id: '00000000-0000-0000-0000-000000000031', visitado_en: `${AYER}T15:03:00Z`, recibido_en: `${AYER}T15:03:30Z`, plazo_hasta: AYER,
+  feedback: ['Pide una tasa más baja'], fb_extra: { fb_principal: 'Pide una tasa más baja', accion_estado: 'Hecho' } });
 const FX = {
   sesion: { user: { email: ANALISTA.correo }, access_token: 'prueba' },
   tablas: { usuarios: [ANALISTA, EJECUTIVO], v2_periodos: { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }, v2_cargas: [], v2_bitacora_visita: [], v2_transacciones: [], v2_feedback_inferido: [] },
@@ -95,19 +102,43 @@ await prueba('visitas retenidas: se ven con el mensaje y Jose las descarta', asy
   assert.deepEqual(d[1], { p_cliente_uid: 'uid-retenida-prueba', p_nota: 'Periodo cerrado, no se recupera' });
   assert.equal(await p.locator('text=Una visita retenida').count(), 0, 'el panel no se actualizó');
 });
+await prueba('base para BBVA: la principal de una visita anterior no se arrastra si la última con feedback no la trae', async () => {
+  await p.evaluate(v => { window.__FX.rpc.v2_actividad = window.__FX.rpc.v2_actividad.concat([v]); S.vista = 'feedback'; pintar(); }, VISITA_AYER_3);
+  try {
+    await p.waitForTimeout(400);
+    const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
+    const f = path.join(RAIZ, 'qa', 'salida_base_principal.xlsx'); await d.saveAs(f);
+    const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f); fs.unlinkSync(f);
+    const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String), v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
+    let fila = 0; b.eachRow((r, n) => { if (r.getCell(cb.indexOf('Customer_ID') + 1).value === '00000003') fila = n; });
+    assert.ok(fila > 1, 'no está el comercio 3'); assert.equal(v(fila, 'Visitas_Validas'), 2, 'no tomó la visita de ayer');
+    assert.equal(v(fila, 'Feedback_Principal') || '', '', 'arrastró la principal de una visita anterior'); assert.equal(v(fila, 'Estado_Del_Problema') || '', '');
+  } finally { await p.evaluate(() => { window.__FX.rpc.v2_actividad = window.__FX.rpc.v2_actividad.filter(x => x.id !== '00000000-0000-0000-0000-000000000031'); }); }
+});
 await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y Base), Documento como llave', async () => {
   await p.evaluate(() => { S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
   const f = path.join(RAIZ, 'qa', 'salida_base_prueba.xlsx'); await d.saveAs(f);
   const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
-  assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'Base']);
+  assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'BBVA', 'Base']);
+  // 03/11: hoja BBVA, solo lo que pide BBVA y con los nombres de su archivo en las 4 fases
+  const hb = xw.getWorksheet('BBVA'), cv = hb.getRow(1).values.slice(1).map(String);
+  assert.equal(cv.length, 31, 'la hoja BBVA debe tener 31 columnas'); assert.ok(!cv.includes('Comentario'), 'el comentario libre no va en la hoja BBVA');
+  assert.deepEqual(cv.slice(19, 27), ['Motivo','Submotivo','Feedback literal','Acción original','Estado','Numero_Ticket','Fecha_Resolucion','Proxima_Accion']);
+  assert.equal(hb.getCell(1, 21).fill.fgColor.argb, 'FF3B43FB', 'las 4 fases van en azul');
+  const vb = (fila, col) => hb.getCell(fila, cv.indexOf(col) + 1).value;
+  assert.equal(vb(2, 'Documento'), '00999001', 'Documento como texto con su cero'); assert.equal(hb.getColumn(1).numFmt, '@');
+  assert.equal(vb(7, 'Feedback literal'), 'Pide una tasa más baja'); assert.equal(vb(7, 'Motivo'), 'Condiciones comerciales');
+  assert.equal(vb(7, 'Acción original'), 'Brindar información de campañas actuales ( si aplica ) y confirmar uso'); assert.equal(vb(7, 'Estado'), 'Hecho');
+  assert.ok(vb(7, 'Fecha_Resolucion') instanceof Date, 'Fecha_Resolucion debe ser fecha en la hoja BBVA');
+  assert.equal(hb.rowCount, xw.getWorksheet('Base').rowCount, 'la hoja BBVA debe tener los mismos comercios que Base');
   const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String);
   // 26/10: las 55 columnas del modelo de Jose, en su orden (Gestion_Stratis_visitados_base_nueva_corte_23-10-2026.xlsx)
-  assert.equal(cb.length, 59, 'Base debe tener las 55 columnas del modelo, las 2 de fuente y las 2 de tipificación BBVA');
+  assert.equal(cb.length, 61, 'Base debe tener las 55 columnas del modelo, las 2 de fuente y las 4 de tipificación BBVA');
   assert.deepEqual(cb.slice(0, 10), ['Documento','Customer_ID','Nombre_Comercial','Razon_Social','Distrito','Periodo','Bloque','Origen','Ejecutivo','Grupo_Ubicacion']);
   assert.deepEqual(cb.slice(50, 55), ['Reactivado_BBVA','Dias_Con_Trx_Post_Visita','Cuenta_Para_Comision','Validacion','Fuera_De_Plazo']);
   // la fuente del feedback va después de la columna 55 (Jose, 26/10)
-  assert.deepEqual(cb.slice(55), ['Fuente_Feedback','Fuente_Que_Lo_Convencio','Motivo_BBVA','Submotivo_BBVA']);
+  assert.deepEqual(cb.slice(55), ['Fuente_Feedback','Fuente_Que_Lo_Convencio','Motivo_BBVA','Submotivo_BBVA','Feedback_Principal','Accion_BBVA']);
   assert.equal(cb[26], 'Resultado', 'Resultado debe ir en la columna AA'); assert.equal(cb[40], 'Numero_Ticket', 'Numero_Ticket debe ir en la columna AO');
   assert.equal(b.getColumn(1).numFmt, '@', 'Documento debe ir como texto'); assert.equal(b.getColumn(2).numFmt, '@', 'Customer_ID debe ir como texto');
   const v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
@@ -125,10 +156,20 @@ await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y 
   assert.equal(v(3, 'Rama_Feedback'), 'Decisión y necesidad'); assert.equal(v(3, 'Fuente_Feedback'), 'Ejecutivo'); assert.equal(v(3, 'Que_Ofrecio'), 'Reagendé con quien decide');
   assert.ok(v(3, 'Fecha_Volver') instanceof Date, 'Fecha_Volver debe ser fecha');
   // Las que el celular todavía no captura van vacías y con cabecera naranja
-  for (const h of ['Nombre_Cargo_Contacto','Sentir_Del_Cliente','Punto_De_Dolor_Principal','Numero_Ticket','Proxima_Accion']){
+  for (const h of ['Nombre_Cargo_Contacto','Sentir_Del_Cliente','Punto_De_Dolor_Principal']){
     assert.equal(v(2, h) || '', '', h + ' debe ir vacía');
     assert.equal(b.getCell(1, cb.indexOf(h) + 1).fill.fgColor.argb, 'FFF86F35', h + ' debe ir en naranja'); }
   assert.equal(b.getCell(1, 1).fill.fgColor.argb, 'FF0C1137');
+  // 03/11: las 4 fases de BBVA. Con frase principal: un solo motivo, la acción que pide BBVA y su estado en AO–AR (ya no van en naranja)
+  for (const h of ['Numero_Ticket','Estado_Del_Problema','Fecha_Resolucion','Proxima_Accion']) assert.equal(b.getCell(1, cb.indexOf(h) + 1).fill.fgColor.argb, 'FF0C1137', h + ' ya no va en naranja');
+  assert.equal(v(7, 'Feedback'), 'Usa POS de otra marca; Pide una tasa más baja');
+  assert.equal(v(7, 'Feedback_Principal'), 'Pide una tasa más baja'); assert.equal(v(7, 'Motivo_BBVA'), 'Condiciones comerciales');
+  assert.equal(v(7, 'Submotivo_BBVA'), 'Condiciones comerciales poco atractivas');
+  assert.equal(v(7, 'Accion_BBVA'), 'Brindar información de campañas actuales ( si aplica ) y confirmar uso');
+  assert.equal(v(7, 'Estado_Del_Problema'), 'Hecho'); assert.equal(v(7, 'Numero_Ticket'), 'T-5');
+  assert.ok(v(7, 'Fecha_Resolucion') instanceof Date, 'Fecha_Resolucion debe ser fecha'); assert.equal(v(7, 'Proxima_Accion') || '', '');
+  // sin frase con acción (solo «No se encontraba…»), no hay principal ni estado
+  assert.equal(v(3, 'Feedback_Principal') || '', ''); assert.equal(v(3, 'Estado_Del_Problema') || '', '');
   // Sin corte de BBVA en el periodo no se afirma «NO»
   assert.equal(v(2, 'Reactivado_BBVA'), 'Sin dato en el corte'); assert.equal(v(2, 'Cuenta_Para_Comision'), 'Sin dato en el corte');
   // Resumen: fórmulas sobre la hoja Base, por ejecutivo
@@ -136,6 +177,7 @@ await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y 
   r.eachRow(row => row.eachCell(c => { if (c.value && c.value.formula) formulas.push(c.value.formula); }));
   assert.ok(formulas.length >= 9 && formulas.every(x => /Base!|SUM\(/.test(x)), 'el Resumen debe salir de la hoja Base');
   assert.ok(formulas.some(x => /COUNTIFS\(Base!\$I\$2:\$I\$\d+,\$A5,Base!\$K\$2:\$K\$\d+,"SI"\)/.test(x)), 'falta Comercios visitados por ejecutivo (columnas I y K)');
+  assert.ok(formulas.some(x => /Base!\$AP\$2:\$AP\$\d+,"Hecho"/.test(x)), 'falta «Lo que pide BBVA: hecho» por ejecutivo (columna AP)');
   fs.unlinkSync(f);
 });
 await prueba('base para BBVA: solo la base nueva, y con corte de BBVA en el periodo dice SI o NO', async () => {

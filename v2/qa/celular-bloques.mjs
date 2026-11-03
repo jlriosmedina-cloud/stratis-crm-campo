@@ -97,6 +97,8 @@ for (const tema of ['light', 'dark']) {
     const t = await texto();
     assert.match(t, /Bloque 1 · /); assert.match(t, /Bloque 2 · próximo/); assert.match(t, /217 comercios nuevos llegan/);
     assert.match(t, /Comercios visitados\s*1 \/ 225/); assert.match(t, /2 visitados · 1 con contacto/);
+    // 03/11: sugiere revisar el Drive individual de BBVA
+    assert.match(t, /Tu Drive individual de BBVA/);
     await p.evaluate(() => { S.vista = 'inicio'; pintar(); });
   });
   await prueba(`${tema} · ruta de hoy: los opcionales no la traban y la 98 y la 99 nunca salen`, async () => {
