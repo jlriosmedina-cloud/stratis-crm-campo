@@ -123,7 +123,7 @@ await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y 
   assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'BBVA', 'Base']);
   // 03/11: hoja BBVA, solo lo que pide BBVA y con los nombres de su archivo en las 4 fases
   const hb = xw.getWorksheet('BBVA'), cv = hb.getRow(1).values.slice(1).map(String);
-  assert.equal(cv.length, 31, 'la hoja BBVA debe tener 31 columnas'); assert.ok(!cv.includes('Comentario'), 'el comentario libre no va en la hoja BBVA');
+  assert.equal(cv.length, 29, 'la hoja BBVA debe tener 29 columnas'); assert.ok(!cv.includes('Reactivado_BBVA') && !cv.includes('Dias_Con_Trx_Post_Visita'), 'el cruce de reactivación sale de la plataforma de BBVA'); assert.ok(!cv.includes('Comentario'), 'el comentario libre no va en la hoja BBVA');
   assert.deepEqual(cv.slice(19, 27), ['Motivo','Submotivo','Feedback literal','Acción original','Estado','Numero_Ticket','Fecha_Resolucion','Proxima_Accion']);
   assert.equal(hb.getCell(1, 21).fill.fgColor.argb, 'FF3B43FB', 'las 4 fases van en azul');
   const vb = (fila, col) => hb.getCell(fila, cv.indexOf(col) + 1).value;

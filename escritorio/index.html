@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "604224";
+const BUILD = "1a7069";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -2891,12 +2891,13 @@ async function baseBBVA(){
     wsB.autoFilter = { from:{ row:1, column:1 }, to:{ row:1, column:BASE55.length } };
     // 03/11 (Jose): hoja «BBVA» con solo lo que BBVA necesita, en su orden: comercio, visita, las 4 fases de su tipificación
     // (con los nombres de su archivo) y su resultado. «Base» queda igual, como respaldo completo de Stratis. Sin el comentario libre
-    // (puede traer nombres o teléfonos): va solo en Base (Jose, 03/11).
+    // (puede traer nombres o teléfonos): va solo en Base (Jose, 03/11). Sin Reactivado_BBVA ni Dias_Con_Trx_Post_Visita: ese cruce
+    // sale de la plataforma de BBVA (Jose, 04/11); en Base se quedan.
     const BBVA_COLS = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Distrito","Periodo","Ejecutivo",
       "Visitado","Fecha_Primera_Visita","Fecha_Ultima_Visita","Visitas_Validas","Como_Fue_La_Visita","Motivo_Sin_Visita","Direccion_Correcta",
       "Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Con_Quien","Decision","Resultado",
       "Motivo_BBVA","Submotivo_BBVA","Feedback_Principal","Accion_BBVA","Estado_Del_Problema","Numero_Ticket","Fecha_Resolucion","Proxima_Accion",
-      "Reactivado_BBVA","Dias_Con_Trx_Post_Visita","POS_Otra_Marca","Fecha_Volver"];
+      "POS_Otra_Marca","Fecha_Volver"];
     const BBVA_NOM = { Motivo_BBVA:"Motivo", Submotivo_BBVA:"Submotivo", Feedback_Principal:"Feedback literal", Accion_BBVA:"Acción original", Estado_Del_Problema:"Estado" };
     const AZB = "FF3B43FB", fasesV = new Set(["Motivo_BBVA","Submotivo_BBVA","Feedback_Principal","Accion_BBVA","Estado_Del_Problema","Numero_Ticket","Fecha_Resolucion","Proxima_Accion"]);
     wsV.addRow(BBVA_COLS.map(h => BBVA_NOM[h] || h)); filas.forEach(f => wsV.addRow(BBVA_COLS.map(h => f[BASE55.indexOf(h)])));
@@ -2934,7 +2935,7 @@ async function baseBBVA(){
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
     a.download = `Base_BBVA_Periodo${per ? "_" + per : ""}_${hoyISO().replace(/-/g, "")}.xlsx`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    toast(`Base para BBVA descargada: ${filas.length} comercios de la base nueva, hojas Resumen, BBVA (31 columnas) y Base (55 columnas del modelo + fuente del feedback y tipificación de BBVA).`);
+    toast(`Base para BBVA descargada: ${filas.length} comercios de la base nueva, hojas Resumen, BBVA (29 columnas) y Base (55 columnas del modelo + fuente del feedback y tipificación de BBVA).`);
   } catch(e){ toast("No se pudo armar la base: " + (e.message || e)); }
   S._bajandoBase = false;
 }
