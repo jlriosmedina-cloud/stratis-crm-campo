@@ -995,6 +995,17 @@ caso('10/11: la frase «Teléfono del comercio que se comunicó a soporte» exis
   await corregirExtra(id, [F], { fb_principal: F, accion_estado: 'Hecho' });
   assert.deepEqual((await visita(id)).feedback, [F]);
 });
+// 10/11: la API corta cada respuesta en 1.000 filas y la base del periodo ya pasa de eso: v2_mi_base va ordenada por customer_id
+// para que el escritorio la pida por tramos sin repetir ni saltarse comercios.
+caso('10/11: v2_mi_base devuelve la base ordenada por customer_id y por tramos no se repite ni se salta ninguna fila', async () => {
+  const todo = (await como(ANA, 'select customer_id from public.v2_mi_base()')).rows.map(x => x.customer_id);
+  assert.ok(todo.length > 5, 'el analista debe ver la base');
+  assert.deepEqual(todo, [...todo].sort(), 'debe venir ordenada por customer_id');
+  assert.equal(new Set(todo).size, todo.length, 'sin comercios repetidos');
+  const t1 = (await como(ANA, 'select customer_id from public.v2_mi_base() limit 7 offset 0')).rows.map(x => x.customer_id);
+  const t2 = (await como(ANA, 'select customer_id from public.v2_mi_base() limit 7 offset 7')).rows.map(x => x.customer_id);
+  assert.deepEqual([...t1, ...t2], todo.slice(0, t1.length + t2.length), 'dos tramos seguidos deben empalmar sin huecos');
+});
 let fallas = 0;
 for (const [n, fn] of CASOS){
   try { await fn(); console.log(`ok  ${n}`); }

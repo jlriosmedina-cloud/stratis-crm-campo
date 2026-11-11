@@ -24,6 +24,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages desde la r
 - **Mientras dure la mudanza, cada publicación sale en los dos links el mismo día:** primero en `qa` (PR) y después en `main` del repo `personal`, con los mismos `v2/`, `index.html` y `escritorio/index.html`, **sin** el `CNAME`. Para empujar al repo personal se usa la cuenta `jlriosmedina-cloud` (`gh auth token --user jlriosmedina-cloud`) sin cambiar la cuenta activa.
 
 - **Datos y reglas:** Supabase (proyecto `xwvpnagvdrjffayzsnke`), tablas y funciones `v2_*`. Las apps solo leen con RPC (`v2_mi_base`, `v2_actividad`, `v2_avance`) y escriben con RPC (`v2_registrar_visita`, `v2_editar_resultado`, `v2_anular_visita`, etc.). Las reglas viven en la base, no en el navegador.
+  - **Tope de 1.000 filas por respuesta (API de Supabase):** `v2_mi_base` va ordenada por `customer_id` y el escritorio la pide por tramos de 1.000 con `.range` (desde el 10/11, con 1.124 comercios en el P4). Todo lector nuevo de una lista que pueda pasar de 1.000 filas debe paginar con un orden fijo; si no, se pierden filas sin avisar (así «bajaron» los visitados de 508 a 409). Pendiente de vigilar: `v2_actividad` (una fila por visita; hoy ~580).
 - **Versión 1:** la carpeta `v1/`, los SQL `01_…43_` de la raíz y `fuente/` son del CRM anterior. No borrar los datos v1 de Supabase hasta después de diciembre de 2026.
 
 ## Cómo se trabaja

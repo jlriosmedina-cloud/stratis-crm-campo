@@ -39,8 +39,16 @@ export const STUB = `
     rpc: (fn, args) => {
       window.__llamadas.push([fn, JSON.parse(JSON.stringify(args || {}))]);
       const r = window.__FX.rpc[fn];
-      if (typeof r === 'function') { const x = r(args); return x && x.__error ? mal(x.__error) : ok(x); }
-      return ok(r === undefined ? [] : r);
+      let pr;
+      if (typeof r === 'function') { const x = r(args); pr = x && x.__error ? mal(x.__error) : ok(x); }
+      else pr = ok(r === undefined ? [] : r);
+      // como PostgREST: rpc(...).range(a, b) devuelve ese tramo (la base pasó de 1.000 filas el 10/11)
+      // y, como la API de Supabase, sin range corta en 1.000 filas (con range entrega a lo más 1.000 de ese tramo)
+      let rango = null;
+      const sal = { range(a, b){ rango = [a, Math.min(b, a + 999)]; return sal; },
+        then(res, rej){ return pr.then(x => x && Array.isArray(x.data) ? { ...x, data: rango ? x.data.slice(rango[0], rango[1] + 1) : x.data.slice(0, 1000) } : x).then(res, rej); },
+        catch(rej){ return sal.then(undefined, rej); } };
+      return sal;
     },
     from: t => { const q = { select(){ return q; }, eq(){ return q; }, lte(){ return q; }, gte(){ return q; }, in(){ return q; }, order(){ return q; }, limit(){ return q; }, range(a, b){ q.tramo = [a, b + 1]; return q; },
       maybeSingle(){ const d = window.__FX.tablas[t]; return ok(Array.isArray(d) ? d[0] || null : d || null); },

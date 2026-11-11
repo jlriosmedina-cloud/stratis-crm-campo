@@ -252,8 +252,20 @@ async function cargarRetenidas(){
   const { data, error } = await sb.rpc("v2_retenidas");
   if (!error) S.retenidas = data || [];
 }
+// 10/11/2026: v2_mi_base devuelve ya más de 1.000 filas al analista (1.124 con el bloque 2) y la API corta en 1.000: se pide por
+// tramos (la función va ordenada por customer_id, migración 20261110230000) hasta que un tramo venga incompleto.
+async function leerBasePorTramos(){
+  const todo = [];
+  for (let i = 0; ; i += 1000){
+    const { data, error } = await sb.rpc("v2_mi_base").range(i, i + 999);
+    if (error) return { data:null, error };
+    todo.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: todo, error:null };
+}
 async function cargarBase(){
-  const { data, error } = await sb.rpc("v2_mi_base");
+  const { data, error } = await leerBasePorTramos();
   if (error){ toast("No se pudo leer la base: " + error.message); return; }
   // Base 2026-11: los de «salida» siguen en v2_asignaciones (regla n.º 1), pero ya no son cartera salvo que reciban una visita.
   // baseMap guarda todos, para leer el comercio de cualquier visita.

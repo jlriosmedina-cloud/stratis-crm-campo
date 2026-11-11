@@ -557,6 +557,19 @@ await prueba('Cierres de periodo: histórico, detalle con cuadre, ojo de privaci
   assert.match(t, /El recorrido de/); assert.equal(await p.locator('.ci-per:not(.curso)').count(), 2); assert.match(t, /30 %/, 'falta lo pagado en total'); assert.match(t, /bolsa retenida al cierre del proyecto/);
   await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
 });
+await prueba('10/11: la base de más de 1.000 filas se lee por tramos y no se pierde ningún comercio', async () => {
+  // La API corta cada respuesta en 1.000 filas; con el bloque 2 el analista ve 1.124 comercios. La prueba entrega 2.150 filas.
+  const r = await p.evaluate(async () => {
+    const fx = window.__FX, guardada = fx.rpc.v2_mi_base;
+    fx.rpc.v2_mi_base = Array.from({ length: 2150 }, (_, i) => ({ customer_id: 'X' + String(i).padStart(6, '0'), razon_social: 'COMERCIO ' + i, correo: null, origen: 'base_nueva', bloque: 1, visitas: i % 2, visitas_validas: i % 2 }));
+    await cargarBase();
+    const out = { filas: Object.keys(S.baseMap).length, ultimo: !!S.baseMap['X002149'], primero: !!S.baseMap['X000000'] };
+    fx.rpc.v2_mi_base = guardada; await cargarBase();
+    return out;
+  });
+  assert.equal(r.filas, 2150, 'se perdieron comercios al leer la base');
+  assert.ok(r.ultimo && r.primero, 'faltan el primero o el último comercio');
+});
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : '\nTodas las pruebas del escritorio pasaron');
