@@ -468,7 +468,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "866d7e";
+const BUILD = "995c05";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -2215,8 +2215,6 @@ function bloqueArbol(r, px){
   if (fb.includes(FB_OTRA_MARCA)) h += `<div class="fb-sub"><b>¿Qué POS usa?</b> <em class="fb-oblig">(obligatorio)</em>
       <div class="ac-chips">${COMPETIDORES.map(c => chip("comp", c, e.competidores.includes(c))).join("")}</div>
       ${e.competidores.includes("Otro") ? `<input class="campo" id="${px}Otro" maxlength="60" placeholder="¿Cuál? Ej.: Vendemás" value="${esc(e.competidor_otro || "")}" style="margin-top:8px">` : ""}
-      <label class="fb-label" for="${px}Tasa">Tasa que le cobra <span>(opcional, en %)</span></label>
-      <input class="campo" id="${px}Tasa" inputmode="decimal" maxlength="5" placeholder="Ej.: 2,5" value="${esc(e.tasa_competidor || "")}" style="max-width:140px">
       <span class="fb-label">¿Por qué lo prefiere? <span>(opcional)</span></span>
       <div class="ac-chips">${PREFIERE_POR.map(c => chip("pref", c, e.prefiere_por.includes(c))).join("")}</div></div>`;
   if (fb.includes(FB_DEMORA)) h += `<div class="fb-sub"><b>Demora de los abonos</b> <span class="fb-opc">(opcional)</span>
@@ -2311,7 +2309,7 @@ function textoExtra(x){
   if (!x) return "";
   const comp = (x.competidores || []).map(c => c === "Otro" && x.competidor_otro ? x.competidor_otro : c);
   const p = [];
-  if (comp.length) p.push("POS de " + comp.join(", ") + (x.tasa_competidor != null ? " a " + String(x.tasa_competidor).replace(".", ",") + " %" : "") + ((x.prefiere_por || []).length ? " · lo prefiere por " + x.prefiere_por.join(", ").toLowerCase() : ""));
+  if (comp.length) p.push("POS de " + comp.join(", ") + ((x.prefiere_por || []).length ? " · lo prefiere por " + x.prefiere_por.join(", ").toLowerCase() : ""));
   if (x.no_necesita_por) p.push("No lo necesita: " + x.no_necesita_por.toLowerCase());
   if (x.fb_principal) p.push("Principal: " + fbCorto(x.fb_principal) + (x.accion_estado ? " · lo que pide BBVA: " + x.accion_estado.toLowerCase() : "") + (x.numero_ticket ? " · ticket " + x.numero_ticket : ""));
   if (x.dias_demora_abono != null || x.banco_abono) p.push("Demora del abono" + (x.dias_demora_abono != null ? ": " + x.dias_demora_abono + " día" + (Number(x.dias_demora_abono) === 1 ? "" : "s") : "") + (x.banco_abono ? " · le abonan en " + (x.banco_abono === "BBVA" ? "BBVA" : "otro banco") : ""));
@@ -2364,7 +2362,6 @@ function enlazarFeedback(p, r, px){
   p.querySelectorAll(`[data-${px}-pref]`).forEach(b => b.onclick = () => { e.prefiere_por = PREFIERE_POR.filter(c => alternarLista(e.prefiere_por, b.dataset[px + "Pref"]).includes(c)); re(); });
   p.querySelectorAll(`[data-${px}-nn]`).forEach(b => b.onclick = () => { e.no_necesita_por = e.no_necesita_por === b.dataset[px + "Nn"] ? null : b.dataset[px + "Nn"]; re(); });
   const o = $("#" + px + "Otro"); if (o) o.oninput = () => { e.competidor_otro = o.value; };
-  const t = $("#" + px + "Tasa"); if (t) t.oninput = () => { e.tasa_competidor = t.value; };
   p.querySelectorAll(`[data-${px}-banco]`).forEach(b => b.onclick = () => { e.banco_abono = e.banco_abono === b.dataset[px + "Banco"] ? null : b.dataset[px + "Banco"]; re(); });
   const dd = $("#" + px + "Dias"); if (dd) dd.oninput = () => { dd.value = dd.value.replace(/\D/g, "").slice(0, 2); e.dias_demora_abono = dd.value; };
   p.querySelectorAll(`[data-${px}-pr]`).forEach(b => b.onclick = () => { const v = b.dataset[px + "Pr"];

@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "bf74cf";
+const BUILD = "93fd8a";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -585,7 +585,7 @@ function demoraTxt(x){
 }
 function competidorTxt(x){
   if (!x || !(x.competidores || []).length) return "";
-  return x.competidores.map(c => c === "Otro" && x.competidor_otro ? x.competidor_otro : c).join(", ") + (x.tasa_competidor != null ? " a " + String(x.tasa_competidor).replace(".", ",") + " %" : "");
+  return x.competidores.map(c => c === "Otro" && x.competidor_otro ? x.competidor_otro : c).join(", ");
 }
 const OBS_MOTIVOS = ["Comentario insuficiente","Comercio repetido en el día","Hora fuera de jornada","El resultado no coincide con el comentario","Otro"];
 const ANU_MOTIVOS = ["Comercio equivocado","Visita duplicada","Registro de prueba","No hubo visita presencial","Otro"];
@@ -2465,10 +2465,8 @@ function vistaFeedback(){
   const conEj = con.filter(o => o.f.fuente === "ejecutivo"), conAcc = conEj.filter(o => (o.f.acc || []).length);
   const cuentaA = t => conEj.filter(o => (o.f.acc || []).includes(t)).length;
   const cuentaC = t => conEj.filter(o => o.f.ext && (o.f.ext.competidores || []).includes(t)).length;
-  const tasas = t => conEj.filter(o => o.f.ext && (o.f.ext.competidores || []).includes(t) && o.f.ext.tasa_competidor != null).map(o => Number(o.f.ext.tasa_competidor));
-  const tasaTxt = t => { const l = tasas(t); return l.length ? ` <small class="fbv-st">tasa prom. ${(l.reduce((a, b) => a + b, 0) / l.length).toFixed(2).replace(".", ",")} % (${l.length})</small>` : ""; };
   const barrasAcc = ACCIONES.filter(cuentaA).sort((a, b) => cuentaA(b) - cuentaA(a)).map(t => fila("a:" + t, t, cuentaA(t))).join("") || `<div class="atajos">Todavía no hay visitas con «qué ofreció» (se marca desde el 26/09).</div>`;
-  const barrasComp = COMPETIDORES.filter(cuentaC).map(t => fila("c:" + t, t === "Otro" ? "Otra marca" : t, cuentaC(t), tasaTxt(t))).join("") || `<div class="atajos">Todavía no hay visitas con POS de otra marca y el nombre del competidor.</div>`;
+  const barrasComp = COMPETIDORES.filter(cuentaC).map(t => fila("c:" + t, t === "Otro" ? "Otra marca" : t, cuentaC(t))).join("") || `<div class="atajos">Todavía no hay visitas con POS de otra marca y el nombre del competidor.</div>`;
   const barrasFuera = FUERA_LISTA.map(t => fila("f:" + t, t, cuentaF(t))).join("") + fila("sd", "El comentario no dice qué opina del POS", sinDetalle);
   const ejs = S.ejecutivos.filter(e => !S.fbEj || e.correo === S.fbEj);
   const porEj = (pred, c) => con.filter(o => o.v.correo === c && pred(o)).length;
@@ -2504,7 +2502,7 @@ function vistaFeedback(){
       <div class="fbv">${barrasAcc}</div>
     </div>
     <div class="panel">
-      <div class="barra"><b>POS de otra marca</b><span class="lbl">qué competidor usa el comercio · la tasa es opcional</span></div>
+      <div class="barra"><b>POS de otra marca</b><span class="lbl">qué competidor usa el comercio</span></div>
       <div class="fbv">${barrasComp}</div>
     </div>
   </div>
@@ -2767,7 +2765,7 @@ const BASE55 = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Dis
   "Feedback_Principal","Accion_BBVA"];
 // Lo que el celular todavía no captura: cabecera naranja y celda vacía (regla de ausencia: vacío = no consta, no «no tiene»)
 // 03/11: Numero_Ticket, Estado_Del_Problema, Fecha_Resolucion y Proxima_Accion ya salen del estado de lo que pide BBVA
-const BASE55_FALTA = new Set(["Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad"]);
+const BASE55_FALTA = new Set(["Tasa_Competidor","Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario","Sentir_Del_Cliente","Punto_De_Dolor_Principal","Severidad"]);
 const BASE55_ANCHO = [12,14,19,15,12,13,13,13,13,18,12,23,22,18,21,20,21,23,30,12,24,21,16,12,19,21,12,40,16,27,12,17,18,26,20,14,22,40,13,13,16,22,19,17,15,20,24,20,16,15,18,27,23,13,17,22,22,30,34,30,50];
 // Opción que marcó el ejecutivo, con el texto exacto del celular (pregunta única «¿Cómo fue la visita?», 26/09). comoFue() es la
 // versión del escritorio («Habló con…», con detalle), por eso aquí va aparte: el modelo de Jose usa las palabras del celular.
@@ -2872,7 +2870,7 @@ async function baseBBVA(){
         Gestion_Con_Contacto: gc ? "SI" : "NO", Fecha_Primera_Gestion_Con_Contacto: gc ? fecha(iso(gc.visitado_en)) : null, Con_Quien: uc ? uc.con : "",
         Decision: uc ? uc.decision || "" : "", Que_Lo_Convencio: m ? m.motivos.join("; ") : "",
         Resultado: ult ? RES_TXT[resultadoDe(ult)] : "Sin visita", Feedback: tipos.join("; "), Rama_Feedback: ramas.join("; "),
-        POS_Otra_Marca: comp.join("; "), Tasa_Competidor: tasa != null ? tasa : "", Prefiere_Competidor_Por: [...pref].join("; "),
+        POS_Otra_Marca: comp.join("; "), Tasa_Competidor: "", Prefiere_Competidor_Por: [...pref].join("; "),
         Dias_Demora_Abono: dias != null ? dias : "", Banco_Abono: banco, Por_Que_No_Necesita: noNec,
         Comentario: ult ? String(ult.comentario || "").replace(/\s+/g, " ").trim() : "", Que_Ofrecio: ACCIONES.filter(a => acc.has(a)).join("; "),
         Derivado_A: deriva.join("; "), Fecha_Volver: ult && ult.fecha_reagenda ? fecha(ult.fecha_reagenda) : null,
