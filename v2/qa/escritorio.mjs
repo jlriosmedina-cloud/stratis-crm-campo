@@ -5,9 +5,28 @@ import { navegador, RAIZ, urlDist, EJECUTIVO, comercio, hoyLima } from './comun.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import JSZip from 'jszip';
 
 const NM = path.join(RAIZ, 'qa', 'node_modules');
+// Las descargas de prueba van a la carpeta temporal de Windows, fuera de OneDrive: OneDrive bloquea los archivos mientras los sincroniza (EBUSY).
+const SALIDA = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-qa-escritorio-'));
+const salida = n => path.join(SALIDA, n);
+process.on('exit', () => fs.rmSync(SALIDA, { recursive: true, force: true }));
+// Descarga que pide la fecha de corte: espera a que termine la pieza anterior, acepta el corte y quita siempre el manejador del diálogo,
+// para que una prueba que falla no deje un manejador colgado que conteste el diálogo de la siguiente.
+async function descargarConCorte(p, sel, corte, nombre) {
+  await p.waitForFunction(() => !S._armandoPpt && !S._armandoRep, null, { timeout: 30000 });
+  await p.waitForTimeout(500);   // deja llegar la descarga de una pieza anterior que haya terminado tarde, antes de escuchar la nuestra
+  let contestado = false;   // solo el primer diálogo (la fecha de corte); otro diálogo lo cierra Playwright, como antes
+  const alDialogo = d => { if (contestado) return; contestado = true; d.accept(corte.split('-').reverse().join('/')).catch(() => {}); };
+  p.on('dialog', alDialogo);
+  try {
+    const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click(sel, { timeout: 60000 })]);
+    if (nombre) assert.match(d.suggestedFilename(), nombre);
+    return d;
+  } finally { p.off('dialog', alDialogo); }
+}
 const ANALISTA = { correo: 'analista.prueba@ejemplo.com', nombre: 'Analista Prueba', nombre_corto: 'Analista', rol: 'Analista', activo: true };
 const BASE = [1, 2, 3, 4, 5, 6].map(i => comercio(i, i === 1 ? { documento: '00999001' } : i === 2 ? { ruc: '20999000002' } : {}));
 const hoy = hoyLima();
@@ -107,7 +126,7 @@ await prueba('base para BBVA: la principal de una visita anterior no se arrastra
   try {
     await p.waitForTimeout(400);
     const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
-    const f = path.join(RAIZ, 'qa', 'salida_base_principal.xlsx'); await d.saveAs(f);
+    const f = salida('salida_base_principal.xlsx'); await d.saveAs(f);
     const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f); fs.unlinkSync(f);
     const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String), v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
     let fila = 0; b.eachRow((r, n) => { if (r.getCell(cb.indexOf('Customer_ID') + 1).value === '00000003') fila = n; });
@@ -118,7 +137,7 @@ await prueba('base para BBVA: la principal de una visita anterior no se arrastra
 await prueba('base para BBVA: modelo Gestión Stratis de 55 columnas (Resumen y Base), Documento como llave', async () => {
   await p.evaluate(() => { S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
-  const f = path.join(RAIZ, 'qa', 'salida_base_prueba.xlsx'); await d.saveAs(f);
+  const f = salida('salida_base_prueba.xlsx'); await d.saveAs(f);
   const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
   assert.deepEqual(xw.worksheets.map(w => w.name), ['Resumen', 'BBVA', 'Base']);
   // 03/11: hoja BBVA, solo lo que pide BBVA y con los nombres de su archivo en las 4 fases
@@ -187,7 +206,7 @@ await prueba('base para BBVA: solo la base nueva, y con corte de BBVA en el peri
       i === 0 ? { bbva_reactivado: '2026-02-01', dias_trx: 2 } : {}));
     fx.tablas.v2_resultados_bbva = [{ corte: '2026-02-01' }]; S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
   const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
-  const f = path.join(RAIZ, 'qa', 'salida_base_prueba_bloques.xlsx'); await d.saveAs(f);
+  const f = salida('salida_base_prueba_bloques.xlsx'); await d.saveAs(f);
   const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
   const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String), v = (fila, col) => b.getCell(fila, cb.indexOf(col) + 1).value;
   const cids = []; for (let r = 2; r <= b.rowCount; r++) cids.push(v(r, 'Customer_ID'));
@@ -215,10 +234,9 @@ await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no
   assert.ok(await p.locator('text=cargado: 3 comercios').count() > 0, 'no muestra el resultado de la carga');
 });
 await prueba('presentación para BBVA: 10 láminas con el corte elegido, sin mapa ni rutas', async () => {
-  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
-  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
+  const d = await descargarConCorte(p, '[data-ppt-bbva]', hoy, /\.pptx$/);
   assert.match(d.suggestedFilename(), new RegExp('^Mastercard_Campaña_BBVA_Adquirencia_' + hoy.replace(/-/g, '') + '\\.pptx$'));
-  const f = path.join(RAIZ, 'qa', 'salida_presentacion_prueba.pptx'); await d.saveAs(f);
+  const f = salida('salida_presentacion_prueba.pptx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 10, 'láminas: ' + lams.length);
@@ -243,9 +261,8 @@ await prueba('presentación con un corte de BBVA de más de 1000 filas: cuenta s
       { customer_id: '00000002', gestion_con_contacto: false, reactivado: 'Si', facturado: 900 }, { customer_id: '00000006', gestion_con_contacto: true, reactivado: 'No', facturado: null }];
     // 1000 filas inventadas fuera de la cartera antes de las 3 de prueba: las que cuentan solo llegan en la segunda página
     window.__FX.tablas.v2_resultados_bbva.unshift(...Array.from({ length: 1000 }, (_, i) => ({ customer_id: String(90000000 + i), gestion_con_contacto: false, reactivado: 'No', facturado: null }))); }, hoy);
-  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
-  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
-  const f = path.join(RAIZ, 'qa', 'salida_presentacion_bbva.pptx'); await d.saveAs(f);
+  const d = await descargarConCorte(p, '[data-ppt-bbva]', hoy, /\.pptx$/);
+  const f = salida('salida_presentacion_bbva.pptx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
   const txt = (await Promise.all(Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).map(n => z.file(n).async('string')))).join(' ');
   assert.ok(txt.includes('1 comercio reactivado cuenta para Stratis'), 'la regla de «cuenta» no da 1');
@@ -282,9 +299,8 @@ await prueba('totales de BBVA: se tipean con puntos de miles, el CRM pone los gr
 });
 await prueba('presentación con totales de BBVA: 11 láminas, cuentan los reactivados con visita y su detalle', async () => {
   await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; }, hoy);
-  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
-  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-ppt-bbva]')]);
-  const f = path.join(RAIZ, 'qa', 'salida_presentacion_totales.pptx'); await d.saveAs(f);
+  const d = await descargarConCorte(p, '[data-ppt-bbva]', hoy, /\.pptx$/);
+  const f = salida('salida_presentacion_totales.pptx'); await d.saveAs(f);
   const z = await JSZip.loadAsync(fs.readFileSync(f));
   const lams = Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n));
   assert.equal(lams.length, 11, 'láminas: ' + lams.length);
@@ -349,10 +365,9 @@ await prueba('presentación: con reactivados de BBVA, «La voz del comercio» su
 });
 await prueba('reporte para directorio: PDF A4 con los cinco cuadros en el orden del desglose y sin «CRM»', async () => {
   await p.evaluate(h => { window.__FX.tablas.v2_totales_bbva = [{ corte: h, cc_reac: 2, cc_fac: 1500.5, cc_trx: 30, sc_reac: 1, sc_fac: 800, sc_trx: 10, nv_reac: 0, nv_fac: 0, nv_trx: 0, por: 'analista.prueba@ejemplo.com', en: h + 'T12:00:00Z' }]; S.totBBVA = null; }, hoy);
-  p.once('dialog', d => d.accept(hoy.split('-').reverse().join('/')));
-  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 60000 }), p.click('[data-reporte-dir]')]);
+  const d = await descargarConCorte(p, '[data-reporte-dir]', hoy, /\.pdf$/);
   assert.match(d.suggestedFilename(), /^Avance_campana_.+\.pdf$/);
-  const f = path.join(RAIZ, 'qa', 'salida_reporte.pdf'); await d.saveAs(f);
+  const f = salida('salida_reporte.pdf'); await d.saveAs(f);
   const pdf = fs.readFileSync(f).toString('latin1'); fs.unlinkSync(f);
   assert.ok(pdf.startsWith('%PDF'), 'no es un PDF');
   const orden = ['COMERCIOS VISITADOS', 'CON CONTACTO', 'REACTIVADOS', 'TASA DE CONVERSI', 'VALOR GENERADO'].map(t => pdf.indexOf('(' + t));

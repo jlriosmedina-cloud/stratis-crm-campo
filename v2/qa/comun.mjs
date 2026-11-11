@@ -58,7 +58,7 @@ export function comercio(i, extra = {}) {
   return Object.assign({
     customer_id: String(i).padStart(8, '0'), razon_social: `COMERCIO DE PRUEBA ${i} SAC`, nombre_comercial: `Comercio Prueba ${i}`,
     rubro: 'Bodega', departamento: 'LIMA', provincia: 'LIMA', distrito: 'SAN ISIDRO', direccion: `AV. INVENTADA ${100 + i}`, zona: 'ZONA 1',
-    tasa_debito: 0.0329, tasa_credito: 0.0329, tasa_foranea: 0.0399, tasas_aprox: true, correo: EJECUTIVO.correo,
+    correo: EJECUTIVO.correo,
     ruta: 'Ruta 01', orden: i, estado_comercio: 'Activado', visitas: 0, visitas_validas: 0, ultima_visita: null, estado: 'por',
     geo_lat: -12.0931 + i * 0.0001, geo_lng: -77.0465, geo_calidad: 'numero'
   }, extra);

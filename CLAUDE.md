@@ -8,12 +8,20 @@ Instrucciones para Claude Code en este repositorio. Responde siempre en español
 
 Somos Stratis, y en el campo representamos a Openpay (adquirencia por POS) en una campaña de BBVA para reactivar comercios que tienen POS y no lo usan. Hay 900 leads por periodo, 225 por ejecutivo. Los ejecutivos son Alfredo, Anibal, Juan y Vanessa (correo de Vanessa: emelin.perez@).
 
-El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
+El CRM tiene dos apps de una sola página, publicadas en GitHub Pages desde la rama `qa` del repo de Stratis:
 
-| App | Fuente | Publicado en | Quién la usa |
-|---|---|---|---|
-| Celular | `v2/celular/` | `index.html` (raíz) | Ejecutivos en campo |
-| Escritorio | `v2/escritorio/` | `escritorio/index.html` | **Solo Jose**; los ejecutivos no deben verla |
+| App | Fuente | Publicado en | Link | Quién la usa |
+|---|---|---|---|---|
+| Celular | `v2/celular/` | `index.html` (raíz) | https://crm-bbva-peru-qa.mystratis.com | Ejecutivos en campo |
+| Escritorio | `v2/escritorio/` | `escritorio/index.html` | https://crm-bbva-peru-qa.mystratis.com/escritorio/ | **Solo Jose**; los ejecutivos no deben verla |
+
+### Repositorio y ramas (desde el 23/10/2026)
+
+- **Repo:** `mystratis-org/stratis-field-crm-fe-javascript` (interno de Stratis; lo administra Antonio Castañeda, Cloud & DevOps). Es `origin` en la carpeta del CRM. Jose entra con la cuenta **JoseRios-Stratis** (permiso Write, sin Admin), que es la cuenta activa de `gh`.
+- **Ramas de Antonio:** `qa` = el link que usan los ejecutivos (Pages); `dev` = desarrollo; `master` = producción (aún sin uso, no tocar). Las sesiones trabajan en su rama `claude/…` creada desde `origin/qa` y abren el PR **hacia `qa`**. Lo fusiona la sesión, con el OK de Jose.
+- **`CNAME` en `qa`:** mantiene el dominio `crm-bbva-peru-qa.mystratis.com`. No borrarlo ni moverlo.
+- **Repo anterior** `jlriosmedina-cloud/stratis-crm-campo` (remoto `personal`, link `jlriosmedina-cloud.github.io/stratis-crm-campo`): ahí el celular muestra el aviso de mudanza al link nuevo (`URL_NUEVA`), primero envía la cola sin señal y después pide pasar. **No se apaga ni se transfiere** hasta que los 4 ejecutivos estén en el link nuevo y cierre el periodo (18/11); se archiva después de diciembre de 2026.
+- **Mientras dure la mudanza, cada publicación sale en los dos links el mismo día:** primero en `qa` (PR) y después en `main` del repo `personal`, con los mismos `v2/`, `index.html` y `escritorio/index.html`, **sin** el `CNAME`. Para empujar al repo personal se usa la cuenta `jlriosmedina-cloud` (`gh auth token --user jlriosmedina-cloud`) sin cambiar la cuenta activa.
 
 - **Datos y reglas:** Supabase (proyecto `xwvpnagvdrjffayzsnke`), tablas y funciones `v2_*`. Las apps solo leen con RPC (`v2_mi_base`, `v2_actividad`, `v2_avance`) y escriben con RPC (`v2_registrar_visita`, `v2_editar_resultado`, `v2_anular_visita`, etc.). Las reglas viven en la base, no en el navegador.
 - **Versión 1:** la carpeta `v1/`, los SQL `01_…43_` de la raíz y `fuente/` son del CRM anterior. No borrar los datos v1 de Supabase hasta después de diciembre de 2026.
@@ -29,8 +37,8 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
   - Casos mínimos:
     - registrar una visita con cada una de las 5 opciones de «¿Cómo fue la visita?»;
     - corregir la visita de hoy;
-    - descargar la base para BBVA (hojas KPIs y Base).
-- **Publicar** con `python v2/build.py --publicar`, luego commit y push. **Solo con el OK explícito de Jose, cada vez.**
+    - descargar la base para BBVA (hojas Resumen y Base, modelo de 55 columnas).
+- **Publicar** con `python v2/build.py --publicar`, luego commit, push de la rama a `origin` y PR hacia `qa` (después, la copia en el repo personal; ver «Repositorio y ramas»). **Solo con el OK explícito de Jose, cada vez.**
 - **Cambios en la base:** una migración en `supabase/migrations/` con nombre descriptivo. Aplicarla solo con el OK de Jose. Si cambia una función que usa el celular, se aplica el mismo día en que se publica la app.
   - Desde el 28/09 las funciones nuevas que crea `postgres` nacen sin EXECUTE para `anon` ni `PUBLIC` (privilegios por defecto); `authenticated` y `service_role` sí lo reciben. Una función que deba usarse sin sesión necesita su `grant` explícito, y hay que justificarlo.
   - Las funciones que escriben datos son `security definer` y dejan su línea en `v2_bitacora_visita`. Las apps no escriben directo en las tablas: los Managers y Analistas solo pueden leer `v2_visitas` y `v2_bitacora_visita`.
@@ -66,8 +74,18 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages:
 - **Seguimiento remoto (desde el 01/10):** en las visitas sin contacto, el ejecutivo registra después por qué canal contactó al comercio (Llamada, WhatsApp, Correo) y qué respondió (`v2_registrar_seguimiento`, tabla `v2_seguimientos`). No cambia la visita, el estado ni el bono; deja su línea en la bitácora (acción `seguimiento`). Inicio avisa cuántos comercios sin contacto esperan seguimiento. Meta de Jose: que ninguna visita quede sin feedback.
 - **Reactivados BBVA vs. comisión (desde el 09/10):** BBVA reporta los reactivados (lo que va a Mastercard y BBVA). Al ejecutivo le cuentan solo si, después de su primera visita válida **con contacto**, el comercio transacciona en 2 días distintos (`v2_dias_trx`). El celular avisa qué reactivados BBVA todavía no cuentan (`v2_mis_reactivados_bbva`) y pide llamarlos o escribirles. El contacto se registra como seguimiento remoto, aunque la visita haya tenido contacto. El escritorio muestra el cuadro «Reactivados BBVA vs. comisión».
 - **Recupero del POS (desde el 09/10):** si el comercio desiste del producto, el ejecutivo no recupera el equipo (lo hacen Soporte de Openpay y el comercio), pero registra qué hizo: ① Llamar a Soporte → ② En trámite → ③ Entregado → ✔ Validado por Jose; salidas «Trabado» y «Sigue con el POS» (`v2_avanzar_recupero`, `v2_validar_recupero`, tablas `v2_recuperos` y `v2_recupero_eventos`). El caso nace con la primera acción; antes se deduce de la visita. No cambia la visita ni el bono.
+- **Tipificaciones oficiales de BBVA (desde el 01/11, definitivas):** cada una de las 25 frases de feedback de BBVA (texto exacto, idéntico al de BBVA; desde el 10/11 hay una 26.ª agregada por Stratis, «Teléfono del comercio que se comunicó a soporte», con motivo/submotivo/acción propuestos y pendientes de BBVA)  tiene motivo, submotivo y la acción que pide BBVA, en `v2_feedback_tipos` (`motivo_bbva`, `submotivo_bbva`, `accion_bbva`) y en `TIPI_BBVA` del celular y del escritorio, con el texto exacto de BBVA (las tres copias deben coincidir; la del celular no trae «No se encontraba…» ni «Sin observaciones», que no se eligen de la lista). No cambia lo que se guarda: el motivo sale de la frase. En el celular el feedback ya no es un desplegable: arriba las 6 frases más frecuentes y abajo los temas de BBVA, que abren sus frases; en pantalla se lee un texto corto (`FB_CORTO`) y se guarda el oficial. «Qué ofreciste» sigue por rama (el servidor valida las acciones por `grupo`) y desde el 03/11 es opcional. En la Base para BBVA van `Motivo_BBVA` y `Submotivo_BBVA` después de la columna 55.
+- **Las 4 fases de BBVA (desde el 03/11):** motivo → submotivo → frase → acción y estado. El ejecutivo marca la frase (el motivo y el submotivo salen de ella); si marca más de una frase con acción, elige la **principal**; y responde «¿Cómo quedó?» lo que pide BBVA para esa frase: **Hecho / En trámite / No se pudo**, con n.º de ticket opcional. Va en `fb_extra` (`fb_principal`, `accion_estado`, `numero_ticket`; validan `v2_fb_extra_obs` y `v2_fb_extra_limpio`). No se pregunta en «Desconfía de la visita» (lo resuelve BBVA) ni es obligatorio al corregir visitas anteriores al 03/11. «Qué ofreciste» pasa a ser **opcional** («¿Algo más que hiciste?»).
+- **Mi avance (03/11):** el celular sugiere a cada ejecutivo revisar su Drive individual de BBVA (sus alcances y lo que reporta BBVA). Solo texto, sin enlace.
 - **Feedback agregado por Stratis el 29/09:** «Desconfía de la visita (duda que representemos a BBVA)» y «No pidió el POS» (Decisión y necesidad), «Solicitó cambio de equipo» (Equipo y contómetros), «Le falta una función» (Uso del POS).
-- **Base para BBVA (Excel del escritorio), modelo de Jose del 30/09:** solo dos hojas, KPIs y Base. Todos los KPIs son fórmulas sobre la hoja Base; la columna Ejecutivo (al final de Base) es la asignación del periodo. Sin notas al pie ni fila de subtítulo en KPIs.
+- **Base para BBVA (Excel del escritorio), modelo «Gestión Stratis» de Jose (desde el 26/10, escritorio 3fd5ec; reemplaza al de KPIs y Base del 30/09):**
+  - Tres hojas: **Resumen** (fórmulas por ejecutivo sobre Base, con el estado de lo que pide BBVA), **BBVA** (desde el 03/11: 29 columnas con solo lo que pide BBVA, en su orden; las 4 fases con los nombres de su archivo —Motivo, Submotivo, Feedback literal, Acción original, Estado— en azul; sin el comentario libre ni Reactivado_BBVA / Dias_Con_Trx_Post_Visita, porque ese cruce sale de la plataforma de BBVA; en Base se quedan) y **Base**, el respaldo completo de Stratis. Una fila por comercio de la **base nueva** del periodo. La base anterior y los de «salida» no van.
+  - **Base tiene 55 columnas** en el orden que fijó Jose (`BASE55` en `v2/escritorio/app.js`). La llave es **Documento** en la columna A (RUC o DNI como texto; sin documento, el RUC). Numero_Ticket, Estado_Del_Problema, Fecha_Resolucion y Proxima_Accion van en AO–AR, no al final.
+  - Las columnas que el celular todavía no captura van vacías, con cabecera naranja (`BASE55_FALTA`): hoy son 6 (nombre y cargo del contacto, celular confirmado, mejor horario, sentir del cliente, punto de dolor y severidad). Se llenan cuando el celular las capture.
+  - Lo nuevo va **después de la columna 55**: `Fuente_Feedback` y `Fuente_Que_Lo_Convencio` (Feedback y Que_Lo_Convencio mezclan lo que marcó el ejecutivo con lo inferido del comentario), `Motivo_BBVA` y `Submotivo_BBVA` (un solo valor cuando hay frase principal) y, desde el 03/11, `Feedback_Principal` y `Accion_BBVA` (61 columnas).
+  - Desde el 03/11, AO–AR salen del estado de lo que pide BBVA (de la última visita con feedback): Numero_Ticket, Estado_Del_Problema (Hecho / En trámite / No se pudo), Fecha_Resolucion (la visita, si quedó hecho) y Proxima_Accion («Seguimiento hasta la solución» o «Pendiente: …»). Jose le avisa a Gabriel del formato.
+  - `Reactivado_BBVA` y `Cuenta_Para_Comision` dicen «Sin dato en el corte» mientras no haya un corte de BBVA dentro del periodo (no «NO»).
+  - Un cambio de columnas cambia el archivo que recibe BBVA: avisar a Gabriel y a BBVA.
   - `Gestion_Con_Contacto` (SI/NO) y su fecha sirven para el cruce con los volúmenes de BBVA.
 
 ## Contexto de negocio

@@ -47,8 +47,6 @@ const fechaCorta = d => lima(d).toLocaleDateString("es-PE",{ day:"2-digit", mont
 const horaCorta = d => lima(d).toLocaleTimeString("es-PE",{ hour:"2-digit", minute:"2-digit" });
 const diaLargo = d => lima(d).toLocaleDateString("es-PE",{ weekday:"long", day:"numeric", month:"long" });
 const fISO = s => { const [a,m,d] = String(s).split("-"); return `${d}/${m}`; };
-// las tasas vienen como fracción: 0,0344 se muestra 3,44 %
-const tasa = v => v == null ? "—" : (Number(v) * 100).toFixed(2).replace(".", ",") + "%";
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2));
 function leerCola(){ try { return JSON.parse(localStorage.getItem("stratis-v2-cola") || "[]"); } catch(e){ return []; } }
 function guardarCola(){ if (S.como) return; try { localStorage.setItem("stratis-v2-cola", JSON.stringify(S.cola)); } catch(e){} }
@@ -59,7 +57,7 @@ const FEEDBACK = [
   ["Tasa y abonos", ["Pide una tasa más baja", "POS no cuenta con la tarifa acordada", "POS problema con abonos", "Los abonos le llegan con demora"]],
   ["Equipo y contómetros", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta", "No tiene contómetros o le quedan pocos", "Solicitó cambio de equipo"]],
   ["Uso del POS", ["Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Le falta una función"]],
-  ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde"]],
+  ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde", "Teléfono del comercio que se comunicó a soporte"]],
   ["Decisión y necesidad", ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS"]],
 ];
 /* Tipificaciones oficiales de BBVA (01/11/2026, definitivas): cada frase de arriba (texto exacto, el que se guarda) con su
@@ -88,6 +86,7 @@ const TIPI_BBVA = {
   "Le falta una función":["Producto / funcionalidad", "Identificar la funcionalidad faltante", "Identificar la funcionalidad requerida, validar su disponibilidad y comunicar alternativas o gestionar el requerimiento."],
   "Soporte no ayudó al comercio":["Disconformidad con el servicio", "Atención al cliente insatisfactoria", "Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
   "Su funcionario de BBVA no responde":["Disconformidad con el servicio", "Atención al cliente insatisfactoria", "Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
+  "Teléfono del comercio que se comunicó a soporte":["Problema técnico", "Comercio se comunicó a soporte", "Registrar el teléfono con el que el comercio se comunicó a soporte y confirmar con Soporte que el caso fue atendido."],
   "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad", "Desconfianza de representante en visita", "Soporte ya cuenta con las credenciales de los ejecutivos en campo"]
 };
 // Motivos en el orden en que se muestran, con el nombre corto que lee el ejecutivo
@@ -839,8 +838,6 @@ function vistaFicha(c){
           ${c.terminales ? `<dt>Terminales POS</dt><dd>${c.terminales}</dd>` : ""}
           ${S.admin ? `<dt>Ejecutivo</dt><dd>${esc(c.correo)}</dd>` : ""}
         </dl>
-        <div class="tasas"><div class="tasa"><b>${tasa(c.tasa_debito)}</b><small>Débito</small></div><div class="tasa"><b>${tasa(c.tasa_credito)}</b><small>Crédito</small></div><div class="tasa"><b>${tasa(c.tasa_foranea)}</b><small>Foránea</small></div></div>
-        ${c.tasa_debito != null && c.tasas_aprox !== false ? `<div class="aprox" style="text-align:center;margin-top:8px">Tasas referenciales · confirmar la vigente con BBVA</div>` : ""}
       </div>
       ${tarjetaDireccion(c)}
       ${tarjetaRuta(c)}
@@ -855,7 +852,7 @@ function vistaFicha(c){
             <input class="campo" id="eDir" placeholder="Dirección correcta" value="${esc(c.direccion_corregida||c.direccion||"")}">
             <input class="campo" id="eRef" placeholder="Referencia (frente a, dentro de…)" value="${esc(c.referencia||"")}">
             ${S.ver || !c.contacto ? `<input class="campo" id="eCont" placeholder="Contacto en el comercio" value="${esc(c.contacto||"")}">` : `<div class="nota">Para ver o corregir el contacto, abre el ojo de los datos.</div>`}
-            <div class="nota">El documento, la razón social y las tasas vienen de BBVA y no se cambian. Tu corrección queda registrada con tu nombre.</div>
+            <div class="nota">El documento y la razón social vienen de BBVA y no se cambian. Tu corrección queda registrada con tu nombre.</div>
             <button class="btn btn-pri btn-full" data-guardar-datos="${esc(c.customer_id)}">Guardar corrección</button></div>`
           : `<div class="nota" style="margin-top:6px">Si la dirección o el nombre no coinciden con lo que ves en la calle, corrígelos aquí.</div>`}
       </div>

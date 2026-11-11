@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "1a7069";
+const BUILD = "01fb52";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -543,7 +543,7 @@ const FEEDBACK = [
   ["Tasa y abonos", ["Pide una tasa más baja", "POS no cuenta con la tarifa acordada", "POS problema con abonos", "Los abonos le llegan con demora"]],
   ["Equipo y contómetros", ["POS no enciende", "Mala Señal en el POS", "POS no tiene señal y no puedo cobrar", "POS queda procesando el pago , se demora", "El cobro a través del POS tarda demasiado cuando existe alta demanda", "POS rechaza los pagos con tarjeta", "No tiene contómetros o le quedan pocos", "Solicitó cambio de equipo"]],
   ["Uso del POS", ["Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Le falta una función"]],
-  ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde"]],
+  ["Atención y soporte", ["Soporte no ayudó al comercio", "Su funcionario de BBVA no responde", "Teléfono del comercio que se comunicó a soporte"]],
   ["Decisión y necesidad", ["No se encontraba la persona que tomaba decisiones", "No necesitaba los POS", "Desconfía de la visita (duda que representemos a BBVA)", "No pidió el POS"]],
 ];
 const ACCIONES = ["Evaluar mejora de tasa", "Expliqué cómo y cuándo abona Openpay", "Ofrecí evaluación de préstamo BBVA", "Mostré los beneficios de cobrar con tarjeta",
@@ -608,7 +608,6 @@ const hoyISO = () => new Date().toLocaleDateString("en-CA",{ timeZone:TZ });
 const ayerISO = () => { const d = new Date(hoyISO() + "T12:00:00Z"); d.setUTCDate(d.getUTCDate()-1); return d.toISOString().slice(0,10); };
 const mDist = m => m == null ? "sin ubicación" : m < 1000 ? `${m} m` : `${(m/1000).toFixed(1).replace(".",",")} km`;
 const claseDist = v => v.distancia_m == null ? "no" : v.distancia_m <= REGLA.cerca ? "ok" : v.distancia_m <= REGLA.lejos ? "med" : "mal";
-const tasa = v => v == null ? "—" : (Number(v)*100).toFixed(2).replace(".",",") + " %";
 const nombreCorto = n => String(n || "").split(" ")[0];
 const num = n => Number(n || 0).toLocaleString("es-PE");
 // Ojo de privacidad (base 2026-11): cerrado al entrar y sin recordar el estado. Oculta montos, potenciales,
@@ -1144,7 +1143,7 @@ function ficha(v){
   return `<div class="panel ficha">
     <div class="cab">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><h2>${esc(v.comercio)}</h2>${pill(v)}</div>
-      <div class="meta">${esc(v.razon_social || "")}${v.ruc && v.ruc !== docDe(v.customer_id) ? " · RUC " + esc(v.ruc) : ""} · ${docDe(v.customer_id) ? "Doc. BBVA" : "Customer ID"} <b>${esc(docDe(v.customer_id) || v.customer_id)}</b><br>${esc(v.direccion || "sin dirección")}${v.distrito ? ", " + esc(v.distrito) : ""}${v.ruta ? ` · ${esc(v.ruta)}${v.orden ? " orden " + v.orden : ""}` : ""}${v.terminales ? ` · ${v.terminales} terminal${v.terminales>1?"es":""}` : ""}${v.tasa_debito != null ? ` · débito ${tasa(v.tasa_debito)} · crédito ${tasa(v.tasa_credito)}` : ""}${c.estado ? ` · en el CRM: ${esc(c.estado)}` : ""}</div>
+      <div class="meta">${esc(v.razon_social || "")}${v.ruc && v.ruc !== docDe(v.customer_id) ? " · RUC " + esc(v.ruc) : ""} · ${docDe(v.customer_id) ? "Doc. BBVA" : "Customer ID"} <b>${esc(docDe(v.customer_id) || v.customer_id)}</b><br>${esc(v.direccion || "sin dirección")}${v.distrito ? ", " + esc(v.distrito) : ""}${v.ruta ? ` · ${esc(v.ruta)}${v.orden ? " orden " + v.orden : ""}` : ""}${v.terminales ? ` · ${v.terminales} terminal${v.terminales>1?"es":""}` : ""}${c.estado ? ` · en el CRM: ${esc(c.estado)}` : ""}</div>
     </div>
     <div class="cuerpo">
       ${v.estado_anul === "pendiente" ? `<div class="aviso warn"><b>${esc(nomDe(v.anul_pedida_por))} pide anular esta visita</b> (${ddhh(v.anul_pedida_en)}): «${esc(v.anul_motivo || "")}». Si la anulas, deja de contar; si rechazas el pedido, sigue contando.</div>` : ""}
@@ -2737,7 +2736,9 @@ const BBVA_ORDEN = ["No se encontraba la persona que tomaba decisiones", "No nec
   "Usa POS de otra marca", "Pide una tasa más baja", "Los abonos le llegan con demora", "Cobra con Yape o Plin para no pagar comisión", "Solo acepta efectivo",
   "No tiene contómetros o le quedan pocos", "Le parece complicado usar el POS", "No sabe revisar sus ventas o abonos", "Su funcionario de BBVA no responde",
   // agregados por Stratis (tipificaciones del 29/09, aprobadas por Gabriel)
-  ...FB_29];
+  ...FB_29,
+  // agregada por Stratis el 10/11/2026 (pedido de Jose)
+  "Teléfono del comercio que se comunicó a soporte"];
 const BASE55 = ["Documento","Customer_ID","Nombre_Comercial","Razon_Social","Distrito","Periodo","Bloque","Origen","Ejecutivo","Grupo_Ubicacion",
   "Visitado","Fecha_Primera_Visita","Fecha_Ultima_Visita","Visitas_Validas","Como_Fue_La_Visita","Motivo_Sin_Visita","Direccion_Correcta",
   "Gestion_Con_Contacto","Fecha_Primera_Gestion_Con_Contacto","Con_Quien","Nombre_Cargo_Contacto","Celular_Confirmado","Mejor_Horario",
@@ -2791,6 +2792,7 @@ const TIPI_BBVA = {
   "Le parece complicado usar el POS":["Adopción / conocimiento","No sabe usar el POS","Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
   "No sabe revisar sus ventas o abonos":["Adopción / conocimiento","No sabe usar el POS","Programar capacitación, agendar sesión y enviar mail confirmando sesión"],
   "Le falta una función":["Producto / funcionalidad","Identificar la funcionalidad faltante","Identificar la funcionalidad requerida, validar su disponibilidad y comunicar alternativas o gestionar el requerimiento."],
+  "Teléfono del comercio que se comunicó a soporte":["Problema técnico","Comercio se comunicó a soporte","Registrar el teléfono con el que el comercio se comunicó a soporte y confirmar con Soporte que el caso fue atendido."],
   "Soporte no ayudó al comercio":["Disconformidad con el servicio","Atención al cliente insatisfactoria","Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
   "Su funcionario de BBVA no responde":["Disconformidad con el servicio","Atención al cliente insatisfactoria","Confirmar solución. Si tiene problemas, derivar a la mesa para su atención."],
   "Desconfía de la visita (duda que representemos a BBVA)":["Validación de identidad","Desconfianza de representante en visita","Soporte ya cuenta con las credenciales de los ejecutivos en campo"],

@@ -38,7 +38,8 @@ grant all on all tables in schema public to anon, authenticated, service_role;
 grant all on all sequences in schema public to anon, authenticated, service_role;`);
 // Parte del catálogo de feedback que ya existe en la base antes de las migraciones (la del 29/09 ubica ahí las opciones nuevas)
 await db.exec(`insert into v2_feedback_tipos(texto, grupo, orden, bbva) values ('No necesitaba los POS', 'Decisión y necesidad', 100, true),
-  ('POS no enciende', 'Equipo y contómetros', 110, true), ('Le parece complicado usar el POS', 'Uso del POS', 120, false);`);
+  ('POS no enciende', 'Equipo y contómetros', 110, true), ('Le parece complicado usar el POS', 'Uso del POS', 120, false),
+  ('Su funcionario de BBVA no responde', 'Atención y soporte', 130, false);`);
 const HASTA = (process.argv.find(a => a.startsWith('--hasta=')) || '').slice(8);
 if (!SIN_NUEVAS) for (const f of fs.readdirSync(MIG).filter(f => f.endsWith('.sql') && f > FOTO && (!HASTA || f <= HASTA)).sort()) await db.exec(fs.readFileSync(path.join(MIG, f), 'utf8'));
 
@@ -287,7 +288,7 @@ const corregirExtra = (id, feedback, extra) => como(EJ, `select public.v2_editar
 caso('03/11: frase principal, estado de lo que pide BBVA y ticket se guardan; al corregir se cambian', async () => {
   await db.exec(`insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad) values ('00000951', 'COMERCIO DE PRUEBA 951 SAC', -12.09, -77.04, 'numero'), ('00000952', 'COMERCIO DE PRUEBA 952 SAC', -12.09, -77.04, 'numero');
     insert into v2_asignaciones(periodo, customer_id, correo) values ('2099-01', '00000951', '${EJ}'), ('2099-01', '00000952', '${EJ}');
-    -- en la foto de prueba esta frase tiene el grupo antiguo y no recibe la acción de BBVA (en Supabase sí la tiene, 25 de 25)
+    -- en la foto de prueba esta frase tiene el grupo antiguo y no recibe la acción de BBVA (en Supabase sí la tiene, 26 de 26)
     update v2_feedback_tipos set accion_bbva = 'Acción de prueba' where texto = 'Usa POS de otra marca' and accion_bbva is null;`);
   const fb = ['Usa POS de otra marca', 'POS no enciende'];
   const id = await registrar(EJ, { cid: '00000951', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: fb,
@@ -979,6 +980,20 @@ caso('tipificaciones BBVA (01/11): cada frase del catálogo gana motivo y submot
     ['No necesitaba los POS', 'Mala venta - falta de necesidad', 'Negocio / rubro no requiere POS'],
     ['POS no enciende', 'Problema técnico', 'POS no enciende']]);
   assert.ok(t.every(x => (x.accion_bbva || '').length > 10), 'falta la acción de BBVA');
+});
+// 10/11: frase nueva «Teléfono del comercio que se comunicó a soporte» (pedido de Jose). La agrega la migración 20261110200000.
+caso('10/11: la frase «Teléfono del comercio que se comunicó a soporte» existe con su tipificación, registra y se corrige', async () => {
+  const F = 'Teléfono del comercio que se comunicó a soporte';
+  const t = (await db.query(`select grupo, bbva, motivo_bbva, submotivo_bbva, accion_bbva from v2_feedback_tipos where texto = $1`, [F])).rows;
+  assert.equal(t.length, 1); assert.equal(t[0].grupo, 'Atención y soporte'); assert.equal(t[0].bbva, false);
+  assert.equal(t[0].motivo_bbva, 'Problema técnico'); assert.equal(t[0].submotivo_bbva, 'Comercio se comunicó a soporte'); assert.ok((t[0].accion_bbva || '').length > 10);
+  await db.exec(`insert into v2_comercios(customer_id, razon_social, geo_lat, geo_lng, geo_calidad) values ('00000961', 'COMERCIO DE PRUEBA 961 SAC', -12.09, -77.04, 'numero');
+    insert into v2_asignaciones(periodo, customer_id, correo) values ('2099-01', '00000961', '${EJ}');`);
+  const id = await registrar(EJ, { cid: '00000961', con: 'Dueño', que: 'Reunión concretada', decision: 'Aún no decide', feedback: [F] });
+  const v = await visita(id);
+  assert.deepEqual(v.feedback, [F]);
+  await corregirExtra(id, [F], { fb_principal: F, accion_estado: 'Hecho' });
+  assert.deepEqual((await visita(id)).feedback, [F]);
 });
 let fallas = 0;
 for (const [n, fn] of CASOS){

@@ -28,6 +28,9 @@ Se aplican solo con el OK de Jose.
 | `20261020150000_respaldo_antes_base_2026_11.sql` | 20/10/2026, con el OK de Jose (solo copia en el esquema `respaldo`; no toca `public`) | `20261020213955` |
 | `20261021130000_ruta_propia_del_ejecutivo.sql` | 21/10/2026, con el OK de Jose (ruta propia del ejecutivo; celular publicado el mismo día) | `20261021002550` |
 | `20261024100000_cierres_de_periodo.sql` | 23/10/2026, con el OK de Jose (cierres congelados por periodo; P1–P3 cargados aparte, fuera del repositorio; apps publicadas el mismo día) | `20261023212621` |
+| `20261026150000_recupero_solo_periodo_actual.sql` | 26/10/2026, con el OK de Jose (el recupero del POS solo muestra el periodo en curso; las apps no cambian; los 50 del periodo 2026-10 quedaron en `Stratis CRM\recupero-pos\`, fuera del repositorio) | `20261026150925` |
+| `20261101100000_tipificaciones_bbva.sql` | 01/11/2026, con el OK de Jose (motivo, submotivo y acción de BBVA en `v2_feedback_tipos`, texto exacto del archivo de BBVA; celular y escritorio publicados el mismo día) | `20261101151524` |
+| `20261103100000_accion_bbva_y_estado.sql` | 03/11/2026, con el OK de Jose (frase principal, estado de lo que pide BBVA y ticket en `fb_extra`; solo cambian `v2_fb_extra_obs` y `v2_fb_extra_limpio`; celular y escritorio publicados el mismo día, después de la migración) | `20261103130221` |
 
 ### Privilegios de tablas (desde el 28/09/2026)
 
