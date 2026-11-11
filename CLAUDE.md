@@ -87,6 +87,7 @@ El CRM tiene dos apps de una sola página, publicadas en GitHub Pages desde la r
   - Desde el 03/11, AO–AR salen del estado de lo que pide BBVA (de la última visita con feedback): Numero_Ticket, Estado_Del_Problema (Hecho / En trámite / No se pudo), Fecha_Resolucion (la visita, si quedó hecho) y Proxima_Accion («Seguimiento hasta la solución» o «Pendiente: …»). Jose le avisa a Gabriel del formato.
   - `Reactivado_BBVA` y `Cuenta_Para_Comision` dicen «Sin dato en el corte» mientras no haya un corte de BBVA dentro del periodo (no «NO»).
   - Un cambio de columnas cambia el archivo que recibe BBVA: avisar a Gabriel y a BBVA.
+  - **Celulares del comercio (desde el 11/11):** BBVA envía hasta 3 números por comercio. `v2_comercios.contacto_celular` es el principal y `contacto_celular2` / `contacto_celular3` los otros; `v2_mi_base` los devuelve al final. La ficha del celular los muestra como «Celular 1/2/3» detrás del ojo; sin ninguno dice «Sin número registrado».
   - **Tasas fuera del CRM (desde el 11/11):** ya no se muestran las tasas del comercio ni se captura «Tasa que le cobra» (tasa del competidor). La columna `Tasa_Competidor` se queda en su lugar (no mover las 55 columnas) pero va siempre vacía y con cabecera naranja (`BASE55_FALTA`). Las frases oficiales de BBVA con «tasa» y los datos antiguos de visitas se conservan.
   - `Gestion_Con_Contacto` (SI/NO) y su fecha sirven para el cruce con los volúmenes de BBVA.
 

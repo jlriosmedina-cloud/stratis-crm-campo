@@ -1207,12 +1207,14 @@ function tarjetaPotencial(c){
       <div><span>Equipo</span><b>${esc(c.tipo_equipo || "—")}</b></div>
     </div></div>`;
 }
+// BBVA envía hasta 3 números por comercio (11/11/2026): contacto_celular es el principal y los otros dos van en contacto_celular2 y 3.
+// Sin ninguno se avisa, para que el ejecutivo lo pida en la visita.
 function tarjetaContacto(c){
-  if (!c.contacto_celular && !c.contacto_correo) return "";
-  const cel = c.contacto_celular, mail = c.contacto_correo;
+  const cels = [c.contacto_celular, c.contacto_celular2, c.contacto_celular3].filter(Boolean), mail = c.contacto_correo;
+  if (!cels.length && !mail) return `<div class="card"><div class="eyebrow">Contacto de BBVA</div><div class="nota" style="margin-top:6px">Sin número registrado · pídelo en la visita y anótalo en el comentario.</div></div>`;
   return `<div class="card"><div class="fila-ent"><div class="eyebrow">Contacto de BBVA</div>${botonOjo()}</div>
     <dl class="datos">
-      ${cel ? `<dt>Celular</dt><dd>${S.ver ? `<a href="tel:${esc(String(cel).replace(/[^\d+]/g, ""))}">${esc(cel)}</a>` : privado(cel)}</dd>` : ""}
+      ${cels.map((cel, i) => `<dt>${cels.length > 1 ? "Celular " + (i + 1) : "Celular"}</dt><dd>${S.ver ? `<a href="tel:${esc(String(cel).replace(/[^\d+]/g, ""))}">${esc(cel)}</a>` : privado(cel)}</dd>`).join("")}
       ${mail ? `<dt>Correo</dt><dd>${S.ver ? `<a href="mailto:${esc(mail)}">${esc(mail)}</a>` : privado(mail)}</dd>` : ""}
     </dl>${S.ver ? "" : `<div class="nota" style="margin-top:6px">Datos ocultos · abre el ojo para verlos.</div>`}</div>`;
 }

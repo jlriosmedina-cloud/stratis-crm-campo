@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 const dia = n => new Date(Date.now() + n * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
 const nuevo = (i, extra) => comercio(i, Object.assign({ origen: 'base_nueva', bloque: 1, bloque_ini: dia(-3), bloque_fin: dia(10), grupo_ubicacion: 1,
-  potencial: 0, vinculacion: 'Vinculado', vol_092026: 1200, tipo_equipo: 'POS inalámbrico', contacto_celular: '987654321', contacto_correo: 'ana.prueba@ejemplo.com',
+  potencial: 0, vinculacion: 'Vinculado', vol_092026: 1200, tipo_equipo: 'POS inalámbrico', contacto_celular: '987654321', contacto_celular2: '911222333', contacto_celular3: '944555666', contacto_correo: 'ana.prueba@ejemplo.com',
   geo_nota: 'Nota de ubicación de prueba' }, extra));
 const BASE = [
   nuevo(1, { potencial: 15000 }), nuevo(2, { potencial: 90000, grupo_ubicacion: 2 }), nuevo(3, { potencial: 40000, grupo_ubicacion: 3, documento: '20999999991' }),
@@ -85,10 +85,11 @@ for (const tema of ['light', 'dark']) {
     assert.ok(t.includes('Llama antes de ir') && t.includes('Nota de ubicación de prueba'));
     assert.equal(await p.locator('.dir-card a[href*="waze.com"]').count(), 1, 'falta Waze');
     assert.ok(t.includes('••••••321') && t.includes('a•••@ejemplo.com'), 'no enmascara el contacto');
-    assert.ok(!t.includes('987654321') && !t.includes('ana.prueba@'), 'muestra el contacto con el ojo cerrado');
+    assert.ok(!t.includes('987654321') && !t.includes('911222333') && !t.includes('944555666') && !t.includes('ana.prueba@'), 'muestra el contacto con el ojo cerrado');
     await p.click('.card [data-ojo] >> nth=0'); await p.waitForTimeout(150);
     t = await texto();
-    assert.ok(t.includes('987654321') && t.includes('ana.prueba@ejemplo.com') && /S\/\s40/.test(t), 'no se ve con el ojo abierto');
+    assert.ok(t.includes('987654321') && t.includes('911222333') && t.includes('944555666') && t.includes('ana.prueba@ejemplo.com') && /S\/\s40/.test(t), 'no se ven los 3 celulares con el ojo abierto');
+    assert.ok(/Celular 1/.test(t) && /Celular 3/.test(t), 'con varios números se rotulan Celular 1, 2 y 3');
     await p.evaluate(() => { S.ver = false; S.ficha = null; S.vista = 'inicio'; pintar(); });
   });
 

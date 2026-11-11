@@ -911,7 +911,7 @@ caso('ruta propia: no toca visitas ni el medidor; v2_mi_base agrega las columnas
   assert.deepEqual([r.visitas, r.ruta_propia], [1, 'Ruta 07 · Prueba']);
   const cols = (await db.query(`select array_agg(a order by n) c from unnest((select proargnames from pg_proc where proname = 'v2_mi_base')) with ordinality t(a, n) where n > 1`)).rows[0].c;
   assert.deepEqual([cols[16], cols[17], cols[42], cols[43], cols[56]], ['ruta', 'orden', 'bbva_reactivado', 'documento', 'contacto_correo']);
-  assert.deepEqual(cols.slice(57), ['ruta_propia', 'orden_propio', 'ruta_propia_en']);
+  assert.deepEqual(cols.slice(57), ['ruta_propia', 'orden_propio', 'ruta_propia_en', 'contacto_celular2', 'contacto_celular3']);
 });
 caso('las tablas nuevas nacen sin TRUNCATE para authenticated y sin nada para anon', async () => {
   await db.exec(`create table public.v2_tabla_de_prueba(id bigserial primary key)`);
@@ -1005,6 +1005,15 @@ caso('10/11: v2_mi_base devuelve la base ordenada por customer_id y por tramos n
   const t1 = (await como(ANA, 'select customer_id from public.v2_mi_base() limit 7 offset 0')).rows.map(x => x.customer_id);
   const t2 = (await como(ANA, 'select customer_id from public.v2_mi_base() limit 7 offset 7')).rows.map(x => x.customer_id);
   assert.deepEqual([...t1, ...t2], todo.slice(0, t1.length + t2.length), 'dos tramos seguidos deben empalmar sin huecos');
+});
+// 11/11: BBVA envía hasta 3 celulares por comercio; contacto_celular es el principal y los otros dos llegan al final de v2_mi_base.
+caso('11/11: v2_mi_base devuelve los celulares adicionales del comercio y no los pierde el ejecutivo', async () => {
+  await db.exec(`update v2_comercios set contacto_celular = '999111222', contacto_celular2 = '999333444', contacto_celular3 = '999555666' where customer_id = '00000003'`);
+  const r = (await como(EJ, `select contacto_celular, contacto_celular2, contacto_celular3 from public.v2_mi_base('2099-01') where customer_id = '00000003'`)).rows[0];
+  assert.deepEqual([r.contacto_celular, r.contacto_celular2, r.contacto_celular3], ['999111222', '999333444', '999555666']);
+  const sin = (await como(EJ, `select contacto_celular2 from public.v2_mi_base('2099-01') where customer_id = '00000004'`)).rows[0];
+  assert.equal(sin.contacto_celular2, null);
+  await falla(como(null, 'select * from public.v2_mi_base()'), /permission denied/);
 });
 let fallas = 0;
 for (const [n, fn] of CASOS){

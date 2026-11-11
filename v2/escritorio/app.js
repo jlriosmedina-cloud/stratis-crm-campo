@@ -878,7 +878,7 @@ function vistaBloques(){
     ${buscar.length ? `<div class="tabla-wrap" style="max-height:480px"><table class="datos"><thead><tr><th>Comercio</th><th>Ejecutivo</th><th>Dirección de BBVA</th><th>Nota de ubicación</th><th>Contacto</th><th class="n">Potencial</th><th>Visita</th><th></th></tr></thead><tbody>
       ${buscar.map(c => `<tr><td class="com"><b>${esc(nombre(c))}</b><small>${esc(c.documento || c.customer_id)} · bloque ${c.bloque || "—"}</small></td><td>${c.correo ? esc(nombreCorto(ejDe(c.correo).nombre)) : "—"}</td>
         <td>${esc(c.direccion || "—")}<br><small class="muted">${esc(c.distrito || "")}</small></td><td><small>${esc(c.geo_nota || "—")}</small></td>
-        <td><small>${telO(c.contacto_celular)}<br>${mailO(c.contacto_correo)}</small></td><td class="n num">${solesO(c.potencial)}</td>
+        <td><small>${[c.contacto_celular, c.contacto_celular2, c.contacto_celular3].filter(Boolean).map(telO).join(" · ") || telO(null)}<br>${mailO(c.contacto_correo)}</small></td><td class="n num">${solesO(c.potencial)}</td>
         <td>${T.vis.has(c.customer_id) ? `<span class="pill val">Visitado</span>` : `<span class="pill pend">Por visitar</span>`}</td>
         <td>${c.geo_lat != null ? `<a class="btn chico" target="_blank" rel="noopener" href="${gmaps(c.geo_lat, c.geo_lng)}">Maps</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>` : `<div class="vacio">No hay comercios por buscar${S.ej !== "todos" ? " para este ejecutivo" : ""}.</div>`}</div>`;
