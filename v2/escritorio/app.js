@@ -2295,7 +2295,11 @@ async function baseBBVA(){
     // Último corte de la lista de BBVA: si no hay ninguno dentro del periodo, Reactivado_BBVA dice «Sin dato en el corte» (no «NO»)
     const corteQ = sb.from("v2_resultados_bbva").select("corte").order("corte", { ascending:false }).limit(1);
     const recQ = sb.rpc("v2_mis_recuperos", per ? { p_periodo: per } : {});
-    const [, , , , , rc, rr] = await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido(), cargarMsiInferido(), cargarSeguimientos(), corteQ, recQ]);
+    // 19/11/2026: los comercios que salen de la base del periodo (retiro con motivo «Fuera de la base…») no van en el Excel para BBVA,
+    // salvo que ya tengan una visita (Regla n.º 1). Los retiros temporales de otro tipo siguen yendo, como siempre.
+    const fueraQ = per ? sb.from("v2_retiros_temporales").select("customer_id,motivo").eq("periodo", per).is("restituido_en", null).like("motivo", "Fuera de la base%") : Promise.resolve({ data: [] });
+    const [, , , , , rc, rr, fq] = await Promise.all([cargarActividad(true), cargarBase(), cargarFbInferido(), cargarMsiInferido(), cargarSeguimientos(), corteQ, recQ, fueraQ]);
+    const fueraBase = new Set(((fq && !fq.error && fq.data) || []).map(x => x.customer_id));
     const ultCorte = rc && !rc.error && rc.data && rc.data[0] ? rc.data[0].corte : null;
     const hayCorte = !!(ultCorte && (!S.periodo || ultCorte >= S.periodo.ini));
     const recPor = {}; ((rr && !rr.error && rr.data) || []).forEach(x => { recPor[x.customer_id] = x; });
@@ -2307,7 +2311,7 @@ async function baseBBVA(){
     // Filas: solo la base nueva del periodo (Jose, 26/10). La base anterior (visitas del 19 y 20/10) fue el cierre del periodo
     // anterior, ampliado por excepción, y no va. En un periodo sin bloques (sin origen) van todos los comercios en cartera.
     const ejN = c => c.correo ? ejDe(c.correo).nombre : "";
-    const base = S.base.filter(c => !c.origen || c.origen === "base_nueva").map(c => ({ c, l:porCid[c.customer_id] || [] }))
+    const base = S.base.filter(c => (!c.origen || c.origen === "base_nueva") && (!fueraBase.has(c.customer_id) || (porCid[c.customer_id] || []).length)).map(c => ({ c, l:porCid[c.customer_id] || [] }))
       .sort((a, b) => ejN(a.c).localeCompare(ejN(b.c)) || (a.l.length ? 0 : 1) - (b.l.length ? 0 : 1)
         || String(a.l[0] ? a.l[0].visitado_en : "").localeCompare(String(b.l[0] ? b.l[0].visitado_en : "")) || String(a.c.documento || a.c.customer_id).localeCompare(String(b.c.documento || b.c.customer_id)));
     const RAMA = t => (FEEDBACK.find(g => g[1].includes(t)) || [])[0] || "";

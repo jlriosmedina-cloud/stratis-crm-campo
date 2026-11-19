@@ -217,6 +217,20 @@ await prueba('base para BBVA: solo la base nueva, y con corte de BBVA en el peri
   fs.unlinkSync(f);
   await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_mi_base = fx._base; delete fx.tablas.v2_resultados_bbva; });
 });
+await prueba('base para BBVA (19/11): los comercios retirados por «Fuera de la base» no van, salvo que ya tengan una visita', async () => {
+  await p.evaluate(() => { const fx = window.__FX; fx._base = fx.rpc.v2_mi_base;
+    fx.rpc.v2_mi_base = ['ZZ000001', 'ZZ000002'].map(id => Object.assign({}, fx._base[0], { customer_id: id, documento: id, origen: 'base_nueva', bloque: 1, visitas: 0 }));
+    fx.tablas.v2_retiros_temporales = [{ customer_id: 'ZZ000002', motivo: 'Fuera de la base final v2 (19/11/2026)' }]; S.vista = 'feedback'; pintar(); }); await p.waitForTimeout(400);
+  const [d] = await Promise.all([p.waitForEvent('download', { timeout: 30000 }), p.click('[data-base-bbva]')]);
+  const f = salida('salida_base_fuera.xlsx'); await d.saveAs(f);
+  const ExcelJS = (await import('exceljs')).default, xw = new ExcelJS.Workbook(); await xw.xlsx.readFile(f);
+  const b = xw.getWorksheet('Base'), cb = b.getRow(1).values.slice(1).map(String);
+  const cids = []; for (let r = 2; r <= b.rowCount; r++) cids.push(b.getCell(r, cb.indexOf('Customer_ID') + 1).value);
+  assert.deepEqual(cids, ['ZZ000001'], 'el retirado por salir de la base no debe ir');
+  fs.unlinkSync(f);
+  await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_mi_base = fx._base; delete fx.tablas.v2_retiros_temporales; });
+  await p.evaluate(() => cargarBase());
+});
 await prueba('carga de resultados de BBVA: completa los ceros, rechaza lo que no está en la base y envía el corte', async () => {
   await p.evaluate(() => { window.__FX.rpc.v2_cargar_resultados_bbva = a => ({ carga_id: 7, corte: a.p_corte, leidas: a.p_filas.length, cargadas: a.p_filas.length, rechazadas: 0, reemplazo: false, reactivados: 2, con_contacto: 1, detalle: [] });
     S.vista = 'cargas'; S.carga = { tipo: 'resultados_bbva', archivo: null, filas: null, hecho: false, resultado: null }; pintar(); }); await p.waitForTimeout(300);

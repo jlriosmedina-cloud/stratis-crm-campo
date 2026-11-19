@@ -50,7 +50,7 @@ export const STUB = `
         catch(rej){ return sal.then(undefined, rej); } };
       return sal;
     },
-    from: t => { const q = { select(){ return q; }, eq(){ return q; }, lte(){ return q; }, gte(){ return q; }, in(){ return q; }, order(){ return q; }, limit(){ return q; }, range(a, b){ q.tramo = [a, b + 1]; return q; },
+    from: t => { const q = { select(){ return q; }, eq(){ return q; }, lte(){ return q; }, gte(){ return q; }, in(){ return q; }, is(){ return q; }, like(){ return q; }, order(){ return q; }, limit(){ return q; }, range(a, b){ q.tramo = [a, b + 1]; return q; },
       maybeSingle(){ const d = window.__FX.tablas[t]; return ok(Array.isArray(d) ? d[0] || null : d || null); },
       single(){ return q.maybeSingle(); },
       then(res, rej){ const d = window.__FX.tablas[t], l = Array.isArray(d) ? d : d ? [d] : []; return ok(q.tramo ? l.slice(...q.tramo) : l).then(res, rej); } };
