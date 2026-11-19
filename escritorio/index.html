@@ -530,7 +530,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "0ce1e8";
+const BUILD = "49563a";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -2724,9 +2724,9 @@ function vistaIndicadores(){
   const pct1 = x => x == null ? "—" : Number(x).toFixed(1).replace(".", ",") + " %";
   return `${p.sin_parametros ? `<div class="aviso warn" style="margin-bottom:12px">El periodo no tiene parámetros cargados: se cuentan los indicadores pero no hay puntos ni bono.</div>` : ""}
   ${p.hay_transacciones === false ? `<div class="aviso warn" style="margin-bottom:12px">Sin transacciones cargadas: los reactivados están en cero para todos. Carga la data diaria de BBVA en «Cargas».</div>` : ""}
-  <div class="panel"><div class="barra"><b>Equipo · periodo ${esc(p.periodo || "")}</b><span class="lbl">pesos ${p.peso_reactivados ?? "—"} · ${p.peso_visitas ?? "—"} · ${p.peso_conversion ?? "—"} · metas ${p.meta_reactivados ?? "—"} reactivados · ${p.meta_visitas ?? "—"} visitas · ${p.meta_conversion != null ? pct1(p.meta_conversion) : "—"} de conversión · bono desde ${p.puntos_min ?? "—"} puntos</span></div>
+  <div class="panel"><div class="barra"><b>Equipo · periodo ${esc(p.periodo || "")}</b><span class="lbl">pesos ${p.peso_reactivados ?? "—"} · ${p.peso_visitas ?? "—"} · ${p.peso_conversion ?? "—"} · bono desde ${p.puntos_min ?? "—"} puntos</span></div>
   <div style="overflow:auto"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Base</th><th class="n">Visitados</th><th class="n">Reactivados</th><th class="n">Conversión</th><th class="n">Puntos</th><th class="n">Bono</th><th class="n">Paga · retiene</th><th>Objetivo BBVA</th></tr></thead><tbody>
-    ${filas.map(a => { const e = ejDe(a.correo); return `<tr><td><span class="ej">${AVATAR(e)}${esc(a.nombre || e.nombre)}</span></td><td class="n num">${num(a.base)}</td><td class="n num">${num(a.visitados)} <span style="color:var(--muted)">/ ${a.meta_visitas ?? "—"}</span></td><td class="n num">${num(a.reactivados)} <span style="color:var(--muted)">/ ${a.meta_reactivados ?? "—"}</span></td><td class="n num">${pct1(a.conversion)}</td><td class="n num"><b>${a.puntos == null ? "—" : Number(a.puntos).toFixed(1).replace(".", ",")}</b></td><td class="n num">${a.bono_pct == null ? "—" : pct1(a.bono_pct)}</td><td class="n num">${a.bono_pagado == null ? "—" : pct1(a.bono_pagado) + " · " + pct1(a.bono_retenido)}</td><td>${a.objetivo_bbva ? `<span class="pill val">cumplido</span>` : `<span class="pill pend">pendiente</span>`}</td></tr>`; }).join("")}
+    ${filas.map(a => { const e = ejDe(a.correo); return `<tr><td><span class="ej">${AVATAR(e)}${esc(a.nombre || e.nombre)}</span></td><td class="n num">${num(a.base)}</td><td class="n num">${num(a.visitados)}</td><td class="n num">${num(a.reactivados)}</td><td class="n num">${pct1(a.conversion)}</td><td class="n num"><b>${a.puntos == null ? "—" : Number(a.puntos).toFixed(1).replace(".", ",")}</b></td><td class="n num">${a.bono_pct == null ? "—" : pct1(a.bono_pct)}</td><td class="n num">${a.bono_pagado == null ? "—" : pct1(a.bono_pagado) + " · " + pct1(a.bono_retenido)}</td><td>${a.objetivo_bbva ? `<span class="pill val">cumplido</span>` : `<span class="pill pend">pendiente</span>`}</td></tr>`; }).join("")}
   </tbody></table></div>
   <div class="atajos">Solo cuentan las visitas no anuladas, una por comercio. Los reactivados salen de la data de BBVA cargada, no de lo que declara el ejecutivo.</div></div>`;
 }

@@ -468,7 +468,7 @@ textarea.campo{min-height:78px;resize:vertical}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "6a1216";
+const BUILD = "ec7160";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 // Vista previa (carpeta /prueba/): la misma app con los datos reales, pero sin escribir nada.
 // Solo deja pasar las lecturas; cualquier guardado responde con un aviso.
@@ -1025,7 +1025,6 @@ function vistaInicio(){
   const volver = S.base.filter(c => c.estado === "uno" && esMio(c));
   const nombre = (S.yo.nombre_corto || S.yo.nombre || "").split(" ")[0];
   const bl = hayBloques(), B = bl ? bloqueInfo() : null;
-  const meta = m.meta, metaR = S.admin ? 160 : 40;
   const bVis = B ? B.del.filter(c => c.visitas_validas > 0).length : 0;
   const antVis = bl ? S.base.filter(c => esMio(c) && esAnterior(c) && c.visitas_validas > 0).length : 0;
   const subBloque = B && B.n ? `Bloque ${B.n} de 2 · ${B.quedan != null ? `quedan ${B.quedan} días del bloque` : `quedan ${diasQuedan()} días del periodo`}` : "";
@@ -1034,12 +1033,12 @@ function vistaInicio(){
       <div class="fila"><div><h1>Hola, ${esc(nombre)}</h1><div class="sub">${subBloque || (diaLargo(new Date()) + (S.periodo ? ` · quedan ${diasQuedan()} días del periodo` : ""))}</div></div>${cabeceraMenu()}</div>
       ${B && B.n ? `<div class="kpis">
         <div class="kpi naranja"><b>${bVis}<small> /${B.del.length}</small></b><span>Visitados del<br>bloque ${B.n}</span></div>
-        <div class="kpi"><b>${m.visitados}<small> /${meta}</small></b><span>Visitados del<br>periodo${S.admin ? " · equipo" : ""}${antVis ? `<br>+${antVis} base anterior` : ""}</span></div>
+        <div class="kpi"><b>${m.visitados}</b><span>Visitados del<br>periodo${S.admin ? " · equipo" : ""}${antVis ? `<br>+${antVis} base anterior` : ""}</span></div>
         <div class="kpi verde"><b>${m.reactivados}</b><span>Reactivados<br>que cuentan</span></div>
       </div>` : `<div class="kpis">
-        <div class="kpi naranja"><b>${m.visitados}<small> /${meta}</small></b><span>Comercios visitados${S.admin?"<br>equipo":""}</span></div>
-        <div class="kpi verde"><b>${m.reactivados}<small> /${metaR}</small></b><span>Reactivados<br>que cuentan</span></div>
-        <div class="kpi"><b>${pct(m.conv).replace("%","")}<small>%</small></b><span>Conversión<br>meta 25%</span></div>
+        <div class="kpi naranja"><b>${m.visitados}</b><span>Comercios visitados${S.admin?"<br>equipo":""}</span></div>
+        <div class="kpi verde"><b>${m.reactivados}</b><span>Reactivados<br>que cuentan</span></div>
+        <div class="kpi"><b>${pct(m.conv).replace("%","")}<small>%</small></b><span>Conversión</span></div>
       </div>`}
     </div>
     <div class="cuerpo">
@@ -1692,7 +1691,7 @@ function tarjetaBloques(){
   }).join("");
   const ant = S.base.filter(c => esMio(c) && esAnterior(c)), antVis = ant.filter(c => c.visitas_validas > 0).length;
   return `${bloques}
-    <div class="card"><div class="eyebrow">Periodo completo</div>${fila("Comercios visitados", m.visitados, m.meta)}${antVis ? `<div class="nota" style="margin-top:6px">Además, ${antVis} ${antVis === 1 ? "visita" : "visitas"} de la base anterior, que se cuentan aparte.</div>` : ""}
+    <div class="card"><div class="eyebrow">Periodo completo</div><div class="av-fila"><div class="fila-ent"><span>Comercios visitados</span><b>${m.visitados}</b></div></div>${antVis ? `<div class="nota" style="margin-top:6px">Además, ${antVis} ${antVis === 1 ? "visita" : "visitas"} de la base anterior, que se cuentan aparte.</div>` : ""}
       <div class="nota" style="margin-top:6px">${m.reactivados} ${m.reactivados === 1 ? "reactivado cuenta" : "reactivados cuentan"} para ti. Cuenta un reactivado cuando BBVA lo reporta y transacciona 2 días distintos después de tu visita con contacto.</div></div>
     ${ant.length ? `<div class="card"><div class="eyebrow">Base anterior</div><h2>${ant.length} visitados · ${ant.filter(conContacto).length} con contacto</h2><div class="nota">Se suman a tu avance si BBVA los reporta como reactivados.</div></div>` : ""}`;
 }
@@ -1732,7 +1731,7 @@ function vistaAvance(){
     const a = S.avance.find(x => x.correo === miCorreo()) || a0;
     if (a.sin_parametros) return envolver(`${tarjetaIndicadores(a)}
       <div class="card"><h2>El modelo de este periodo todavía no está cargado</h2>
-      <div class="nota">Tus números ya se están contando. El puntaje aparece apenas se carguen los pesos y las metas del periodo.</div></div>${avisoTrx}${reglas}`);
+      <div class="nota">Tus números ya se están contando. El puntaje aparece apenas se cargue el modelo del periodo.</div></div>${avisoTrx}${reglas}`);
     return envolver(`${avisoTrx}${tarjetaPuntaje(a)}${tarjetaIndicadores(a)}${reglas}`);
   }
 
@@ -1746,7 +1745,7 @@ function vistaAvance(){
     return `<div class="ejec">
       <div class="l1"><b>${esc(x.nombre)}</b><span>${pts == null ? "\u2014" : num1(pts)}<small>pts</small></span></div>
       <div class="mini"><i style="width:${Math.max(0, Math.min(100, pts || 0))}%"></i></div>
-      <div class="l2"><span><b>${x.visitados}</b> de ${x.meta_visitas ?? "\u2014"} visitas · <b>${x.reactivados}</b> de ${x.meta_reactivados ?? "\u2014"} reactivados</span><span>conv. ${pct(x.conversion)}</span></div>
+      <div class="l2"><span><b>${x.visitados}</b> visitas · <b>${x.reactivados}</b> reactivados</span><span>conv. ${pct(x.conversion)}</span></div>
       <div class="l3">${bono ? `Bono ${num1(bono)}% del sueldo · paga ${num1(x.bono_pagado)} y retiene ${num1(x.bono_retenido)}${x.objetivo_bbva && pts >= Number(x.puntos_tope) ? " · con el objetivo de BBVA" : ""}` : (bono === 0 ? `Sin bono todavía · faltan ${num1(Number(x.puntos_min) - (pts || 0))} puntos para los ${num1(x.puntos_min)}` : "Sin parámetros del periodo")}</div>
     </div>`;
   }).join("");
@@ -1870,11 +1869,10 @@ function tarjetaIndicadores(a){
       const c = i.cumpl == null ? null : Number(i.cumpl);
       const aporta = (c == null || i.peso == null) ? null : c * Number(i.peso) / 100;
       const val = i.u === "%" ? num1(i.val) + "%" : i.val;
-      const meta = i.meta == null ? "—" : (i.u === "%" ? num1(i.meta) + "%" : i.meta);
       return `<div class="ind ${i.k}">
-        <div class="t"><b>${i.nom}</b><span>${val} <small style="color:var(--muted);font-weight:600">de ${meta}</small></span></div>
+        <div class="t"><b>${i.nom}</b><span>${val}</span></div>
         <div class="barra-i"><i style="width:${c == null ? 0 : Math.max(0, Math.min(100, c))}%"></i></div>
-        <div class="pie"><span>${c == null ? "sin metas cargadas" : num1(c) + "% de cumplimiento" + (c >= 100 ? " · tope" : "") + (i.peso == null ? "" : " · peso " + num1(i.peso))}</span>
+        <div class="pie"><span>${c == null ? "sin cálculo todavía" : num1(c) + "% de cumplimiento" + (c >= 100 ? " · tope" : "") + (i.peso == null ? "" : " · peso " + num1(i.peso))}</span>
           <span>${aporta == null ? "" : num1(aporta) + " pts"}</span></div>
       </div>`;
     }).join("")}
@@ -1885,7 +1883,6 @@ function tarjetaParametros(a){
   return `<div class="card"><h2>El modelo que está aplicando el CRM</h2>
     <ul class="reglas">
       <li>Pesos: reactivados ${num1(a.peso_reactivados)}, visitas ${num1(a.peso_visitas)}, conversión ${num1(a.peso_conversion)}.</li>
-      <li>Metas por ejecutivo: ${a.meta_visitas} visitas, ${a.meta_reactivados} reactivados, ${num1(a.meta_conversion)}% de conversión.</li>
       <li>Escala: ${num1(a.puntos_min)} puntos = ${num1(a.bono_min)}% del sueldo y ${num1(a.puntos_tope)} puntos = ${num1(a.bono_tope)}%, sin sobrecumplimiento. Con ${num1(a.puntos_tope)} puntos más el objetivo de BBVA en la cartera (${a.bbva_meta_reactivados ?? "—"} reactivados), sube a ${num1(a.bono_max)}%.</li>
       <li>Se paga el ${num1(a.pago_pct)}% y se retiene el ${num1(100 - Number(a.pago_pct))}%.</li>
     </ul>
@@ -2415,7 +2412,7 @@ async function guardarVisita(){
     S.reg = null; delete S.hist[v.p_customer_id];
     await recargarBase();
     const m = metricas();
-    avisar(nueva && v.p_lat != null ? `Visita guardada. Llevas <b>${m.visitados} de ${m.meta}</b> comercios visitados.` : nueva ? "Visita guardada sin ubicación: no suma a tus visitados." : `Visita guardada como seguimiento. Sigues en <b>${m.visitados} de ${m.meta}</b>.`);
+    avisar(nueva && v.p_lat != null ? `Visita guardada. Llevas <b>${m.visitados}</b> comercios visitados.` : nueva ? "Visita guardada sin ubicación: no suma a tus visitados." : `Visita guardada como seguimiento. Sigues en <b>${m.visitados}</b> visitados.`);
   } catch(e){
     if (/fetch|network|Failed|NetworkError/i.test(e.message || "") || !navigator.onLine){
       S.cola = S.cola.filter(x => x.p_cliente_uid !== v.p_cliente_uid); S.cola.push(v); guardarCola(); S.reg = null;

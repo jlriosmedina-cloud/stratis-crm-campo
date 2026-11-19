@@ -34,11 +34,11 @@ for (const tema of ['light', 'dark']) {
   await p.goto(urlDist('celular')); await p.waitForTimeout(1200);
   const texto = () => p.evaluate(() => document.querySelector('#pantalla').textContent);
 
-  await prueba(`${tema} · Inicio por bloque: días, KPI sobre 225, los 5 de mayor potencial, base anterior y antes de salir`, async () => {
+  await prueba(`${tema} · Inicio por bloque: días, visitados del periodo sin meta, los 5 de mayor potencial, base anterior y antes de salir`, async () => {
     const t = await texto();
     assert.match(t, /Bloque 1 de 2 · quedan 1[01] días del bloque/);
     assert.match(t, /1\s*\/8/, 'visitados del bloque');
-    assert.match(t, /1\s*\/225/, 'visitados del periodo sobre 225');
+    assert.doesNotMatch(t, /\/225/, 'ya no se muestra la meta de 225'); assert.match(t, /Visitados del\s*periodo/);
     assert.match(t, /\+2 base anterior/, 'no muestra aparte las visitas de la base anterior');
     assert.equal(await p.evaluate(() => metricas().reactivados), 1, 'reactivados que cuentan: lista de BBVA + 2 días (incluye base anterior; no el que solo tiene 2 días)');
     assert.ok(!/Base compartida|libres/i.test(t), 'sigue la base compartida');
@@ -93,11 +93,11 @@ for (const tema of ['light', 'dark']) {
     await p.evaluate(() => { S.ver = false; S.ficha = null; S.vista = 'inicio'; pintar(); });
   });
 
-  await prueba(`${tema} · avance: bloque 1, bloque 2 próximo, periodo de 225 y base anterior`, async () => {
+  await prueba(`${tema} · avance: bloque 1, bloque 2 próximo, periodo completo sin meta y base anterior`, async () => {
     await p.evaluate(() => { S.vista = 'avance'; pintar(); }); await p.waitForTimeout(300);
     const t = await texto();
     assert.match(t, /Bloque 1 · /); assert.match(t, /Bloque 2 · próximo/); assert.match(t, /217 comercios nuevos llegan/);
-    assert.match(t, /Comercios visitados\s*1 \/ 225/); assert.match(t, /2 visitados · 1 con contacto/);
+    assert.match(t, /Periodo completo\s*Comercios visitados\s*1\D/); assert.doesNotMatch(t, /\/ 225/); assert.match(t, /2 visitados · 1 con contacto/);
     // 03/11: sugiere revisar el Drive individual de BBVA
     assert.match(t, /Tu Drive individual de BBVA/);
     await p.evaluate(() => { S.vista = 'inicio'; pintar(); });
