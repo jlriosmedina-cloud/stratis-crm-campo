@@ -127,7 +127,9 @@ for (const tema of ['light', 'dark']) {
     assert.equal(ll.at(-1).p_visita_id, 'v14');
     // el 15 ya cuenta: sin botón de contacto en su visita con contacto
     await p.evaluate(v => { S.hist['00000015'] = [Object.assign({}, v, { id: 'v15', customer_id: '00000015' })]; S.ficha = '00000015'; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
-    if (await p.locator('[data-seg]').count()) throw new Error('ofrece contacto a un reactivado que ya cuenta');
+    // 24/11: ya no es «Registrar contacto» (eso es solo para los que aún no cuentan): es el seguimiento general de una visita con contacto
+    if (await p.locator('[data-seg]', { hasText: 'Registrar contacto' }).count()) throw new Error('ofrece contacto a un reactivado que ya cuenta');
+    if (!(await p.locator('[data-seg="v15"]', { hasText: 'Registrar seguimiento' }).count())) throw new Error('debía ofrecer el seguimiento de una visita con contacto');
     await p.evaluate(() => { S.ficha = null; delete S.hist['00000014']; delete S.hist['00000015']; S.filtroEstado = 'todos'; S.vista = 'inicio'; pintar(); });
     console.log(`ok  ${tema} · reactivados BBVA vs. comisión`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · reactivados BBVA vs. comisión: ${e.message}`); }
@@ -215,9 +217,12 @@ for (const tema of ['light', 'dark']) {
     await p.click('[data-seg-enviar]'); await p.waitForTimeout(300);
     const ll = await p.evaluate(() => window.__llamadas.filter(x => x[0] === 'v2_registrar_seguimiento').map(x => x[1]));
     assert.deepEqual(ll.at(-1), { p_visita_id:'visita-sin-contacto', p_canal:'WhatsApp', p_resultado:'No respondió', p_nota:'Le escribí al número de la base' });
-    // en una visita con contacto no aparece
-    await p.evaluate(v => { S.hist['00000013'] = [v]; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
-    if (await p.locator('[data-seg]').count()) throw new Error('ofrece seguimiento en una visita con contacto');
+    // 24/11: en una visita con contacto también aparece, pero solo en la última del comercio
+    await p.evaluate(v => { S.hist['00000013'] = [Object.assign({}, v, { customer_id: '00000013' })]; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
+    if (!(await p.locator(`[data-seg="${VISITA_HOY.id}"]`).count())) throw new Error('no ofrece seguimiento en la última visita con contacto');
+    await p.evaluate(v => { S.hist['00000013'] = [Object.assign({}, v, { customer_id: '00000013' }), Object.assign({}, v, { customer_id: '00000013', id:'visita-mas-nueva', visitado_en:'2099-01-01T15:00:00Z' })]; pintar(); }, VISITA_HOY); await p.waitForTimeout(150);
+    if (await p.locator(`[data-seg="${VISITA_HOY.id}"]`).count()) throw new Error('ofrece seguimiento en una visita con contacto que ya no es la última');
+    if (!(await p.locator('[data-seg="visita-mas-nueva"]').count())) throw new Error('no ofrece seguimiento en la visita más nueva');
     await p.evaluate(() => { S.ficha = null; delete S.hist['00000013']; S.vista = 'inicio'; pintar(); });
     console.log(`ok  ${tema} · seguimiento remoto de la visita sin contacto`);
   } catch (e) { fallas++; console.log(`MAL ${tema} · seguimiento remoto: ${e.message}`); }

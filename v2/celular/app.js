@@ -967,16 +967,24 @@ async function enviarSeguimiento(){
   S.segReg = null; await cargarSeguimientos(); S._mantenerScroll = true; pintar();
   avisar("Seguimiento registrado. La visita no cambia.");
 }
-// Lo ya registrado y el botón o el panel para registrar (solo en visitas sin contacto, propias y del periodo en curso)
+// Última visita (no anulada) del comercio en el periodo, con lo que el celular ya conoce (historial de la ficha y actividad).
+function ultimaDelComercio(v){
+  const xs = (S.hist[v.customer_id] || []).concat((S.act || []).filter(x => x.customer_id === v.customer_id))
+    .filter(x => x.estado_anul !== "anulada" && (x.periodo == null || x.periodo === v.periodo));
+  return !xs.some(x => String(x.visitado_en) > String(v.visitado_en));
+}
+// Lo ya registrado y el botón o el panel para registrar (visitas propias y del periodo en curso: sin contacto, o con contacto si es la última del comercio)
 function bloqueSeguimiento(v){
   const com = S.base.find(c => c.customer_id === v.customer_id), rb = com && porContactar(com) ? rbbvaDe(com) : null;
   const porRea = v.con !== "Nadie" && !!rb && rb.ultima_visita_id === v.id;
-  if ((v.con !== "Nadie" && !porRea) || v.estado_anul === "anulada") return "";
-  const l = segDe(v.id), puede = v.es_mia && S.periodo && v.periodo === S.periodo.id && S.seg != null;
+  if (v.estado_anul === "anulada") return "";
+  // 24/11/2026: el seguimiento remoto también se registra en visitas con contacto (Jose), sobre la última visita del comercio en el periodo.
+  const conContacto = v.con !== "Nadie" && !porRea, elegible = !conContacto || ultimaDelComercio(v);
+  const l = segDe(v.id), puede = elegible && v.es_mia && S.periodo && v.periodo === S.periodo.id && S.seg != null;
   const hechos = l.length ? `<div class="fb-hist seg-hist"><b>Seguimiento remoto:</b> ${l.map(x => `${esc(x.canal)} · ${esc(x.resultado)} <span class="nota">(${fechaCorta(x.hecho_en)})</span>${x.nota ? ` · ${esc(x.nota)}` : ""}`).join("<br>")}</div>` : "";
   const r = S.segReg && S.segReg.id === v.id ? S.segReg : null;
   if (!puede) return hechos;
-  if (!r) return hechos + `<div class="acc-btns"><button class="btn ${l.length ? "btn-lin" : "btn-sec"} mini" data-seg="${v.id}">${porRea ? (l.length ? "Registrar otro contacto" : "Registrar contacto") : l.length ? "Registrar otro seguimiento" : "Registrar seguimiento remoto"}</button></div>`;
+  if (!r) return hechos + `<div class="acc-btns"><button class="btn ${l.length ? "btn-lin" : "btn-sec"} mini" data-seg="${v.id}">${porRea ? (l.length ? "Registrar otro contacto" : "Registrar contacto") : conContacto ? (l.length ? "Registrar otro seguimiento" : "Registrar seguimiento") : l.length ? "Registrar otro seguimiento" : "Registrar seguimiento remoto"}</button></div>`;
   const op = (g, val, on) => `<button type="button" class="ac ${on ? "on" : ""}" aria-pressed="${on}" data-seg-${g}="${esc(val)}">${esc(val)}</button>`;
   return hechos + `<div class="acc-panel seg-panel">
     <b>Seguimiento remoto</b>

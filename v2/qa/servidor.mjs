@@ -569,9 +569,14 @@ caso('seguimiento remoto: el ejecutivo lo registra en su visita sin contacto, de
   await falla(como(EJ, `insert into v2_seguimientos(visita_id, customer_id, periodo, correo, por, canal, resultado) values ($1, '00000013', '2099-01', $2, $2, 'Llamada', 'No respondió')`, [id, EJ]), /permission denied/);
   await falla(como(null, `select public.v2_mis_seguimientos()`), /permission denied/);
 });
-caso('seguimiento remoto: solo visitas sin contacto, con canal y resultado de la lista', async () => {
-  const conC = await visitaPasada('00000014', 6, 'Dueño', { que: 'Reunión concretada' });
-  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [conC]), /sin contacto/);
+caso('seguimiento remoto: visitas sin contacto o la última visita con contacto, con canal y resultado de la lista', async () => {
+  const cC = await nuevoComercio(301);
+  const conC = await visitaPasada(cC, 6, 'Dueño', { que: 'Reunión concretada' });
+  // 24/11: una visita con contacto admite seguimiento si es la última del comercio en el periodo; si hay una más nueva, va en esa
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [conC]);
+  const conC2 = await visitaPasada(cC, 3, 'Dueño', { que: 'Reunión concretada' });
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [conC]), /última visita/);
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'WhatsApp', 'Respondió: aún no decide')`, [conC2]);
   const sinC = await visitaPasada('00000015', 6, 'Nadie', { motivo: 'No atendió' });
   await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Paloma mensajera', 'No respondió')`, [sinC]), /check/);
   await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'Quién sabe')`, [sinC]), /check/);
@@ -630,10 +635,10 @@ caso('seguimiento: reactivado BBVA que aún no cuenta, aunque la visita tuvo con
   const despues = await visita(ult73);
   for (const k of ['con', 'que', 'motivo', 'decision', 'fuera_plazo', 'validacion', 'anulada_en']) assert.deepEqual(despues[k], antes[k], 'cambió la visita: ' + k);
   assert.equal((await bitacora(ult73)).filter(x => x.despues === 'Llamada · Respondió: usará el POS').length, 1, 'falta la línea de la bitácora');
-  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [previa73]), /sin contacto/);   // no es su última visita
-  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v74]), /sin contacto/);       // ya cuenta (2 días)
-  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v75]), /sin contacto/);       // no es reactivado BBVA
-  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v76]), /sin contacto/);       // reactivado en otro periodo
+  await falla(como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [previa73]), /última visita/);   // no es su última visita
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v74]);   // 24/11: ahora vale (ya cuenta (2 días)): es su última visita con contacto
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v75]);   // 24/11: ahora vale (no es reactivado BBVA): es su última visita con contacto
+  await como(EJ, `select public.v2_registrar_seguimiento($1, 'Llamada', 'No respondió')`, [v76]);   // 24/11: ahora vale (reactivado en otro periodo): es su última visita con contacto
   // lo que lee el celular: solo los propios, con días después de la visita con contacto y su última visita
   const l = (await como(EJ, `select customer_id, dias_trx, con_contacto, ultima_visita_id from public.v2_mis_reactivados_bbva() where customer_id in ($1, $2, $3, $4) order by 1`, [c73, c74, c75, c76])).rows;
   assert.deepEqual(l.map(x => [x.customer_id, x.dias_trx, x.con_contacto, x.ultima_visita_id]), [[c73, 0, true, ult73], [c74, 2, true, v74]]);
