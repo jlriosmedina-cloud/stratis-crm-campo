@@ -1,0 +1,41 @@
+# Migraciones de Supabase
+
+Una migración por cambio, con fecha y nombre descriptivo (por ejemplo `20260928120000_lista_del_dia.sql`).
+La primera será la foto del esquema actual (`supabase db dump --schema public`), pendiente de la primera sesión en Claude Code.
+Se aplican solo con el OK de Jose.
+
+## Aplicadas
+
+| Archivo | Aplicada | Versión en Supabase |
+|---|---|---|
+| `20260928000000_esquema_inicial.sql` | Foto de referencia, no se aplica | — |
+| `20260928100000_permisos_y_reglas_de_visita.sql` | 27/09/2026, con el OK de Jose | `20260927204630` |
+| `20260928110000_calidad_avisa_no_bloquea.sql` | 27/09/2026, con el OK de Jose | `20260927210956` |
+| `20260928120000_visitas_retenidas.sql` | 27/09/2026, con el OK de Jose | `20260927214009` |
+| `20260928140000_sin_truncate_ni_anon_en_tablas.sql` | 28/09/2026, con el OK de Jose | `20260928195803` |
+| `20260929100000_tipificaciones_de_visita.sql` | 29/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260929100322` |
+| `20260929120000_resultados_bbva.sql` | 29/09/2026, con el OK de Jose (escritorio publicado el mismo día) | `20260929132503` |
+| `20260930100000_totales_bbva.sql` | 30/09/2026, con el OK de Jose (escritorio publicado el mismo día) | `20260930120544` |
+| `20260930120000_mi_base_reactivado_bbva.sql` | 30/09/2026, con el OK de Jose (celular publicado el mismo día) | `20260930182215` |
+| `20261001100000_seguimiento_remoto.sql` | 01/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261001183005` |
+| `20261006100000_retiro_temporal_de_la_base.sql` | 06/10/2026, con el OK de Jose (cambia `v2_mi_base`; el celular no cambia de versión) | `20261006100628` |
+| `20261009100000_seguimiento_reactivados_bbva.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009141119` |
+| `20261010100000_recupero_pos.sql` | 09/10/2026, con el OK de Jose (celular publicado el mismo día) | `20261009151310` |
+| `20261021100000_base_2026_11_bloques.sql` | 21/10/2026, con el OK de Jose, junto con la carga del bloque 1 (celular d9ca90 y escritorio 159664 se publican el mismo día) | `base_2026_11_bloques` |
+| `20261021110000_cargas_por_documento.sql` | 21/10/2026, con el OK de Jose | `cargas_por_documento` |
+| `20261021115000_meta_visitas_2026_11.sql` | 21/10/2026, con el OK de Jose (meta de visitas 225) | `meta_visitas_2026_11` |
+| `20261021120000_avance_base_2026_11.sql` | 21/10/2026, con el OK de Jose (v2_avance: base y visitados solo con la base nueva; 2026-10 sin cambios) | `avance_base_2026_11` |
+| `20261020150000_respaldo_antes_base_2026_11.sql` | 20/10/2026, con el OK de Jose (solo copia en el esquema `respaldo`; no toca `public`) | `20261020213955` |
+| `20261021130000_ruta_propia_del_ejecutivo.sql` | 21/10/2026, con el OK de Jose (ruta propia del ejecutivo; celular publicado el mismo día) | `20261021002550` |
+| `20261024100000_cierres_de_periodo.sql` | 23/10/2026, con el OK de Jose (cierres congelados por periodo; P1–P3 cargados aparte, fuera del repositorio; apps publicadas el mismo día) | `20261023212621` |
+| `20261026150000_recupero_solo_periodo_actual.sql` | 26/10/2026, con el OK de Jose (el recupero del POS solo muestra el periodo en curso; las apps no cambian; los 50 del periodo 2026-10 quedaron en `Stratis CRM\recupero-pos\`, fuera del repositorio) | `20261026150925` |
+| `20261101100000_tipificaciones_bbva.sql` | 01/11/2026, con el OK de Jose (motivo, submotivo y acción de BBVA en `v2_feedback_tipos`, texto exacto del archivo de BBVA; celular y escritorio publicados el mismo día) | `20261101151524` |
+| `20261103100000_accion_bbva_y_estado.sql` | 03/11/2026, con el OK de Jose (frase principal, estado de lo que pide BBVA y ticket en `fb_extra`; solo cambian `v2_fb_extra_obs` y `v2_fb_extra_limpio`; celular y escritorio publicados el mismo día, después de la migración) | `20261103130221` |
+
+### Privilegios de tablas (desde el 28/09/2026)
+
+- En `usuarios` y las tablas `v2_*`, `anon` no tiene nada. `authenticated` no tiene TRUNCATE, REFERENCES ni TRIGGER, y conserva SELECT/INSERT/UPDATE/DELETE, que siguen sujetos a RLS. Las secuencias `v2_*` no tienen UPDATE (`setval`) para `authenticated` ni nada para `anon`.
+- Las tablas y secuencias nuevas que crea `postgres` en `public` nacen igual. Las que cree `supabase_admin` todavía nacen abiertas, porque sus privilegios por defecto no se pueden cambiar como `postgres`: revisar sus permisos si alguna vez aparece una.
+- **Si algo se rompe**, la inversa devuelve solo lo que se quitó, **nunca con `grant all`**, porque eso reabre TRUNCATE: `grant truncate, references, trigger on <tabla> to authenticated`, `grant update on sequence <secuencia> to authenticated` y, solo en la tabla que lo necesite y con justificación, el grant puntual a `anon`.
+
+Las pruebas `v2/qa/servidor.mjs` aplican, sobre la foto, los archivos posteriores a ella en orden de nombre.
