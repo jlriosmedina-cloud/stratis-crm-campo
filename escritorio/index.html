@@ -547,7 +547,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "74558e";
+const BUILD = "adc8f1";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1310,16 +1310,23 @@ function alertasMismoPunto(){
   return grupos.sort((a, b) => ord[a.nivel] - ord[b.nivel] || D(b.visitas[0].visitado_en) - D(a.visitas[0].visitado_en));
 }
 // Visitas registradas cerca del domicilio del ejecutivo con el comercio lejos. Alta: a 150 m o menos y comercio a más de 500 m; media: a 500 m o menos y comercio a más de 1 km.
+// Validación con la dirección cargada (Jose, 26/11): si el punto de la dirección del comercio (el de Google/dirección, no el tomado de otra visita) cae a 500 m o menos
+// del domicilio, el comercio sí está ahí y la visita no es alerta. Si el comercio solo tiene un punto tomado de una visita, no se puede validar y la alerta se mantiene.
+const DOM_R = { alta:150, media:500, comAlta:500, comMedia:1000 };   // alerta de domicilio: radio y distancia al comercio, en metros
+const puntoDireccion = v => v.ref_lat != null && v.ref_calidad !== "visita" ? { lat:v.ref_lat, lng:v.ref_lng, cal:v.ref_calidad }
+  : v.geo_lat != null && v.geo_calidad !== "visita" ? { lat:v.geo_lat, lng:v.geo_lng, cal:v.geo_calidad } : null;
 function alertasDomicilio(){
-  const mejor = {};
+  const mejor = {}; let descartadas = 0;
   (S.domicilios || []).forEach(d => S.act.forEach(v => {
     if (v.correo !== d.correo || v.estado_anul === "anulada" || v.lat == null || v.distancia_m == null) return;
     const m = Math.round(hav(v.lat, v.lng, d.lat, d.lng)), nivel = m <= DOM_R.alta && v.distancia_m > DOM_R.comAlta ? "alta" : m <= DOM_R.media && v.distancia_m > DOM_R.comMedia ? "media" : null;
-    if (nivel && (!mejor[v.id] || m < mejor[v.id].m)) mejor[v.id] = { v, d, m, nivel }; }));
-  const ord = { alta:0, media:1 };
-  return Object.values(mejor).sort((a, b) => ord[a.nivel] - ord[b.nivel] || D(b.v.visitado_en) - D(a.v.visitado_en));
+    if (!nivel) return;
+    const pd = puntoDireccion(v), mc = pd ? Math.round(hav(pd.lat, pd.lng, d.lat, d.lng)) : null;
+    if (pd && mc <= DOM_R.media){ descartadas++; return; }
+    if (!mejor[v.id] || m < mejor[v.id].m) mejor[v.id] = { v, d, m, nivel, pd, mc }; }));
+  const ord = { alta:0, media:1 }, out = Object.values(mejor).sort((a, b) => ord[a.nivel] - ord[b.nivel] || D(b.v.visitado_en) - D(a.v.visitado_en));
+  out.descartadas = descartadas; return out;
 }
-const DOM_R = { alta:150, media:500, comAlta:500, comMedia:1000 };   // alerta de domicilio: radio y distancia al comercio, en metros
 const NIVEL_TXT = { alta:["Alta", "n-alta"], media:["Media", "n-media"], info:["Informativa", "n-info"] };
 function vistaUbicacion(){
   cargarPeriodos(); cargarDomicilios();
@@ -1368,8 +1375,8 @@ function panelAlertas(){
   } else if (S.domErr){
     cuerpo = `<div class="vacio">Los domicilios de referencia todavía no están habilitados (${esc(S.domErr)}).</div>`;
   } else {
-    cuerpo = `<div class="eq-dias"><table class="datos"><thead><tr><th>Fecha</th><th>Ejecutivo</th><th>Comercio visitado</th><th class="n">Del domicilio</th><th class="n">Del comercio</th><th>Nivel</th></tr></thead><tbody>${dom.map((o, i) => `<tr class="${S.alSel && S.alSel.t === "d" && S.alSel.i === i ? "on" : ""}" data-alsel="d|${i}" tabindex="0" style="cursor:pointer"><td>${fISO(iso(o.v.visitado_en))} ${hh(o.v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(o.v.correo))}${esc(nombreCorto(ejDe(o.v.correo).nombre))}</span></td><td>${esc(o.v.comercio)}</td><td class="n num">${mDist(o.m)}</td><td class="n num">${mDist(o.v.distancia_m)}</td><td><span class="pill ${NIVEL_TXT[o.nivel][1]}">${NIVEL_TXT[o.nivel][0]}</span></td></tr>`).join("") || `<tr><td colspan="6" class="muted">${(S.domicilios || []).length ? "Ninguna visita marcada cerca de un domicilio con el comercio lejos." : "Todavía no hay domicilios de referencia cargados."}</td></tr>`}</tbody></table></div>
-      <div class="muted" style="font-size:12px;margin-top:8px"><b>Alta</b>: a ${DOM_R.alta} m o menos del domicilio y el comercio a más de ${DOM_R.comAlta} m. <b>Media</b>: a ${DOM_R.media} m o menos y el comercio a más de ${DOM_R.comMedia / 1000} km. El domicilio lo ven solo quienes tienen acceso al escritorio.</div>`;
+    cuerpo = `<div class="eq-dias"><table class="datos"><thead><tr><th>Fecha</th><th>Ejecutivo</th><th>Comercio visitado</th><th class="n">Del domicilio</th><th class="n">Del comercio</th><th>Dirección del comercio</th><th>Nivel</th></tr></thead><tbody>${dom.map((o, i) => `<tr class="${S.alSel && S.alSel.t === "d" && S.alSel.i === i ? "on" : ""}" data-alsel="d|${i}" tabindex="0" style="cursor:pointer"><td>${fISO(iso(o.v.visitado_en))} ${hh(o.v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(o.v.correo))}${esc(nombreCorto(ejDe(o.v.correo).nombre))}</span></td><td>${esc(o.v.comercio)}</td><td class="n num">${mDist(o.m)}</td><td class="n num">${mDist(o.v.distancia_m)}</td><td>${esc(o.v.direccion || "—")}${o.v.distrito ? ", " + esc(o.v.distrito) : ""}<small class="muted" style="display:block">${o.pd ? "a " + mDist(o.mc) + " del domicilio (" + esc(o.pd.cal || "dirección") + ")" : "sin punto verificado: solo tiene uno tomado de una visita"}</small></td><td><span class="pill ${NIVEL_TXT[o.nivel][1]}">${NIVEL_TXT[o.nivel][0]}</span></td></tr>`).join("") || `<tr><td colspan="7" class="muted">${(S.domicilios || []).length ? "Ninguna visita marcada cerca de un domicilio con el comercio lejos." : "Todavía no hay domicilios de referencia cargados."}</td></tr>`}</tbody></table></div>
+      <div class="muted" style="font-size:12px;margin-top:8px"><b>Alta</b>: a ${DOM_R.alta} m o menos del domicilio y el comercio a más de ${DOM_R.comAlta} m. <b>Media</b>: a ${DOM_R.media} m o menos y el comercio a más de ${DOM_R.comMedia / 1000} km. Antes de avisar se mira la dirección cargada del comercio: si su punto verificado cae a ${DOM_R.media} m o menos del domicilio, el comercio sí está ahí y no es alerta${dom.descartadas ? ` (${dom.descartadas} visita${dom.descartadas === 1 ? "" : "s"} descartada${dom.descartadas === 1 ? "" : "s"} por eso)` : ""}. El domicilio lo ven solo quienes tienen acceso al escritorio.</div>`;
   }
   return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Alertas de registro</b><span class="lbl">dos señales para validar que la visita se hizo en el comercio · avisan, no bloquean ni descartan visitas</span></div>
     <div style="padding:10px">${tabs}${cuerpo}${S.alSel ? `<div id="mapaAlerta" class="mapa-dist" style="height:340px;margin-top:12px"></div>` : `<div class="muted" style="font-size:12px;margin-top:10px">Toca una fila para verla en el mapa.</div>`}</div></div>`;

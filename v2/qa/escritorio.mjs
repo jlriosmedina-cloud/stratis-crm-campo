@@ -632,6 +632,17 @@ await prueba('Ubicación (26/11): cercanía al comercio, alertas «mismo punto»
   assert.match(await tile('En el comercio'), /En el comercio/i, 'el resto de la vista debe seguir funcionando');
   await p.evaluate(() => { const fx = window.__FX; S.act = fx._actU; delete fx.rpc.v2_domicilios; delete fx.rpc.v2_guardar_domicilio; delete fx.rpc.v2_borrar_domicilio; S.domicilios = null; S.domErr = ''; S.alSel = null; S.alTab = 'pt'; S.vista = 'validacion'; pintar(); });
 });
+await prueba('Alerta de domicilio (26/11): se descarta si la dirección cargada del comercio está en la zona del domicilio; se mantiene si solo hay un punto tomado de una visita', async () => {
+  const cerca = { lat: -12.0932, lng: -77.0466, distancia_m: 2000 };
+  const A = visita(1, { id: '00000000-0000-0000-0000-0000000000e1', customer_id: '00000021', comercio: 'Comercio A', ...cerca, ref_lat: -12.0931, ref_lng: -77.0465, ref_calidad: 'numero', visitado_en: `${hoy}T23:00:00Z` });
+  const B = visita(1, { id: '00000000-0000-0000-0000-0000000000e2', customer_id: '00000022', comercio: 'Comercio B', ...cerca, ref_lat: -12.1300, ref_lng: -77.0100, ref_calidad: 'numero', direccion: 'AV. LEJANA 100', distrito: 'MIRAFLORES', visitado_en: `${hoy}T23:05:00Z` });
+  const C = visita(1, { id: '00000000-0000-0000-0000-0000000000e3', customer_id: '00000023', comercio: 'Comercio C', ...cerca, ref_lat: -12.0931, ref_lng: -77.0465, ref_calidad: 'visita', visitado_en: `${hoy}T23:10:00Z` });
+  const r = await p.evaluate(({ a, b, c }) => { const ant = S.act; S.act = [a, b, c]; S.domicilios = [{ id: 1, correo: a.correo, ejecutivo: 'Ejecutivo Prueba', etiqueta: 'Casa', lat: -12.0931, lng: -77.0465, exactitud: 'aproximado', nota: null }];
+    const o = alertasDomicilio(); const res = { nombres: o.map(x => x.v.comercio).sort(), descartadas: o.descartadas, sinVerificar: o.filter(x => !x.pd).map(x => x.v.comercio), lejos: o.find(x => x.v.comercio === 'Comercio B').mc }; S.act = ant; S.domicilios = null; return res; }, { a: A, b: B, c: C });
+  assert.deepEqual(r.nombres, ['Comercio B', 'Comercio C'], 'solo B (comercio lejos de verdad) y C (sin punto verificado) son alerta: ' + JSON.stringify(r));
+  assert.equal(r.descartadas, 1, 'A debe descartarse: su dirección está en la zona del domicilio');
+  assert.deepEqual(r.sinVerificar, ['Comercio C']); assert.ok(r.lejos > 2000, 'B queda a más de 2 km del domicilio: ' + r.lejos);
+});
 await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta, con la ruta de hoy y el historial', async () => {
   // Los dos ejecutivos tienen una «Ruta 01 · Lima» y una «Ruta 99 · Por ubicar»: nunca se mezclan
   const E2 = 'ejecutivo2.prueba@ejemplo.com', R1 = 'Ruta 01 · Lima', R99 = 'Ruta 99 · Por ubicar', en = '2026-10-21T15:00:00Z';
