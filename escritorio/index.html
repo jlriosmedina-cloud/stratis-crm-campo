@@ -559,7 +559,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "b5a677";
+const BUILD = "f662e7";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1038,9 +1038,6 @@ function cascaron(){
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
         <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hojas Resumen y Base, modelo Gestión Stratis de 55 columnas (una fila por comercio de la base nueva; llave: Documento)">Base para BBVA</button>
-        <details class="mas"><summary class="btn" title="Presentación y reporte para BBVA y el directorio">Reportes ▾</summary><div class="mas-menu">
-          <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
-          <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button></div></details>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
@@ -1478,7 +1475,6 @@ async function borrarDomicilio(id){
   toast("Domicilio borrado."); S.domicilios = null; cargarDomicilios(true);
 }
 document.addEventListener("keydown", ev => { if (ev.key !== "Enter" && ev.key !== " ") return; const t = ev.target.closest && ev.target.closest("tr[data-usel],tr[data-alsel]"); if (t && ev.target === t){ ev.preventDefault(); t.click(); } });
-document.addEventListener("click", ev => { const m = document.querySelector("details.mas[open]"); if (m && (!m.contains(ev.target) || ev.target.closest(".mas-menu button"))) m.open = false; });
 document.addEventListener("click", ev => {
   const t = ev.target.closest("[data-uper],[data-ucl],[data-usel],[data-altab],[data-alniv],[data-alsel],[data-dom-guardar],[data-dom-borrar]"); if (!t) return;
   if (t.dataset.uper){ const id = t.dataset.uper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.uPer = id; S.uSel = null; S.alSel = null; S.uCl = ""; pintar(); return; }
@@ -3364,7 +3360,7 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-ppt-bbva],[data-reporte-dir],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-recup-validar")){ validarRecupero(t.dataset.recupValidar, true); return; }
   if (t.hasAttribute("data-recup-observar")){ validarRecupero(t.dataset.recupObservar, false); return; }
@@ -3380,8 +3376,6 @@ document.addEventListener("click", async ev => {
   if (t.hasAttribute("data-pq-alc")){ S.pqAlcance = t.dataset.pqAlc; if ((S.pqSel || "").startsWith("no:")) S.pqSel = ""; pintar(); return; }
   if (t.hasAttribute("data-pq")){ S.pqSel = S.pqSel === t.dataset.pq ? "" : t.dataset.pq; pintar(); if (S.pqSel) document.querySelector(".pq-lista-ancla")?.scrollIntoView({ behavior:"smooth", block:"start" }); return; }
   if (t.hasAttribute("data-base-bbva")){ baseBBVA(); return; }
-  if (t.hasAttribute("data-ppt-bbva")){ presentacionBBVA(); return; }
-  if (t.hasAttribute("data-reporte-dir")){ reporteDirectorio(); return; }
   if (t.hasAttribute("data-fb-csv")){ csvFeedback(); return; }
   if (t.hasAttribute("data-fb-tipo")){ S.fbTipo = S.fbTipo === t.dataset.fbTipo ? "" : t.dataset.fbTipo; pintar(); return; }
   if (t.hasAttribute("data-salir")){ await sb.auth.signOut(); location.reload(); return; }
