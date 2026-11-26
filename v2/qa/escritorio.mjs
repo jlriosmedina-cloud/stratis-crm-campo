@@ -342,7 +342,7 @@ await prueba('base 2026-11: selector de ejecutivo, «Ver su celular», meta cont
   await p.evaluate(() => { S.vista = 'equipo'; pintar(); }); await p.waitForTimeout(300);
   assert.match((await p.locator('.tile', { hasText: 'Comercios nuevos visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios nuevos visitados 2 \/ 160/i, 'Por ejecutivo suma la base anterior o comercios de antes: ' + (await p.locator('.tile', { hasText: 'Comercios nuevos visitados' }).first().innerText()));
   await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; pintar(); }); await p.waitForTimeout(300);
-  assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160.*1 de la base anterior, aparte/i, 'Visitas suma la base anterior');
+  assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160.*1 fuera de la base nueva, aparte/i, 'Visitas suma la base anterior');
   const coms = (await p.locator('td.com b').allInnerTexts()).join(' | ');
   assert.ok(coms.includes('Comercio Prueba 11') && !coms.includes('Comercio Prueba 21'), 'Visitas no se filtró por ejecutivo: ' + coms);
   await p.click('#btnCel'); await p.waitForTimeout(200);
@@ -646,6 +646,17 @@ await prueba('Cartera (26/11): los comercios del periodo con su última visita, 
   const por = await p.evaluate(() => { const v = new Set(S.act.filter(x => x.estado_anul !== 'anulada').map(x => x.customer_id)); return S.base.filter(c => c.correo && (!S.hayOrigen || c.origen === 'base_nueva') && !v.has(c.customer_id)).length; });
   assert.equal(await p.locator('#contenido tbody tr').count(), por, 'el filtro «Por visitar» no cuadra');
   await p.evaluate(() => { S.carEst = ''; S.vista = 'directorio'; pintar(); });
+});
+await prueba('Comercios aparte de la base (26/11): se ven aparte, no suman y el resto queda como base nueva; sin la función todo sigue igual', async () => {
+  const r = await p.evaluate(async () => {
+    const fx = window.__FX, hay0 = S.hayOrigen, cid = S.base.find(c => c.correo).customer_id, per = S.periodo.id, o0 = S.baseMap[cid].origen, nu0 = S.base.filter(c => c.correo && c.origen === 'base_nueva').length;
+    fx.rpc.v2_apartes = [{ periodo: per, customer_id: cid }]; await cargarBase();
+    const a = { hay: S.hayOrigen, origen: S.baseMap[cid].origen, suma: sumaMeta(cid), otros: S.base.filter(x => x.customer_id !== cid && x.correo).every(x => x.origen), cartera: S.base.filter(c => c.correo && c.origen === 'base_nueva').length, esperada: S.hayOrigen && hay0 ? nu0 - (o0 === 'base_nueva' ? 1 : 0) : S.base.filter(x => x.customer_id !== cid && x.correo).length };
+    S.apartes = undefined; fx.rpc.v2_apartes = () => ({ __error: 'function public.v2_apartes() does not exist' }); await cargarBase();
+    a.sinFuncion = S.hayOrigen === hay0 && S.baseMap[cid].origen === o0;
+    delete fx.rpc.v2_apartes; await cargarBase(); return a; });
+  assert.equal(r.hay, true); assert.equal(r.origen, 'base_anterior'); assert.equal(r.suma, false, 'no debe sumar a la meta'); assert.ok(r.otros, 'el resto debe quedar con origen');
+  assert.equal(r.cartera, r.esperada, 'la cartera debe quedar sin el comercio aparte'); assert.ok(r.sinFuncion, 'sin la función no debe cambiar nada');
 });
 await prueba('Vista del ejecutivo (26/11): interruptor, menú de 4 pestañas, un solo ejecutivo y vuelta a supervisión', async () => {
   await p.evaluate(() => { S.modo = 'sup'; S.vista = 'directorio'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(300);

@@ -618,7 +618,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "e354cb";
+const BUILD = "0686ab";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -871,9 +871,25 @@ async function leerBasePorTramos(periodo){
   }
   return { data: todo, error:null };
 }
+// Comercios aparte de la base (26/11, decisión de Jose): siguen asignados y con sus visitas (el celular no cambia), pero el escritorio los
+// trata como «base anterior»: se ven aparte y no suman a la cartera, a la meta ni a la Base para BBVA. Si la función aún no existe, no pasa nada.
+async function cargarApartes(){
+  try {
+    const { data, error } = await sb.rpc("v2_apartes");
+    if (error) { S.apartes = S.apartes || {}; return; }
+    const o = {}; (data || []).forEach(r => { (o[r.periodo] ||= new Set()).add(r.customer_id); }); S.apartes = o;
+  } catch(e){ S.apartes = S.apartes || {}; }
+}
+// Con comercios aparte en el periodo, el resto pasa a «base nueva» (en el celular y en v2_avance un origen vacío ya cuenta como nueva).
+function aplicarAparte(rows, perId){
+  const ap = (S.apartes || {})[perId]; if (!ap || !ap.size) return rows;
+  return rows.map(c => ap.has(c.customer_id) ? { ...c, origen:"base_anterior" } : c.origen ? c : { ...c, origen:"base_nueva" });
+}
 async function cargarBase(){
-  const { data, error } = await leerBasePorTramos();
+  await cargarApartes();
+  let { data, error } = await leerBasePorTramos();
   if (error){ toast("No se pudo leer la base: " + error.message); return; }
+  data = aplicarAparte(data || [], S.periodo && S.periodo.id);
   // Base 2026-11: los de «salida» siguen en v2_asignaciones (regla n.º 1), pero ya no son cartera salvo que reciban una visita.
   // baseMap guarda todos, para leer el comercio de cualquier visita.
   S.base = (data || []).filter(enCartera); S.baseMap = {}; S.docMap = {};
@@ -888,7 +904,7 @@ const enCartera = c => c.origen !== "salida" || (c.visitas || 0) > 0;
 // Comercio que suma a la meta de visitados (Jose, 21/10): solo la base nueva, igual que v2_avance. La base anterior va aparte.
 // En un periodo sin bloques (sin origen) cuenta todo, como antes.
 // Comercios de la base anterior con visita válida: van aparte, se muestran al lado del total
-const notaAnterior = act => { if (!S.hayOrigen) return ""; const n = new Set(act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo && (S.baseMap[v.customer_id] || {}).origen === "base_anterior").map(v => v.customer_id)).size; return n ? ` · ${n} de la base anterior, aparte` : ""; };
+const notaAnterior = act => { if (!S.hayOrigen) return ""; const n = new Set(act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo && (S.baseMap[v.customer_id] || {}).origen === "base_anterior").map(v => v.customer_id)).size; return n ? ` · ${n} fuera de la base nueva, aparte` : ""; };
 const sumaMeta = cid => { const c = S.baseMap[cid]; return !S.hayOrigen || (!!c && c.origen === "base_nueva"); };
 // Selector de ejecutivo (base 2026-11): todas las vistas se leen con el ejecutivo elegido o con el equipo.
 // Solo filtra mientras se pinta; las descargas y las acciones siempre usan los datos completos.
@@ -1479,7 +1495,8 @@ function datosPeriodo(per){
 async function cargarDatosPeriodo(per){
   const [a, b] = await Promise.all([leerActividad(per.ini, per.fin), leerBasePorTramos(per.id)]);
   if (a.error || b.error){ S.dirDatos[per.id] = { err:(a.error || b.error).message }; pintar(); return; }
-  const todo = b.data || [], baseMap = {}; todo.forEach(c => { baseMap[c.customer_id] = c; });
+  if (!S.apartes) await cargarApartes();
+  const todo = aplicarAparte(b.data || [], per.id), baseMap = {}; todo.forEach(c => { baseMap[c.customer_id] = c; });
   S.dirDatos[per.id] = { act:a.data || [], base:todo.filter(enCartera), baseMap, hayOrigen:todo.some(c => c.origen) }; pintar();
 }
 function statsDir(d, correo){
