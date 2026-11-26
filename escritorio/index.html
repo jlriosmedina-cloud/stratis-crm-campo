@@ -338,16 +338,16 @@ table.datos tr.err td{background:var(--rojo-t)}
 </style>
 <style>table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }
 /* ---------- Mapa de distritos ---------- */
-.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 390px;min-height:600px}
+.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:440px}
 .mapa-dist-col{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--linea)}
-.mapa-dist{height:600px;width:100%;background:var(--suelo)}
+.mapa-dist{height:440px;width:100%;background:var(--suelo)}   /* un solo alto para todos los mapas del escritorio */
 :root[data-theme="dark"] .mapa-dist .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9)}
 .md-leyenda{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-top:1px solid var(--linea);font-size:12px}
 .md-leyenda b{color:var(--ink)}
 .md-leyenda .leyenda-ej span:first-child{color:inherit;font-weight:400}
 .md-leyenda .leyenda-ej i{width:14px;height:10px;border-radius:2px}
 .md-leyenda .leyenda-ej i.pto{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 1.5px var(--tarjeta)}
-.md-lado{min-width:0;display:flex;flex-direction:column;max-height:690px;overflow:auto}
+.md-lado{min-width:0;display:flex;flex-direction:column;max-height:440px;overflow:auto}
 .md-cuerpo{padding:12px;display:flex;flex-direction:column;gap:10px}
 .md-cuerpo h3{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
 .md-ej{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ink)}
@@ -559,6 +559,8 @@ table.datos tr.on td{background:var(--azul-t)}
 .top .sub{display:none}
 .top .der{gap:8px}
 .top .btn{padding:6px 10px}
+.barrita{position:relative}
+.barrita .esp{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -574,7 +576,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "5ccffe";
+const BUILD = "466e03";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1068,7 +1070,7 @@ function cascaron(){
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
-        <button class="btn" data-nueva-clave title="Cambiar tu contraseña">Cambiar contraseña</button>
+        <button class="btn" data-nueva-clave title="Cambiar tu contraseña">Mi clave</button>
         <button class="btn q" data-salir title="Cerrar sesión">${ICON.salir}</button>
       </div>
     </header>
@@ -1417,7 +1419,7 @@ function vistaUbicacionCuerpo(){
     <div class="tile"><div class="k">Distancia mediana</div><div class="v num">${mediana == null ? "—" : mDist(mediana)}</div><div class="d">GPS de precisión baja (más de ${REGLA.precision} m): ${baja} %</div></div></div>
   <div class="eq-2">
     <div class="panel"><div class="barra"><b>Mapa de registros</b><span class="lbl">punto de color = dónde se registró · cuadrado oscuro = dónde está el comercio · la línea los une</span></div>
-      <div style="padding:10px">${chipsCl}<div id="mapaUbic" class="mapa-dist" style="height:420px"></div></div></div>
+      <div style="padding:10px">${chipsCl}<div id="mapaUbic" class="mapa-dist"></div></div></div>
     <div class="panel"><div class="barra"><b>Visitas por revisar primero</b><span class="lbl">de la más lejana a la más cercana · ${lista.length} visita${lista.length === 1 ? "" : "s"}</span></div>
       <div style="padding:10px">${det}<div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th class="n">Distancia</th><th class="n">GPS</th></tr></thead><tbody>${filas || `<tr><td colspan="5" class="muted">Sin visitas con este filtro.</td></tr>`}</tbody></table></div></div></div>
   </div>
@@ -1442,7 +1444,7 @@ function panelAlertas(){
       <div class="muted" style="font-size:12px;margin-top:8px">Visitas registradas cerca del domicilio del ejecutivo, con la distancia a la dirección real del comercio. Si la dirección cargada del comercio está en la zona del domicilio, no se marca. Solo quienes tienen acceso al escritorio lo ven.</div>`;
   }
   return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Alertas de registro</b><span class="lbl">dos señales para validar que la visita se hizo en el comercio · avisan, no bloquean ni descartan visitas</span></div>
-    <div style="padding:10px">${tabs}${cuerpo}${S.alSel ? `<div id="mapaAlerta" class="mapa-dist" style="height:340px;margin-top:12px"></div>` : `<div class="muted" style="font-size:12px;margin-top:10px">Toca una fila para verla en el mapa.</div>`}</div></div>`;
+    <div style="padding:10px">${tabs}${cuerpo}${S.alSel ? `<div id="mapaAlerta" class="mapa-dist" style="margin-top:12px"></div>` : `<div class="muted" style="font-size:12px;margin-top:10px">Toca una fila para verla en el mapa.</div>`}</div></div>`;
 }
 function panelValidacion(){
   const por = S.ejecutivos.map(e => { const t = S.act.filter(v => v.correo === e.correo);
@@ -1468,7 +1470,7 @@ function panelDomicilios(){
 function nuevoMapaUb(el, clave){
   const m = L.map(el, { zoomControl:true, scrollWheelZoom:false, zoomSnap:.25, preferCanvas:false }); S[clave] = m;
   m.setView([-12.06, -77.03], 11); m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:.55, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:temaActual() === "dark" ? .55 : .5, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
   return m;
 }
 const cuadrado = c => L.divIcon({ className:"", iconSize:[10, 10], iconAnchor:[5, 5], html:`<div style="width:10px;height:10px;background:#0C1137;border:2px solid #fff;box-shadow:0 0 0 1px #0C1137"></div>` });
@@ -1576,11 +1578,14 @@ function vistaDirectorio(){
     ${tile("Reactivados BBVA", cerrado ? numPE(rea) : "—", cerrado ? "reportados por BBVA al cierre del periodo" : "los informa BBVA: se conoce al cierre del periodo")}
   </div>`;
   const ejs = S.ejecutivos.map(e => ({ e, t:statsDir(d, e.correo), c:ci.find(r => r.correo === e.correo) }));
-  const barra = x => `<div class="barrita"><i style="width:${Math.round((x || 0) * 100)}%"></i></div>`;
-  const tEj = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Efectividad por ejecutivo</b><span class="lbl">medidas de gestión de cada ejecutivo · los reactivados y el incentivo solo existen en periodos cerrados</span></div>
+  // línea vertical: lo esperado a hoy según la meta diaria (solo en el periodo en curso). Esperado = meta acumulada hasta hoy ÷ comercios asignados, tope 100 %.
+  const Hd = enCurso ? habiles() : null, metaE = (S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160;
+  const esperado = t => Hd && Hd.total && t && t.asig ? Math.min(1, (metaE * (Hd.hastaHoy || 0) / Hd.total) / t.asig) : null;
+  const barra = (x, t) => { const e = t ? esperado(t) : null; return `<div class="barrita"><i style="width:${Math.round((x || 0) * 100)}%"></i>${e != null ? `<b class="esp" style="left:${Math.round(e * 100)}%" title="Esperado a hoy: ${Math.round(e * 100)} %"></b>` : ""}</div>`; };
+  const tEj = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Efectividad por ejecutivo</b><span class="lbl">medidas de gestión de cada ejecutivo${enCurso ? " · la línea vertical marca lo esperado a hoy según la meta diaria" : ""} · los reactivados y el incentivo solo existen en periodos cerrados</span></div>
     <table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Contacto</th><th class="n">Dirección errada</th><th class="n">Reactivados</th><th class="n">Incentivo</th></tr></thead>
     <tbody>${ejs.map(({ e, t, c }) => `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td>
-      <td class="n num">${pc(t.cob)}${barra(t.cob)}</td><td class="n num">${pc(t.pcon)}${barra(t.pcon)}</td><td class="n num">${pc(t.perr)}${barra(t.perr)}</td>
+      <td class="n num">${pc(t.cob)}${barra(t.cob, t)}</td><td class="n num">${pc(t.pcon)}${barra(t.pcon)}</td><td class="n num">${pc(t.perr)}${barra(t.perr)}</td>
       <td class="n num">${c ? numPE(c.reactivados_lista) : "—"}</td><td class="n num">${c ? pctC(c.incentivo_pct) : "—"}</td></tr>`).join("")}</tbody></table></div>`;
   // distritos con más comercios asignados
   const m = {}; const g = k => m[k] ||= { asig:0, vis:new Set(), reg:0, con:0, err:0 };
@@ -2699,6 +2704,11 @@ const minDia = d => { const [h, m] = hh(d).split(":"); return (Number(h) % 24) *
 const franjaDe = v => FRANJAS.findIndex(f => minDia(v.visitado_en) >= f[2] && minDia(v.visitado_en) < f[3]);
 const claveRes = v => v.con === "Nadie" ? (v.motivo === "Dirección errada" ? "nohall" : "sin") : v.decision === "Realizará consumos" ? "exito" : (v.decision === "Aún no decide" || v.que === "Reagendada") ? "proceso" : "noex";
 const COL_RES = { exito:["#0BBC96","Realizará consumos"], proceso:["#3B43FB","Aún no decide o reagendada"], noex:["#F86F35","Desiste o sin éxito"], nohall:["#B7791F","Dirección errada"], sin:["#7d89a3","No se pudo hacer la visita"] };
+// Comercios de la base asignada que todavía no tienen una visita válida con ubicación (puntos grises del mapa de calor); sale del punto del comercio en la base.
+function porVisitarMapa(){
+  const vis = new Set(S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo).map(v => v.customer_id));
+  return S.base.filter(c => c.correo && c.geo_lat != null && c.geo_lng != null && (!S.hayOrigen || c.origen === "base_nueva") && !vis.has(c.customer_id) && (!S.mEj || S.mEj === "todos" || c.correo === S.mEj));
+}
 function puntosMapa(){
   const r = rangoMapa(), fr = S.mFr !== undefined && S.mFr !== "" ? FRANJAS[S.mFr] : null;
   return S.act.filter(v => {
@@ -2708,8 +2718,9 @@ function puntosMapa(){
     return true; });
 }
 const puntoColor = v => S.mColor === "hora" ? (FRANJAS[franjaDe(v)] || [0, 0, 0, 0, "#7d89a3"])[4] : S.mColor === "res" ? COL_RES[claveRes(v)][0] : colorCss(ejDe(v.correo).color);
+const LEY_PEND = () => S.mPend !== false ? `<span><i style="background:#9aa3b8;border-radius:50%"></i>comercio por visitar</span>` : "";
 function leyendaPuntos(){
-  if (S.mPuntos === false) return "";
+  if (S.mPuntos === false) return LEY_PEND();
   if (S.mColor === "hora") return FRANJAS.map(f => `<span><i style="background:${f[4]};border-radius:50%"></i>${f[0]} · ${f[1]}</span>`).join("");
   if (S.mColor === "res") return Object.values(COL_RES).map(c => `<span><i style="background:${c[0]};border-radius:50%"></i>${c[1]}</span>`).join("");
   return `<span><i class="pto"></i>visita (color del ejecutivo)</span>`;
@@ -2789,6 +2800,7 @@ function vistaMapaCuerpo(){
         <select class="sel" id="mDia" aria-label="Día"><option value="">Todos los días</option>${[...new Set(S.act.filter(v => v.lat != null && v.estado_anul !== "anulada").map(v => iso(v.visitado_en)))].sort().map(d => `<option value="${d}" ${S.mDia === d ? "selected" : ""}>${fISO(d)}</option>`).join("")}</select>
         <select class="sel" id="mFr" aria-label="Franja horaria"><option value="">Todo el día</option>${FRANJAS.map((f, i) => `<option value="${i}" ${S.mFr === String(i) ? "selected" : ""}>${f[0]} · ${f[1]}</option>`).join("")}</select>
         <label class="lbl"><input type="checkbox" id="mPuntos" ${S.mPuntos !== false ? "checked" : ""}> Puntos de visita</label>
+        <label class="lbl"><input type="checkbox" id="mPend" ${S.mPend !== false ? "checked" : ""}> Por visitar (${porVisitarMapa().length})</label>
       </div>
     </div>
     <div class="mapa-dist-wrap">
@@ -2838,6 +2850,10 @@ function montarMapaDistritos(el){
   capas.filter(x => x[3]).forEach(([g, capa, o]) => { if (S.mDist === g.clave) capa.bringToFront();
     const c = capa.getBounds().getCenter(); const v = valorMet(o, k === "ej" ? "cob" : k);
     etqs.push([capa, L.marker(c, { interactive:false, keyboard:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<b>${esc(g.nombre)}</b><span>${fmtMet(v, k === "ej" ? "cob" : k)}</span>` }) }).addTo(m)]); });
+  if (S.mPend !== false){
+    porVisitarMapa().forEach(c => { L.circleMarker([c.geo_lat, c.geo_lng], { radius:3, color:"transparent", weight:0, fillColor:"#9aa3b8", fillOpacity:.75, interactive:true })
+      .bindTooltip(`<b>${esc(c.nombre_comercial || c.razon_social)}</b><br>${esc(nombreCorto((ejDe(c.correo) || {}).nombre))} · por visitar${c.distrito ? " · " + esc(c.distrito) : ""}`, { className:"etq-mapa", direction:"top", offset:[0,-3] }).addTo(m); });
+  }
   if (S.mPuntos !== false){
     puntosMapa().forEach(v => { const d = iso(v.visitado_en);
       L.circleMarker([v.lat, v.lng], { radius:4, color:borde, weight:1.5, fillColor:puntoColor(v), fillOpacity:1 })
@@ -3559,6 +3575,7 @@ document.addEventListener("change", ev => {
   if (t.id === "pqSemana"){ S.pqSemana = t.value; pintar(); }
   if (t.id === "mRango"){ S.mRango = t.value; pintar(); }
   if (t.id === "mPuntos"){ S.mPuntos = t.checked; pintar(); }
+  if (t.id === "mPend"){ S.mPend = t.checked; pintar(); }
   if (t.id === "mColor"){ S.mColor = t.value; pintar(); }
   if (t.id === "mDia"){ S.mDia = t.value; pintar(); }
   if (t.id === "mFr"){ S.mFr = t.value; pintar(); }
