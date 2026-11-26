@@ -544,6 +544,9 @@ table.datos tr.on td{background:var(--azul-t)}
 .cab-kpis .ck span{font-size:12px;opacity:.78}
 .cab-kpis .ck.or b{color:var(--naranja)}.cab-kpis .ck.vd b{color:var(--verde)}
 .cab-kpis .ck-per{margin-left:auto;font-size:12px;opacity:.7}
+.cab-kpis .ck-sel{margin-left:auto;display:flex;gap:4px;background:rgba(255,255,255,.1);border-radius:10px;padding:3px;flex-wrap:wrap}
+.cab-kpis .ck-sel .chip{background:none;border:0;color:#fff;opacity:.75;padding:5px 10px;border-radius:8px;font-weight:700;font-size:12.5px}
+.cab-kpis .ck-sel .chip.on{background:#fff;color:var(--navy);opacity:1}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -559,7 +562,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "f662e7";
+const BUILD = "62635d";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -963,10 +966,15 @@ function pintarNav(){
 // Franja de cifras del periodo en curso (prototipo 4.0): las mismas medidas del Directorio, sin números nuevos.
 function cabKpis(){
   const k = $("#cabKpis"); if (!k) return;
-  if (!S.periodo || !S.base.length){ k.innerHTML = ""; return; }
-  let T; try { T = statsDir({ act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen }); } catch(e){ k.innerHTML = ""; return; }
+  if (!S.periodo){ k.innerHTML = ""; return; }
+  cargarPeriodos();
+  const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo.id;
+  const per = L.find(p => p.id === S.dirPer) || L.find(p => p.id === cur) || { id:cur };
+  let T = null; try { const d = datosPeriodo(per); if (d && !d.cargando && !d.err && d.act) T = statsDir(d); } catch(e){}
   const it = (n, t, cls) => `<div class="ck ${cls || ""}"><b class="num">${n}</b><span>${t}</span></div>`;
-  k.innerHTML = it(T.asig, "cartera asignada") + it(T.vis, "visitados únicos", "or") + it(T.reg, "visitas realizadas", "vd") + it(T.con, "con contacto") + it("—", "reactivados BBVA · sin corte") + `<span class="ck-per">Periodo ${esc(S.periodo.id)}</span>`;
+  // el selector manda sobre Directorio, Mapa de calor y Ubicación (cada una guardaba su periodo; ahora se cambian juntos)
+  const sel = L.length > 1 ? `<div class="ck-sel" role="group" aria-label="Periodo">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" data-mper="${esc(p.id)}" data-uper="${esc(p.id)}" aria-pressed="${p.id === per.id}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`).join("")}</div>` : `<span class="ck-per">Periodo ${esc(per.id)}</span>`;
+  k.innerHTML = it(T ? T.asig : "…", "cartera asignada") + it(T ? T.vis : "…", "visitados únicos", "or") + it(T ? T.reg : "…", "visitas realizadas", "vd") + it(T ? T.con : "…", "con contacto") + it("—", "reactivados BBVA · sin corte") + sel;
 }
 function pintar(){
   const app = $("#app");
@@ -1355,8 +1363,7 @@ const NIVEL_TXT = { alta:["Alta", "n-alta"], media:["Media", "n-media"], info:["
 function vistaUbicacion(){
   cargarPeriodos(); cargarDomicilios();
   const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo && S.periodo.id, sel = L.find(p => p.id === S.uPer) || null;
-  const chips = L.length > 1 ? `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => { const on = sel ? p.id === sel.id : p.id === cur;
-    return `<button class="chip ${on ? "on" : ""}" data-uper="${esc(p.id)}" aria-pressed="${on}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`; }).join("")}</div>` : "";
+  const chips = "";   // el selector de periodo vive en la franja de arriba
   if (sel && sel.id !== cur){ const d = datosPeriodo(sel);
     if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(sel.id)}…</div></div>`;
     if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-uper="${esc(sel.id)}" style="margin-top:10px">Reintentar</button></div></div>`; }
@@ -1520,7 +1527,7 @@ function vistaDirectorio(){
   const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO());
   if (!L.length) return `<div class="panel"><div class="vacio">Leyendo los periodos…</div></div>`;
   const per = L.find(p => p.id === S.dirPer) || L.find(p => S.periodo && p.id === S.periodo.id) || L[L.length - 1];
-  const chips = `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" aria-pressed="${p.id === per.id}">${esc(p.id)}${S.periodo && p.id === S.periodo.id ? " · en curso" : ""}</button>`).join("")}</div>`;
+  const chips = "";
   const d = datosPeriodo(per);
   if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(per.id)}…</div></div>`;
   if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-dirper="${esc(per.id)}" style="margin-top:10px">Reintentar</button></div></div>`;
@@ -2609,8 +2616,7 @@ function conPeriodoId(id, fn){
 function vistaMapa(){
   cargarPeriodos();
   const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo && S.periodo.id, sel = L.find(p => p.id === S.mPer) || null;
-  const chips = L.length > 1 ? `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => { const on = sel ? p.id === sel.id : p.id === cur;
-    return `<button class="chip ${on ? "on" : ""}" data-mper="${esc(p.id)}" aria-pressed="${on}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`; }).join("")}</div>` : "";
+  const chips = "";
   if (sel && sel.id !== cur){ const d = datosPeriodo(sel);
     if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(sel.id)}…</div></div>`;
     if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-mper="${esc(sel.id)}" style="margin-top:10px">Reintentar</button></div></div>`; }
@@ -3448,7 +3454,7 @@ document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && S.accion){ S.accion = null; pintar(); }
 });
 
-document.addEventListener("click", ev => { const m = ev.target.closest("[data-mper]"); if (m){ const id = m.dataset.mper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.mPer = id; S.mDist = null; S.mVista = null; S.mEnfocar = null; S.mDia = ""; S.mFr = ""; if (S.periodo && id !== S.periodo.id) S.mRango = "periodo"; pintar(); return; }
+document.addEventListener("click", ev => { const m = ev.target.closest("[data-mper]"); if (m){ const id = m.dataset.mper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.mPer = id; S.dirPer = id; S.mDist = null; S.mVista = null; S.mEnfocar = null; S.mDia = ""; S.mFr = ""; if (S.periodo && id !== S.periodo.id) S.mRango = "periodo"; pintar(); return; }
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
