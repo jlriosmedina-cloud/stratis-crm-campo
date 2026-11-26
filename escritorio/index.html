@@ -532,6 +532,9 @@ table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 .dom-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;padding:12px;border-top:1px solid var(--linea)}
 .dom-form input,.dom-form select{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;background:var(--tarjeta);color:var(--ink);font:inherit}
 table.datos tr.on td{background:var(--azul-t)}
+.mas{position:relative}.mas summary{list-style:none;cursor:pointer}.mas summary::-webkit-details-marker{display:none}
+.mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
+.mas-menu .btn{width:100%;text-align:left}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -547,7 +550,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "adc8f1";
+const BUILD = "f38d19";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -637,7 +640,7 @@ const mailO = t => !t || t === "-" ? "Sin correo" : S.ver ? esc(t) : esc(String(
 
 /* ---------- estado ---------- */
 const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, error:"",
-  vista:"validacion", filtro:"todos", ej:"todos", ver:false, verCel:null, dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
+  vista:"directorio", filtro:"todos", ej:"todos", ver:false, verCel:null, dia:"hoy", soloSenal:false, sel:null, marcadas:new Set(), accion:null, ocupado:false,
   act:[], actEn:null, base:[], baseMap:{}, docMap:{}, ejecutivos:[], bit:{}, trx:{}, nuevas:new Set(), pausa:false, ultimaRecep:null,
   tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"", retenidas:[] };
 
@@ -924,23 +927,25 @@ async function accion(id, tipo, motivo, nota){
    Pintado
    ========================================================================= */
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
+// Orden del prototipo 4.0: primero la supervisión (Directorio, Equipo, Mapa de calor, Cartera, Actividad, Ubicación, Cierres) y, aparte, las herramientas de gestión.
 const VISTAS = [
   ["directorio","Directorio", ICON.ind, null],
-  ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
-  ["bloques","Base y bloques", ICON.bloques, null],
-  ["rutas","Rutas", ICON.ruta, null],
-  ["equipo","Por ejecutivo", ICON.equipo, null],
-  ["mapa","Mapa de distritos", ICON.mapa, null],
+  ["equipo","Equipo", ICON.equipo, null],
+  ["mapa","Mapa de calor", ICON.mapa, null],
+  ["bloques","Cartera", ICON.bloques, null],
+  ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["ubicacion","Ubicación", ICON.mapa, null],
+  ["cierres","Cierres", ICON.cierre, null],
+  ["--","Herramientas"],
+  ["rutas","Rutas", ICON.ruta, null],
   ["feedback","Feedback", ICON.fb, null],
   ["porque","Por qué sí / no", ICON.pq, null],
-  ["auditoria","Auditoría", ICON.aud, null],
-  ["cargas","Cargas", ICON.carga, null],
   ["indicadores","Indicadores", ICON.ind, null],
-  ["cierres","Cierres de periodo", ICON.cierre, null],
+  ["cargas","Cargas", ICON.carga, null],
+  ["auditoria","Auditoría", ICON.aud, null],
 ];
 function pintarNav(){
-  $("#nav").innerHTML = `<div class="sec">Mi trabajo</div>` + VISTAS.map(([k,t,i,c]) => `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
+  $("#nav").innerHTML = VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
   const p = S.periodo;
   $("#pieRail").innerHTML = p ? `<b>Periodo ${esc(p.id)} · ${fISO(p.ini)} – ${fISO(p.fin)}</b>${S.base.length} comercios · ${S.ejecutivos.length} ejecutivos · build ${BUILD}` : `<b>Sin periodo abierto</b>build ${BUILD}`;
 }
@@ -1013,8 +1018,9 @@ function cascaron(){
         <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
         <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hojas Resumen y Base, modelo Gestión Stratis de 55 columnas (una fila por comercio de la base nueva; llave: Documento)">Base para BBVA</button>
-        <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
-        <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button>
+        <details class="mas"><summary class="btn" title="Presentación y reporte para BBVA y el directorio">Reportes ▾</summary><div class="mas-menu">
+          <button class="btn" data-ppt-bbva title="PowerPoint semanal para BBVA y Mastercard, con los datos al corte que elijas">Presentación BBVA</button>
+          <button class="btn" data-reporte-dir title="Hoja A4 en PDF para el directorio, con las mismas cifras de la presentación">Reporte directorio</button></div></details>
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
