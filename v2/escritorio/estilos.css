@@ -225,7 +225,7 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .leyenda-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .leyenda-ej i.meta{width:16px;height:0;border-top:2px dashed var(--naranja);border-radius:0;vertical-align:3px}
 .leyenda-ej span:first-child{color:var(--naranja);font-weight:700}
-.graf-ej{display:block}
+.graf-ej{display:block;width:100%;max-width:1100px;height:auto;margin:0 auto}
 .graf-ej:hover g.b path{opacity:.4} .graf-ej g.b:hover path{opacity:1} .graf-ej g.b path{transition:opacity .12s}
 @media (prefers-reduced-motion: reduce){.graf-ej g.b path{transition:none}}
 table.matriz th.dia,table.matriz td.dia{text-align:center;padding:6px 3px;min-width:46px}
@@ -328,16 +328,16 @@ table.datos tr.err td{background:var(--rojo-t)}
 .ver-mas{font-size:12px;color:var(--muted);padding:8px 12px;text-align:center}
 /*@@BLOQUE@@*/table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }
 /* ---------- Mapa de distritos ---------- */
-.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 390px;min-height:600px}
+.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:300px}
 .mapa-dist-col{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--linea)}
-.mapa-dist{height:600px;width:100%;background:var(--suelo)}
+.mapa-dist{height:clamp(280px,40vh,360px);width:100%;background:var(--suelo)}   /* un solo alto para todos los mapas del escritorio */
 :root[data-theme="dark"] .mapa-dist .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9)}
 .md-leyenda{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-top:1px solid var(--linea);font-size:12px}
 .md-leyenda b{color:var(--ink)}
 .md-leyenda .leyenda-ej span:first-child{color:inherit;font-weight:400}
 .md-leyenda .leyenda-ej i{width:14px;height:10px;border-radius:2px}
 .md-leyenda .leyenda-ej i.pto{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 1.5px var(--tarjeta)}
-.md-lado{min-width:0;display:flex;flex-direction:column;max-height:690px;overflow:auto}
+.md-lado{min-width:0;display:flex;flex-direction:column;max-height:clamp(280px,40vh,360px);overflow:auto}
 .md-cuerpo{padding:12px;display:flex;flex-direction:column;gap:10px}
 .md-cuerpo h3{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
 .md-ej{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ink)}
@@ -522,3 +522,84 @@ table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 .dom-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;padding:12px;border-top:1px solid var(--linea)}
 .dom-form input,.dom-form select{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;background:var(--tarjeta);color:var(--ink);font:inherit}
 table.datos tr.on td{background:var(--azul-t)}
+.mas{position:relative}.mas summary{list-style:none;cursor:pointer}.mas summary::-webkit-details-marker{display:none}
+.mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
+.mas-menu .btn{width:100%;text-align:left}
+/* franja de cifras del periodo (prototipo 4.0) */
+.cab-kpis{display:flex;align-items:flex-end;gap:0;background:var(--navy);color:#fff;padding:10px 22px 12px;flex-wrap:wrap;row-gap:8px}
+.cab-kpis:empty{display:none}
+.cab-kpis .ck{display:flex;flex-direction:column;padding:0 22px;border-left:1px solid rgba(255,255,255,.14)}
+.cab-kpis .ck:first-child{border-left:0;padding-left:0}
+.cab-kpis .ck b{font-size:24px;line-height:1.1;font-weight:800}
+.cab-kpis .ck span{font-size:12px;opacity:.78}
+.cab-kpis .ck.or b{color:var(--naranja)}.cab-kpis .ck.vd b{color:var(--verde)}
+.cab-kpis .ck-per{margin-left:auto;font-size:12px;opacity:.7}
+.cab-kpis .ck-sel .chip{background:none;border:0;color:#fff;opacity:.75;padding:5px 10px;border-radius:8px;font-weight:700;font-size:12.5px}
+.cab-kpis .ck-sel .chip.on{background:#fff;color:var(--navy);opacity:1}
+/* Tiempos y Reporte (prototipo 4.0) */
+.tiempos td .cel{display:grid;place-items:center;min-width:30px;height:30px;border-radius:8px;font-weight:700;background:color-mix(in srgb,var(--azul) calc(var(--i,0)*100%),var(--hover));color:var(--ink)}
+.tiempos td .cel:empty{background:var(--hover)}
+.franja{display:grid;grid-template-columns:200px 1fr 90px;gap:12px;align-items:center;margin:8px 0}
+.fbar{display:flex;height:30px;border-radius:8px;overflow:hidden;background:var(--hover)}
+.fbar i{display:grid;place-items:center;color:#fff;font-style:normal;font-weight:700;font-size:12px}
+@media (max-width:900px){.franja{grid-template-columns:1fr}}
+/* encabezado más limpio (prototipo 4.0): sin subtítulo y en menos filas */
+.top{padding:8px 22px;gap:10px}
+.top .sub{display:none}
+.top .der{gap:8px}
+.top .btn{padding:6px 10px}
+.barrita{position:relative}
+.barrita .esp{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
+/* Mapa único (26/11): mapa a la izquierda y panel a la derecha; con el menú lateral, debajo de 1240 px de pantalla pasa a una sola columna */
+.mu-barra{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;margin-bottom:12px}
+.mu-g{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.mu-g>small{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-right:2px}
+.mu-g .chip i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.mu-g .tog{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;cursor:pointer}
+.gris{width:10px;height:10px;border-radius:50%;background:#9aa3b8;display:inline-block}
+.mu-main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(380px,1fr);gap:14px;margin-bottom:6px;align-items:start}
+.mu-mapa-card{display:flex;flex-direction:column;margin:0;position:sticky;top:0}   /* el mapa acompaña mientras se recorre el cuadro de la derecha */
+.mu-ley{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 12px;border-top:1px solid var(--linea);font-size:12px}
+.mu-ley span{display:inline-flex;align-items:center;gap:6px}.mu-ley i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.mu-ley i.pto{background:var(--azul);border:2px solid #fff;box-shadow:0 0 0 1px var(--azul)}.mu-ley i.aro{border:2px solid #D6455D;background:none}
+.mu-panel{display:flex;flex-direction:column;margin:0}   /* el cuadro sale completo: sin tope de alto ni scroll interno */
+.mu-mapa-card #mapaUnico{height:clamp(420px,64vh,620px)}
+.mu-tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--linea);overflow:auto;flex:none}
+.mu-tabs .tab{border:0;background:none;padding:8px 11px;font-weight:700;font-size:12.5px;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.mu-tabs .tab.on{color:var(--azul-txt);border-color:var(--azul)}
+.mu-tabs .tab em{font-style:normal;background:var(--hover);border-radius:99px;padding:1px 7px;font-size:11px;margin-left:5px;color:var(--texto)}
+.mu-tabs .tab.al em{background:rgba(214,69,93,.16);color:var(--rojo-txt,#d6455d)}
+.mu-cuerpo{overflow:visible}
+
+.mu-sub{padding:8px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--linea);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mu-f{cursor:pointer}.mu-f:hover{background:var(--hover)}.mu-f.on{background:rgba(59,67,251,.1)}
+.mu-rombo{width:14px;height:14px;background:#fff;border:3px solid var(--ink);transform:rotate(45deg)}
+.mu-det{margin:0 0 12px;border:1px solid var(--linea);border-radius:12px;background:var(--tarjeta)}
+.mu-det>summary{padding:11px 14px;font-weight:700;cursor:pointer}.mu-det>summary small{font-weight:600;color:var(--muted);margin-left:6px}
+.mu-det[open]>summary{border-bottom:1px solid var(--linea)}.mu-det>.panel{border:0;margin:0}
+@media (max-width:1240px){.mu-main{grid-template-columns:1fr}.mu-mapa-card{position:static}}
+.mu-cuerpo .datos th,.mu-cuerpo .datos td{padding-left:7px;padding-right:7px}
+.mu-cuerpo .datos th{letter-spacing:.04em;font-size:10px}
+.mu-cuerpo .datos .barrita{min-width:50px}
+.negro{width:10px;height:10px;border-radius:50%;background:#0B0F26;border:1px solid #fff;box-shadow:0 0 0 1px #0B0F26;display:inline-block}
+:root[data-theme="dark"] .negro{background:#fff;border-color:#0B0F26;box-shadow:0 0 0 1px #fff}
+.cab-kpis .ck-sel{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;opacity:.95;background:none;padding:0}
+.cab-kpis .ck-sel select{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:9px;padding:6px 10px;font-weight:700}
+.cab-kpis .ck-sel select option{color:#1b2340}
+.graf-acu{display:block;width:100%;max-width:1000px;height:auto;margin:0 auto}
+/* Tiempos: mapa de calor más ordenado */
+.tiempos{table-layout:fixed}
+.tiempos th,.tiempos td{padding:6px 4px}
+.tiempos th.n{text-align:center;font-size:10px;letter-spacing:.02em}
+.tiempos td.n{text-align:center}
+.tiempos th:first-child,.tiempos td:first-child{width:170px;text-align:left}
+.tiempos td .cel{display:grid;place-items:center;width:100%;min-width:0;height:34px;border-radius:8px;font-weight:700}
+/* Chips por ejecutivo bajo el gráfico de avance acumulado (26/11) */
+.acu-fila{display:flex;gap:24px;align-items:flex-start;padding:10px 18px 16px}
+.acu-graf{flex:0 1 700px;min-width:0}
+.acu-ej{flex:1 1 220px;max-width:300px;display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--texto);padding-top:6px}
+.acu-tit{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.chip-ej{display:block}
+.chip-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+.chip-ej small{margin-left:4px;font-weight:600}.chip-ej small.ok{color:var(--verde-txt)}.chip-ej small.mal{color:var(--rojo-txt)}
+.graf-acu{max-width:700px}
+.acu-pie{padding:8px 16px 0;font-size:13px;color:var(--texto)}

@@ -625,7 +625,7 @@ await prueba('Avance acumulado contra lo esperado en Equipo y en Resumen (26/11)
   if (process.env.CAPTURAS) await p.screenshot({ path: path.join(process.env.CAPTURAS, 'equipo.png') });
   assert.equal(await p.locator('.graf-acu').count(), 1, 'falta el gráfico de avance acumulado en Equipo');
   assert.ok(await p.locator('.graf-acu path[stroke="var(--naranja)"]').count() >= 1, 'falta la línea de lo esperado');
-  const g = await p.evaluate(() => { const e = document.querySelector('.graf-acu').getBoundingClientRect(); return { h: Math.round(e.height), w: Math.round(e.width) }; }); assert.ok(g.h <= 300 && g.w <= 1000, 'el gráfico acumulado es muy grande: ' + JSON.stringify(g));
+  const g = await p.evaluate(() => { const e = document.querySelector('.graf-acu').getBoundingClientRect(); return { h: Math.round(e.height), w: Math.round(e.width) }; }); assert.ok(g.h <= 350 && g.w <= 720, 'el gráfico acumulado es muy grande: ' + JSON.stringify(g));
   await p.evaluate(() => { S.vista = 'resumen'; pintar(); }); await p.waitForTimeout(400);
   assert.ok(await p.locator('#contenido .barrita u').count() >= 1, 'falta la marca de lo esperado en el Resumen');
   assert.match(await p.locator('#contenido').innerText(), /esperado \d+/);

@@ -603,6 +603,16 @@ table.datos tr.on td{background:var(--azul-t)}
 .tiempos td.n{text-align:center}
 .tiempos th:first-child,.tiempos td:first-child{width:170px;text-align:left}
 .tiempos td .cel{display:grid;place-items:center;width:100%;min-width:0;height:34px;border-radius:8px;font-weight:700}
+/* Chips por ejecutivo bajo el gráfico de avance acumulado (26/11) */
+.acu-fila{display:flex;gap:24px;align-items:flex-start;padding:10px 18px 16px}
+.acu-graf{flex:0 1 700px;min-width:0}
+.acu-ej{flex:1 1 220px;max-width:300px;display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--texto);padding-top:6px}
+.acu-tit{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.chip-ej{display:block}
+.chip-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+.chip-ej small{margin-left:4px;font-weight:600}.chip-ej small.ok{color:var(--verde-txt)}.chip-ej small.mal{color:var(--rojo-txt)}
+.graf-acu{max-width:700px}
+.acu-pie{padding:8px 16px 0;font-size:13px;color:var(--texto)}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -618,7 +628,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "0686ab";
+const BUILD = "56cdf2";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1645,18 +1655,27 @@ function esperadoA(metaEj, iso0){
   return Math.min(metaEj, metaEj * n / H.total);
 }
 function graficoAcumulado(filas, metaEj){
+  // Estilo de la presentación semanal: por día hábil, barras del acumulado del equipo (azul) y de los comercios nuevos del día (naranja),
+  // y la línea de lo esperado (meta del equipo repartida por día hábil). Las barras llegan hasta hoy; la línea, hasta el cierre del periodo.
   const p = S.periodo; if (!p) return "";
-  const dias = [], hab = [], Ht = habiles().total; { const d = new Date(p.ini + "T12:00:00Z"); let n = 0; while (d.toISOString().slice(0, 10) <= p.fin && dias.length < 70){ const s2 = d.toISOString().slice(0, 10), dow = d.getUTCDay(); if (dow >= 1 && dow <= 5 && !FERIADOS.includes(s2)) n++; dias.push(s2); hab.push(n); d.setUTCDate(d.getUTCDate() + 1); } }
-  const hoy = hoyISO(), W = 1000, Hc = 250, pl = 38, pr = 16, pt = 14, pb = 30, ymax = Math.ceil(metaEj * 1.08 / 20) * 20;
-  const x = i => pl + (W - pl - pr) * (dias.length > 1 ? i / (dias.length - 1) : 0), y = v => pt + (Hc - pt - pb) * (1 - v / ymax);
-  const rej = [0, .25, .5, .75, 1].map(f => { const v = Math.round(metaEj * f); return `<line x1="${pl}" y1="${y(v).toFixed(1)}" x2="${W - pr}" y2="${y(v).toFixed(1)}" stroke="var(--linea)" stroke-dasharray="2 4"/><text x="${pl - 6}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${v}</text>`; }).join("");
-  const ej = dias.map((d, i) => `${i % 7 === 0 || d === p.fin ? `<text x="${x(i).toFixed(1)}" y="${Hc - 10}" text-anchor="middle" font-size="10" fill="var(--muted)">${fISO(d)}</text>` : ""}`).join("");
-  const esp = dias.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(Ht ? Math.min(metaEj, metaEj * hab[i] / Ht) : 0).toFixed(1)}`).join(" ");
-  const lineas = filas.map(f => { let acu = 0; const pts = []; dias.forEach((d, i) => { if (d > hoy) return; const o = f.porDia[d]; acu += o ? o.nuevas : 0; pts.push([x(i), y(acu), acu]); });
-    const last = pts[pts.length - 1]; if (!last) return "";
-    return `<path d="${pts.map((q, i) => (i ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="none" stroke="${f.e.color}" stroke-width="2.4" stroke-linejoin="round"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="${f.e.color}" stroke="var(--tarjeta)" stroke-width="1.5"><title>${esc(f.e.nombre)}: ${last[2]} comercios nuevos</title></circle>`; }).join("");
+  const todos = []; { const d = new Date(p.ini + "T12:00:00Z"); while (d.toISOString().slice(0, 10) <= p.fin && todos.length < 40){ const s2 = d.toISOString().slice(0, 10), dow = d.getUTCDay(); if (dow >= 1 && dow <= 5 && !FERIADOS.includes(s2)) todos.push(s2); d.setUTCDate(d.getUTCDate() + 1); } }
+  const Ht = todos.length, hoy = hoyISO(), dias = todos.filter(d => d <= hoy), N = dias.length; if (!N) return "";
+  const metaT = metaEj * filas.length, espDe = i => metaT * (i + 1) / Ht;
+  const acuHasta = iso0 => filas.reduce((t, f) => t + Object.keys(f.porDia).filter(k => k <= iso0).reduce((u, k) => u + f.porDia[k].nuevas, 0), 0);
+  const acu = dias.map((d, i) => acuHasta(i === N - 1 ? (hoy < p.fin ? hoy : p.fin) : d)), nue = dias.map((d, i) => acu[i] - (i ? acu[i - 1] : 0)), pasado = dias.map(d => d <= hoy);
+  const W = 700, Hc = 340, pl = 40, pr = 16, pt = 28, pb = 44, tope = Math.max(...acu, espDe(N - 1)) * 1.18, unidad = tope > 300 ? 50 : tope > 120 ? 20 : 10, ymax = Math.max(unidad * 2, Math.ceil(tope / unidad) * unidad);
+  const gw = (W - pl - pr) / N, bw = Math.max(5, Math.min(28, gw * .36)), y = v => pt + (Hc - pt - pb) * (1 - v / ymax), cx = i => pl + gw * i + gw / 2;
+  const paso = ymax > 300 ? 100 : ymax > 120 ? 50 : ymax > 60 ? 20 : 10, ticks = []; for (let t = 0; t <= ymax; t += paso) ticks.push(t);
+  const rej = ticks.map(t => `<line x1="${pl}" y1="${y(t).toFixed(1)}" x2="${W - pr}" y2="${y(t).toFixed(1)}" stroke="var(--linea)" ${t ? 'stroke-dasharray="2 4"' : ""}/><text x="${pl - 8}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${t}</text>`).join("");
+  const etiq = gw >= 28;
+  const barras = dias.map((d, i) => { const x1 = cx(i) - bw - 1, x2 = cx(i) + 1, tip = `${fISO(d)}: acumulado ${acu[i]} · nuevos del día ${nue[i]} · esperado ${Math.round(espDe(i))}`;
+    return `<g><title>${esc(tip)}</title><rect x="${x1.toFixed(1)}" y="${y(acu[i]).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, y(0) - y(acu[i])).toFixed(1)}" rx="3" fill="var(--navy-2)"/>`
+      + (nue[i] ? `<rect x="${x2.toFixed(1)}" y="${y(nue[i]).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(2, y(0) - y(nue[i])).toFixed(1)}" rx="3" fill="var(--naranja)"/>` : "")
+      + (etiq ? `<text x="${(x1 + bw / 2).toFixed(1)}" y="${(y(acu[i]) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)">${acu[i]}</text>` + (nue[i] ? `<text x="${(x2 + bw / 2).toFixed(1)}" y="${(y(nue[i]) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--naranja)">${nue[i]}</text>` : "") : "") + `</g>`; }).join("");
+  const ejeX = dias.map((d, i) => `<text x="${cx(i).toFixed(1)}" y="${Hc - 22}" text-anchor="middle" font-size="11" fill="${d === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d === hoy ? 700 : 400}">${fISO(d)}</text>`).join("");
+  const lin = dias.map((d, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${y(espDe(i)).toFixed(1)}`).join(" ");
   const hi = dias.indexOf(hoy);
-  return `<svg class="graf-acu" viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios nuevos acumulados por ejecutivo contra lo esperado">${rej}${ej}${hi >= 0 ? `<line x1="${x(hi).toFixed(1)}" y1="${pt}" x2="${x(hi).toFixed(1)}" y2="${Hc - pb}" stroke="var(--muted)" stroke-dasharray="3 3"/>` : ""}<path d="${esp}" fill="none" stroke="var(--naranja)" stroke-width="2.4" stroke-dasharray="7 5"/>${lineas}</svg>`;
+  return `<div class="acu-pie">Meta del equipo en el periodo: <b>${metaT}</b> comercios nuevos en ${Ht} días hábiles · van ${N} · quedan ${Ht - N}.</div><svg class="graf-acu" viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios nuevos por día hábil: acumulado del equipo, nuevos del día y lo esperado según la meta">${rej}${ejeX}${hi >= 0 ? `<text x="${cx(hi).toFixed(1)}" y="${Hc - 6}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--naranja)">hoy</text>` : ""}${barras}<path d="${lin}" fill="none" stroke="var(--naranja)" stroke-width="2.4" stroke-dasharray="7 5" stroke-linejoin="round"/><circle cx="${cx(N - 1).toFixed(1)}" cy="${y(espDe(N - 1)).toFixed(1)}" r="4" fill="var(--naranja)"/><text x="${(cx(N - 1) + 10).toFixed(1)}" y="${(y(espDe(N - 1)) - 8).toFixed(1)}" text-anchor="${N > 3 ? "end" : "start"}" font-size="11" font-weight="700" fill="var(--naranja)">esperado ${Math.round(espDe(N - 1))}</text></svg>`;
 }
 function equipoPeriodo(){ return conPeriodoElegido(vistaEquipo); }
 function vistaEquipo(){
@@ -1680,6 +1699,7 @@ function vistaEquipo(){
   const sum = k => filas.reduce((a, f) => a + f[k], 0);
   const T = { com:sum("com"), reg:sum("reg"), rev:filas.reduce((a, f) => a + f.revs.length, 0), avance:sum("avance") };
   const metaEq = metaEj * filas.length, metaDiaEq = metaDia * filas.length;
+  const espHoy = Math.round(esperadoA(metaEj, hoyISO()));
   const ritmoEq = H.hastaHoy ? T.com / H.hastaHoy : 0, necEq = Math.max(0, metaEq - T.com) / Math.max(1, H.total - H.antes);
   const pct = (a, b) => b ? Math.round(a / b * 100) : 0, c1 = x => x.toFixed(1).replace(".", ",");
   const totDia = dias.map(d => filas.reduce((a, f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].nuevas : 0), 0));
@@ -1721,9 +1741,9 @@ function vistaEquipo(){
     <div class="tile"><div class="k">Revisitas</div><div class="v num">${T.rev}</div><div class="d">${T.avance} lograron avance (contacto o decisión)</div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Avance acumulado contra lo esperado</b><span class="lbl">comercios nuevos que lleva cada ejecutivo · la línea naranja punteada es dónde debería ir cada día según la meta de ${metaEj}</span>
-      <div class="der leyenda-ej"><span><i class="meta"></i>esperado a la fecha</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))} · ${f.com}</span>`).join("")}</div></div>
-    <div style="padding:8px 14px 10px">${graficoAcumulado(filas, metaEj)}</div>
+    <div class="barra"><b>Avance acumulado contra lo esperado</b><span class="lbl">comercios nuevos por día hábil · la línea naranja es dónde debería ir el equipo según la meta de ${metaEj} por ejecutivo</span>
+      <div class="der leyenda-ej"><span><i style="background:var(--navy-2)"></i>acumulado del equipo</span><span><i style="background:var(--naranja)"></i>nuevos del día</span><span><i class="meta"></i>esperado</span></div></div>
+    <div class="acu-fila"><div class="acu-graf">${graficoAcumulado(filas, metaEj)}</div><div class="acu-ej"><div class="acu-tit">Cada ejecutivo contra lo esperado a hoy</div>${filas.map(f => { const esp = espHoy, dif = f.com - esp; return `<span class="chip-ej"><i style="background:${f.e.color}"></i><b>${esc(nombreCorto(f.e.nombre))}</b> ${f.com} <small class="${dif >= 0 ? "ok" : "mal"}">${dif >= 0 ? "+" : "−"}${Math.abs(dif)} vs esperado ${esp}</small></span>`; }).join("")}</div></div>
   </div>
   <details class="mu-det"><summary>Comercios nuevos por día y por ejecutivo</summary><div class="panel" style="margin:0">
     <div class="barra"><b>Comercios nuevos por día y por ejecutivo</b><span class="lbl">solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio es nuevo la primera vez que se visita en el periodo · la parte clara de cada barra son las revisitas</span>
