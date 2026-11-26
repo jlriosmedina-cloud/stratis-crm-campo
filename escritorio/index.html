@@ -574,7 +574,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "b70c6a";
+const BUILD = "5ccffe";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1009,13 +1009,13 @@ function pintar(){
   const T = { resumen:["Resumen de gestión","Cartera, visitas y contacto del equipo en el periodo, y cómo va cada ejecutivo."],
               tiempos:["Consulta de tiempos","A qué hora registra visitas cada ejecutivo: por día, acumulado del periodo, por franjas y el detalle de los registros."],
               reporte:["Reporte de gestión del equipo","Resumen del periodo, gestión por ejecutivo con su ventana de trabajo y las franjas del día."],
-              validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
-              bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
+              validacion:["Actividad","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
+              bloques:["Cartera","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
               rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
               directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
-              equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
+              equipo:["Equipo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               ubicacion:["Ubicación y alertas de registro","¿Se registraron las visitas en el comercio? Qué tan lejos quedó cada registro, comercios registrados en el mismo punto, visitas marcadas cerca del domicilio del ejecutivo, y la validación y las anulaciones. Avisa, no bloquea."],
-              mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
+              mapa:["Mapa de calor","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
               porque:["Por qué sí / por qué no","Por qué tenemos éxito en unas visitas y en otras no: el resultado de cada comercio por su última visita, qué convenció a los que dijeron que sí y qué frenó a los demás."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
@@ -3587,7 +3587,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","rutas","equipo","mapa","ubicacion","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","equipo","mapa","ubicacion","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
   if (/type=recovery/.test(location.hash)) S.nuevaClave = {};   // llega por el enlace del correo de recuperación
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
