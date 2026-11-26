@@ -554,6 +554,11 @@ table.datos tr.on td{background:var(--azul-t)}
 .fbar{display:flex;height:30px;border-radius:8px;overflow:hidden;background:var(--hover)}
 .fbar i{display:grid;place-items:center;color:#fff;font-style:normal;font-weight:700;font-size:12px}
 @media (max-width:900px){.franja{grid-template-columns:1fr}}
+/* encabezado más limpio (prototipo 4.0): sin subtítulo y en menos filas */
+.top{padding:8px 22px;gap:10px}
+.top .sub{display:none}
+.top .der{gap:8px}
+.top .btn{padding:6px 10px}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -569,7 +574,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "624f60";
+const BUILD = "9b0b9f";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
