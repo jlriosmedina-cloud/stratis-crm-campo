@@ -515,6 +515,17 @@ table.datos tr.sel td{background:var(--naranja-t)}
 .ci-ok{color:var(--verde-txt);font-weight:800}.ci-dif{color:var(--rojo-txt);font-weight:800}
 .chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
 .ci-ok .sr,.ci-dif .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Equipo (25/11): resumen sin columnas de días, tabla «Por día» en vertical y revisitas; sin scroll hacia la derecha */
+.eq-2{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:start}
+@media (max-width:1100px){.eq-2{grid-template-columns:minmax(0,1fr)}}
+.eq-dias{max-height:460px;overflow:auto}
+table.eq-res th,table.eq-res td{padding-left:6px;padding-right:6px}
+table.matriz td.dia button{width:auto;min-width:46px;height:auto;min-height:32px;padding:3px 6px;line-height:1.15}
+table.matriz td.dia button small.rv,table.matriz td.dia small.rv{display:block;font-size:9.5px;font-weight:600;color:var(--muted)}
+table.matriz td.fecha{white-space:nowrap}
+table.matriz td.fecha.hoy b{color:var(--naranja)} table.matriz td.fecha.finde{opacity:.7}
+table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -530,7 +541,7 @@ table.datos tr.sel td{background:var(--naranja-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "201c5d";
+const BUILD = "219013";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -777,10 +788,10 @@ async function cargarRetenidas(){
 }
 // 10/11/2026: v2_mi_base devuelve ya más de 1.000 filas al analista (1.124 con el bloque 2) y la API corta en 1.000: se pide por
 // tramos (la función va ordenada por customer_id, migración 20261110230000) hasta que un tramo venga incompleto.
-async function leerBasePorTramos(){
+async function leerBasePorTramos(periodo){
   const todo = [];
   for (let i = 0; ; i += 1000){
-    const { data, error } = await sb.rpc("v2_mi_base").range(i, i + 999);
+    const { data, error } = await sb.rpc("v2_mi_base", periodo ? { p_periodo:periodo } : {}).range(i, i + 999);
     if (error) return { data:null, error };
     todo.push(...(data || []));
     if (!data || data.length < 1000) break;
@@ -892,6 +903,7 @@ async function accion(id, tipo, motivo, nota){
    ========================================================================= */
 function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textContent = txt; t.classList.add("on"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("on"), 4200); }
 const VISTAS = [
+  ["directorio","Directorio", ICON.ind, null],
   ["validacion","Visitas", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["bloques","Base y bloques", ICON.bloques, null],
   ["rutas","Rutas", ICON.ruta, null],
@@ -925,6 +937,7 @@ function pintar(){
   const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
               bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
               rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
+              directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
@@ -935,7 +948,7 @@ function pintar(){
               cierres:["Cierres de periodo","Lo que se aprobó y pagó en cada periodo cerrado, congelado como se firmó, en % del sueldo base. Elige un ejecutivo arriba para ver su evolutivo."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
   $("#gEj").innerHTML = `<option value="todos">Equipo completo</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}`;
-  $("#gEj").disabled = S.vista === "cargas"; $("#gEj").title = S.vista === "cargas" ? "Las cargas son de todo el equipo" : "Ver todas las vistas de un ejecutivo o del equipo";
+  $("#gEj").disabled = S.vista === "cargas" || S.vista === "directorio"; $("#gEj").title = S.vista === "cargas" ? "Las cargas son de todo el equipo" : S.vista === "directorio" ? "El directorio es de todo el equipo" : "Ver todas las vistas de un ejecutivo o del equipo";
   $("#btnCel").hidden = S.ej === "todos";
   $("#btnOjo").innerHTML = S.ver ? `${ICON.ojo} Ocultar datos` : `${ICON.ojoNo} Ver datos`;
   $("#btnOjo").setAttribute("aria-pressed", String(S.ver)); $("#btnOjo").classList.toggle("cerrado", !S.ver);
@@ -946,7 +959,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -1212,105 +1225,197 @@ function siguientePendiente(actual){
    1b · Por ejecutivo y día
    ========================================================================= */
 const DOW = ["dom","lun","mar","mié","jue","vie","sáb"];
+// Días hábiles sin trabajo dentro del periodo: no cuentan como hábiles y la meta total no cambia (Jose, 25/11/2026)
+const FERIADOS = ["2026-12-08"];
 function diasPeriodo(){
   const p = S.periodo; if (!p) return [];
   const fin = hoyISO() < p.fin ? hoyISO() : p.fin;
   const out = []; const d = new Date(p.ini + "T12:00:00Z");
-  while (d.toISOString().slice(0,10) <= fin){ const s2 = d.toISOString().slice(0,10), dow = d.getUTCDay(); out.push({ iso:s2, dow, habil: dow >= 1 && dow <= 5 }); d.setUTCDate(d.getUTCDate() + 1); }
+  while (d.toISOString().slice(0,10) <= fin){ const s2 = d.toISOString().slice(0,10), dow = d.getUTCDay(); out.push({ iso:s2, dow, habil: dow >= 1 && dow <= 5 && !FERIADOS.includes(s2) }); d.setUTCDate(d.getUTCDate() + 1); }
   return out.filter(x => x.dow !== 0 || S.act.some(v => iso(v.visitado_en) === x.iso));
 }
 function habiles(){
   const p = S.periodo; if (!p) return { total:0, antes:0, hastaHoy:0 };
   let total = 0, antes = 0, hastaHoy = 0; const hoy = hoyISO(); const d = new Date(p.ini + "T12:00:00Z");
   while (d.toISOString().slice(0,10) <= p.fin){ const s2 = d.toISOString().slice(0,10), dow = d.getUTCDay();
-    if (dow >= 1 && dow <= 5){ total++; if (s2 < hoy) antes++; if (s2 <= hoy) hastaHoy++; } d.setUTCDate(d.getUTCDate() + 1); }
+    if (dow >= 1 && dow <= 5 && !FERIADOS.includes(s2)){ total++; if (s2 < hoy) antes++; if (s2 <= hoy) hastaHoy++; } d.setUTCDate(d.getUTCDate() + 1); }
   return { total, antes, hastaHoy };
 }
+// Nueva = primera visita que cuenta del comercio en el periodo; las siguientes son revisitas: no suman a la meta, pero se registran con su resultado.
+// Solo entran las visitas que cuentan (no anuladas, con ubicación y a tiempo): una primera visita sin ubicación o fuera de plazo no vuelve revisita a la siguiente.
+function marcarRevisitas(act){
+  const rev = new Map(), ant = new Map(), n = {}, ult = {};
+  act.filter(v => v.estado_anul !== "anulada" && v.lat != null && !v.fuera_plazo).sort((a, b) => D(a.visitado_en) - D(b.visitado_en)).forEach(v => {
+    const k = v.correo + "|" + v.customer_id; rev.set(v.id, n[k] || 0); if (n[k]) ant.set(v.id, ult[k]); n[k] = (n[k] || 0) + 1; ult[k] = v; });
+  return { rev, ant };
+}
+// «Avanzó»: pasó de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos»
+const avanceRev = (v, p) => !!p && ((p.con === "Nadie" && v.con !== "Nadie") || (p.decision === "Aún no decide" && v.decision === "Realizará consumos"));
+/* =========================================================================
+   Directorio · vista para directorio: cobertura, contacto y dirección errada, con selector de periodo (P1 a P5).
+   Los periodos cerrados no se tocan: se leen con sus mismas funciones. Reactivados e incentivo solo existen en los cerrados (los informa BBVA).
+   ========================================================================= */
+async function cargarPeriodos(){
+  if (S.periodos || S._perCarg) return; S._perCarg = true;
+  const { data, error } = await sb.from("v2_periodos").select("*").order("ini");
+  S._perCarg = false; S.periodos = error ? [] : (data || []); pintar();
+}
+function datosPeriodo(per){
+  if (S.periodo && per.id === S.periodo.id) return { act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen };
+  S.dirDatos = S.dirDatos || {};
+  if (!S.dirDatos[per.id]){ S.dirDatos[per.id] = { cargando:true }; cargarDatosPeriodo(per); }
+  return S.dirDatos[per.id];
+}
+async function cargarDatosPeriodo(per){
+  const [a, b] = await Promise.all([sb.rpc("v2_actividad", { p_desde:per.ini, p_hasta:per.fin }), leerBasePorTramos(per.id)]);
+  if (a.error || b.error){ S.dirDatos[per.id] = { err:(a.error || b.error).message }; pintar(); return; }
+  const todo = b.data || [], baseMap = {}; todo.forEach(c => { baseMap[c.customer_id] = c; });
+  S.dirDatos[per.id] = { act:a.data || [], base:todo.filter(enCartera), baseMap, hayOrigen:todo.some(c => c.origen) }; pintar();
+}
+function statsDir(d, correo){
+  const sm = cid => { const c = d.baseMap[cid]; return !d.hayOrigen || (!!c && c.origen === "base_nueva"); };
+  const act = d.act.filter(v => v.estado_anul !== "anulada" && (!correo || v.correo === correo));
+  const base = d.base.filter(c => c.correo && (!correo || c.correo === correo) && (!d.hayOrigen || c.origen === "base_nueva"));
+  const asig = base.length, vis = new Set(act.filter(v => v.lat != null && !v.fuera_plazo && sm(v.customer_id)).map(v => v.customer_id)).size;
+  const reg = act.length, con = act.filter(v => v.con !== "Nadie").length, err = act.filter(v => v.con === "Nadie" && v.motivo === "Dirección errada").length;
+  return { asig, vis, reg, con, err, cob: asig ? vis / asig : null, pcon: reg ? con / reg : null, perr: reg ? err / reg : null };
+}
+function vistaDirectorio(){
+  cargarPeriodos(); cargarCierres();
+  const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO());
+  if (!L.length) return `<div class="panel"><div class="vacio">Leyendo los periodos…</div></div>`;
+  const per = L.find(p => p.id === S.dirPer) || L.find(p => S.periodo && p.id === S.periodo.id) || L[L.length - 1];
+  const chips = `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" aria-pressed="${p.id === per.id}">${esc(p.id)}${S.periodo && p.id === S.periodo.id ? " · en curso" : ""}</button>`).join("")}</div>`;
+  const d = datosPeriodo(per);
+  if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(per.id)}…</div></div>`;
+  if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-dirper="${esc(per.id)}" style="margin-top:10px">Reintentar</button></div></div>`;
+  const enCurso = !!(S.periodo && per.id === S.periodo.id), T = statsDir(d);
+  const ci = ((S.cierres && S.cierres.l) || []).filter(r => r.periodo === per.id), cerrado = ci.length > 0;
+  const rea = ci.reduce((n, r) => n + Number(r.reactivados_lista || 0), 0);
+  const ant = L[L.indexOf(per) - 1], da = ant ? datosPeriodo(ant) : null, Ta = da && da.act ? statsDir(da) : null;
+  const pc = x => x == null ? "—" : Math.round(x * 100) + " %", pts = (x, y) => x == null || y == null ? "" : `${x >= y ? "▲" : "▼"} ${Math.abs(Math.round((x - y) * 100))} pts frente a ${esc(ant.id)}`;
+  const tile = (k, v, d2, cls) => `<div class="tile ${cls || ""}"><div class="k">${k}</div><div class="v num">${v}</div><div class="d">${d2}</div></div>`;
+  const kp = `<div class="resumen">
+    ${tile("Cobertura", pc(T.cob), `${T.vis} de ${T.asig} comercios asignados visitados${enCurso ? " · periodo en curso" : ""}`, "acc")}
+    ${tile("Contacto", pc(T.pcon), `${T.con} de ${T.reg} visitas hablaron con el comercio${Ta ? " · " + pts(T.pcon, Ta.pcon) : ""}`)}
+    ${tile("Dirección errada", pc(T.perr), `${T.err} de ${T.reg} visitas no ubicaron el comercio${Ta ? " · " + pts(T.perr, Ta.perr) : ""}`)}
+    ${tile("Reactivados BBVA", cerrado ? numPE(rea) : "—", cerrado ? "reportados por BBVA al cierre del periodo" : "los informa BBVA: se conoce al cierre del periodo")}
+  </div>`;
+  const ejs = S.ejecutivos.map(e => ({ e, t:statsDir(d, e.correo), c:ci.find(r => r.correo === e.correo) }));
+  const barra = x => `<div class="barrita"><i style="width:${Math.round((x || 0) * 100)}%"></i></div>`;
+  const tEj = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Efectividad por ejecutivo</b><span class="lbl">medidas de gestión de cada ejecutivo · los reactivados y el incentivo solo existen en periodos cerrados</span></div>
+    <table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Contacto</th><th class="n">Dirección errada</th><th class="n">Reactivados</th><th class="n">Incentivo</th></tr></thead>
+    <tbody>${ejs.map(({ e, t, c }) => `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td>
+      <td class="n num">${pc(t.cob)}${barra(t.cob)}</td><td class="n num">${pc(t.pcon)}${barra(t.pcon)}</td><td class="n num">${pc(t.perr)}${barra(t.perr)}</td>
+      <td class="n num">${c ? numPE(c.reactivados_lista) : "—"}</td><td class="n num">${c ? pctC(c.incentivo_pct) : "—"}</td></tr>`).join("")}</tbody></table></div>`;
+  // distritos con más comercios asignados
+  const m = {}; const g = k => m[k] ||= { asig:0, vis:new Set(), reg:0, con:0, err:0 };
+  d.base.filter(c => c.correo && (!d.hayOrigen || c.origen === "base_nueva")).forEach(c => { g(c.distrito || "Sin distrito").asig++; });
+  d.act.filter(v => v.estado_anul !== "anulada").forEach(v => { const o = g(v.distrito || "Sin distrito"); o.reg++; if (v.con !== "Nadie") o.con++; if (v.con === "Nadie" && v.motivo === "Dirección errada") o.err++;
+    if (v.lat != null && !v.fuera_plazo && (!d.hayOrigen || (d.baseMap[v.customer_id] || {}).origen === "base_nueva")) o.vis.add(v.customer_id); });
+  const todos = Object.entries(m).sort((a, b) => b[1].asig - a[1].asig), ds = todos.filter(([k, o]) => o.asig >= 10 && k !== "Sin distrito").slice(0, 12);
+  const resto = todos.filter(x => !ds.includes(x)).reduce((r, [, o]) => { r.asig += o.asig; r.reg += o.reg; r.con += o.con; r.err += o.err; o.vis.forEach(c => r.vis.add(c)); return r; }, { asig:0, vis:new Set(), reg:0, con:0, err:0 });
+  if (resto.asig || resto.reg) ds.push(["Otros distritos y sin distrito", resto]);
+  const tDis = `<div class="panel"><div class="barra"><b>Distritos con más comercios asignados</b><span class="lbl">los 12 mayores (10 comercios o más) y el resto sumado en la última fila · el mapa de distritos tiene el detalle de cada uno</span></div>
+    <table class="datos"><thead><tr><th>Distrito</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Contacto</th><th class="n">Dirección errada</th></tr></thead>
+    <tbody>${ds.map(([k, o]) => `<tr><td><b>${esc(k)}</b></td><td class="n num">${o.asig}</td><td class="n num">${o.vis.size}</td><td class="n num">${pc(o.asig ? o.vis.size / o.asig : null)}${barra(o.asig ? o.vis.size / o.asig : 0)}</td>
+      <td class="n num">${pc(o.reg ? o.con / o.reg : null)}</td><td class="n num">${pc(o.reg ? o.err / o.reg : null)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Sin comercios asignados.</td></tr>`}</tbody></table></div>`;
+  return chips + kp + tEj + tDis + `<div class="panel"><div class="atajos">Cobertura = comercios distintos con una visita válida ÷ comercios asignados (en un periodo por bloques, solo la base nueva). Contacto = visitas en que habló con alguien ÷ visitas. Dirección errada = visitas donde no se ubicó el comercio ÷ visitas. Los reactivados y el incentivo los define BBVA y se muestran solo en los periodos cerrados; en el periodo en curso quedan «—». Los periodos cerrados se leen tal como quedaron: no se modifican.</div></div>`;
+}
+
 function vistaEquipo(){
   const dias = diasPeriodo(), H = habiles();
   const metaEj = (S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160;
   const metaDia = H.total ? metaEj / H.total : 8;
-  const hoy = hoyISO();
+  const hoy = hoyISO(), RV = marcarRevisitas(S.act);
+  const esNueva = v => RV.rev.get(v.id) === 0 && v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id);
   const filas = S.ejecutivos.map(e => {
-    const todas = S.act.filter(v => v.correo === e.correo);
-    const vs = todas.filter(v => v.estado_anul !== "anulada");
-    const porDia = {};
-    vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { com:new Set(), n:0, h1:null, h2:null, obs:0, pend:0 }; o.n++; if (v.lat != null && !v.fuera_plazo) o.com.add(v.customer_id); if (v.fuera_plazo) o.tarde = (o.tarde || 0) + 1; const t = D(v.visitado_en); if (!o.h1 || t < o.h1) o.h1 = t; if (!o.h2 || t > o.h2) o.h2 = t; if (estadoDe(v) === "obs") o.obs++; if (estadoDe(v) === "pend") o.pend++; });
-    const com = new Set(vs.filter(v => v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size;
+    const todas = S.act.filter(v => v.correo === e.correo), vs = todas.filter(v => v.estado_anul !== "anulada"), porDia = {};
+    vs.forEach(v => { const k = iso(v.visitado_en); const o = porDia[k] ||= { nuevas:0, rev:0, n:0, pend:0, tarde:0 }; o.n++;
+      if (RV.rev.get(v.id) > 0) o.rev++; else if (esNueva(v)) o.nuevas++; if (estadoDe(v) === "pend") o.pend++; if (v.fuera_plazo) o.tarde++; });
+    const nuevas = vs.filter(esNueva), com = nuevas.length, revs = vs.filter(v => RV.rev.get(v.id) > 0);
     const restantes = Math.max(1, H.total - H.antes);
-    return { e, porDia, com, reg:vs.length,
+    return { e, porDia, com, reg:vs.length, revs, avance:revs.filter(v => avanceRev(v, RV.ant.get(v.id))).length,
       val: vs.filter(v => estadoDe(v) === "val").length, pend: vs.filter(v => estadoDe(v) === "pend").length, obs: vs.filter(v => estadoDe(v) === "obs").length, anu: todas.length - vs.length,
-      contacto: vs.filter(v => v.con !== "Nadie").length, comContacto: new Set(vs.filter(v => v.con !== "Nadie" && v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size, reunion: vs.filter(v => v.que === "Reunión concretada").length, consumos: vs.filter(v => v.decision === "Realizará consumos").length,
-      lejos: vs.filter(v => v.distancia_m == null || v.distancia_m > REGLA.lejos).length, tarde: vs.filter(v => v.fuera_plazo).length,
+      contacto: vs.filter(v => v.con !== "Nadie").length, comContacto: new Set(vs.filter(v => v.con !== "Nadie" && v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)).map(v => v.customer_id)).size,
+      consumos: vs.filter(v => v.decision === "Realizará consumos").length, tarde: vs.filter(v => v.fuera_plazo).length,
       ritmo: H.hastaHoy ? com / H.hastaHoy : 0, necesario: Math.max(0, metaEj - com) / restantes, esperado: metaDia * H.hastaHoy };
   });
-  const T = { com: filas.reduce((a,f) => a + f.com, 0), reg: filas.reduce((a,f) => a + f.reg, 0) };
+  const sum = k => filas.reduce((a, f) => a + f[k], 0);
+  const T = { com:sum("com"), reg:sum("reg"), rev:filas.reduce((a, f) => a + f.revs.length, 0), avance:sum("avance") };
   const metaEq = metaEj * filas.length, metaDiaEq = metaDia * filas.length;
   const ritmoEq = H.hastaHoy ? T.com / H.hastaHoy : 0, necEq = Math.max(0, metaEq - T.com) / Math.max(1, H.total - H.antes);
-  const celda = (o, d, correo) => {
-    const n = o ? o.com.size : 0; const k = n === 0 ? "c0" : n < metaDia * .5 ? "c1" : n < metaDia ? "c2" : "c3";
-    const tip = o ? `${n} comercios · ${o.n} registros · de ${hh(o.h1)} a ${hh(o.h2)}${o.pend ? ` · ${o.pend} por validar` : ""}${o.obs ? ` · ${o.obs} observadas` : ""}${o.tarde ? ` · ${o.tarde} fuera de plazo (no cuentan)` : ""}` : "sin visitas";
-    return `<td class="dia ${k}${d.habil ? "" : " finde"}${d.iso === hoy ? " hoy" : ""}"><button data-ir-dia="${d.iso}" data-ir-ej="${esc(correo)}" title="${esc(tip)}" ${o ? "" : "disabled"}>${n || "·"}${o && o.pend ? `<i class="pd" aria-label="por validar"></i>` : ""}</button></td>`;
-  };
-  // gráfico: comercios por día, una barra por ejecutivo (lado a lado) contra su meta diaria
-  const tot = dias.map(d => filas.reduce((a,f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0), 0));
+  const pct = (a, b) => b ? Math.round(a / b * 100) : 0, c1 = x => x.toFixed(1).replace(".", ",");
+  const totDia = dias.map(d => filas.reduce((a, f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].nuevas : 0), 0));
+  // gráfico: comercios nuevos por día, una barra por ejecutivo contra su meta diaria; la parte clara son las revisitas
   const nEj = Math.max(1, filas.length), pl = 34, pr = 12, pt = 18, pb = 50, Hc = 250;
   const gw = Math.max(92, nEj * 20 + 28), W = Math.max(920, pl + pr + dias.length * gw), step = (W - pl - pr) / Math.max(1, dias.length);
   const bw = Math.min(30, (step * .74 - (nEj - 1) * 3) / nEj);
-  const vmax = Math.max(metaDia, ...filas.flatMap(f => dias.map(d => f.porDia[d.iso] ? f.porDia[d.iso].com.size : 0)), 1);
-  const ymax = Math.ceil(vmax * 1.18 / 4) * 4;
-  const y = n => pt + (Hc - pt - pb) * (1 - n / ymax);
+  const vmax = Math.max(metaDia, ...filas.flatMap(f => dias.map(d => { const o = f.porDia[d.iso]; return o ? o.nuevas + o.rev : 0; })), 1);
+  const ymax = Math.ceil(vmax * 1.18 / 4) * 4, y = n => pt + (Hc - pt - pb) * (1 - n / ymax);
   const ticks = []; for (let t = 0; t <= ymax; t += ymax > 24 ? 8 : 4) ticks.push(t);
   const rejilla = ticks.map(t => `<line x1="${pl}" y1="${y(t).toFixed(1)}" x2="${W - pr}" y2="${y(t).toFixed(1)}" stroke="var(--linea)" stroke-width="1" ${t ? 'stroke-dasharray="2 4"' : ""}/><text x="${pl - 8}" y="${(y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${t}</text>`).join("");
   const barras = dias.map((d, i) => { const x0 = pl + step * i + (step - (nEj * bw + (nEj - 1) * 3)) / 2, cx = pl + step * i + step / 2;
-    const bs = filas.map((f, k) => { const o = f.porDia[d.iso], n = o ? o.com.size : 0, x = x0 + k * (bw + 3);
-      const tip = `${f.e.nombre} · ${fISO(d.iso)}: ${n} comercio${n === 1 ? "" : "s"}${o ? ` · ${o.n} registro${o.n === 1 ? "" : "s"}` : ""} · meta ${Math.round(metaDia)}`;
-      const h = n ? Math.max(2, y(0) - y(n)) : 0;
-      return `<g class="b"><rect x="${(x - 1).toFixed(1)}" y="${pt}" width="${(bw + 2).toFixed(1)}" height="${(y(0) - pt).toFixed(1)}" fill="transparent"><title>${esc(tip)}</title></rect>${n ? `<path d="M${x.toFixed(1)},${y(0).toFixed(1)} v${(-h + 4).toFixed(1)} q0,-4 4,-4 h${(bw - 8).toFixed(1)} q4,0 4,4 v${(h - 4).toFixed(1)} z" fill="${f.e.color}" pointer-events="none"/>` : ""}${n && bw >= 11 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(n) - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)" pointer-events="none">${n}</text>` : ""}</g>`; }).join("");
+    const bs = filas.map((f, k) => { const o = f.porDia[d.iso], n = o ? o.nuevas : 0, r = o ? o.rev : 0, x = x0 + k * (bw + 3);
+      const tip = `${f.e.nombre} · ${fISO(d.iso)}: ${n} comercio${n === 1 ? "" : "s"} nuevo${n === 1 ? "" : "s"}${r ? ` + ${r} revisita${r === 1 ? "" : "s"}` : ""} · meta ${Math.round(metaDia)}`;
+      const hn = n ? Math.max(2, y(0) - y(n)) : 0, hr = r ? Math.max(2, y(0) - y(r)) : 0;
+      return `<g class="b"><rect x="${(x - 1).toFixed(1)}" y="${pt}" width="${(bw + 2).toFixed(1)}" height="${(y(0) - pt).toFixed(1)}" fill="transparent"><title>${esc(tip)}</title></rect>`
+        + (n ? `<rect x="${x.toFixed(1)}" y="${(y(0) - hn).toFixed(1)}" width="${bw.toFixed(1)}" height="${hn.toFixed(1)}" rx="3" fill="${f.e.color}" pointer-events="none"/>` : "")
+        + (r ? `<rect x="${x.toFixed(1)}" y="${(y(0) - hn - hr).toFixed(1)}" width="${bw.toFixed(1)}" height="${hr.toFixed(1)}" rx="3" fill="${f.e.color}" fill-opacity=".32" stroke="${f.e.color}" stroke-dasharray="3 2" pointer-events="none"/>` : "")
+        + ((n || r) && bw >= 11 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(0) - hn - hr - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)" pointer-events="none">${n}${r ? "+" + r : ""}</text>` : "") + `</g>`; }).join("");
     return `${bs}<text x="${cx.toFixed(1)}" y="${Hc - 32}" text-anchor="middle" font-size="11" fill="${d.iso === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d.iso === hoy ? 700 : 400}">${fISO(d.iso)} ${DOW[d.dow]}</text>
-      <text x="${cx.toFixed(1)}" y="${Hc - 16}" text-anchor="middle" font-size="10" fill="var(--muted)">equipo ${tot[i]} / ${Math.round(metaDiaEq)}</text>`; }).join("");
-  const grafico = `<svg class="graf-ej" viewBox="0 0 ${W} ${Hc}"${W > 920 ? ` width="${W}" style="width:${W}px;max-width:none"` : ""} role="img" aria-label="Comercios visitados por día, una barra por ejecutivo, con la meta diaria de ${Math.round(metaDia)}">
-    ${rejilla}
-    <line x1="${pl}" y1="${y(metaDia).toFixed(1)}" x2="${W - pr}" y2="${y(metaDia).toFixed(1)}" stroke="var(--naranja)" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="${W - pr}" y="${(y(metaDia) - 6).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" fill="var(--naranja)">meta ${Math.round(metaDia)} por ejecutivo</text>
-    ${barras}</svg>`;
-  const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+      <text x="${cx.toFixed(1)}" y="${Hc - 16}" text-anchor="middle" font-size="10" fill="var(--muted)">equipo ${totDia[i]} / ${Math.round(metaDiaEq)}</text>`; }).join("");
+  const grafico = `<svg class="graf-ej" viewBox="0 0 ${W} ${Hc}"${W > 920 ? ` width="${W}" style="width:${W}px;max-width:none"` : ""} role="img" aria-label="Comercios nuevos por día, una barra por ejecutivo, con la meta diaria de ${Math.round(metaDia)}">
+    ${rejilla}<line x1="${pl}" y1="${y(metaDia).toFixed(1)}" x2="${W - pr}" y2="${y(metaDia).toFixed(1)}" stroke="var(--naranja)" stroke-width="2" stroke-dasharray="6 4"/>${barras}</svg>`;
+  const celda = (f, d) => { const o = f.porDia[d.iso], n = o ? o.nuevas : 0, r = o ? o.rev : 0; const k = !o ? "c0" : n === 0 ? "c0" : n < metaDia * .5 ? "c1" : n < metaDia ? "c2" : "c3";
+    const tip = o ? `${n} nuevos${r ? ` · ${r} revisitas` : ""} · ${o.n} registros${o.pend ? ` · ${o.pend} por validar` : ""}${o.tarde ? ` · ${o.tarde} fuera de plazo (no cuentan)` : ""}` : "sin visitas";
+    return `<td class="dia ${k}${d.habil ? "" : " finde"}${d.iso === hoy ? " hoy" : ""}"><button data-ir-dia="${d.iso}" data-ir-ej="${esc(f.e.correo)}" title="${esc(tip)}" ${o ? "" : "disabled"}>${n || (r ? 0 : "·")}${r ? `<small class="rv">+${r} rev.</small>` : ""}${o && o.pend ? `<i class="pd" aria-label="por validar"></i>` : ""}</button></td>`; };
+  const filasDia = dias.slice().reverse().map((d, i) => { const ti = dias.length - 1 - i, tr = filas.reduce((a, f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].rev : 0), 0);
+    return `<tr><td class="fecha${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}"><b>${DOW[d.dow]} ${fISO(d.iso)}</b></td>${filas.map(f => celda(f, d)).join("")}<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${totDia[ti] || "·"}</b>${tr ? `<small class="rv">+${tr} rev.</small>` : ""}</td></tr>`; }).join("");
+  const todasRev = filas.flatMap(f => f.revs).sort((a, b) => D(b.visitado_en) - D(a.visitado_en));
+  const filaRev = v => { const p = RV.ant.get(v.id), ej = ejDe(v.correo);
+    return `<tr><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</td><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td>${esc(v.comercio)}<small class="muted" style="display:block">revisita ${RV.rev.get(v.id) + 1}</small></td>
+      <td>${p ? esc(comoFue(p)[0]) : "—"}<small class="muted" style="display:block">luego</small>${esc(comoFue(v)[0])}${avanceRev(v, p) ? ` <span class="pill val">avanzó</span>` : ""}</td></tr>`; };
   return `
   <div class="resumen">
-    <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${T.com}<small> / ${metaEq}</small></div><div class="d">${pct(T.com, metaEq)} % de la meta del periodo · ${T.reg} registros${notaAnterior(S.act)}</div></div>
-    <div class="tile"><div class="k">Días hábiles</div><div class="v num">${H.hastaHoy}<small> de ${H.total}</small></div><div class="d">${pct(H.hastaHoy, H.total)} % del periodo corrido, contando hoy</div></div>
-    <div class="tile ${ritmoEq >= metaDiaEq ? "ok" : "warn"}"><div class="k">Ritmo del equipo</div><div class="v num">${ritmoEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">meta ${Math.round(metaDiaEq)} por día hábil (${Math.round(metaDia)} por ejecutivo)</div></div>
-    <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${necEq.toFixed(1).replace(".", ",")}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
+    <div class="tile acc"><div class="k">Comercios nuevos visitados</div><div class="v num">${T.com}<small> / ${metaEq}</small></div><div class="d">${pct(T.com, metaEq)} % de la meta del periodo · ${T.reg} registros${notaAnterior(S.act)}</div></div>
+    <div class="tile"><div class="k">Días hábiles</div><div class="v num">${H.hastaHoy}<small> de ${H.total}</small></div><div class="d">${pct(H.hastaHoy, H.total)} % del periodo corrido, contando hoy${FERIADOS.some(f => S.periodo && f >= S.periodo.ini && f <= S.periodo.fin) ? " · sin feriados" : ""}</div></div>
+    <div class="tile ${ritmoEq >= metaDiaEq ? "ok" : "warn"}"><div class="k">Ritmo del equipo</div><div class="v num">${c1(ritmoEq)}<small> por día</small></div><div class="d">meta ${c1(metaDiaEq)} por día hábil (${c1(metaDia)} por ejecutivo)</div></div>
+    <div class="tile ${necEq > metaDiaEq ? "bad" : ""}"><div class="k">Para cerrar en meta</div><div class="v num">${c1(necEq)}<small> por día</small></div><div class="d">en los ${Math.max(0, H.total - H.antes)} días hábiles que quedan, contando hoy</div></div>
+    <div class="tile"><div class="k">Revisitas</div><div class="v num">${T.rev}</div><div class="d">${T.avance} lograron avance (contacto o decisión)</div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
-    <div class="barra"><b>Comercios visitados por día y por ejecutivo</b><span class="lbl">solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio cuenta una vez por día · pasa el mouse por una barra para ver el detalle</span>
+    <div class="barra"><b>Comercios nuevos por día y por ejecutivo</b><span class="lbl">solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio es nuevo la primera vez que se visita en el periodo · la parte clara de cada barra son las revisitas</span>
       <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria · ${Math.round(metaDia)} por ejecutivo</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
     <div style="padding:6px 12px 2px;overflow-x:auto">${grafico}</div>
   </div>
-  <div class="panel">
-    <div class="barra"><b>Por ejecutivo y por día</b><span class="lbl">verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: a más de la mitad · rojo: menos de la mitad · el punto naranja marca visitas por validar</span></div>
-    <div style="overflow-x:auto"><table class="datos matriz">
-      <thead><tr><th>Ejecutivo</th>${dias.map(d => `<th class="dia${d.iso === hoy ? " hoy" : ""}${d.habil ? "" : " finde"}">${DOW[d.dow]}<br>${fISO(d.iso)}</th>`).join("")}<th class="n">Comercios</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Visitas con<br>contacto</th><th class="n">Comercios con<br>contacto</th><th class="n">Reunión</th><th class="n">Realizará<br>consumos</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
+  <div class="panel" style="margin-bottom:16px">
+    <div class="barra"><b>Resumen por ejecutivo</b><span class="lbl">comercios nuevos, ritmo contra la meta, revisitas, contacto y estado de validación</span></div>
+    <table class="datos eq-res">
+      <thead><tr><th>Ejecutivo</th><th class="n">Comercios nuevos</th><th class="n">Ritmo<br>por día</th><th class="n">Necesita<br>por día</th><th class="n">Revisitas</th><th class="n">Visitas con<br>contacto</th><th class="n">Comercios con<br>contacto</th><th class="n">Realizará<br>consumos</th><th class="n">Fuera de<br>plazo</th><th>Validación</th></tr></thead>
       <tbody>${filas.map(f => `<tr>
         <td><button class="ej-btn" data-ir-dia="periodo" data-ir-ej="${esc(f.e.correo)}"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></button></td>
-        ${dias.map(d => celda(f.porDia[d.iso], d, f.e.correo)).join("")}
         <td class="n num"><b>${f.com}</b> <span class="muted">/ ${metaEj}</span><div class="barrita"><i style="width:${Math.min(100, pct(f.com, metaEj))}%"></i><u style="left:${Math.min(100, pct(f.esperado, metaEj))}%" title="donde debería ir hoy"></u></div></td>
-        <td class="n num ${f.ritmo >= metaDia ? "ok" : "warn"}">${f.ritmo.toFixed(1).replace(".", ",")}</td>
-        <td class="n num ${f.necesario > metaDia ? "mal" : ""}">${f.necesario.toFixed(1).replace(".", ",")}</td>
-        <td class="n num">${f.contacto}<span class="muted"> / ${f.reg}</span></td>
-        <td class="n num">${f.comContacto}<span class="muted"> / ${f.com}</span></td>
-        <td class="n num">${f.reunion}</td>
-        <td class="n num">${f.consumos}</td>
+        <td class="n num ${f.ritmo >= metaDia ? "ok" : "warn"}">${c1(f.ritmo)}</td><td class="n num ${f.necesario > metaDia ? "mal" : ""}">${c1(f.necesario)}</td>
+        <td class="n num">${f.revs.length}<small class="muted" style="display:block">${f.avance} con avance</small></td>
+        <td class="n num">${f.contacto}<span class="muted"> / ${f.reg}</span></td><td class="n num">${f.comContacto}</td><td class="n num">${f.consumos}</td>
         <td class="n num ${f.tarde ? "mal" : ""}">${f.tarde}</td>
-        <td><span class="mini-estados"><span class="pill val">${f.val}</span><span class="pill pend">${f.pend}</span>${f.obs ? `<span class="pill obs">${f.obs}</span>` : ""}${f.anu ? `<span class="pill anu">${f.anu}</span>` : ""}</span></td>
-      </tr>`).join("")}
-      <tr class="total"><td><b>Equipo</b></td>${dias.map((d, i) => `<td class="dia tot${d.iso === hoy ? " hoy" : ""}"><b>${tot[i] || "·"}</b></td>`).join("")}
-        <td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${ritmoEq.toFixed(1).replace(".", ",")}</td><td class="n num">${necEq.toFixed(1).replace(".", ",")}</td>
-        <td class="n num">${filas.reduce((a,f)=>a+f.contacto,0)}<span class="muted"> / ${T.reg}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.comContacto,0)}<span class="muted"> / ${T.com}</span></td><td class="n num">${filas.reduce((a,f)=>a+f.reunion,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.consumos,0)}</td><td class="n num">${filas.reduce((a,f)=>a+f.tarde,0)}</td>
-        <td><span class="mini-estados"><span class="pill val">${filas.reduce((a,f)=>a+f.val,0)}</span><span class="pill pend">${filas.reduce((a,f)=>a+f.pend,0)}</span></span></td></tr>
-      </tbody></table></div>
-    <div class="atajos">Comercios = comercios distintos con visita válida, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono), y la base anterior se ve en «Base y bloques». Comercios con contacto también es solo de la base nueva; el gráfico, los días y las columnas de visitas (con contacto, reunión, consumos, fuera de plazo) cuentan toda la actividad. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Comercios con contacto = comercios visitados en que habló con alguien. Ritmo = comercios visitados ÷ días hábiles corridos (contando hoy). Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman comercios. La raya en la barrita marca dónde debería ir hoy. Validación: validadas · por validar · observadas · anuladas.</div>
-  </div>`;
+        <td><span class="mini-estados"><span class="pill val">${f.val}</span><span class="pill pend">${f.pend}</span>${f.obs ? `<span class="pill obs">${f.obs}</span>` : ""}${f.anu ? `<span class="pill anu">${f.anu}</span>` : ""}</span></td></tr>`).join("")}
+      <tr class="total"><td><b>Equipo</b></td><td class="n num"><b>${T.com}</b> <span class="muted">/ ${metaEq}</span></td><td class="n num">${c1(ritmoEq)}</td><td class="n num">${c1(necEq)}</td><td class="n num">${T.rev}<small class="muted" style="display:block">${T.avance} con avance</small></td>
+        <td class="n num">${sum("contacto")}<span class="muted"> / ${T.reg}</span></td><td class="n num">${sum("comContacto")}</td><td class="n num">${sum("consumos")}</td><td class="n num">${sum("tarde")}</td>
+        <td><span class="mini-estados"><span class="pill val">${sum("val")}</span><span class="pill pend">${sum("pend")}</span></span></td></tr></tbody></table>
+  </div>
+  <div class="eq-2">
+    <div class="panel">
+      <div class="barra"><b>Por día</b><span class="lbl">comercios nuevos de cada día (las revisitas, aparte) · verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: más de la mitad · naranja: menos de la mitad · el punto naranja marca visitas por validar</span></div>
+      <div class="eq-dias"><table class="datos matriz"><thead><tr><th>Día</th>${filas.map(f => `<th class="dia">${esc(nombreCorto(f.e.nombre))}</th>`).join("")}<th class="dia">Equipo</th></tr></thead><tbody>${filasDia}</tbody></table></div>
+    </div>
+    <div class="panel">
+      <div class="barra"><b>Revisitas: qué gestión hicieron</b><span class="lbl">${T.rev} en el periodo · el resultado de la visita anterior y el de la revisita</span></div>
+      <div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th></tr></thead><tbody>${todasRev.map(filaRev).join("") || `<tr><td colspan="4" class="muted">Todavía no hay revisitas en el periodo.</td></tr>`}</tbody></table></div>
+    </div>
+  </div>
+  <div class="panel"><div class="atajos">Comercios nuevos = comercios distintos con una visita válida que se hace por primera vez en el periodo, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono). Revisita = una visita posterior a un comercio ya visitado en el periodo: no suma a la meta, pero se registra con su resultado; «avanzó» es pasar de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos». Ritmo = comercios nuevos ÷ días hábiles corridos (contando hoy); los feriados no cuentan. Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman. Validación: validadas · por validar · observadas · anuladas.</div></div>`;
 }
 
 /* =========================================================================
@@ -3058,9 +3163,10 @@ document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && S.accion){ S.accion = null; pintar(); }
 });
 
+document.addEventListener("click", ev => { const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["validacion","bloques","rutas","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","validacion","bloques","rutas","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });

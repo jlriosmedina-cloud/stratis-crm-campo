@@ -474,7 +474,7 @@ await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de pr
   assert.match(await tile('Periodo · visitados'), /2 \/ 225/, 'periodo del ejecutivo');
   // «Por ejecutivo» y Visitas cuentan contra la meta solo la base nueva (Jose, 21/10); la base anterior va aparte
   await p.evaluate(() => { S.vista = 'equipo'; pintar(); }); await p.waitForTimeout(300);
-  assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160/i, 'Por ejecutivo suma la base anterior o comercios de antes: ' + (await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()));
+  assert.match((await p.locator('.tile', { hasText: 'Comercios nuevos visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios nuevos visitados 2 \/ 160/i, 'Por ejecutivo suma la base anterior o comercios de antes: ' + (await p.locator('.tile', { hasText: 'Comercios nuevos visitados' }).first().innerText()));
   await p.evaluate(() => { S.vista = 'validacion'; S.dia = 'periodo'; pintar(); }); await p.waitForTimeout(300);
   assert.match((await p.locator('.tile', { hasText: 'Comercios visitados' }).first().innerText()).replace(/\s+/g, ' '), /comercios visitados 2 \/ 160.*1 de la base anterior, aparte/i, 'Visitas suma la base anterior');
   const coms = (await p.locator('td.com b').allInnerTexts()).join(' | ');
@@ -493,6 +493,61 @@ await prueba('base 2026-11: «Base y bloques», selector de ejecutivo, ojo de pr
   assert.deepEqual([fila.cid, fila.doc, fila.err], ['00000013', '20000000013', []], 'el RUC de un comercio con Customer ID antiguo no se enlaza');
   assert.match(r[4].err || '', /no está en la base/); assert.match(r[5].err || '', /ni un RUC/); assert.match(r[6].err || '', /RUC no está/);
   await p.evaluate(() => { elegirEj('todos'); S.vista = 'validacion'; pintar(); });
+});
+await prueba('Equipo (25/11): nuevos y revisitas, la revisita no suma a la meta, sin scroll lateral y el feriado no cuenta', async () => {
+  const antes = await p.evaluate(() => { S.vista = 'equipo'; elegirEj('todos'); pintar(); return S.act.length; }); await p.waitForTimeout(300);
+  const nuevos0 = await p.evaluate(() => Number(document.querySelector('.tile.acc .v').childNodes[0].textContent));
+  // segunda visita al comercio 1, más tarde y con otra decisión: es una revisita y avanzó
+  const rev = visita(1, { id: '00000000-0000-0000-0000-000000000099', visitado_en: `${hoy}T21:30:00Z`, recibido_en: `${hoy}T21:30:30Z`, decision: 'Realizará consumos' });
+  await p.evaluate(v => { S.act = S.act.concat([v]); pintar(); }, rev); await p.waitForTimeout(300);
+  const nuevos1 = await p.evaluate(() => Number(document.querySelector('.tile.acc .v').childNodes[0].textContent));
+  assert.equal(nuevos1, nuevos0, 'la revisita no debe sumar a los comercios nuevos');
+  const t = (await p.locator('.tile', { hasText: 'Revisitas' }).first().innerText()).replace(/\s+/g, ' ');
+  assert.match(t, /Revisitas 1/i, 'el cuadro de revisitas no cuenta la nueva revisita: ' + t);
+  const lista = (await p.locator('.eq-2 .panel').nth(1).innerText()).replace(/\s+/g, ' ');
+  assert.ok(/Comercio Prueba 1/.test(lista) && /revisita 2/.test(lista) && /avanzó/.test(lista), 'la lista de revisitas no muestra la gestión: ' + lista);
+  assert.ok(await p.locator('table.matriz small.rv').count() > 0, 'la tabla por día no muestra las revisitas');
+  // sin scroll hacia la derecha: la página, el resumen y la tabla por día caben en su cuadro
+  const ancho = await p.evaluate(() => { const el = document.querySelector('.contenido') || document.body; const t = document.querySelector('table.eq-res'), d = document.querySelector('.eq-dias');
+    return { pag: document.documentElement.scrollWidth <= innerWidth + 1, cont: el.scrollWidth <= el.clientWidth + 2, resumen: t.scrollWidth <= t.parentElement.clientWidth + 2, dias: d.scrollWidth <= d.clientWidth + 2 }; });
+  assert.deepEqual(ancho, { pag: true, cont: true, resumen: true, dias: true }, 'hay scroll lateral: ' + JSON.stringify(ancho));
+  if (process.env.CAPTURAS) await p.screenshot({ path: path.join(process.env.CAPTURAS, 'equipo.png'), fullPage: true });
+  // feriado: 19/11 a 18/12 tiene 22 días de lunes a viernes; sin el 8/12 son 21, y la meta total no cambia
+  const h = await p.evaluate(() => { const g = S.periodo; S.periodo = { id: 'X', ini: '2026-11-19', fin: '2026-12-18' }; const r = habiles(); S.periodo = g; return r; });
+  assert.equal(h.total, 21, 'el 8/12 debe quedar fuera de los días hábiles: ' + h.total);
+  await p.evaluate(n => { S.act = S.act.slice(0, n); pintar(); }, antes);
+});
+await prueba('Equipo: una primera visita sin ubicación no vuelve revisita a la siguiente (cuenta como nueva)', async () => {
+  await p.evaluate(() => { window.__ho = S.hayOrigen; S.hayOrigen = false; S.vista = 'equipo'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(300);
+  const n0 = await p.evaluate(() => Number(document.querySelector('.tile.acc .v').childNodes[0].textContent));
+  const sin = visita(1, { id: '00000000-0000-0000-0000-0000000000b1', customer_id: '00000008', visitado_en: `${hoy}T20:00:00Z`, recibido_en: `${hoy}T20:00:30Z`, lat: null, lng: null });
+  const con = visita(1, { id: '00000000-0000-0000-0000-0000000000b2', customer_id: '00000008', visitado_en: `${hoy}T21:00:00Z`, recibido_en: `${hoy}T21:00:30Z` });
+  await p.evaluate(v => { window.__act0 = S.act; S.act = S.act.concat(v); pintar(); }, [sin, con]); await p.waitForTimeout(300);
+  const n1 = await p.evaluate(() => Number(document.querySelector('.tile.acc .v').childNodes[0].textContent));
+  assert.equal(n1, n0 + 1, 'la segunda visita (con ubicación) debe contar como comercio nuevo: ' + n0 + ' -> ' + n1);
+  await p.evaluate(() => { S.act = window.__act0; S.hayOrigen = window.__ho; pintar(); });
+});
+await prueba('Directorio: selector de periodo, cobertura, contacto y dirección errada; reactivados solo en periodos cerrados', async () => {
+  const cerrada = visita(1, { id: '00000000-0000-0000-0000-0000000000a1', periodo: 'CERRADO', visitado_en: '2025-01-10T15:00:00Z', recibido_en: '2025-01-10T15:00:30Z', plazo_hasta: '2025-01-11' });
+  const cierre = { periodo: 'CERRADO', correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre, nombre: 'P0 · prueba', ini: '2025-01-01', fin: '2025-01-31', modelo: 'Modelo de prueba', aprobado_en: '2025-01-31', enviado_en: null,
+    incentivo_pct: 20, pagado_pct: 16, retenido_pct: 4, alcances: [], detalle: {}, reactivados_lista: 5, reactivados_ya_facturaban: 1 };
+  await p.evaluate(({ c, ci, bc }) => { const fx = window.__FX, act = fx.rpc.v2_actividad, base = fx.rpc.v2_mi_base; fx._act = act; fx._base2 = base;
+    fx.rpc.v2_actividad = a => a && a.p_desde === '2025-01-01' ? [c] : act; fx.rpc.v2_mi_base = a => a && a.p_periodo === 'CERRADO' ? bc : base;
+    fx.rpc.v2_cierres_equipo = [ci]; fx.tablas.v2_periodos = [{ id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }, { id: 'CERRADO', ini: '2025-01-01', fin: '2025-01-31' }];
+    S.cierres = null; S.periodos = null; S.dirPer = null; S.dirDatos = null; fx._ver = S.ver; S.ver = true; S.vista = 'directorio'; elegirEj('todos'); pintar(); }, { c: cerrada, ci: cierre, bc: [comercio(1), comercio(2)] });
+  await p.waitForTimeout(600);
+  assert.equal(await p.locator('[data-dirper]').count(), 2, 'faltan los chips de periodo');
+  const tile = async k => (await p.locator('.tile', { hasText: k }).first().innerText()).replace(/\s+/g, ' ');
+  assert.match(await tile('Cobertura'), /Cobertura \d+ %/i, 'cobertura del periodo en curso: ' + await tile('Cobertura'));
+  assert.match(await tile('Contacto'), /Contacto \d+ %/i); assert.match(await tile('Dirección errada'), /Dirección errada \d+ %/i);
+  assert.match(await tile('Reactivados BBVA'), /Reactivados BBVA — /i, 'el periodo en curso no debe mostrar reactivados: ' + await tile('Reactivados BBVA'));
+  await p.click('[data-dirper="CERRADO"]'); await p.waitForTimeout(700);
+  assert.match(await tile('Reactivados BBVA'), /Reactivados BBVA 5 /i, 'el periodo cerrado muestra los reactivados del cierre: ' + await tile('Reactivados BBVA'));
+  assert.match(await tile('Cobertura'), /Cobertura 50 %/i, 'la cobertura del periodo cerrado sale de su propia base (1 de 2): ' + await tile('Cobertura'));
+  if (process.env.CAPTURAS) await p.screenshot({ path: path.join(process.env.CAPTURAS, 'directorio.png'), fullPage: true });
+  const tabla = (await p.locator('table.datos').first().innerText()).replace(/\s+/g, ' ');
+  assert.ok(/20 ?%/.test(tabla), 'el incentivo del cierre no aparece por ejecutivo: ' + tabla);
+  await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_actividad = fx._act; fx.rpc.v2_mi_base = fx._base2; delete fx.rpc.v2_cierres_equipo; fx.tablas.v2_periodos = { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }; S.cierres = null; S.periodos = null; S.dirDatos = null; S.dirPer = null; S.ver = fx._ver; S.vista = 'validacion'; pintar(); });
 });
 await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta, con la ruta de hoy y el historial', async () => {
   // Los dos ejecutivos tienen una «Ruta 01 · Lima» y una «Ruta 99 · Por ubicar»: nunca se mezclan

@@ -505,3 +505,14 @@ table.datos tr.sel td{background:var(--naranja-t)}
 .ci-ok{color:var(--verde-txt);font-weight:800}.ci-dif{color:var(--rojo-txt);font-weight:800}
 .chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
 .ci-ok .sr,.ci-dif .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Equipo (25/11): resumen sin columnas de días, tabla «Por día» en vertical y revisitas; sin scroll hacia la derecha */
+.eq-2{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:start}
+@media (max-width:1100px){.eq-2{grid-template-columns:minmax(0,1fr)}}
+.eq-dias{max-height:460px;overflow:auto}
+table.eq-res th,table.eq-res td{padding-left:6px;padding-right:6px}
+table.matriz td.dia button{width:auto;min-width:46px;height:auto;min-height:32px;padding:3px 6px;line-height:1.15}
+table.matriz td.dia button small.rv,table.matriz td.dia small.rv{display:block;font-size:9.5px;font-weight:600;color:var(--muted)}
+table.matriz td.fecha{white-space:nowrap}
+table.matriz td.fecha.hoy b{color:var(--naranja)} table.matriz td.fecha.finde{opacity:.7}
+table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
