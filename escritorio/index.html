@@ -535,6 +535,15 @@ table.datos tr.on td{background:var(--azul-t)}
 .mas{position:relative}.mas summary{list-style:none;cursor:pointer}.mas summary::-webkit-details-marker{display:none}
 .mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
 .mas-menu .btn{width:100%;text-align:left}
+/* franja de cifras del periodo (prototipo 4.0) */
+.cab-kpis{display:flex;align-items:flex-end;gap:0;background:var(--navy);color:#fff;padding:10px 22px 12px;flex-wrap:wrap;row-gap:8px}
+.cab-kpis:empty{display:none}
+.cab-kpis .ck{display:flex;flex-direction:column;padding:0 22px;border-left:1px solid rgba(255,255,255,.14)}
+.cab-kpis .ck:first-child{border-left:0;padding-left:0}
+.cab-kpis .ck b{font-size:24px;line-height:1.1;font-weight:800}
+.cab-kpis .ck span{font-size:12px;opacity:.78}
+.cab-kpis .ck.or b{color:var(--naranja)}.cab-kpis .ck.vd b{color:var(--verde)}
+.cab-kpis .ck-per{margin-left:auto;font-size:12px;opacity:.7}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -550,7 +559,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "2526a7";
+const BUILD = "1f9af9";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -949,6 +958,14 @@ function pintarNav(){
   const p = S.periodo;
   $("#pieRail").innerHTML = p ? `<b>Periodo ${esc(p.id)} · ${fISO(p.ini)} – ${fISO(p.fin)}</b>${S.base.length} comercios · ${S.ejecutivos.length} ejecutivos · build ${BUILD}` : `<b>Sin periodo abierto</b>build ${BUILD}`;
 }
+// Franja de cifras del periodo en curso (prototipo 4.0): las mismas medidas del Directorio, sin números nuevos.
+function cabKpis(){
+  const k = $("#cabKpis"); if (!k) return;
+  if (!S.periodo || !S.base.length){ k.innerHTML = ""; return; }
+  let T; try { T = statsDir({ act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen }); } catch(e){ k.innerHTML = ""; return; }
+  const it = (n, t, cls) => `<div class="ck ${cls || ""}"><b class="num">${n}</b><span>${t}</span></div>`;
+  k.innerHTML = it(T.asig, "cartera asignada") + it(T.vis, "visitados únicos", "or") + it(T.reg, "visitas realizadas", "vd") + it(T.con, "con contacto") + it("—", "reactivados BBVA · sin corte") + `<span class="ck-per">Periodo ${esc(S.periodo.id)}</span>`;
+}
 function pintar(){
   const app = $("#app");
   if (!S.sesion && !S.denegado){ app.innerHTML = vistaLogin(); return; }
@@ -961,6 +978,7 @@ function pintar(){
   $("#btnPausa").textContent = S.pausa ? "Reanudar" : "Pausar";
   $("#ahora").textContent = S.actEn ? hh(S.actEn) : "—";
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
+  cabKpis();
   const c = $("#contenido");
   const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
               bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
@@ -1027,6 +1045,7 @@ function cascaron(){
         <button class="btn q" data-salir title="Cerrar sesión">${ICON.salir}</button>
       </div>
     </header>
+    <div class="cab-kpis" id="cabKpis"></div>
     <div class="contenido" id="contenido"></div>
   </div></div>
   <div class="toast" id="toast"><i></i><span id="toastTxt"></span></div>`;
