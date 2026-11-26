@@ -574,7 +574,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "9b0b9f";
+const BUILD = "b70c6a";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -780,7 +780,7 @@ async function cargar(){
     // Quién entra lo decide la base (tabla v2_acceso_escritorio), no el rol: por ahora, solo Jose.
     const acc = await sb.rpc("v2_puede_escritorio");
     if (acc.error) throw acc.error;
-    if (acc.data !== true){ S.denegado = true; await sb.auth.signOut().catch(() => {}); S.sesion = null; throw new Error("La vista de escritorio todavía no está habilitada para tu usuario. Tu CRM de campo sigue en el celular, igual que siempre."); }
+    if (acc.data !== true){ S.denegado = true; S.nuevaClave = null; await sb.auth.signOut().catch(() => {}); S.sesion = null; throw new Error("La vista de escritorio todavía no está habilitada para tu usuario. Tu CRM de campo sigue en el celular, igual que siempre."); }
     S.yo = u.data; S.admin = true;
     S.periodo = p.data || null;
     const us = await sb.from("usuarios").select("correo,nombre,nombre_corto,rol,activo").eq("activo", true).order("nombre");
@@ -993,6 +993,7 @@ function cabKpis(){
 }
 function pintar(){
   const app = $("#app");
+  if (S.nuevaClave){ app.innerHTML = vistaNuevaClave(); return; }
   if (!S.sesion && !S.denegado){ app.innerHTML = vistaLogin(); return; }
   if (S.cargando){ app.innerHTML = `<div class="cargando"><span class="spin"></span>Cargando el CRM…</div>`; return; }
   if (S.error){ app.innerHTML = `<div class="login"><div class="caja"><div class="marca">STRATIS</div><h1>${S.denegado ? "Esta vista no es para tu usuario" : "No se pudo entrar"}</h1><p>${esc(S.error)}</p>${S.denegado ? `<a class="btn p" href="../" style="text-decoration:none">Ir al CRM de campo</a><button class="btn" data-otro-usuario style="margin-top:8px">Entrar con otro usuario</button>` : `<button class="btn" data-salir>${ICON.salir} Salir</button>`}</div></div>`; return; }
@@ -1067,6 +1068,7 @@ function cascaron(){
         <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
         <span class="per">leído a las <b id="ahora"></b></span>
         <span class="usuario" id="quien"></span>
+        <button class="btn" data-nueva-clave title="Cambiar tu contraseña">Cambiar contraseña</button>
         <button class="btn q" data-salir title="Cerrar sesión">${ICON.salir}</button>
       </div>
     </header>
@@ -1082,7 +1084,19 @@ function vistaLogin(){
     <label for="lClave">Contraseña</label><input id="lClave" type="password" autocomplete="current-password" required>
     <button class="btn p" type="submit" id="bEntrar">Entrar</button>
     <div id="lErr"></div>
+    <button class="btn" type="button" data-olvide style="margin-top:8px;background:none;border:0;color:var(--azul-txt);font-weight:600;padding:4px 0">¿Olvidaste tu contraseña?</button>
   </form></div>`;
+}
+// Nueva contraseña: al abrir el enlace de recuperación, o desde «Cambiar contraseña» con la sesión abierta. Solo cambia la clave del propio usuario.
+function vistaNuevaClave(){
+  const n = S.nuevaClave, correo = S.sesion && S.sesion.user && S.sesion.user.email;
+  if (n.lista) return `<div class="login"><div class="caja"><div class="marca">STRATIS</div><h1>Tu contraseña nueva quedó guardada</h1><p>Desde ahora entras al CRM con tu correo${correo ? " <b>" + esc(correo) + "</b>" : ""} y esa contraseña.</p><button class="btn p" data-clave-seguir>Entrar al CRM</button></div></div>`;
+  return `<div class="login"><form class="caja" id="fClave"><div class="marca">STRATIS</div><h1>Crea tu contraseña nueva</h1><p>${correo ? "Para la cuenta <b>" + esc(correo) + "</b>. " : ""}Usa al menos 8 caracteres.</p>
+    <label for="cClave1">Contraseña nueva</label><input id="cClave1" type="password" autocomplete="new-password" required>
+    <label for="cClave2">Repite la contraseña</label><input id="cClave2" type="password" autocomplete="new-password" required>
+    ${n.error ? `<div class="aviso mal err" role="alert">${esc(n.error)}</div>` : ""}
+    <button class="btn p" type="submit" id="bClave" ${n.enviando ? "disabled" : ""}>${n.enviando ? "Guardando…" : "Guardar contraseña"}</button>
+    ${S.sesion && S.yo ? `<button class="btn" type="button" data-clave-cancelar style="margin-top:8px">Cancelar</button>` : ""}</form></div>`;
 }
 
 /* =========================================================================
@@ -3456,6 +3470,16 @@ document.addEventListener("click", ev => {
   S.denegado = false; S.error = ""; S.sesion = null; pintar();
 });
 document.addEventListener("submit", async ev => {
+  if (ev.target.id === "fClave"){ ev.preventDefault();
+    const c1 = $("#cClave1").value, c2 = $("#cClave2").value, n = S.nuevaClave;
+    if (c1.length < 8){ n.error = "La contraseña debe tener al menos 8 caracteres."; return pintar(); }
+    if (c1 !== c2){ n.error = "Las dos contraseñas no coinciden. Escríbelas de nuevo."; return pintar(); }
+    n.error = ""; n.enviando = true; pintar();
+    let error = null; try { ({ error } = await sb.auth.updateUser({ password:c1 })); } catch(e){ error = e; }
+    n.enviando = false;
+    if (error && (error.code === "same_password" || /different|same/i.test(error.message || ""))){ n.error = "Esa es tu contraseña actual: elige una distinta."; return pintar(); }
+    if (error){ n.error = "No se guardó (" + (error.message || "error desconocido") + "). Pide un enlace nuevo con «¿Olvidaste tu contraseña?»."; return pintar(); }
+    n.lista = true; pintar(); return; }
   if (ev.target.id !== "fLogin") return; ev.preventDefault();
   const b = $("#bEntrar"); b.disabled = true; b.textContent = "Entrando…"; $("#lErr").innerHTML = "";
   const { data, error } = await sb.auth.signInWithPassword({ email:$("#lCorreo").value.trim().toLowerCase(), password:$("#lClave").value });
@@ -3463,6 +3487,14 @@ document.addEventListener("submit", async ev => {
   S.sesion = data.session; cargar();
 });
 document.addEventListener("click", async ev => {
+  const o = ev.target.closest("[data-olvide],[data-nueva-clave],[data-clave-seguir],[data-clave-cancelar]");
+  if (o){
+    if (o.hasAttribute("data-nueva-clave")){ S.nuevaClave = {}; pintar(); return; }
+    if (o.hasAttribute("data-clave-cancelar") || o.hasAttribute("data-clave-seguir")){ S.nuevaClave = null; try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} if (S.sesion && !S.yo && !S.cargando && !S.error) cargar(); else pintar(); return; }
+    const correo = ($("#lCorreo") || {}).value ? $("#lCorreo").value.trim().toLowerCase() : "";
+    if (!correo){ $("#lErr").innerHTML = `<div class="aviso mal err">Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».</div>`; return; }
+    try { await sb.auth.resetPasswordForEmail(correo, { redirectTo: location.origin + location.pathname }); } catch(e){}
+    $("#lErr").innerHTML = `<div class="aviso">Si ese correo tiene acceso, te enviamos un enlace para crear tu contraseña. Dura 60 minutos.</div>`; return; }
   const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-pq],[data-pq-alc],[data-pq-csv],[data-base-bbva],[data-fb-tipo],[data-fb-csv],[data-ir-dia],[data-mmet],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-recup-validar")){ validarRecupero(t.dataset.recupValidar, true); return; }
@@ -3556,9 +3588,10 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
 /* ---------- arranque ---------- */
 (async function(){
   try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","rutas","equipo","mapa","ubicacion","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  if (/type=recovery/.test(location.hash)) S.nuevaClave = {};   // llega por el enlace del correo de recuperación
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
-  sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
+  sb.auth.onAuthStateChange((ev, ses) => { if (ev === "PASSWORD_RECOVERY"){ S.sesion = ses || S.sesion; S.nuevaClave = S.nuevaClave || {}; pintar(); } else if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
   if (S.sesion) cargar(); else { S.cargando = false; pintar(); }
 })();
 
