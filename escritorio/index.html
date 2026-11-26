@@ -618,7 +618,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "8f6bd4";
+const BUILD = "c81efd";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1033,9 +1033,10 @@ function cabKpis(){
   const per = L.find(p => p.id === S.dirPer) || L.find(p => p.id === cur) || { id:cur };
   let T = null; try { const d = datosPeriodo(per); if (d && !d.cargando && !d.err && d.act) T = statsDir(d); } catch(e){}
   const it = (n, t, cls) => `<div class="ck ${cls || ""}"><b class="num">${n}</b><span>${t}</span></div>`;
+  cargarSegs(per.id); const nSeg = S.segs && S.segs[per.id] ? S.segs[per.id].length : null;
   // el selector manda sobre Directorio, Mapa de calor y Ubicación (cada una guardaba su periodo; ahora se cambian juntos)
   const sel = L.length > 1 ? `<label class="ck-sel">Periodo <select id="cabPer" aria-label="Periodo">${L.map(p => `<option value="${esc(p.id)}" ${p.id === per.id ? "selected" : ""}>${esc(pNom(p))} · ${esc(pRango(p))}${p.id === cur ? " · en curso" : ""}</option>`).join("")}</select></label>` : `<span class="ck-per">Periodo ${esc(pNom(per))}</span>`;
-  k.innerHTML = it(T ? T.asig : "…", "cartera asignada") + it(T ? T.vis : "…", "visitados únicos", "or") + it(T ? T.reg : "…", "visitas realizadas", "vd") + it(T ? T.con : "…", "con contacto") + it("—", "reactivados BBVA · sin corte") + sel;
+  k.innerHTML = it(T ? T.asig : "…", "cartera asignada") + it(T ? T.vis : "…", "visitados únicos", "or") + it(T ? T.reg : "…", "visitas realizadas", "vd") + it(T ? T.con : "…", "con contacto") + it("—", "reactivados BBVA · sin corte") + it(nSeg == null ? "…" : nSeg, "seguimientos") + sel;
 }
 function pintar(){
   const app = $("#app");
@@ -1686,8 +1687,13 @@ function vistaResumen(){
   const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo);
     return `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td><b>${t.vis}</b><span class="muted"> / ${metaEj}</span><span class="muted"> · esperado ${Math.round(esp)}</span><div class="barrita"><i style="width:${Math.min(100, Math.round(t.vis * 100 / metaEj))}%"></i><u style="left:${Math.min(100, Math.round(esp * 100 / metaEj))}%" title="dónde debería ir hoy"></u></div></td><td class="n num">—</td></tr>`; }).join("");
   const hoyN = vivas().filter(v => iso(v.visitado_en) === hoy).length;
+  const perId = (S.dirPer || (S.periodo || {}).id), sg = (S.segs && S.segs[perId]) || [], sgL = sg.filter(r => S.ej === "todos" || r.correo === S.ej);
+  const segPanel = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Seguimiento remoto del periodo</b><span class="lbl">${sgL.length} contacto${sgL.length === 1 ? "" : "s"} por llamada, WhatsApp o correo a comercios sin contacto en la visita · no cambia la visita ni el bono</span></div>
+    <div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th>Canal</th><th>Qué respondió</th></tr></thead><tbody>${sgL.map(r => { const c = S.baseMap[r.customer_id] || {}, ej = ejDe(r.correo);
+      return `<tr><td>${fISO(iso(r.hecho_en))} ${hh(r.hecho_en)}</td><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(c.nombre_comercial || c.razon_social || r.customer_id)}</b></td><td>${esc(r.canal)}</td><td>${esc(r.resultado)}${r.nota ? `<small class="muted" style="display:block">${esc(r.nota)}</small>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">${S.segs && S.segs[perId] === null ? "Leyendo…" : "Todavía no hay seguimientos remotos en el periodo."}</td></tr>`}</tbody></table></div></div>`;
   return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión del equipo${S.periodo ? " · " + esc(pNom(S.periodo)) : ""}</b><span class="lbl">cada cifra sale de las visitas con GPS del CRM</span></div><div style="padding:10px">${kp}</div></div>
   <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión por ejecutivo</b></div><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th>Avance de comercios nuevos contra lo esperado</th><th class="n">Reactivados BBVA</th></tr></thead><tbody>${filas}</tbody></table></div>
+  ${segPanel}
   ${S.periodo && hoy >= S.periodo.ini && hoy <= S.periodo.fin ? `<div class="panel"><div class="barra"><b>Hoy · ${fISO(hoy)}</b></div><div style="padding:10px"><div class="resumen">${tile(hoyN, "visitas registradas hoy")}</div><div class="muted" style="font-size:12px;margin-top:8px">El incentivo y los reactivados de cada periodo están en Cierres.</div></div></div>` : ""}`;
 }
 function vistaTiempos(){
@@ -3288,6 +3294,11 @@ function resultadoDe(v){
 }
 // Motivos del sí inferidos por Stratis del comentario (tabla v2_motivo_si_inferido, solo escritorio).
 // Seguimiento remoto de las visitas sin contacto (01/10). Si la tabla aún no existe o falla, la presentación sigue sin él.
+async function cargarSegs(per){
+  S.segs ||= {}; if (!per || S.segs[per] !== undefined) return; S.segs[per] = null;
+  const r = await sb.from("v2_seguimientos").select("customer_id,correo,canal,resultado,nota,hecho_en").eq("periodo", per).order("hecho_en", { ascending:false });
+  S.segs[per] = r && !r.error ? (r.data || []) : []; pintar();
+}
 async function cargarSeguimientos(){
   let q = sb.from("v2_seguimientos").select("visita_id,customer_id,canal,resultado,hecho_en"); if (S.periodo) q = q.eq("periodo", S.periodo.id);
   const r = await q;
