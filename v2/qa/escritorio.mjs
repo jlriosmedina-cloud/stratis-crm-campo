@@ -549,6 +549,43 @@ await prueba('Directorio: selector de periodo, cobertura, contacto y dirección 
   assert.ok(/20 ?%/.test(tabla), 'el incentivo del cierre no aparece por ejecutivo: ' + tabla);
   await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_actividad = fx._act; fx.rpc.v2_mi_base = fx._base2; delete fx.rpc.v2_cierres_equipo; fx.tablas.v2_periodos = { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }; S.cierres = null; S.periodos = null; S.dirDatos = null; S.dirPer = null; S.ver = fx._ver; S.vista = 'validacion'; pintar(); });
 });
+await prueba('Lectura de actividad: más de 1.000 filas se leen partiendo el rango por fechas, sin perder ninguna', async () => {
+  const r = await p.evaluate(async () => {
+    const fx = window.__FX, ant = fx.rpc.v2_actividad, filas = [];
+    for (let i = 0; i < 12; i++) for (let j = 0; j < 100; j++) filas.push({ id: 'x' + i + '-' + j, visitado_en: `2026-02-${String(i + 1).padStart(2, '0')}T15:00:00Z` });
+    fx.rpc.v2_actividad = a => filas.filter(f => { const d = f.visitado_en.slice(0, 10); return d >= a.p_desde && d <= a.p_hasta; });
+    const out = await leerActividad('2026-02-01', '2026-02-12'); fx.rpc.v2_actividad = ant;
+    return { n: out.data.length, error: out.error, ids: new Set(out.data.map(v => v.id)).size, orden: out.data.every((v, i, l) => !i || new Date(l[i - 1].visitado_en) >= new Date(v.visitado_en)) };
+  });
+  assert.equal(r.error, null); assert.equal(r.n, 1200, 'se perdieron filas: ' + r.n); assert.equal(r.ids, 1200, 'hay filas repetidas'); assert.equal(r.orden, true, 'no queda ordenada de la más reciente a la más antigua');
+});
+await prueba('Mapa de distritos: selector de periodo, puntos por hora, filtros de día y franja, y lista con fecha y hora', async () => {
+  const cerrada = visita(1, { id: '00000000-0000-0000-0000-0000000000c1', periodo: 'CERRADO', visitado_en: '2025-01-10T15:00:00Z', recibido_en: '2025-01-10T15:00:30Z', plazo_hasta: '2025-01-11' });
+  const mediodia = visita(2, { id: '00000000-0000-0000-0000-0000000000c2', visitado_en: `${hoy}T18:00:00Z`, recibido_en: `${hoy}T18:00:30Z` });
+  await p.evaluate(({ c, m, bc }) => { const fx = window.__FX, act = fx.rpc.v2_actividad, base = fx.rpc.v2_mi_base; fx._act = act; fx._base2 = base; fx._actS = S.act;
+    fx.rpc.v2_actividad = a => a && a.p_desde === '2025-01-01' ? [c] : act; fx.rpc.v2_mi_base = a => a && a.p_periodo === 'CERRADO' ? bc : base;
+    fx.tablas.v2_periodos = [{ id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }, { id: 'CERRADO', ini: '2025-01-01', fin: '2025-01-31' }];
+    S.act = S.act.concat([m]); S.periodos = null; S.dirDatos = null; S.mPer = null; S.mDia = ''; S.mFr = ''; S.mColor = 'hora'; S.mPuntos = true; S.mRango = 'periodo'; S.vista = 'mapa'; elegirEj('todos'); pintar(); },
+    { c: cerrada, m: mediodia, bc: [comercio(1), comercio(2)] });
+  await p.waitForTimeout(700);
+  assert.equal(await p.locator('[data-mper]').count(), 2, 'faltan los chips de periodo');
+  const filas = async () => p.locator('.panel', { hasText: 'Visitas del mapa · fecha y hora' }).locator('tbody tr').count();
+  const esperadas = fr => p.evaluate(f => puntosMapa === undefined ? -1 : S.act.filter(v => v.lat != null && v.estado_anul !== 'anulada' && (f === '' || franjaDe(v) === Number(f))).length, fr);
+  assert.equal(await filas(), await esperadas(''), 'la lista no tiene todas las visitas con ubicación');
+  assert.match(await p.locator('.md-leyenda').innerText(), /Mañana/, 'la leyenda no muestra las franjas del día');
+  await p.selectOption('#mFr', '1'); await p.waitForTimeout(300);
+  assert.equal(await filas(), 1, 'la franja de mediodía debe tener solo la visita de las 13:00'); assert.match(await p.locator('.panel', { hasText: 'Visitas del mapa · fecha y hora' }).innerText(), /13:00/);
+  await p.selectOption('#mFr', '0'); await p.waitForTimeout(300);
+  assert.equal(await filas(), await esperadas('0'), 'la franja de mañana no cuadra con las visitas');
+  await p.selectOption('#mFr', ''); await p.selectOption('#mColor', 'res'); await p.waitForTimeout(300);
+  assert.match(await p.locator('.md-leyenda').innerText(), /Realizará consumos/, 'la leyenda por resultado');
+  if (process.env.CAPTURAS) await p.screenshot({ path: path.join(process.env.CAPTURAS, 'mapa.png'), fullPage: true });
+  await p.click('[data-mper="CERRADO"]'); await p.waitForTimeout(800);
+  const lista = await p.locator('.panel', { hasText: 'Visitas del mapa · fecha y hora' }).innerText();
+  assert.ok(/10\/01 10:00/.test(lista) && /Comercio Prueba 1/.test(lista), 'el periodo cerrado debe mostrar su propia visita: ' + lista.slice(0, 200));
+  assert.equal(await filas(), 1, 'el periodo cerrado tiene una sola visita');
+  await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_actividad = fx._act; fx.rpc.v2_mi_base = fx._base2; fx.tablas.v2_periodos = { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }; S.act = fx._actS; S.periodos = null; S.dirDatos = null; S.mPer = null; S.mColor = 'ej'; S.vista = 'validacion'; pintar(); });
+});
 await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta, con la ruta de hoy y el historial', async () => {
   // Los dos ejecutivos tienen una «Ruta 01 · Lima» y una «Ruta 99 · Por ubicar»: nunca se mezclan
   const E2 = 'ejecutivo2.prueba@ejemplo.com', R1 = 'Ruta 01 · Lima', R99 = 'Ruta 99 · Por ubicar', en = '2026-10-21T15:00:00Z';

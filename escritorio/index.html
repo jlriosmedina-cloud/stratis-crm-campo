@@ -541,7 +541,7 @@ table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "219013";
+const BUILD = "4e960f";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -757,10 +757,26 @@ async function cargar(){
   S.cargando = false; pintar();
   if (!S.error) escuchar();
 }
+// La API corta en 1.000 filas por respuesta y v2_actividad no pagina: si una respuesta llega al tope, se parte el rango de fechas en dos
+// hasta que cada parte quepa (así no se pierden visitas sin avisar). Un solo día con más de 1.000 visitas no se puede partir.
+async function leerActividad(d1, d2){
+  const { data, error } = await sb.rpc("v2_actividad", { p_desde:d1, p_hasta:d2 });
+  if (error) return { data:null, error };
+  if ((data || []).length >= 1000 && d1 >= d2){ console.warn("v2_actividad: el día " + d1 + " llegó al tope de 1.000 visitas; pueden faltar filas"); if (typeof toast === "function") toast("El día " + fISO(d1) + " tiene 1.000 visitas o más: puede faltar alguna en la pantalla."); }
+  if ((data || []).length < 1000 || d1 >= d2) return { data:data || [], error:null };
+  const dias = Math.round((new Date(d2 + "T12:00:00Z") - new Date(d1 + "T12:00:00Z")) / 86400000);
+  const m = new Date(d1 + "T12:00:00Z"); m.setUTCDate(m.getUTCDate() + Math.floor(dias / 2));
+  const s2 = new Date(m); s2.setUTCDate(s2.getUTCDate() + 1);
+  const [a, b] = await Promise.all([leerActividad(d1, m.toISOString().slice(0, 10)), leerActividad(s2.toISOString().slice(0, 10), d2)]);
+  if (a.error || b.error) return { data:null, error:a.error || b.error };
+  const vistos = new Set(), todo = [];
+  a.data.concat(b.data).forEach(v => { if (!vistos.has(v.id)){ vistos.add(v.id); todo.push(v); } });
+  return { data: todo.sort((x, y) => D(y.visitado_en) - D(x.visitado_en)), error:null };
+}
 async function cargarActividad(silencio){
   if (S._actCargando) return; S._actCargando = true;
   const desde = (S.periodo && S.periodo.ini) || ayerISO();
-  const [{ data, error }] = await Promise.all([sb.rpc("v2_actividad", { p_desde: desde, p_hasta: hoyISO() }), cargarRetenidas()]);
+  const [{ data, error }] = await Promise.all([leerActividad(desde, hoyISO()), cargarRetenidas()]);
   S._actCargando = false;
   if (error){ if (!silencio) toast("No se pudo actualizar: " + error.message); return; }
   const firma = JSON.stringify(data || []);
@@ -966,7 +982,7 @@ function pintar(){
   S._pinto = { vista:S.vista, sel:S.sel, tab:S.tab };
   despuesDePintar();
 }
-function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) montarMapaDistritos(md); }
+function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) conPeriodoMapa(() => montarMapaDistritos(md)); }
 function cascaron(){
   return `<div class="app">
   <aside class="rail">
@@ -1267,7 +1283,7 @@ function datosPeriodo(per){
   return S.dirDatos[per.id];
 }
 async function cargarDatosPeriodo(per){
-  const [a, b] = await Promise.all([sb.rpc("v2_actividad", { p_desde:per.ini, p_hasta:per.fin }), leerBasePorTramos(per.id)]);
+  const [a, b] = await Promise.all([leerActividad(per.ini, per.fin), leerBasePorTramos(per.id)]);
   if (a.error || b.error){ S.dirDatos[per.id] = { err:(a.error || b.error).message }; pintar(); return; }
   const todo = b.data || [], baseMap = {}; todo.forEach(c => { baseMap[c.customer_id] = c; });
   S.dirDatos[per.id] = { act:a.data || [], base:todo.filter(enCartera), baseMap, hayOrigen:todo.some(c => c.origen) }; pintar();
@@ -2305,6 +2321,7 @@ async function cargarGeo(){
   pintar();
 }
 function rangoMapa(){
+  if (S.mPer && S.periodo && S.mPer !== S.periodo.id) return null;   // un periodo cerrado se ve completo: «hoy» y «esta semana» no aplican
   const h = hoyISO();
   if (S.mRango === "hoy") return [h, h];
   if (S.mRango === "semana"){ const d = new Date(h + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() || 7) - 1)); return [d.toISOString().slice(0,10), h]; }
@@ -2338,7 +2355,48 @@ function clasesMet(st, k){
   const etq = i => { if (i === 0) return "0"; const a = i === 1 ? 1 : lim[i-2] + 1, b = lim[i-1]; return a >= b ? String(b) : `${a}–${b}`; };
   return { paso, etq, lim };
 }
+/* ---------- Mapa de distritos: periodo, hora del día y lista de visitas (entrega 2, 25/11) ---------- */
+const FRANJAS = [["Mañana","hasta 12:00",0,720,"#8fa0ff"],["Mediodía","12:00 a 14:00",720,840,"#F86F35"],["Tarde","14:00 a 18:00",840,1080,"#3B43FB"],["Noche","desde las 18:00",1080,1441,"#0C1137"]];
+// hh() puede devolver «24:05» a medianoche (hour12:false): la hora 24 es la 0
+const minDia = d => { const [h, m] = hh(d).split(":"); return (Number(h) % 24) * 60 + Number(m); };
+const franjaDe = v => FRANJAS.findIndex(f => minDia(v.visitado_en) >= f[2] && minDia(v.visitado_en) < f[3]);
+const claveRes = v => v.con === "Nadie" ? (v.motivo === "Dirección errada" ? "nohall" : "sin") : v.decision === "Realizará consumos" ? "exito" : (v.decision === "Aún no decide" || v.que === "Reagendada") ? "proceso" : "noex";
+const COL_RES = { exito:["#0BBC96","Realizará consumos"], proceso:["#3B43FB","Aún no decide o reagendada"], noex:["#F86F35","Desiste o sin éxito"], nohall:["#B7791F","Dirección errada"], sin:["#7d89a3","No se pudo hacer la visita"] };
+function puntosMapa(){
+  const r = rangoMapa(), fr = S.mFr !== undefined && S.mFr !== "" ? FRANJAS[S.mFr] : null;
+  return S.act.filter(v => {
+    if (v.lat == null || v.estado_anul === "anulada" || (S.mEj && S.mEj !== "todos" && v.correo !== S.mEj)) return false;
+    const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return false; if (S.mDia && d !== S.mDia) return false;
+    if (fr){ const mn = minDia(v.visitado_en); if (!(mn >= fr[2] && mn < fr[3])) return false; }
+    return true; });
+}
+const puntoColor = v => S.mColor === "hora" ? (FRANJAS[franjaDe(v)] || [0, 0, 0, 0, "#7d89a3"])[4] : S.mColor === "res" ? COL_RES[claveRes(v)][0] : colorCss(ejDe(v.correo).color);
+function leyendaPuntos(){
+  if (S.mPuntos === false) return "";
+  if (S.mColor === "hora") return FRANJAS.map(f => `<span><i style="background:${f[4]};border-radius:50%"></i>${f[0]} · ${f[1]}</span>`).join("");
+  if (S.mColor === "res") return Object.values(COL_RES).map(c => `<span><i style="background:${c[0]};border-radius:50%"></i>${c[1]}</span>`).join("");
+  return `<span><i class="pto"></i>visita (color del ejecutivo)</span>`;
+}
+const mapaEnCurso = () => !S.mPer || !S.periodo || S.mPer === S.periodo.id;
+function conPeriodoMapa(fn){
+  const p = (S.periodos || []).find(x => x.id === S.mPer);
+  if (!p || mapaEnCurso()) return fn();
+  const d = datosPeriodo(p); if (d.cargando || d.err) return fn();
+  const g = { act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen };
+  Object.assign(S, { act:d.act, base:d.base, baseMap:d.baseMap, hayOrigen:d.hayOrigen });
+  try { return fn(); } finally { Object.assign(S, g); }
+}
 function vistaMapa(){
+  cargarPeriodos();
+  const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo && S.periodo.id, sel = L.find(p => p.id === S.mPer) || null;
+  const chips = L.length > 1 ? `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => { const on = sel ? p.id === sel.id : p.id === cur;
+    return `<button class="chip ${on ? "on" : ""}" data-mper="${esc(p.id)}" aria-pressed="${on}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`; }).join("")}</div>` : "";
+  if (sel && sel.id !== cur){ const d = datosPeriodo(sel);
+    if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(sel.id)}…</div></div>`;
+    if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-mper="${esc(sel.id)}" style="margin-top:10px">Reintentar</button></div></div>`; }
+  return chips + conPeriodoMapa(vistaMapaCuerpo);
+}
+function vistaMapaCuerpo(){
   if (!S.geo && !S.geoErr) cargarGeo();
   const k = S.mMet || "ej", st = statsDistritos(), cl = k === "ej" ? null : clasesMet(st, k);
   const asignados = Object.values(st).filter(o => o.asig).sort((a, b) => (valorMet(b, k === "ej" ? "cob" : k) ?? -1) - (valorMet(a, k === "ej" ? "cob" : k) ?? -1) || b.asig - a.asig);
@@ -2390,13 +2448,16 @@ function vistaMapa(){
       <div class="chips" role="tablist" aria-label="Qué pintar en el mapa">${MET.map(([c, t, d]) => `<button class="chip ${k === c ? "on" : ""}" data-mmet="${c}" title="${esc(d)}">${t}</button>`).join("")}</div>
       <div class="der">
         <select class="sel" id="mRango" aria-label="Rango"><option value="periodo">Todo el periodo</option><option value="semana" ${S.mRango === "semana" ? "selected" : ""}>Esta semana</option><option value="hoy" ${S.mRango === "hoy" ? "selected" : ""}>Hoy</option></select>
+        <select class="sel" id="mColor" aria-label="Color de los puntos"><option value="ej">Puntos por ejecutivo</option><option value="hora" ${S.mColor === "hora" ? "selected" : ""}>Puntos por hora del día</option><option value="res" ${S.mColor === "res" ? "selected" : ""}>Puntos por resultado</option></select>
+        <select class="sel" id="mDia" aria-label="Día"><option value="">Todos los días</option>${[...new Set(S.act.filter(v => v.lat != null && v.estado_anul !== "anulada").map(v => iso(v.visitado_en)))].sort().map(d => `<option value="${d}" ${S.mDia === d ? "selected" : ""}>${fISO(d)}</option>`).join("")}</select>
+        <select class="sel" id="mFr" aria-label="Franja horaria"><option value="">Todo el día</option>${FRANJAS.map((f, i) => `<option value="${i}" ${S.mFr === String(i) ? "selected" : ""}>${f[0]} · ${f[1]}</option>`).join("")}</select>
         <label class="lbl"><input type="checkbox" id="mPuntos" ${S.mPuntos !== false ? "checked" : ""}> Puntos de visita</label>
       </div>
     </div>
     <div class="mapa-dist-wrap">
       <div class="mapa-dist-col">
         ${S.geoErr ? `<div class="vacio" style="padding:30px">No se pudieron cargar los límites de los distritos: ${esc(S.geoErr)}</div>` : !S.geo ? `<div class="vacio" style="padding:30px"><span class="spin"></span> Cargando el mapa…</div>` : `<div id="mapaDist" class="mapa-dist"></div>`}
-        <div class="md-leyenda"><b>${esc(MET.find(x => x[0] === k)[1])}</b><span class="muted">${esc(MET.find(x => x[0] === k)[2])}${k === "rea" ? "" : r ? ` Rango: ${S.mRango === "hoy" ? "hoy" : "esta semana"}.` : ""}</span><div class="leyenda-ej">${leyenda}${S.mPuntos !== false ? `<span><i class="pto"></i>visita (color del ejecutivo)</span>` : ""}</div></div>
+        <div class="md-leyenda"><b>${esc(MET.find(x => x[0] === k)[1])}</b><span class="muted">${esc(MET.find(x => x[0] === k)[2])}${k === "rea" ? "" : r ? ` Rango: ${S.mRango === "hoy" ? "hoy" : "esta semana"}.` : ""}</span><div class="leyenda-ej">${leyenda}${leyendaPuntos()}</div></div>
       </div>
       <div class="md-lado">${lateral}</div>
     </div>
@@ -2406,7 +2467,11 @@ function vistaMapa(){
     <div style="overflow-x:auto"><table class="datos md-tabla"><thead><tr><th>Distrito</th><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Visitas</th><th class="n">Efectividad</th><th class="n">Reuniones</th><th class="n">Realizará<br>consumos</th><th class="n">Reactivados</th><th class="n">Lejos o<br>sin GPS</th></tr></thead>
     <tbody>${filasTabla}</tbody></table></div>
     <div class="atajos">Límites de distritos: © colaboradores de OpenStreetMap (ODbL). Los reactivados se cuentan en todo el periodo; lo demás, en el rango elegido.</div>
-  </div>`;
+  </div>
+  ${S.mPuntos !== false ? (() => { const pts = puntosMapa().sort((a, b) => D(b.visitado_en) - D(a.visitado_en));
+    return `<div class="panel" style="margin-top:16px"><div class="barra"><b>Visitas del mapa · fecha y hora</b><span class="lbl">${pts.length} visita${pts.length === 1 ? "" : "s"} con ubicación según los filtros de arriba</span></div>
+    <div class="eq-dias"><table class="datos"><thead><tr><th>Día y hora</th><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Resultado</th></tr></thead><tbody>${pts.map(v => { const ej = ejDe(v.correo);
+      return `<tr><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</td><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td>${esc(v.comercio)}</td><td>${esc(v.distrito || "—")}</td><td>${esc(comoFue(v)[0])}</td></tr>`; }).join("") || `<tr><td colspan="5" class="muted">Sin visitas con estos filtros.</td></tr>`}</tbody></table></div></div>`; })() : ""}`;
 }
 function montarMapaDistritos(el){
   if (!window.L || !S.geo){ return; }
@@ -2437,11 +2502,10 @@ function montarMapaDistritos(el){
     const c = capa.getBounds().getCenter(); const v = valorMet(o, k === "ej" ? "cob" : k);
     etqs.push([capa, L.marker(c, { interactive:false, keyboard:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<b>${esc(g.nombre)}</b><span>${fmtMet(v, k === "ej" ? "cob" : k)}</span>` }) }).addTo(m)]); });
   if (S.mPuntos !== false){
-    S.act.forEach(v => { if (v.lat == null || v.estado_anul === "anulada" || (S.mEj && S.mEj !== "todos" && v.correo !== S.mEj)) return;
-      const d = iso(v.visitado_en); if (r && (d < r[0] || d > r[1])) return;
-      L.circleMarker([v.lat, v.lng], { radius:4, color:borde, weight:1.5, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 })
+    puntosMapa().forEach(v => { const d = iso(v.visitado_en);
+      L.circleMarker([v.lat, v.lng], { radius:4, color:borde, weight:1.5, fillColor:puntoColor(v), fillOpacity:1 })
         .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(d)} ${hh(v.visitado_en)}<br>${esc(comoFue(v)[0])}${v.distancia_m != null ? ` · a ${mDist(v.distancia_m)}` : ""}`, { className:"etq-mapa", direction:"top", offset:[0,-4] })
-        .on("click", () => { S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; if (S.ej !== "todos" && v.correo !== S.ej) elegirEj("todos"); S.sel = v.id; pintar(); })
+        .on("click", () => { if (!mapaEnCurso()) return; S.vista = "validacion"; S.filtro = "todos"; S.dia = "periodo"; if (S.ej !== "todos" && v.correo !== S.ej) elegirEj("todos"); S.sel = v.id; pintar(); })
         .addTo(m); });
   }
   const selCapa = capas.find(x => x[0].clave === S.mEnfocar);
@@ -3142,6 +3206,9 @@ document.addEventListener("change", ev => {
   if (t.id === "pqSemana"){ S.pqSemana = t.value; pintar(); }
   if (t.id === "mRango"){ S.mRango = t.value; pintar(); }
   if (t.id === "mPuntos"){ S.mPuntos = t.checked; pintar(); }
+  if (t.id === "mColor"){ S.mColor = t.value; pintar(); }
+  if (t.id === "mDia"){ S.mDia = t.value; pintar(); }
+  if (t.id === "mFr"){ S.mFr = t.value; pintar(); }
   if (t.id === "fSenal"){ S.soloSenal = t.checked; S.sel = null; pintar(); }
   if (t.dataset.marca){ if (t.checked) S.marcadas.add(t.dataset.marca); else S.marcadas.delete(t.dataset.marca); pintar(); }
   if (t.id === "archivo" && t.files[0]) leerArchivo(t.files[0]);
@@ -3163,7 +3230,8 @@ document.addEventListener("keydown", ev => {
   if (ev.key === "Escape" && S.accion){ S.accion = null; pintar(); }
 });
 
-document.addEventListener("click", ev => { const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
+document.addEventListener("click", ev => { const m = ev.target.closest("[data-mper]"); if (m){ const id = m.dataset.mper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.mPer = id; S.mDist = null; S.mVista = null; S.mEnfocar = null; S.mDia = ""; S.mFr = ""; if (S.periodo && id !== S.periodo.id) S.mRango = "periodo"; pintar(); return; }
+  const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
   try { const h = location.hash.replace("#",""); if (["directorio","validacion","bloques","rutas","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
