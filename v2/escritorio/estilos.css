@@ -603,3 +603,19 @@ table.datos tr.on td{background:var(--azul-t)}
 .chip-ej small{margin-left:4px;font-weight:600}.chip-ej small.ok{color:var(--verde-txt)}.chip-ej small.mal{color:var(--rojo-txt)}
 .graf-acu{max-width:700px}
 .acu-pie{padding:8px 16px 0;font-size:13px;color:var(--texto)}
+
+/* Tiempos · Resumen diario rediseñado (26/11): una tarjeta por ejecutivo */
+.tm-dia{display:inline-flex;gap:6px;align-items:center}
+.tm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.tm-card{background:var(--tarjeta);border:1px solid var(--linea);border-radius:14px;padding:14px 16px 12px;display:flex;flex-direction:column;gap:8px}
+.tm-card.eq{background:var(--hover)}
+.tm-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tm-n{display:flex;align-items:baseline;gap:5px}.tm-n b{font-size:26px;color:var(--ink);line-height:1}.tm-n small{color:var(--muted);font-size:12px}
+.tm-bars{display:flex;align-items:flex-end;gap:3px;height:56px;border-bottom:1px solid var(--linea)}
+.tm-bars i{flex:1;min-width:3px;border-radius:3px 3px 0 0;background:var(--hover)}.tm-card.eq .tm-bars i{background:var(--linea)}
+.tm-bars i.on{background:var(--navy-2)}
+.tm-ejeh{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-top:-4px}
+.tm-fila{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--texto);padding:3px 0;border-top:1px dashed var(--linea)}
+.tm-ejeh+.tm-fila{border-top:0}.tm-fila b{color:var(--ink);font-weight:600}
+.tm-vacio{color:var(--muted);font-size:13px;padding:10px 0}
+.tm-card.vacia{opacity:.75}

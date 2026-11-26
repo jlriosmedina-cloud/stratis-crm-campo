@@ -658,6 +658,19 @@ await prueba('Comercios aparte de la base (26/11): se ven aparte, no suman y el 
   assert.equal(r.hay, true); assert.equal(r.origen, 'base_anterior'); assert.equal(r.suma, false, 'no debe sumar a la meta'); assert.ok(r.otros, 'el resto debe quedar con origen');
   assert.equal(r.cartera, r.esperada, 'la cartera debe quedar sin el comercio aparte'); assert.ok(r.sinFuncion, 'sin la función no debe cambiar nada');
 });
+await prueba('Tiempos · Resumen diario rediseñado (26/11): una tarjeta por ejecutivo más la del equipo, y día anterior/siguiente', async () => {
+  const d0 = await p.evaluate(() => { S.vista = 'tiempos'; S.tTab = 'dia'; S.tDia = iso(S.act[0].visitado_en); elegirEj('todos'); pintar(); return S.tDia; }); await p.waitForTimeout(400);
+  const nEj = await p.evaluate(() => S.ejecutivos.length);
+  assert.equal(await p.locator('.tm-card').count(), nEj + 1, 'una tarjeta por ejecutivo y la del equipo');
+  const t = await p.locator('.tm-cards').innerText(); assert.match(t, /Primera visita/); assert.match(t, /Ventana del día/); assert.match(t, /Hora pico/);
+  assert.equal(await p.locator('details.mu-det table.tiempos').count(), 1, 'la tabla por hora queda plegada');
+  const n0 = await p.evaluate(() => vivas().filter(v => iso(v.visitado_en) === S.tDia).length);
+  assert.equal((await p.locator('.tm-card.eq .tm-n b').innerText()).trim(), String(n0), 'el total del equipo debe cuadrar con las visitas del día');
+  await p.click('[data-tdia-mas="1"]'); await p.waitForTimeout(300);
+  assert.notEqual(await p.evaluate(() => S.tDia), d0, 'el día debe avanzar'); await p.click('[data-tdia-mas="-1"]'); await p.waitForTimeout(300);
+  assert.equal(await p.evaluate(() => S.tDia), d0, 'el día debe volver');
+  await p.evaluate(() => { S.vista = 'directorio'; pintar(); });
+});
 await prueba('Vista del ejecutivo (26/11): interruptor, menú de 4 pestañas, un solo ejecutivo y vuelta a supervisión', async () => {
   await p.evaluate(() => { S.modo = 'sup'; S.vista = 'directorio'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(300);
   assert.equal(await p.locator('#btnModo').innerText(), 'Ver como ejecutivo');

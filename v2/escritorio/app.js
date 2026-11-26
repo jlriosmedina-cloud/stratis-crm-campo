@@ -990,7 +990,7 @@ function vistaResumen(){
 function vistaTiempos(){
   const tab = S.tTab || "dia", dia = S.tDia || hoyISO();
   const tabs = [["dia", "Resumen diario"], ["acum", "Acumulado del periodo"], ["rangos", "Rangos horarios"], ["det", "Detalle de registros"]];
-  const ctl = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Consulta de tiempos</b></div><div style="padding:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><input type="date" id="tDia" value="${esc(dia)}" aria-label="Día"><div class="chips" role="group" aria-label="Vista de tiempos" style="margin:0">${tabs.map(([k, t]) => `<button class="chip ${tab === k ? "on" : ""}" data-ttab="${k}" aria-pressed="${tab === k}">${t}</button>`).join("")}</div></div></div>`;
+  const ctl = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Consulta de tiempos</b></div><div style="padding:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="tm-dia"><button class="btn" data-tdia-mas="-1" aria-label="Día anterior" title="Día anterior">‹</button><input type="date" id="tDia" value="${esc(dia)}" aria-label="Día"><button class="btn" data-tdia-mas="1" aria-label="Día siguiente" title="Día siguiente">›</button></span><div class="chips" role="group" aria-label="Vista de tiempos" style="margin:0">${tabs.map(([k, t]) => `<button class="chip ${tab === k ? "on" : ""}" data-ttab="${k}" aria-pressed="${tab === k}">${t}</button>`).join("")}</div></div></div>`;
   const vs = vivas().filter(v => tab === "acum" || tab === "rangos" ? true : iso(v.visitado_en) === dia);
   const hs = vs.map(v => Math.floor(horaMin(v) / 60)), horas = []; for (let h = Math.min(8, ...hs); h <= Math.max(21, ...hs); h++) horas.push(h);   // 8 a 22 h; si hay visitas fuera de ese rango, se amplía para que el total cuadre
   let cuerpo;
@@ -998,9 +998,28 @@ function vistaTiempos(){
     const filas = S.ejecutivos.map(e => { const l = vs.filter(v => v.correo === e.correo), por = horas.map(h => l.filter(v => Math.floor(horaMin(v) / 60) === h).length), n = l.length, pico = n ? horas[por.indexOf(Math.max(...por))] : null;
       return { e, por, n, pico, activas:por.filter(x => x).length }; });
     const max = Math.max(1, ...filas.flatMap(f => f.por)), colH = horas.map((h, i) => filas.reduce((s, f) => s + f.por[i], 0));
-    cuerpo = `<div class="panel"><div class="barra"><b>Visitas por hora · ${tab === "dia" ? fISO(dia) : "todo el periodo"}</b><span class="lbl">cada celda cuenta las visitas de esa hora (8–9, 9–10…) · más oscuro = más visitas</span></div>
+    const tabla = `<div class="panel"><div class="barra"><b>Visitas por hora · ${tab === "dia" ? fISO(dia) : "todo el periodo"}</b><span class="lbl">cada celda cuenta las visitas de esa hora (8–9, 9–10…) · más oscuro = más visitas</span></div>
       <div class="eq-dias"><table class="datos tiempos"><thead><tr><th>Ejecutivo</th>${horas.map(h => `<th class="n">${h}–${h + 1}</th>`).join("")}<th class="n">Total</th><th class="n">Hora pico</th><th class="n">Horas activas</th></tr></thead><tbody>${filas.map(f => `<tr><td><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span><small class="muted" style="display:block">${f.n ? f.n + " visitas" : "sin visitas"}</small></td>${f.por.map(x => `<td class="n num"><span class="cel" style="--i:${(x / max).toFixed(2)}">${x || ""}</span></td>`).join("")}<td class="n num"><b>${f.n}</b></td><td class="n num">${f.pico == null ? "—" : f.pico + "–" + (f.pico + 1)}</td><td class="n num">${f.activas} de ${horas.length}</td></tr>`).join("")}
       <tr class="total"><td><b>Equipo</b></td>${colH.map(x => `<td class="n num"><b>${x || ""}</b></td>`).join("")}<td class="n num"><b>${filas.reduce((s, f) => s + f.n, 0)}</b></td><td></td><td></td></tr></tbody></table></div></div>`;
+    if (tab === "acum") cuerpo = tabla;
+    else {
+      // Resumen diario (26/11, rediseño): una tarjeta por ejecutivo con sus visitas del día, cuándo empezó y terminó, cada cuánto registró y su hora pico.
+      const J = jornadas(), jd = c => J.find(j => j.correo === c && j.dia === dia), maxC = Math.max(1, ...colH);
+      const fila = (k, v) => `<div class="tm-fila"><span>${k}</span><b>${v}</b></div>`;
+      const tarjeta = (nombre, avatar, n, por, j, pico) => `<div class="tm-card${n ? "" : " vacia"}"><div class="tm-top"><span class="ej">${avatar}${esc(nombre)}</span><span class="tm-n"><b class="num">${n}</b><small>visita${n === 1 ? "" : "s"}</small></span></div>
+        <div class="tm-bars" role="img" aria-label="Visitas por hora del día">${por.map((x, i) => `<i class="${x ? "on" : ""}" style="height:${x ? Math.max(12, Math.round(x * 100 / Math.max(1, ...por))) : 5}%" title="${horas[i]}–${horas[i] + 1} h: ${x}"></i>`).join("")}</div>
+        <div class="tm-ejeh"><span>${horas[0]} h</span><span>${horas[horas.length - 1] + 1} h</span></div>
+        ${n ? fila("Primera visita", relojTxt(j ? j.ini : null)) + fila("Última visita", relojTxt(j ? j.fin : null)) + fila("Ventana del día", j && j.ventana != null ? minTxt(j.ventana) : "—") + fila("Registra cada", j && j.prom != null ? minTxt(j.prom) : "—") + fila("Hora pico", pico == null ? "—" : pico + "–" + (pico + 1) + " h") : `<div class="tm-vacio">Sin visitas este día</div>`}</div>`;
+      const todas = J.filter(j => j.dia === dia), totN = filas.reduce((a, f) => a + f.n, 0);
+      const jt = todas.length ? { ini: Math.min(...todas.map(j => j.ini)), fin: Math.max(...todas.map(j => j.fin)) } : null;
+      const picoT = totN ? horas[colH.indexOf(Math.max(...colH))] : null;
+      cuerpo = `<div class="tm-cards">${filas.map(f => tarjeta(f.e.nombre, AVATAR(f.e), f.n, f.por, jd(f.e.correo), f.pico)).join("")}
+        <div class="tm-card eq"><div class="tm-top"><span class="ej"><b>Equipo</b></span><span class="tm-n"><b class="num">${totN}</b><small>visita${totN === 1 ? "" : "s"}</small></span></div>
+          <div class="tm-bars" role="img" aria-label="Visitas del equipo por hora">${colH.map((x, i) => `<i class="${x ? "on" : ""}" style="height:${x ? Math.max(12, Math.round(x * 100 / maxC)) : 5}%" title="${horas[i]}–${horas[i] + 1} h: ${x}"></i>`).join("")}</div>
+          <div class="tm-ejeh"><span>${horas[0]} h</span><span>${horas[horas.length - 1] + 1} h</span></div>
+          ${totN ? fila("Primera del equipo", relojTxt(jt && jt.ini)) + fila("Última del equipo", relojTxt(jt && jt.fin)) + fila("Hora pico", picoT == null ? "—" : picoT + "–" + (picoT + 1) + " h") : `<div class="tm-vacio">Sin visitas este día</div>`}</div></div>
+        <details class="mu-det" style="margin-top:14px"><summary>Ver la tabla de visitas por hora</summary>${tabla}</details>`;
+    }
   } else if (tab === "rangos"){
     cuerpo = `<div class="panel"><div class="barra"><b>Rangos horarios del periodo</b><span class="lbl">qué parte de sus visitas hace cada ejecutivo en cada franja del día</span></div><div style="padding:10px">${barrasFranjas()}</div></div>`;
   } else {
@@ -2421,6 +2440,7 @@ document.addEventListener("click", ev => {
 const numPE = x => Number(x || 0).toLocaleString("de-DE");   // punto de miles y coma decimal, como el Excel de Jose
 document.addEventListener("click", ev => { const t = ev.target.closest("[data-ttab]"); if (!t) return; S.tTab = t.dataset.ttab; pintar(); });
 document.addEventListener("change", ev => { if (ev.target.id === "tDia" && ev.target.value){ S.tDia = ev.target.value; pintar(); } });
+document.addEventListener("click", ev => { const t = ev.target.closest("[data-tdia-mas]"); if (!t) return; const d = new Date((S.tDia || hoyISO()) + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + Number(t.dataset.tdiaMas)); S.tDia = d.toISOString().slice(0, 10); pintar(); });
 document.addEventListener("change", ev => { if (ev.target.id !== "cabPer") return; const id = ev.target.value;
   if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id];
   S.dirPer = id; S.mPer = id; S.uPer = id; S.mDist = null; S.mVista = null; S.mEnfocar = null; S.mDia = ""; S.mFr = ""; S.muSel = null; S.muVista = null; S.uSel = null; S.alSel = null;
