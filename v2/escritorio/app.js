@@ -382,8 +382,11 @@ const VISTAS = [
 ];
 // Jose (26/11): el menú queda solo con las pestañas del prototipo; las herramientas siguen en el código y se abren por su dirección (#cargas, #rutas…).
 const NAV_VISTAS = VISTAS.slice(0, VISTAS.findIndex(v => v[0] === "--"));
+// Vista del ejecutivo (26/11): el interruptor de arriba deja la pantalla como la ve un ejecutivo (Jose y Gabriel); solo lee, no escribe nada.
+const NAV_EJE = [["avance","Mi avance",ICON.equipo],["cartera","Mi cartera",ICON.bloques],["alertas","Mis alertas",ICON.cola],["mapa","Mi mapa",ICON.mapa]];
+function claveEje(){ return S.vista === "miavance" ? "avance" : S.vista === "cartera" ? "cartera" : S.vista === "mapa" ? (S.muTab === "ale" ? "alertas" : "mapa") : ""; }
 function pintarNav(){
-  $("#nav").innerHTML = NAV_VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
+  $("#nav").innerHTML = S.modo === "eje" ? NAV_EJE.map(([k,t,i]) => `<button class="${claveEje()===k?"on":""}" data-eje="${k}">${i}${t}</button>`).join("") : NAV_VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
   const p = S.periodo;
   $("#pieRail").innerHTML = p ? `<b>Periodo ${esc(pNom(p))} · ${fISO(p.ini)} – ${fISO(p.fin)}</b>${S.base.length} comercios · ${S.ejecutivos.length} ejecutivos · build ${BUILD}` : `<b>Sin periodo abierto</b>build ${BUILD}`;
 }
@@ -408,6 +411,10 @@ function pintar(){
   if (S.cargando){ app.innerHTML = `<div class="cargando"><span class="spin"></span>Cargando el CRM…</div>`; return; }
   if (S.error){ app.innerHTML = `<div class="login"><div class="caja"><div class="marca">STRATIS</div><h1>${S.denegado ? "Esta vista no es para tu usuario" : "No se pudo entrar"}</h1><p>${esc(S.error)}</p>${S.denegado ? `<a class="btn p" href="../" style="text-decoration:none">Ir al CRM de campo</a><button class="btn" data-otro-usuario style="margin-top:8px">Entrar con otro usuario</button>` : `<button class="btn" data-salir>${ICON.salir} Salir</button>`}</div></div>`; return; }
   if (!app.querySelector(".rail")) app.innerHTML = cascaron();
+  if (S.modo === "eje"){
+    if (S.ej === "todos" && S.ejecutivos.length) elegirEj(S.ejecutivos[0].correo);
+    if (!["miavance","cartera","mapa"].includes(S.vista)) S.vista = "miavance";
+  }
   pintarNav();
   $("#vivoTxt").textContent = S.pausa ? "Actualización en pausa" : textoVivo();
   $("#vivo").classList.toggle("pausa", S.pausa);
@@ -416,7 +423,8 @@ function pintar(){
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   cabKpis();
   const c = $("#contenido");
-  const T = { resumen:["Resumen de gestión","Cartera, visitas y contacto del equipo en el periodo, y cómo va cada ejecutivo."],
+  const T = { miavance:["Mi avance","Cómo va el ejecutivo elegido contra su meta del periodo y qué le queda pendiente. Es la pantalla tal como la ve él."],
+              resumen:["Resumen de gestión","Cartera, visitas y contacto del equipo en el periodo, y cómo va cada ejecutivo."],
               tiempos:["Consulta de tiempos","A qué hora registra visitas cada ejecutivo: por día, acumulado del periodo, por franjas y el detalle de los registros."],
               reporte:["Reporte de gestión del equipo","Resumen del periodo, gestión por ejecutivo con su ventana de trabajo y las franjas del día."],
               validacion:["Actividad","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
@@ -429,7 +437,8 @@ function pintar(){
               indicadores:["Indicadores del equipo","La misma medición que ve cada ejecutivo en «Mi avance», comparada."],
               cierres:["Cierres de periodo","Lo que se aprobó y pagó en cada periodo cerrado, congelado como se firmó, en % del sueldo base. Elige un ejecutivo arriba para ver su evolutivo."] };
   $("#titulo").textContent = T[S.vista][0]; $("#subtitulo").textContent = T[S.vista][1];
-  $("#gEj").innerHTML = `<option value="todos">Equipo completo</option>${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}`;
+  $("#btnModo").textContent = S.modo === "eje" ? "Volver a supervisión" : "Ver como ejecutivo"; $("#btnModo").setAttribute("aria-pressed", String(S.modo === "eje"));
+  $("#gEj").innerHTML = `${S.modo === "eje" ? "" : '<option value="todos">Equipo completo</option>'}${S.ejecutivos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}`;
   $("#gEj").disabled = S.vista === "cargas" || S.vista === "directorio"; $("#gEj").title = S.vista === "cargas" ? "Las cargas son de todo el equipo" : S.vista === "directorio" ? "El directorio es de todo el equipo" : "Ver todas las vistas de un ejecutivo o del equipo";
   $("#btnCel").hidden = S.ej === "todos";
   $("#btnOjo").innerHTML = S.ver ? `${ICON.ojo} Ocultar datos` : `${ICON.ojoNo} Ver datos`;
@@ -443,7 +452,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "cartera" ? vistaCartera() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "miavance" ? vistaMiAvance() : S.vista === "validacion" ? vistaValidacion() : S.vista === "cartera" ? vistaCartera() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -464,6 +473,7 @@ function cascaron(){
     <header class="top">
       <div><h1 id="titulo"></h1><div class="sub" id="subtitulo"></div></div>
       <div class="der">
+        <button class="btn" id="btnModo" aria-pressed="false" title="Ver la pantalla como la ve un ejecutivo (solo para mirar)">Ver como ejecutivo</button>
         <select class="sel" id="gEj" aria-label="Ejecutivo"></select>
         <button class="btn" id="btnCel" title="Abrir su celular tal como lo ve él, solo para mirar" hidden>${ICON.cel} Ver su celular</button>
         <button class="btn ojo" id="btnOjo" aria-pressed="false" title="Mostrar u ocultar montos, potenciales, volúmenes, celulares y correos"></button>
@@ -1805,6 +1815,19 @@ const muRampaErr = c => c == null || c === 0 ? "#E4E8FB" : c < .1 ? "#FBD5B8" : 
 function muPeriodo(fn){ cargarPeriodos(); return conPeriodoId(S.dirPer, fn); }
 /* Cartera (26/11): los comercios del periodo con su última visita y su próxima acción. Solo lectura. */
 const CAR_EST = [["", "Todos los estados"], ["por", "Por visitar"], ["vis", "Visitados"], ["con", "Con contacto"], ["sin", "Sin contacto"], ["err", "No se encontró el comercio"]];
+/* Mi avance (vista del ejecutivo): sus pendientes y, debajo, su avance contra la meta (la misma pantalla de Equipo, con un solo ejecutivo). */
+function vistaMiAvance(){
+  const e = S.ejecutivos[0]; if (!e) return `<div class="panel"><div class="vacio">No hay un ejecutivo para mostrar.</div></div>`;
+  const ult = {}; S.act.filter(v => v.estado_anul !== "anulada").sort((x, y) => D(x.visitado_en) - D(y.visitado_en)).forEach(v => { ult[v.customer_id] = v; });
+  const base = S.base.filter(c => c.correo && (!S.hayOrigen || c.origen === "base_nueva"));
+  const por = base.filter(c => !ult[c.customer_id]).length, err = base.filter(c => ult[c.customer_id] && esErr(ult[c.customer_id])).length, volver = base.filter(c => { const v = ult[c.customer_id]; return v && !esErr(v) && v.con === "Nadie"; }).length;
+  const tiles = `<div class="resumen" style="margin-bottom:14px">
+    <div class="tile acc"><div class="k">Mi cartera · ${esc(nombreCorto(e.nombre))}</div><div class="v num">${base.length}</div><div class="d">${base.length - por} con visita · ${por} por visitar</div></div>
+    <div class="tile ${por ? "warn" : "ok"}"><div class="k">Por visitar</div><div class="v num">${por}</div><div class="d">comercios de mi base sin visita en el periodo</div></div>
+    <div class="tile ${volver ? "warn" : "ok"}"><div class="k">Volver a visitar</div><div class="v num">${volver}</div><div class="d">la última visita fue sin contacto</div></div>
+    <div class="tile ${err ? "warn" : "ok"}"><div class="k">Validar dirección</div><div class="v num">${err}</div><div class="d">no se encontró el comercio en la dirección</div></div></div>`;
+  return tiles + equipoPeriodo().replace("Ritmo del equipo", "Mi ritmo");
+}
 function vistaCartera(){
   const ult = {}; S.act.filter(v => v.estado_anul !== "anulada").sort((x, y) => D(x.visitado_en) - D(y.visitado_en)).forEach(v => { ult[v.customer_id] = v; });
   const q = norm0(S.carQ || ""), est = S.carEst || "";
@@ -1828,7 +1851,7 @@ function vistaMapaUnico(){
 }
 function cuerpoMapaUnico(enCurso){
   const modo = S.muModo || "ej", tab = S.muTab || "dis", vs = S.act.filter(v => v.estado_anul !== "anulada");
-  const ejs = `<div class="mu-g"><small>Ejecutivo</small><select class="sel" id="muEj" aria-label="Ejecutivo"><option value="todos">Equipo completo</option>${S.muTodos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select></div>`;
+  const ejs = `<div class="mu-g"><small>Ejecutivo</small><select class="sel" id="muEj" aria-label="Ejecutivo">${S.modo === "eje" ? "" : '<option value="todos">Equipo completo</option>'}${S.muTodos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select></div>`;
   const mod = `<div class="mu-g"><small>Colorear distritos por</small>${MU_MODOS.map(([k, t]) => `<button class="chip ${modo === k ? "on" : ""}" data-mu-modo="${k}">${t}</button>`).join("")}</div>`;
   const cap = enCurso ? `<div class="mu-g"><small>Capas</small><label class="tog"><input type="checkbox" id="muVis" ${S.muVis !== false ? "checked" : ""}> Visitas</label><label class="tog"><input type="checkbox" id="muPen" ${S.muPen !== false ? "checked" : ""}> <i class="negro"></i> Por visitar (${porVisitarMapa().length})</label><label class="tog"><input type="checkbox" id="muAle" ${S.muAle !== false ? "checked" : ""}> Alertas</label></div>` : "";
   const lejos = vs.filter(v => v.lat != null && (v.distancia_m || 0) > REGLA.lejos).length, alt = alertasMismoPunto().filter(g => g.nivel !== "info").length;
@@ -2277,7 +2300,7 @@ document.addEventListener("click", async ev => {
     if (!correo){ $("#lErr").innerHTML = `<div class="aviso mal err">Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».</div>`; return; }
     try { await sb.auth.resetPasswordForEmail(correo, { redirectTo: location.origin + location.pathname }); } catch(e){}
     $("#lErr").innerHTML = `<div class="aviso">Si ese correo tiene acceso, te enviamos un enlace para crear tu contraseña. Dura 60 minutos.</div>`; return; }
-  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-base-bbva],[data-ir-dia],[data-mdist],#btnTema,[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-base-bbva],[data-ir-dia],[data-mdist],#btnTema,#btnModo,[data-eje],[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-recup-validar")){ validarRecupero(t.dataset.recupValidar, true); return; }
   if (t.hasAttribute("data-recup-observar")){ validarRecupero(t.dataset.recupObservar, false); return; }
@@ -2295,6 +2318,11 @@ document.addEventListener("click", async ev => {
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
   if (t.id === "btnTema"){ cambiarTema(); return; }
   if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; elegirEj(t.dataset.irEj || "todos"); S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
+  if (t.id === "btnModo"){ S.sel = null; S.muSel = null;
+    if (S.modo !== "eje"){ S._antesEje = { vista: S.vista, ej: S.ej }; S.modo = "eje"; S.vista = "miavance"; }
+    else { const a = S._antesEje || { vista: "directorio", ej: "todos" }; S.modo = "sup"; S.vista = a.vista; elegirEj(a.ej); }
+    pintar(); return; }
+  if (t.dataset.eje){ const k = t.dataset.eje; S.vista = k === "avance" ? "miavance" : k === "cartera" ? "cartera" : "mapa"; if (k === "alertas") S.muTab = "ale"; else if (k === "mapa") S.muTab = "dis"; S.muSel = null; S.sel = null; pintar(); return; }
   if (t.dataset.vista){ S.vista = t.dataset.vista; if (t.dataset.tab) S.tab = t.dataset.tab; S.accion = null; try { history.replaceState(null, "", "#" + S.vista); } catch(e){} pintar(); return; }
   if (t.dataset.filtro){ S.filtro = t.dataset.filtro; S.sel = null; S.accion = null; pintar(); return; }
   if (t.dataset.sel){ if (ev.target.closest("input")) return; S.sel = t.dataset.sel; S.accion = null; pintar(); return; }

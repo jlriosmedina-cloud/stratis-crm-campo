@@ -647,6 +647,23 @@ await prueba('Cartera (26/11): los comercios del periodo con su última visita, 
   assert.equal(await p.locator('#contenido tbody tr').count(), por, 'el filtro «Por visitar» no cuadra');
   await p.evaluate(() => { S.carEst = ''; S.vista = 'directorio'; pintar(); });
 });
+await prueba('Vista del ejecutivo (26/11): interruptor, menú de 4 pestañas, un solo ejecutivo y vuelta a supervisión', async () => {
+  await p.evaluate(() => { S.modo = 'sup'; S.vista = 'directorio'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(300);
+  assert.equal(await p.locator('#btnModo').innerText(), 'Ver como ejecutivo');
+  await p.click('#btnModo'); await p.waitForTimeout(600);
+  assert.deepEqual(await p.locator('#nav button').allInnerTexts(), ['Mi avance', 'Mi cartera', 'Mis alertas', 'Mi mapa']);
+  assert.notEqual(await p.evaluate(() => S.ej), 'todos', 'debe quedar un ejecutivo elegido');
+  assert.equal(await p.locator('#gEj option[value="todos"]').count(), 0, 'en la vista del ejecutivo no hay «Equipo completo»');
+  assert.match(await p.locator('#contenido').innerText(), /mi cartera/i); assert.match(await p.locator('#contenido').innerText(), /mi ritmo/i);
+  await p.click('[data-eje="cartera"]'); await p.waitForTimeout(400);
+  assert.equal(await p.locator('#nav button.on').innerText(), 'Mi cartera');
+  await p.click('[data-eje="alertas"]'); await p.waitForTimeout(700);
+  assert.equal(await p.locator('#nav button.on').innerText(), 'Mis alertas'); assert.equal(await p.evaluate(() => S.muTab), 'ale');
+  assert.equal(await p.locator('#muEj option[value="todos"]').count(), 0, 'el mapa del ejecutivo no ofrece el equipo completo');
+  await p.click('[data-eje="mapa"]'); await p.waitForTimeout(500); assert.equal(await p.locator('#nav button.on').innerText(), 'Mi mapa');
+  await p.click('#btnModo'); await p.waitForTimeout(500);
+  assert.equal(await p.evaluate(() => [S.modo, S.vista, S.ej].join()), 'sup,directorio,todos'); assert.ok(await p.locator('#nav button').count() >= 9, 'debe volver el menú completo');
+});
 if (errs.length) { fallas++; console.log('MAL errores de consola:', errs); }
 await b.close();
 console.log(fallas ? `\n${fallas} prueba(s) fallaron` : '\nTodas las pruebas del escritorio pasaron');
