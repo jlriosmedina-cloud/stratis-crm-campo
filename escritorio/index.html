@@ -547,6 +547,13 @@ table.datos tr.on td{background:var(--azul-t)}
 .cab-kpis .ck-sel{margin-left:auto;display:flex;gap:4px;background:rgba(255,255,255,.1);border-radius:10px;padding:3px;flex-wrap:wrap}
 .cab-kpis .ck-sel .chip{background:none;border:0;color:#fff;opacity:.75;padding:5px 10px;border-radius:8px;font-weight:700;font-size:12.5px}
 .cab-kpis .ck-sel .chip.on{background:#fff;color:var(--navy);opacity:1}
+/* Tiempos y Reporte (prototipo 4.0) */
+.tiempos td .cel{display:grid;place-items:center;min-width:30px;height:30px;border-radius:8px;font-weight:700;background:color-mix(in srgb,var(--azul) calc(var(--i,0)*100%),var(--hover));color:var(--ink)}
+.tiempos td .cel:empty{background:var(--hover)}
+.franja{display:grid;grid-template-columns:200px 1fr 90px;gap:12px;align-items:center;margin:8px 0}
+.fbar{display:flex;height:30px;border-radius:8px;overflow:hidden;background:var(--hover)}
+.fbar i{display:grid;place-items:center;color:#fff;font-style:normal;font-weight:700;font-size:12px}
+@media (max-width:900px){.franja{grid-template-columns:1fr}}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -562,7 +569,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "d20548";
+const BUILD = "624f60";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -942,12 +949,15 @@ function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textC
 // Orden del prototipo 4.0: primero la supervisión (Directorio, Equipo, Mapa de calor, Cartera, Actividad, Ubicación, Cierres) y, aparte, las herramientas de gestión.
 const VISTAS = [
   ["directorio","Directorio", ICON.ind, null],
+  ["resumen","Resumen", ICON.bloques, null],
   ["equipo","Equipo", ICON.equipo, null],
   ["mapa","Mapa de calor", ICON.mapa, null],
   ["bloques","Cartera", ICON.bloques, null],
   ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["ubicacion","Ubicación", ICON.mapa, null],
+  ["tiempos","Tiempos", ICON.aud, null],
   ["cierres","Cierres", ICON.cierre, null],
+  ["reporte","Reporte", ICON.cola, null],
   ["--","Herramientas"],
   ["rutas","Rutas", ICON.ruta, null],
   ["feedback","Feedback", ICON.fb, null],
@@ -990,7 +1000,10 @@ function pintar(){
   $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   cabKpis();
   const c = $("#contenido");
-  const T = { validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
+  const T = { resumen:["Resumen de gestión","Cartera, visitas y contacto del equipo en el periodo, y cómo va cada ejecutivo."],
+              tiempos:["Consulta de tiempos","A qué hora registra visitas cada ejecutivo: por día, acumulado del periodo, por franjas y el detalle de los registros."],
+              reporte:["Reporte de gestión del equipo","Resumen del periodo, gestión por ejecutivo con su ventana de trabajo y las franjas del día."],
+              validacion:["Visitas registradas","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
               bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
               rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
               directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
@@ -1017,7 +1030,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "mapa" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "mapa" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -1566,16 +1579,84 @@ function vistaDirectorio(){
 }
 
 // Equipo con el periodo que se eligió arriba: en un periodo cerrado se leen sus visitas y su base, y los días y la meta salen de ese periodo.
-function equipoPeriodo(){
+function conPeriodoElegido(vista){
   cargarPeriodos();
   const p = (S.periodos || []).find(x => x.id === S.dirPer);
-  if (!p || !S.periodo || p.id === S.periodo.id) return vistaEquipo();
+  if (!p || !S.periodo || p.id === S.periodo.id) return vista();
   const d = datosPeriodo(p);
   if (d.cargando) return `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(p.id)}…</div></div>`;
   if (d.err) return `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-dirper="${esc(p.id)}" style="margin-top:10px">Reintentar</button></div></div>`;
   const g = { periodo:S.periodo, avance:S.avance };
-  try { return conPeriodoId(p.id, () => { S.periodo = p; S.avance = null; return vistaEquipo(); }); } finally { Object.assign(S, g); }
+  try { return conPeriodoId(p.id, () => { S.periodo = p; S.avance = null; return vista(); }); } finally { Object.assign(S, g); }
 }
+/* =========================================================================
+   Resumen, Tiempos y Reporte de supervisión (prototipo 4.0, 26/11/2026)
+   Todo sale de las visitas con GPS del CRM y de la base asignada: no hay cifras nuevas ni escritura. Las visitas anuladas no cuentan.
+   ========================================================================= */
+const horaMin = v => { const [h, m] = hh(v.visitado_en).split(":").map(Number); return h * 60 + m; };
+const minTxt = m => m == null ? "—" : (m >= 60 ? Math.floor(m / 60) + " h " + String(Math.round(m % 60)).padStart(2, "0") + " min" : Math.round(m) + " min");
+const relojTxt = m => m == null ? "—" : String(Math.floor(m / 60) % 24).padStart(2, "0") + ":" + String(Math.round(m % 60)).padStart(2, "0");
+const vivas = () => S.act.filter(v => v.estado_anul !== "anulada" && v.visitado_en && !isNaN(D(v.visitado_en)));
+const FRANJAS_REP = [["Mañana · hasta 12:00", 0, 720, "#8F99FF"], ["Mediodía · 12:00 a 14:00", 720, 840, "#F86F35"], ["Tarde · 14:00 a 18:00", 840, 1080, "#3B43FB"], ["Noche · desde las 18:00", 1080, 1500, "#0C1137"]];
+// por ejecutivo y día: primera y última visita (la «ventana» del día) y el promedio entre visitas
+function jornadas(correo){
+  const m = {};
+  vivas().filter(v => !correo || v.correo === correo).forEach(v => { (m[v.correo + "|" + iso(v.visitado_en)] ||= { correo:v.correo, dia:iso(v.visitado_en), min:[] }).min.push(horaMin(v)); });
+  return Object.values(m).map(j => { j.min.sort((a, b) => a - b); j.n = j.min.length; j.ini = j.min[0]; j.fin = j.min[j.n - 1]; j.ventana = j.n >= 2 ? j.fin - j.ini : null; j.prom = j.n >= 2 ? j.ventana / (j.n - 1) : null; return j; });
+}
+function vistaResumen(){
+  const H = habiles(), hoy = hoyISO(), metaEj = (S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160, meta = metaEj * S.ejecutivos.length;
+  const T0 = { act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen }, T = statsDir(T0);
+  const hastaHoy = H.hastaHoy || 0, ritmo = hastaHoy ? T.vis / hastaHoy : null, metaDia = H.total ? meta / H.total : null;
+  const tile = (v, t, sub) => `<div class="tile"><div class="v num">${v}${sub ? ` <small class="muted">${sub}</small>` : ""}</div><div class="d">${t}</div></div>`;
+  const kp = `<div class="resumen">${tile(T.asig, "cartera asignada")}${tile(T.vis, "comercios visitados" + (meta ? ` · ${Math.round(T.vis * 100 / meta)} % de la meta` : ""), "/ " + meta)}${tile(hastaHoy, "días hábiles transcurridos", "de " + H.total)}${tile(ritmo == null ? "—" : ritmo.toFixed(1).replace(".", ","), "ritmo por día" + (metaDia ? ` · meta ${metaDia.toFixed(1).replace(".", ",")} por día` : ""))}${tile(T.reg, "visitas realizadas (incluye sin contacto)")}${tile(T.con, "visitas con contacto")}${tile("—", "reactivados BBVA · sin corte conectado")}</div>`;
+  const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo);
+    return `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td class="n num">—</td></tr>`; }).join("");
+  const hoyN = vivas().filter(v => iso(v.visitado_en) === hoy).length;
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión del equipo${S.periodo ? " · " + esc(S.periodo.id) : ""}</b><span class="lbl">cada cifra sale de las visitas con GPS del CRM</span></div><div style="padding:10px">${kp}</div></div>
+  <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión por ejecutivo</b></div><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Reactivados BBVA</th></tr></thead><tbody>${filas}</tbody></table></div>
+  ${S.periodo && hoy >= S.periodo.ini && hoy <= S.periodo.fin ? `<div class="panel"><div class="barra"><b>Hoy · ${fISO(hoy)}</b></div><div style="padding:10px"><div class="resumen">${tile(hoyN, "visitas registradas hoy")}</div><div class="muted" style="font-size:12px;margin-top:8px">El incentivo y los reactivados de cada periodo están en Cierres.</div></div></div>` : ""}`;
+}
+function vistaTiempos(){
+  const tab = S.tTab || "dia", dia = S.tDia || hoyISO();
+  const tabs = [["dia", "Resumen diario"], ["acum", "Acumulado del periodo"], ["rangos", "Rangos horarios"], ["det", "Detalle de registros"]];
+  const ctl = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Consulta de tiempos</b></div><div style="padding:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><input type="date" id="tDia" value="${esc(dia)}" aria-label="Día"><div class="chips" role="group" aria-label="Vista de tiempos" style="margin:0">${tabs.map(([k, t]) => `<button class="chip ${tab === k ? "on" : ""}" data-ttab="${k}" aria-pressed="${tab === k}">${t}</button>`).join("")}</div></div></div>`;
+  const vs = vivas().filter(v => tab === "acum" || tab === "rangos" ? true : iso(v.visitado_en) === dia);
+  const hs = vs.map(v => Math.floor(horaMin(v) / 60)), horas = []; for (let h = Math.min(8, ...hs); h <= Math.max(21, ...hs); h++) horas.push(h);   // 8 a 22 h; si hay visitas fuera de ese rango, se amplía para que el total cuadre
+  let cuerpo;
+  if (tab === "dia" || tab === "acum"){
+    const filas = S.ejecutivos.map(e => { const l = vs.filter(v => v.correo === e.correo), por = horas.map(h => l.filter(v => Math.floor(horaMin(v) / 60) === h).length), n = l.length, pico = n ? horas[por.indexOf(Math.max(...por))] : null;
+      return { e, por, n, pico, activas:por.filter(x => x).length }; });
+    const max = Math.max(1, ...filas.flatMap(f => f.por)), colH = horas.map((h, i) => filas.reduce((s, f) => s + f.por[i], 0));
+    cuerpo = `<div class="panel"><div class="barra"><b>Visitas por hora · ${tab === "dia" ? fISO(dia) : "todo el periodo"}</b><span class="lbl">cada celda cuenta las visitas de esa hora (8–9, 9–10…) · más oscuro = más visitas</span></div>
+      <div class="eq-dias"><table class="datos tiempos"><thead><tr><th>Ejecutivo</th>${horas.map(h => `<th class="n">${h}–${h + 1}</th>`).join("")}<th class="n">Total</th><th class="n">Hora pico</th><th class="n">Horas activas</th></tr></thead><tbody>${filas.map(f => `<tr><td><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span><small class="muted" style="display:block">${f.n ? f.n + " visitas" : "sin visitas"}</small></td>${f.por.map(x => `<td class="n num"><span class="cel" style="--i:${(x / max).toFixed(2)}">${x || ""}</span></td>`).join("")}<td class="n num"><b>${f.n}</b></td><td class="n num">${f.pico == null ? "—" : f.pico + "–" + (f.pico + 1)}</td><td class="n num">${f.activas} de ${horas.length}</td></tr>`).join("")}
+      <tr class="total"><td><b>Equipo</b></td>${colH.map(x => `<td class="n num"><b>${x || ""}</b></td>`).join("")}<td class="n num"><b>${filas.reduce((s, f) => s + f.n, 0)}</b></td><td></td><td></td></tr></tbody></table></div></div>`;
+  } else if (tab === "rangos"){
+    cuerpo = `<div class="panel"><div class="barra"><b>Rangos horarios del periodo</b><span class="lbl">qué parte de sus visitas hace cada ejecutivo en cada franja del día</span></div><div style="padding:10px">${barrasFranjas()}</div></div>`;
+  } else {
+    const l = vs.slice().sort((a, b) => D(a.visitado_en) - D(b.visitado_en));
+    cuerpo = `<div class="panel"><div class="barra"><b>Detalle de registros · ${fISO(dia)}</b><span class="lbl">${l.length} visitas, por hora</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Resultado</th></tr></thead><tbody>${l.map(v => `<tr><td class="num">${hh(v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(v.correo))}${esc(nombreCorto(ejDe(v.correo).nombre))}</span></td><td>${esc(v.comercio)}</td><td>${esc(v.distrito || "—")}</td><td>${esc(v.con === "Nadie" ? "Sin contacto" : "Con contacto")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Sin visitas ese día.</td></tr>`}</tbody></table></div></div>`;
+  }
+  return ctl + cuerpo + `<div class="panel"><div class="atajos">Los intervalos no representan inactividad. La ventana (primera a última visita del día) no equivale a horas efectivas de trabajo. Con menos de dos visitas no se calculan ventana ni intervalos. Hora Perú.</div></div>`;
+}
+function barrasFranjas(){
+  const fil = S.ejecutivos.map(e => { const l = vivas().filter(v => v.correo === e.correo), n = l.length; return { e, n, p:FRANJAS_REP.map(([, a, b]) => n ? l.filter(v => { const m = horaMin(v); return m >= a && m < b; }).length * 100 / n : 0) }; });
+  return fil.map(f => `<div class="franja"><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span><div class="fbar">${f.p.map((x, i) => x ? `<i style="width:${x}%;background:${FRANJAS_REP[i][3]}" title="${esc(FRANJAS_REP[i][0])}">${Math.round(x)} %</i>` : "").join("")}</div><span class="muted">${f.n} visitas</span></div>`).join("")
+    + `<div class="muted" style="font-size:12px;margin-top:8px">${FRANJAS_REP.map(([t, , , c]) => `<span style="display:inline-block;width:10px;height:10px;background:${c};border-radius:2px;margin:0 4px 0 10px"></span>${esc(t)}`).join("")}</div>`;
+}
+function vistaReporte(){
+  const T0 = { act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen }, T = statsDir(T0), per = S.periodo;
+  const jj = jornadas(), ventanaTot = jj.reduce((s, j) => s + (j.ventana || 0), 0);
+  const prom = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo), j = jornadas(e.correo), cv = j.filter(x => x.ventana != null);
+    return `<tr><td><b>${esc(e.nombre)}</b></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td class="n num">${j.length}</td><td class="n num"><b>${minTxt(cv.reduce((s, x) => s + x.ventana, 0) || null)}</b></td><td class="n num">${minTxt(prom(cv.map(x => x.ventana)))}</td><td class="n num">${relojTxt(prom(cv.map(x => x.ini)))}</td><td class="n num">${relojTxt(prom(cv.map(x => x.fin)))}</td></tr>`; }).join("");
+  const kpi = (t, v, s) => `<div class="tile"><div class="k">${t}</div><div class="v num">${v}</div><div class="d">${s}</div></div>`;
+  return `<div class="panel"><div class="barra"><b>Reporte de gestión del equipo</b><span class="lbl">Campaña BBVA Adquirencia${per ? " · " + esc(per.id) : ""} · visitas con GPS del CRM de campo · cartera de ${T.asig} comercios</span></div><div style="padding:10px">
+    <h3 style="margin:6px 0">1 · Resumen del periodo</h3><div class="resumen">${kpi("Visitas", T.reg, T.vis + " comercios distintos")}${kpi("Con contacto", T.con, (T.reg ? Math.round(T.con * 100 / T.reg) : 0) + " % de las visitas")}${kpi("Ventana acumulada", minTxt(ventanaTot || null), jj.length + " días-ejecutivo con gestión")}</div>
+    <h3 style="margin:16px 0 6px">2 · Gestión por ejecutivo</h3><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Días</th><th class="n">Ventana acumulada</th><th class="n">Ventana diaria</th><th class="n">Inicio prom.</th><th class="n">Cierre prom.</th></tr></thead><tbody>${filas}</tbody></table></div><div class="muted" style="font-size:12px;margin-top:6px">Ventana, inicio y cierre promedio cuentan solo los días con dos o más visitas.</div>
+    <h3 style="margin:16px 0 6px">3 · Franjas del día</h3>${barrasFranjas()}</div></div>`;
+}
+function equipoPeriodo(){ return conPeriodoElegido(vistaEquipo); }
 function vistaEquipo(){
   const dias = diasPeriodo(), H = habiles();
   const metaEj = (S.avance && S.avance[0] && S.avance[0].meta_visitas) || 160;
@@ -3469,7 +3550,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","validacion","bloques","rutas","equipo","mapa","ubicacion","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","rutas","equipo","mapa","ubicacion","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });
@@ -3478,5 +3559,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
 
 // Presentación y reporte para directorio: eliminados (Jose, 26/11/2026). Quedan en el historial de git.
 const numPE = x => Number(x || 0).toLocaleString("de-DE");   // punto de miles y coma decimal, como el Excel de Jose
+document.addEventListener("click", ev => { const t = ev.target.closest("[data-ttab]"); if (!t) return; S.tTab = t.dataset.ttab; pintar(); });
+document.addEventListener("change", ev => { if (ev.target.id === "tDia" && ev.target.value){ S.tDia = ev.target.value; pintar(); } });
 </script>
 </body></html>
