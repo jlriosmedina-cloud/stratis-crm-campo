@@ -533,7 +533,7 @@ table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 .dom-form input,.dom-form select{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;background:var(--tarjeta);color:var(--ink);font:inherit}
 table.datos tr.on td{background:var(--azul-t)}
 .mas{position:relative}.mas summary{list-style:none;cursor:pointer}.mas summary::-webkit-details-marker{display:none}
-.mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
+.mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
 .mas-menu .btn{width:100%;text-align:left}
 </style>
 </head><body>
@@ -550,7 +550,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "f38d19";
+const BUILD = "2526a7";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1457,6 +1457,7 @@ async function borrarDomicilio(id){
   toast("Domicilio borrado."); S.domicilios = null; cargarDomicilios(true);
 }
 document.addEventListener("keydown", ev => { if (ev.key !== "Enter" && ev.key !== " ") return; const t = ev.target.closest && ev.target.closest("tr[data-usel],tr[data-alsel]"); if (t && ev.target === t){ ev.preventDefault(); t.click(); } });
+document.addEventListener("click", ev => { const m = document.querySelector("details.mas[open]"); if (m && (!m.contains(ev.target) || ev.target.closest(".mas-menu button"))) m.open = false; });
 document.addEventListener("click", ev => {
   const t = ev.target.closest("[data-uper],[data-ucl],[data-usel],[data-altab],[data-alniv],[data-alsel],[data-dom-guardar],[data-dom-borrar]"); if (!t) return;
   if (t.dataset.uper){ const id = t.dataset.uper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.uPer = id; S.uSel = null; S.alSel = null; S.uCl = ""; pintar(); return; }
