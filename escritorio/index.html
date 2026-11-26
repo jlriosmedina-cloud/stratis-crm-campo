@@ -234,7 +234,7 @@ input[type=checkbox]{accent-color:var(--naranja);width:15px;height:15px}
 .leyenda-ej i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .leyenda-ej i.meta{width:16px;height:0;border-top:2px dashed var(--naranja);border-radius:0;vertical-align:3px}
 .leyenda-ej span:first-child{color:var(--naranja);font-weight:700}
-.graf-ej{display:block}
+.graf-ej{display:block;width:100%;max-width:1100px;height:auto;margin:0 auto}
 .graf-ej:hover g.b path{opacity:.4} .graf-ej g.b:hover path{opacity:1} .graf-ej g.b path{transition:opacity .12s}
 @media (prefers-reduced-motion: reduce){.graf-ej g.b path{transition:none}}
 table.matriz th.dia,table.matriz td.dia{text-align:center;padding:6px 3px;min-width:46px}
@@ -606,7 +606,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "df75a6";
+const BUILD = "547c08";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -680,6 +680,9 @@ const ddhh = d => d ? `${dd(d)} ${hh(d)}` : "—";
 const iso = d => D(d).toLocaleDateString("en-CA",{ timeZone:TZ });
 const horaLima = d => Number(D(d).toLocaleTimeString("en-GB",{ timeZone:TZ, hour:"2-digit", hour12:false }).slice(0,2));
 const fISO = s => s ? String(s).split("-").reverse().slice(0,2).join("/") : "—";
+const pNum = id => { const m = /^(\d{4})-(\d{2})$/.exec(String(id || "")); return m ? (Number(m[1]) - 2026) * 12 + Number(m[2]) - 7 : null; };
+const pNom = p => { const n = pNum(p && p.id); return n && n > 0 ? "P" + n : String(p && p.id || ""); };
+const pRango = p => p && p.ini && p.fin ? fISO(p.ini) + " – " + fISO(p.fin) : "";
 const hoyISO = () => new Date().toLocaleDateString("en-CA",{ timeZone:TZ });
 const ayerISO = () => { const d = new Date(hoyISO() + "T12:00:00Z"); d.setUTCDate(d.getUTCDate()-1); return d.toISOString().slice(0,10); };
 const mDist = m => m == null ? "sin ubicación" : m < 1000 ? `${m} m` : `${(m/1000).toFixed(1).replace(".",",")} km`;
@@ -1007,7 +1010,7 @@ const NAV_VISTAS = VISTAS.slice(0, VISTAS.findIndex(v => v[0] === "--"));
 function pintarNav(){
   $("#nav").innerHTML = NAV_VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
   const p = S.periodo;
-  $("#pieRail").innerHTML = p ? `<b>Periodo ${esc(p.id)} · ${fISO(p.ini)} – ${fISO(p.fin)}</b>${S.base.length} comercios · ${S.ejecutivos.length} ejecutivos · build ${BUILD}` : `<b>Sin periodo abierto</b>build ${BUILD}`;
+  $("#pieRail").innerHTML = p ? `<b>Periodo ${esc(pNom(p))} · ${fISO(p.ini)} – ${fISO(p.fin)}</b>${S.base.length} comercios · ${S.ejecutivos.length} ejecutivos · build ${BUILD}` : `<b>Sin periodo abierto</b>build ${BUILD}`;
 }
 // Franja de cifras del periodo en curso (prototipo 4.0): las mismas medidas del Directorio, sin números nuevos.
 function cabKpis(){
@@ -1019,7 +1022,7 @@ function cabKpis(){
   let T = null; try { const d = datosPeriodo(per); if (d && !d.cargando && !d.err && d.act) T = statsDir(d); } catch(e){}
   const it = (n, t, cls) => `<div class="ck ${cls || ""}"><b class="num">${n}</b><span>${t}</span></div>`;
   // el selector manda sobre Directorio, Mapa de calor y Ubicación (cada una guardaba su periodo; ahora se cambian juntos)
-  const sel = L.length > 1 ? `<div class="ck-sel" role="group" aria-label="Periodo">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" data-mper="${esc(p.id)}" data-uper="${esc(p.id)}" aria-pressed="${p.id === per.id}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`).join("")}</div>` : `<span class="ck-per">Periodo ${esc(per.id)}</span>`;
+  const sel = L.length > 1 ? `<div class="ck-sel" role="group" aria-label="Periodo">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" data-mper="${esc(p.id)}" data-uper="${esc(p.id)}" aria-pressed="${p.id === per.id}" title="${esc(pRango(p))}">${esc(pNom(p))} · ${esc(pRango(p))}${p.id === cur ? " · en curso" : ""}</button>`).join("")}</div>` : `<span class="ck-per">Periodo ${esc(pNom(per))}</span>`;
   k.innerHTML = it(T ? T.asig : "…", "cartera asignada") + it(T ? T.vis : "…", "visitados únicos", "or") + it(T ? T.reg : "…", "visitas realizadas", "vd") + it(T ? T.con : "…", "con contacto") + it("—", "reactivados BBVA · sin corte") + sel;
 }
 function pintar(){
@@ -1669,7 +1672,7 @@ function vistaResumen(){
   const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo);
     return `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td class="n num">—</td></tr>`; }).join("");
   const hoyN = vivas().filter(v => iso(v.visitado_en) === hoy).length;
-  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión del equipo${S.periodo ? " · " + esc(S.periodo.id) : ""}</b><span class="lbl">cada cifra sale de las visitas con GPS del CRM</span></div><div style="padding:10px">${kp}</div></div>
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión del equipo${S.periodo ? " · " + esc(pNom(S.periodo)) : ""}</b><span class="lbl">cada cifra sale de las visitas con GPS del CRM</span></div><div style="padding:10px">${kp}</div></div>
   <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión por ejecutivo</b></div><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Reactivados BBVA</th></tr></thead><tbody>${filas}</tbody></table></div>
   ${S.periodo && hoy >= S.periodo.ini && hoy <= S.periodo.fin ? `<div class="panel"><div class="barra"><b>Hoy · ${fISO(hoy)}</b></div><div style="padding:10px"><div class="resumen">${tile(hoyN, "visitas registradas hoy")}</div><div class="muted" style="font-size:12px;margin-top:8px">El incentivo y los reactivados de cada periodo están en Cierres.</div></div></div>` : ""}`;
 }
@@ -1707,7 +1710,7 @@ function vistaReporte(){
   const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo), j = jornadas(e.correo), cv = j.filter(x => x.ventana != null);
     return `<tr><td><b>${esc(e.nombre)}</b></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td class="n num">${j.length}</td><td class="n num"><b>${minTxt(cv.reduce((s, x) => s + x.ventana, 0) || null)}</b></td><td class="n num">${minTxt(prom(cv.map(x => x.ventana)))}</td><td class="n num">${relojTxt(prom(cv.map(x => x.ini)))}</td><td class="n num">${relojTxt(prom(cv.map(x => x.fin)))}</td></tr>`; }).join("");
   const kpi = (t, v, s) => `<div class="tile"><div class="k">${t}</div><div class="v num">${v}</div><div class="d">${s}</div></div>`;
-  return `<div class="panel"><div class="barra"><b>Reporte de gestión del equipo</b><span class="lbl">Campaña BBVA Adquirencia${per ? " · " + esc(per.id) : ""} · visitas con GPS del CRM de campo · cartera de ${T.asig} comercios</span></div><div style="padding:10px">
+  return `<div class="panel"><div class="barra"><b>Reporte de gestión del equipo</b><span class="lbl">Campaña BBVA Adquirencia${per ? " · " + esc(pNom(per)) : ""} · visitas con GPS del CRM de campo · cartera de ${T.asig} comercios</span></div><div style="padding:10px">
     <h3 style="margin:6px 0">1 · Resumen del periodo</h3><div class="resumen">${kpi("Visitas", T.reg, T.vis + " comercios distintos")}${kpi("Con contacto", T.con, (T.reg ? Math.round(T.con * 100 / T.reg) : 0) + " % de las visitas")}${kpi("Ventana acumulada", minTxt(ventanaTot || null), jj.length + " días-ejecutivo con gestión")}</div>
     <h3 style="margin:16px 0 6px">2 · Gestión por ejecutivo</h3><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Días</th><th class="n">Ventana acumulada</th><th class="n">Ventana diaria</th><th class="n">Inicio prom.</th><th class="n">Cierre prom.</th></tr></thead><tbody>${filas}</tbody></table></div><div class="muted" style="font-size:12px;margin-top:6px">Ventana, inicio y cierre promedio cuentan solo los días con dos o más visitas.</div>
     <h3 style="margin:16px 0 6px">3 · Franjas del día</h3>${barrasFranjas()}</div></div>`;
@@ -1739,8 +1742,8 @@ function vistaEquipo(){
   const totDia = dias.map(d => filas.reduce((a, f) => a + (f.porDia[d.iso] ? f.porDia[d.iso].nuevas : 0), 0));
   // gráfico: comercios nuevos por día, una barra por ejecutivo contra su meta diaria; la parte clara son las revisitas
   const nEj = Math.max(1, filas.length), pl = 34, pr = 12, pt = 18, pb = 50, Hc = 250;
-  const gw = Math.max(92, nEj * 20 + 28), W = Math.max(920, pl + pr + dias.length * gw), step = (W - pl - pr) / Math.max(1, dias.length);
-  const bw = Math.min(30, (step * .74 - (nEj - 1) * 3) / nEj);
+  const gw = Math.max(92, nEj * 20 + 28), W = 1100, step = (W - pl - pr) / Math.max(1, dias.length);
+  const bw = Math.max(1.5, Math.min(30, (step * .74 - (nEj - 1) * 3) / nEj));
   const vmax = Math.max(metaDia, ...filas.flatMap(f => dias.map(d => { const o = f.porDia[d.iso]; return o ? o.nuevas + o.rev : 0; })), 1);
   const ymax = Math.ceil(vmax * 1.18 / 4) * 4, y = n => pt + (Hc - pt - pb) * (1 - n / ymax);
   const ticks = []; for (let t = 0; t <= ymax; t += ymax > 24 ? 8 : 4) ticks.push(t);
@@ -1755,7 +1758,7 @@ function vistaEquipo(){
         + ((n || r) && bw >= 11 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y(0) - hn - hr - 5).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)" pointer-events="none">${n}${r ? "+" + r : ""}</text>` : "") + `</g>`; }).join("");
     return `${bs}<text x="${cx.toFixed(1)}" y="${Hc - 32}" text-anchor="middle" font-size="11" fill="${d.iso === hoy ? "var(--naranja)" : "var(--muted)"}" font-weight="${d.iso === hoy ? 700 : 400}">${fISO(d.iso)} ${DOW[d.dow]}</text>
       <text x="${cx.toFixed(1)}" y="${Hc - 16}" text-anchor="middle" font-size="10" fill="var(--muted)">equipo ${totDia[i]} / ${Math.round(metaDiaEq)}</text>`; }).join("");
-  const grafico = `<svg class="graf-ej" viewBox="0 0 ${W} ${Hc}"${W > 920 ? ` width="${W}" style="width:${W}px;max-width:none"` : ""} role="img" aria-label="Comercios nuevos por día, una barra por ejecutivo, con la meta diaria de ${Math.round(metaDia)}">
+  const grafico = `<svg class="graf-ej" viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios nuevos por día, una barra por ejecutivo, con la meta diaria de ${Math.round(metaDia)}">
     ${rejilla}<line x1="${pl}" y1="${y(metaDia).toFixed(1)}" x2="${W - pr}" y2="${y(metaDia).toFixed(1)}" stroke="var(--naranja)" stroke-width="2" stroke-dasharray="6 4"/>${barras}</svg>`;
   const celda = (f, d) => { const o = f.porDia[d.iso], n = o ? o.nuevas : 0, r = o ? o.rev : 0; const k = !o ? "c0" : n === 0 ? "c0" : n < metaDia * .5 ? "c1" : n < metaDia ? "c2" : "c3";
     const tip = o ? `${n} nuevos${r ? ` · ${r} revisitas` : ""} · ${o.n} registros${o.pend ? ` · ${o.pend} por validar` : ""}${o.tarde ? ` · ${o.tarde} fuera de plazo (no cuentan)` : ""}` : "sin visitas";
@@ -2846,7 +2849,8 @@ function muPanel(tab, enCurso){
 function montarMapaUnico(el){
   if (!window.L || !S.geo) return;
   const modo = S.muModo || "ej", st = muStats(), oscuro = temaActual() === "dark", enCurso = !S.dirPer || !S.periodo || S.dirPer === S.periodo.id;
-  const m = L.map(el, { zoomControl:true, scrollWheelZoom:false, zoomSnap:.25, preferCanvas:false });
+  const m = L.map(el, { zoomControl:true, scrollWheelZoom:true, zoomSnap:.25, preferCanvas:false });
+  m.setView(S.muVista ? S.muVista.c : [-12.06, -77.03], S.muVista ? S.muVista.z : 11);   // la vista primero: sin ella Leaflet no puede dibujar las capas
   m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:oscuro ? .55 : .5, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
   const borde = colorCss("var(--tarjeta)"), pts = [];
