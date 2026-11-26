@@ -82,6 +82,10 @@ const S = { sesion:null, yo:null, admin:false, periodo:null, cargando:true, erro
   tab:"traza", traza:null, busca:"", carga:{ tipo:"diario", archivo:null, filas:null, hecho:false, resultado:null }, cargas:[], avance:null, avanceErr:"", retenidas:[] };
 
 const ICON = {
+  resumen:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  cartera:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
+  reporte:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>',
+  mas:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
   cierre:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   pq:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M4 12h6M4 18h9"/><path d="M16 8l2 2 4-4"/><path d="M16 15l5 5M21 15l-5 5"/></svg>',
   fb:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 10h6M9 14h4"/></svg>',
@@ -383,14 +387,14 @@ function toast(txt){ const t = $("#toast"); if (!t) return; $("#toastTxt").textC
 // Orden del prototipo 4.0: primero la supervisión (Directorio, Equipo, Mapa de calor, Cartera, Actividad, Ubicación, Cierres) y, aparte, las herramientas de gestión.
 const VISTAS = [
   ["directorio","Directorio", ICON.ind, null],
-  ["resumen","Resumen", ICON.bloques, null],
+  ["resumen","Resumen", ICON.resumen, null],
   ["equipo","Equipo", ICON.equipo, null],
   ["mapa","Mapa", ICON.mapa, null],
-  ["cartera","Cartera", ICON.bloques, null],
+  ["cartera","Cartera", ICON.cartera, null],
   ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["tiempos","Tiempos", ICON.aud, null],
   ["cierres","Cierres", ICON.cierre, null],
-  ["reporte","Reporte", ICON.cola, null],
+  ["reporte","Reporte", ICON.reporte, null],
   ["--","Herramientas"],
   ["indicadores","Indicadores", ICON.ind, null],
   ["cargas","Cargas", ICON.carga, null],
@@ -399,7 +403,7 @@ const VISTAS = [
 // Jose (26/11): el menú queda solo con las pestañas del prototipo; las herramientas siguen en el código y se abren por su dirección (#cargas, #rutas…).
 const NAV_VISTAS = VISTAS.slice(0, VISTAS.findIndex(v => v[0] === "--"));
 // Vista del ejecutivo (26/11): el interruptor de arriba deja la pantalla como la ve un ejecutivo (Jose y Gabriel); solo lee, no escribe nada.
-const NAV_EJE = [["avance","Mi avance",ICON.equipo],["cartera","Mi cartera",ICON.bloques],["alertas","Mis alertas",ICON.cola],["mapa","Mi mapa",ICON.mapa]];
+const NAV_EJE = [["avance","Mi avance",ICON.equipo],["cartera","Mi cartera",ICON.cartera],["alertas","Mis alertas",ICON.cola],["mapa","Mi mapa",ICON.mapa]];
 function claveEje(){ return S.vista === "miavance" ? "avance" : S.vista === "cartera" ? "cartera" : S.vista === "mapa" ? (S.muTab === "ale" ? "alertas" : "mapa") : ""; }
 function pintarNav(){
   $("#nav").innerHTML = S.modo === "eje" ? NAV_EJE.map(([k,t,i]) => `<button class="${claveEje()===k?"on":""}" data-eje="${k}">${i}${t}</button>`).join("") : NAV_VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
@@ -436,7 +440,7 @@ function pintar(){
   $("#vivo").classList.toggle("pausa", S.pausa);
   $("#btnPausa").textContent = S.pausa ? "Reanudar" : "Pausar";
   $("#ahora").textContent = S.actEn ? hh(S.actEn) : "—";
-  $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
+  $("#quien").title = (S.yo.nombre || "") + " · " + S.yo.rol.toLowerCase(); $("#quien").innerHTML = `<span class="avatar" style="background:var(--naranja)">${esc(iniciales(S.yo.nombre_corto || S.yo.nombre))}</span>${esc(nombreCorto(S.yo.nombre_corto || S.yo.nombre))} · ${esc(S.yo.rol.toLowerCase())}`;
   cabKpis();
   const c = $("#contenido");
   const T = { miavance:["Mi avance","Cómo va el ejecutivo elegido contra su meta del periodo y qué le queda pendiente. Es la pantalla tal como la ve él."],
@@ -494,14 +498,18 @@ function cascaron(){
         <button class="btn" id="btnCel" title="Abrir su celular tal como lo ve él, solo para mirar" hidden>${ICON.cel} Ver su celular</button>
         <button class="btn ojo" id="btnOjo" aria-pressed="false" title="Mostrar u ocultar montos, potenciales, volúmenes, celulares y correos"></button>
         <span class="vivo" id="vivo"><i></i><span id="vivoTxt"></span></span>
-        <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
         <button class="btn" data-refrescar title="Volver a leer la actividad">Actualizar</button>
         <button class="btn" data-base-bbva title="Excel del periodo para enviar a BBVA: hojas Resumen y Base, modelo Gestión Stratis de 55 columnas (una fila por comercio de la base nueva; llave: Documento)">Base para BBVA</button>
-        <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
-        <span class="per">leído a las <b id="ahora"></b></span>
+        <details class="opmenu" id="opmenu"><summary class="btn" aria-label="Más opciones" aria-haspopup="true" title="Más opciones">${ICON.mas}</summary>
+          <div class="opmenu-menu">
+            <button class="btn" id="btnPausa" title="Pausar la actualización automática">Pausar</button>
+            <button class="btn" id="btnTema" title="Cambiar entre tema claro y oscuro"></button>
+            <button class="btn" data-nueva-clave title="Cambiar tu contraseña">Mi clave</button>
+            <button class="btn" data-salir title="Cerrar sesión">${ICON.salir} Cerrar sesión</button>
+            <div class="opmenu-pie">Leído a las <b id="ahora"></b></div>
+          </div>
+        </details>
         <span class="usuario" id="quien"></span>
-        <button class="btn" data-nueva-clave title="Cambiar tu contraseña">Mi clave</button>
-        <button class="btn q" data-salir title="Cerrar sesión">${ICON.salir}</button>
       </div>
     </header>
     <div class="cab-kpis" id="cabKpis"></div>
@@ -2440,6 +2448,8 @@ document.addEventListener("click", ev => {
 const numPE = x => Number(x || 0).toLocaleString("de-DE");   // punto de miles y coma decimal, como el Excel de Jose
 document.addEventListener("click", ev => { const t = ev.target.closest("[data-ttab]"); if (!t) return; S.tTab = t.dataset.ttab; pintar(); });
 document.addEventListener("change", ev => { if (ev.target.id === "tDia" && ev.target.value){ S.tDia = ev.target.value; pintar(); } });
+document.addEventListener("click", ev => { const m = document.getElementById("opmenu"); if (m && m.open && ev.target.closest(".opmenu-menu .btn")) m.querySelector("summary").focus(); if (m && m.open && (!ev.target.closest("#opmenu") || ev.target.closest(".opmenu-menu .btn"))) m.open = false; });
+document.addEventListener("keydown", ev => { const m = document.getElementById("opmenu"); if (ev.key === "Escape" && m && m.open){ m.open = false; m.querySelector("summary").focus(); } });
 document.addEventListener("click", ev => { const t = ev.target.closest("[data-tdia-mas]"); if (!t) return; const d = new Date((S.tDia || hoyISO()) + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + Number(t.dataset.tdiaMas)); S.tDia = d.toISOString().slice(0, 10); pintar(); });
 document.addEventListener("change", ev => { if (ev.target.id !== "cabPer") return; const id = ev.target.value;
   if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id];

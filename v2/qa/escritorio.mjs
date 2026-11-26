@@ -539,6 +539,7 @@ await prueba('Menú (26/11): orden del prototipo 4.0, entrada en Directorio fran
   assert.equal(await p.locator('#cabKpis .ck').count(), 6, 'la franja de cifras del periodo debe tener 6 datos');
   assert.match(await p.locator('#cabKpis').innerText(), /cartera asignada[\s\S]*visitados únicos[\s\S]*visitas realizadas[\s\S]*con contacto[\s\S]*reactivados BBVA/, 'textos de la franja');
   assert.equal(await p.locator('details.mas').count(), 0, 'ya no hay menú de reportes');
+  await p.click('#opmenu > summary'); assert.deepEqual(await p.locator('#opmenu .opmenu-menu .btn').allInnerTexts().then(a => a.map(t => t.trim())), ['Pausar', 'Oscuro', 'Mi clave', 'Cerrar sesión'], 'menú Más'); await p.click('#btnPausa'); assert.equal(await p.locator('#opmenu[open]').count(), 0, 'el menú se cierra al elegir'); await p.click('#opmenu > summary'); await p.keyboard.press('Escape'); assert.equal(await p.locator('#opmenu[open]').count(), 0, 'Escape cierra el menú'); await p.click('#opmenu > summary'); await p.click('#btnPausa'); await p.waitForTimeout(100);
 });
 await prueba('Resumen, Tiempos y Reporte (26/11): cifras del CRM, mapa de calor por hora y ventana de trabajo', async () => {
   const ir = async v => { await p.evaluate(x => { S.vista = x; S.tTab = null; S.tDia = null; S.dirPer = null; elegirEj('todos'); pintar(); }, v); await p.waitForTimeout(400); };
@@ -561,7 +562,7 @@ await prueba('Resumen, Tiempos y Reporte (26/11): cifras del CRM, mapa de calor 
 await prueba('Contraseña (26/11): «¿Olvidaste tu contraseña?», cambiar contraseña con validaciones y enlace de recuperación', async () => {
   await p.evaluate(() => { window.__llamadas.length = 0; });
   // desde la sesión abierta
-  await p.click('[data-nueva-clave]'); await p.waitForTimeout(200);
+  await p.click('#opmenu > summary'); await p.click('[data-nueva-clave]'); await p.waitForTimeout(200);
   assert.equal(await p.locator('#fClave').count(), 1, 'no abrió la pantalla de contraseña nueva');
   await p.fill('#cClave1', 'corta'); await p.fill('#cClave2', 'corta'); await p.click('#bClave'); await p.waitForTimeout(150);
   assert.match(await p.locator('#fClave').innerText(), /al menos 8 caracteres/); assert.equal(await p.evaluate(() => window.__llamadas.filter(l => l[0] === 'auth.updateUser').length), 0, 'no debe guardar una clave corta');

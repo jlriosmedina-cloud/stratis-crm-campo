@@ -522,9 +522,9 @@ table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
 .dom-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;padding:12px;border-top:1px solid var(--linea)}
 .dom-form input,.dom-form select{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;background:var(--tarjeta);color:var(--ink);font:inherit}
 table.datos tr.on td{background:var(--azul-t)}
-.mas{position:relative}.mas summary{list-style:none;cursor:pointer}.mas summary::-webkit-details-marker{display:none}
-.mas-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
-.mas-menu .btn{width:100%;text-align:left}
+
+.opmenu-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;display:flex;flex-direction:column;gap:6px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);min-width:190px}
+.opmenu-menu .btn{width:100%;text-align:left}
 /* franja de cifras del periodo (prototipo 4.0) */
 .cab-kpis{display:flex;align-items:flex-end;gap:0;background:var(--navy);color:#fff;padding:10px 22px 12px;flex-wrap:wrap;row-gap:8px}
 .cab-kpis:empty{display:none}
@@ -619,3 +619,29 @@ table.datos tr.on td{background:var(--azul-t)}
 .tm-ejeh+.tm-fila{border-top:0}.tm-fila b{color:var(--ink);font-weight:600}
 .tm-vacio{color:var(--muted);font-size:13px;padding:10px 0}
 .tm-card.vacia{opacity:.75}
+
+/* Rediseño visual (26/11): cabecera en una sola fila, franja de cifras más serena y menú «Más» */
+.top{flex-wrap:wrap;padding:10px 22px;gap:8px 14px;min-height:56px}
+.top h1{font-size:18px;letter-spacing:-.01em;white-space:nowrap}
+.top .der{flex-wrap:wrap;justify-content:flex-end;gap:8px;min-width:0}
+.top .sel,.top .btn{height:34px}
+.top .vivo{white-space:nowrap}
+.top .usuario{margin-left:4px}
+.top .usuario{font-size:0}.top .usuario .avatar{font-size:11px}
+@media (min-width:1440px){.top .usuario{font-size:12.5px}}
+.opmenu{position:relative}
+.opmenu>summary{list-style:none;cursor:pointer;padding:6px 10px}
+.opmenu>summary::-webkit-details-marker{display:none}
+.opmenu>summary svg{width:18px;height:18px}
+.opmenu[open]>summary{background:var(--hover)}
+.opmenu-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:210px;background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(12,17,55,.18);display:flex;flex-direction:column;gap:2px}
+.opmenu-menu .btn{border:0;background:none;justify-content:flex-start;width:100%;height:36px;padding:0 10px;border-radius:8px}
+.opmenu-menu .btn:hover{background:var(--hover)}
+.opmenu-pie{border-top:1px solid var(--linea);margin-top:4px;padding:8px 10px 4px;font-size:12px;color:var(--muted)}
+.opmenu-pie b{color:var(--ink)}
+@media (max-width:1180px){.top .vivo span#vivoTxt{display:none}}
+.cab-kpis{padding:8px 22px 10px}
+.cab-kpis .ck b{font-size:22px}
+.cab-kpis .ck.or b,.cab-kpis .ck.vd b{color:#fff}
+.cab-kpis .ck span{font-size:11.5px;letter-spacing:.01em}
+.rail .nav button{gap:12px}
