@@ -516,3 +516,9 @@ table.matriz td.dia button small.rv,table.matriz td.dia small.rv{display:block;f
 table.matriz td.fecha{white-space:nowrap}
 table.matriz td.fecha.hoy b{color:var(--naranja)} table.matriz td.fecha.finde{opacity:.7}
 table.matriz td.c1 button{background:var(--naranja-t);color:var(--naranja)}
+
+/* Ubicación y alertas de registro (26/11) */
+.pill.n-alta{background:var(--naranja-t);color:var(--naranja)} .pill.n-media{background:var(--ambar-t);color:var(--ambar-txt)} .pill.n-info{background:var(--suelo);color:var(--muted)}
+.dom-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;padding:12px;border-top:1px solid var(--linea)}
+.dom-form input,.dom-form select{border:1px solid var(--linea);border-radius:10px;padding:8px 10px;background:var(--tarjeta);color:var(--ink);font:inherit}
+table.datos tr.on td{background:var(--azul-t)}

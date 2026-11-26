@@ -391,6 +391,7 @@ const VISTAS = [
   ["rutas","Rutas", ICON.ruta, null],
   ["equipo","Por ejecutivo", ICON.equipo, null],
   ["mapa","Mapa de distritos", ICON.mapa, null],
+  ["ubicacion","Ubicación", ICON.mapa, null],
   ["feedback","Feedback", ICON.fb, null],
   ["porque","Por qué sí / no", ICON.pq, null],
   ["auditoria","Auditoría", ICON.aud, null],
@@ -421,6 +422,7 @@ function pintar(){
               rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
               directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
               equipo:["Gestiones por ejecutivo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
+              ubicacion:["Ubicación y alertas de registro","¿Se registraron las visitas en el comercio? Qué tan lejos quedó cada registro, comercios registrados en el mismo punto, visitas marcadas cerca del domicilio del ejecutivo, y la validación y las anulaciones. Avisa, no bloquea."],
               mapa:["Mapa de distritos","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
               porque:["Por qué sí / por qué no","Por qué tenemos éxito en unas visitas y en otras no: el resultado de cada comercio por su última visita, qué convenció a los que dijeron que sí y qué frenó a los demás."],
@@ -436,19 +438,22 @@ function pintar(){
   $("#btnOjo").setAttribute("aria-pressed", String(S.ver)); $("#btnOjo").classList.toggle("cerrado", !S.ver);
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
   if (S._mapa){ try { S._mapa.off(); S._mapa.stop && S._mapa.stop(); S._mapa.remove(); } catch(e){} S._mapa = null; }
+  if (S._mapa2){ try { S._mapa2.off(); S._mapa2.stop && S._mapa2.stop(); S._mapa2.remove(); } catch(e){} S._mapa2 = null; }
   const ae = document.activeElement, foco = ae && ae.id && c.contains(ae) ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const campos = {}; ["mSel","mNota","qTraza"].forEach(id => { const el = document.getElementById(id); if (el) campos[id] = el.value; });
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? vistaEquipo() : S.vista === "mapa" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
   S._pinto = { vista:S.vista, sel:S.sel, tab:S.tab };
   despuesDePintar();
 }
-function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) conPeriodoMapa(() => montarMapaDistritos(md)); }
+function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) conPeriodoMapa(() => montarMapaDistritos(md));
+  const mu = document.getElementById("mapaUbic"); if (mu) conPeriodoId(S.uPer, () => montarMapaUbicacion(mu));
+  const ma = document.getElementById("mapaAlerta"); if (ma) conPeriodoId(S.uPer, () => montarMapaAlerta(ma)); }
 function cascaron(){
   return `<div class="app">
   <aside class="rail">
@@ -733,6 +738,183 @@ function marcarRevisitas(act){
 }
 // «Avanzó»: pasó de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos»
 const avanceRev = (v, p) => !!p && ((p.con === "Nadie" && v.con !== "Nadie") || (p.decision === "Aún no decide" && v.decision === "Realizará consumos"));
+/* =========================================================================
+   Ubicación (entrega 3, 26/11): ¿se registraron las visitas en el comercio? + alertas de registro + validación, plazo y anulaciones.
+   Todo avisa, nada bloquea ni descarta visitas (Regla n.º 1). Los domicilios son un dato restringido: viven en v2_domicilios_ejecutivos
+   y solo los lee el analista del escritorio (RPC v2_domicilios).
+   ========================================================================= */
+const hav = (a, b, c, d) => { const R = 6371000, p = Math.PI / 180, x = (c - a) * p, y = (d - b) * p, h = Math.sin(x / 2) ** 2 + Math.cos(a * p) * Math.cos(c * p) * Math.sin(y / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+const COL_UBIC = { ok:"#0BBC96", med:"#E0A21B", mal:"#F86F35", no:"#7d89a3" };
+const TXT_UBIC = { ok:["En el comercio", "hasta " + REGLA.cerca + " m"], med:["Cerca", REGLA.cerca + " a " + REGLA.lejos + " m"], mal:["Lejos", "más de " + REGLA.lejos + " m"], no:["Sin punto de referencia", "no hay con qué comparar"] };
+async function cargarDomicilios(forzar){
+  if ((S.domicilios && !forzar) || S._domCarg) return; S._domCarg = true;
+  const { data, error } = await sb.rpc("v2_domicilios");
+  S._domCarg = false; S.domicilios = error ? [] : (data || []); S.domErr = error ? error.message : ""; pintar();
+}
+// Comercios distintos registrados a 30 m o menos entre sí, el mismo día y dentro de 90 minutos. Nivel por la distancia de cada registro a su comercio.
+function alertasMismoPunto(){
+  const porDia = {};
+  S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null).sort((a, b) => D(a.visitado_en) - D(b.visitado_en)).forEach(v => { (porDia[v.correo + "|" + iso(v.visitado_en)] ||= []).push(v); });
+  const grupos = [];
+  Object.values(porDia).forEach(l => {
+    const par = l.map((_, i) => i), f = i => par[i] === i ? i : (par[i] = f(par[i]));
+    for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++){
+      if (D(l[j].visitado_en) - D(l[i].visitado_en) > 90 * 60000) break;
+      if (l[i].customer_id !== l[j].customer_id && hav(l[i].lat, l[i].lng, l[j].lat, l[j].lng) <= 30) par[f(i)] = f(j); }
+    const g = {}; l.forEach((v, i) => { (g[f(i)] ||= []).push(v); });
+    Object.values(g).forEach(m => { if (new Set(m.map(x => x.customer_id)).size < 2) return;
+      const md = Math.max(0, ...m.map(x => x.distancia_m == null ? 0 : x.distancia_m));
+      grupos.push({ visitas:m, md, nivel: md > REGLA.lejos ? "alta" : md > REGLA.cerca ? "media" : "info" }); });
+  });
+  const ord = { alta:0, media:1, info:2 };
+  return grupos.sort((a, b) => ord[a.nivel] - ord[b.nivel] || D(b.visitas[0].visitado_en) - D(a.visitas[0].visitado_en));
+}
+// Visitas registradas cerca del domicilio del ejecutivo con el comercio lejos. Alta: a 150 m o menos y comercio a más de 500 m; media: a 500 m o menos y comercio a más de 1 km.
+function alertasDomicilio(){
+  const mejor = {};
+  (S.domicilios || []).forEach(d => S.act.forEach(v => {
+    if (v.correo !== d.correo || v.estado_anul === "anulada" || v.lat == null || v.distancia_m == null) return;
+    const m = Math.round(hav(v.lat, v.lng, d.lat, d.lng)), nivel = m <= DOM_R.alta && v.distancia_m > DOM_R.comAlta ? "alta" : m <= DOM_R.media && v.distancia_m > DOM_R.comMedia ? "media" : null;
+    if (nivel && (!mejor[v.id] || m < mejor[v.id].m)) mejor[v.id] = { v, d, m, nivel }; }));
+  const ord = { alta:0, media:1 };
+  return Object.values(mejor).sort((a, b) => ord[a.nivel] - ord[b.nivel] || D(b.v.visitado_en) - D(a.v.visitado_en));
+}
+const DOM_R = { alta:150, media:500, comAlta:500, comMedia:1000 };   // alerta de domicilio: radio y distancia al comercio, en metros
+const NIVEL_TXT = { alta:["Alta", "n-alta"], media:["Media", "n-media"], info:["Informativa", "n-info"] };
+function vistaUbicacion(){
+  cargarPeriodos(); cargarDomicilios();
+  const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo && S.periodo.id, sel = L.find(p => p.id === S.uPer) || null;
+  const chips = L.length > 1 ? `<div class="chips" role="group" aria-label="Periodo" style="margin-bottom:14px">${L.map(p => { const on = sel ? p.id === sel.id : p.id === cur;
+    return `<button class="chip ${on ? "on" : ""}" data-uper="${esc(p.id)}" aria-pressed="${on}">${esc(p.id)}${p.id === cur ? " · en curso" : ""}</button>`; }).join("")}</div>` : "";
+  if (sel && sel.id !== cur){ const d = datosPeriodo(sel);
+    if (d.cargando) return chips + `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(sel.id)}…</div></div>`;
+    if (d.err) return chips + `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-uper="${esc(sel.id)}" style="margin-top:10px">Reintentar</button></div></div>`; }
+  return chips + conPeriodoId(S.uPer, vistaUbicacionCuerpo);
+}
+function vistaUbicacionCuerpo(){
+  const vs = S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null), cnt = { ok:0, med:0, mal:0, no:0 }; vs.forEach(v => { cnt[claseDist(v)]++; });
+  const ds = vs.filter(v => v.distancia_m != null).map(v => v.distancia_m).sort((a, b) => a - b), mediana = ds.length ? ds[Math.floor(ds.length / 2)] : null;
+  const baja = vs.length ? Math.round(vs.filter(v => Number(v.precision_m) > REGLA.precision).length / vs.length * 100) : 0;
+  const tile = (c, cls) => `<div class="tile ${cls || ""}"><div class="k">${TXT_UBIC[c][0]}</div><div class="v num">${cnt[c]}<small> de ${vs.length}</small></div><div class="d">${TXT_UBIC[c][1]} · ${vs.length ? Math.round(cnt[c] / vs.length * 100) : 0} %</div></div>`;
+  const chipsCl = `<div class="chips" role="group" aria-label="Qué tan cerca" style="margin-bottom:10px">${[["", "Todas"], ["ok", "En el comercio"], ["med", "Cerca"], ["mal", "Lejos"], ["no", "Sin referencia"]].map(([k, t]) => `<button class="chip ${(S.uCl || "") === k ? "on" : ""}" data-ucl="${k}" aria-pressed="${(S.uCl || "") === k}">${t}</button>`).join("")}</div>`;
+  const lista = vs.filter(v => !S.uCl || claseDist(v) === S.uCl).sort((a, b) => (b.distancia_m == null ? -1 : b.distancia_m) - (a.distancia_m == null ? -1 : a.distancia_m));
+  const selv = S.uSel ? S.act.find(v => v.id === S.uSel) : null;
+  const det = selv ? (() => { const r = puntoRef(selv); return `<div class="aviso" style="margin:0 0 10px"><b>${esc(selv.comercio)}</b> · ${esc(ejDe(selv.correo).nombre)} · ${fISO(iso(selv.visitado_en))} ${hh(selv.visitado_en)}<br>
+      a <b>${mDist(selv.distancia_m)}</b> del comercio · GPS ±${Math.round(Number(selv.precision_m) || 0)} m${r ? ` · punto del comercio: ${esc(r.cal || "—")}${r.cal === "visita" ? " (tomado de otra visita: no es una referencia independiente)" : ""}` : " · el comercio no tiene punto guardado"}<br>
+      <a href="${gmaps(selv.lat, selv.lng)}" target="_blank" rel="noopener">Dónde registró ↗</a>${r ? ` · <a href="${gmaps(r.lat, r.lng)}" target="_blank" rel="noopener">Dónde está el comercio ↗</a>` : ""}</div>`; })() : "";
+  const filas = lista.map(v => `<tr class="${S.uSel === v.id ? "on" : ""}" data-usel="${esc(v.id)}" tabindex="0" style="cursor:pointer"><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(v.correo))}${esc(nombreCorto(ejDe(v.correo).nombre))}</span></td><td>${esc(v.comercio)}<small class="muted" style="display:block">${esc(v.distrito || "")}</small></td><td class="n num"><span class="pill ${claseDist(v) === "ok" ? "val" : claseDist(v) === "med" ? "obs" : claseDist(v) === "mal" ? "n-alta" : "anu"}">${v.distancia_m == null ? "sin punto" : mDist(v.distancia_m)}</span></td><td class="n num ${Number(v.precision_m) > REGLA.precision ? "warn" : ""}">±${Math.round(Number(v.precision_m) || 0)} m</td></tr>`).join("");
+  return `<div class="resumen">${tile("ok", "ok")}${tile("med")}${tile("mal", "warn")}${tile("no")}
+    <div class="tile"><div class="k">Distancia mediana</div><div class="v num">${mediana == null ? "—" : mDist(mediana)}</div><div class="d">GPS de precisión baja (más de ${REGLA.precision} m): ${baja} %</div></div></div>
+  <div class="eq-2">
+    <div class="panel"><div class="barra"><b>Mapa de registros</b><span class="lbl">punto de color = dónde se registró · cuadrado oscuro = dónde está el comercio · la línea los une</span></div>
+      <div style="padding:10px">${chipsCl}<div id="mapaUbic" class="mapa-dist" style="height:420px"></div></div></div>
+    <div class="panel"><div class="barra"><b>Visitas por revisar primero</b><span class="lbl">de la más lejana a la más cercana · ${lista.length} visita${lista.length === 1 ? "" : "s"}</span></div>
+      <div style="padding:10px">${det}<div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th class="n">Distancia</th><th class="n">GPS</th></tr></thead><tbody>${filas || `<tr><td colspan="5" class="muted">Sin visitas con este filtro.</td></tr>`}</tbody></table></div></div></div>
+  </div>
+  ${panelAlertas()}${panelValidacion()}${panelDomicilios()}
+  <div class="panel"><div class="atajos">Compara el GPS del celular al registrar con el punto del comercio guardado en el CRM (umbrales: ${REGLA.cerca} m y ${REGLA.lejos} m). «En el comercio» es coherente con haber estado ahí; «Lejos» pide revisar: puede que se registrara desde otro lugar o que el punto guardado del comercio esté mal. Un punto tomado de una visita anterior no es una referencia independiente. Las señales avisan: no bloquean ni descartan visitas.</div></div>`;
+}
+function panelAlertas(){
+  const tab = S.alTab || "pt", pt = alertasMismoPunto(), dom = alertasDomicilio(), niv = S.alNivel || "rev";
+  const tabs = `<div class="chips" role="group" aria-label="Tipo de alerta" style="margin-bottom:10px"><button class="chip ${tab === "pt" ? "on" : ""}" data-altab="pt" aria-pressed="${tab === "pt"}">Comercios en el mismo punto (${pt.filter(g => g.nivel !== "info").length})</button><button class="chip ${tab === "dom" ? "on" : ""}" data-altab="dom" aria-pressed="${tab === "dom"}">En el domicilio del ejecutivo (${dom.length})</button></div>`;
+  let cuerpo;
+  if (tab === "pt"){
+    const L = pt.map((g, i) => ({ g, i })).filter(o => niv === "all" || (niv === "rev" ? o.g.nivel !== "info" : o.g.nivel === niv));
+    cuerpo = `<div class="chips" role="group" aria-label="Nivel" style="margin-bottom:10px">${[["rev", "Por revisar (alta y media)"], ["info", "Informativas"], ["all", "Todas"]].map(([k, t]) => `<button class="chip ${niv === k ? "on" : ""}" data-alniv="${k}" aria-pressed="${niv === k}">${t}</button>`).join("")}</div>
+      <div class="eq-dias"><table class="datos"><thead><tr><th>Fecha</th><th>Ejecutivo</th><th>Comercios</th><th>Nivel</th></tr></thead><tbody>${L.map(({ g, i }) => { const v0 = g.visitas[0];
+        return `<tr class="${S.alSel && S.alSel.t === "g" && S.alSel.i === i ? "on" : ""}" data-alsel="g|${i}" tabindex="0" style="cursor:pointer"><td>${fISO(iso(v0.visitado_en))} ${hh(v0.visitado_en)}–${hh(g.visitas[g.visitas.length - 1].visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(v0.correo))}${esc(nombreCorto(ejDe(v0.correo).nombre))}</span></td>
+        <td>${[...new Set(g.visitas.map(v => v.comercio))].map(esc).join(" · ")}<small class="muted" style="display:block">${g.visitas.length} registros a 30 m o menos entre sí</small></td><td><span class="pill ${NIVEL_TXT[g.nivel][1]}">${NIVEL_TXT[g.nivel][0]}</span></td></tr>`; }).join("") || `<tr><td colspan="4" class="muted">Sin alertas con este filtro.</td></tr>`}</tbody></table></div>
+      <div class="muted" style="font-size:12px;margin-top:8px"><b>Alta</b>: algún comercio queda a más de ${REGLA.lejos} m del punto. <b>Media</b>: a más de ${REGLA.cerca} m. <b>Informativa</b>: mismo edificio o galería.</div>`;
+  } else if (S.domErr){
+    cuerpo = `<div class="vacio">Los domicilios de referencia todavía no están habilitados (${esc(S.domErr)}).</div>`;
+  } else {
+    cuerpo = `<div class="eq-dias"><table class="datos"><thead><tr><th>Fecha</th><th>Ejecutivo</th><th>Comercio visitado</th><th class="n">Del domicilio</th><th class="n">Del comercio</th><th>Nivel</th></tr></thead><tbody>${dom.map((o, i) => `<tr class="${S.alSel && S.alSel.t === "d" && S.alSel.i === i ? "on" : ""}" data-alsel="d|${i}" tabindex="0" style="cursor:pointer"><td>${fISO(iso(o.v.visitado_en))} ${hh(o.v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(o.v.correo))}${esc(nombreCorto(ejDe(o.v.correo).nombre))}</span></td><td>${esc(o.v.comercio)}</td><td class="n num">${mDist(o.m)}</td><td class="n num">${mDist(o.v.distancia_m)}</td><td><span class="pill ${NIVEL_TXT[o.nivel][1]}">${NIVEL_TXT[o.nivel][0]}</span></td></tr>`).join("") || `<tr><td colspan="6" class="muted">${(S.domicilios || []).length ? "Ninguna visita marcada cerca de un domicilio con el comercio lejos." : "Todavía no hay domicilios de referencia cargados."}</td></tr>`}</tbody></table></div>
+      <div class="muted" style="font-size:12px;margin-top:8px"><b>Alta</b>: a ${DOM_R.alta} m o menos del domicilio y el comercio a más de ${DOM_R.comAlta} m. <b>Media</b>: a ${DOM_R.media} m o menos y el comercio a más de ${DOM_R.comMedia / 1000} km. El domicilio lo ven solo quienes tienen acceso al escritorio.</div>`;
+  }
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Alertas de registro</b><span class="lbl">dos señales para validar que la visita se hizo en el comercio · avisan, no bloquean ni descartan visitas</span></div>
+    <div style="padding:10px">${tabs}${cuerpo}${S.alSel ? `<div id="mapaAlerta" class="mapa-dist" style="height:340px;margin-top:12px"></div>` : `<div class="muted" style="font-size:12px;margin-top:10px">Toca una fila para verla en el mapa.</div>`}</div></div>`;
+}
+function panelValidacion(){
+  const por = S.ejecutivos.map(e => { const t = S.act.filter(v => v.correo === e.correo);
+    return { e, reg:t.length, val:t.filter(v => estadoDe(v) === "val").length, pend:t.filter(v => estadoDe(v) === "pend").length, obs:t.filter(v => estadoDe(v) === "obs").length,
+      anu:t.filter(v => v.estado_anul === "anulada").length, tarde:t.filter(v => v.fuera_plazo).length, pedidas:t.filter(v => v.estado_anul === "pendiente").length }; });
+  const sum = k => por.reduce((a, f) => a + f[k], 0), anul = S.act.filter(v => v.estado_anul === "anulada").sort((a, b) => D(b.visitado_en) - D(a.visitado_en));
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Validación, plazo y anulaciones</b><span class="lbl">las visitas se validan solas: las señales avisan, no bloquean · solo se rechaza por seguridad, por el plazo o por un error de captura evidente</span></div>
+    <table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Registradas</th><th class="n">Validadas</th><th class="n">Por validar</th><th class="n">Observadas</th><th class="n">Anuladas</th><th class="n">Anulación pedida</th><th class="n">Fuera de plazo</th></tr></thead>
+    <tbody>${por.map(f => `<tr><td><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></td><td class="n num">${f.reg}</td><td class="n num">${f.val}</td><td class="n num">${f.pend}</td><td class="n num">${f.obs}</td><td class="n num">${f.anu}</td><td class="n num">${f.pedidas}</td><td class="n num ${f.tarde ? "mal" : ""}">${f.tarde}</td></tr>`).join("")}
+    <tr class="total"><td><b>Equipo</b></td><td class="n num">${sum("reg")}</td><td class="n num">${sum("val")}</td><td class="n num">${sum("pend")}</td><td class="n num">${sum("obs")}</td><td class="n num">${sum("anu")}</td><td class="n num">${sum("pedidas")}</td><td class="n num">${sum("tarde")}</td></tr></tbody></table>
+    ${anul.length ? `<div class="barra" style="border-top:1px solid var(--linea)"><b>Anulaciones y su motivo</b></div><div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th>Motivo</th></tr></thead><tbody>${anul.map(v => `<tr><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}</td><td>${esc(nombreCorto(ejDe(v.correo).nombre))}</td><td>${esc(v.comercio)}</td><td>${esc(String(v.anul_motivo || "(sin motivo)").slice(0, 220))}</td></tr>`).join("")}</tbody></table></div>` : `<div class="atajos">No hay visitas anuladas en el periodo.</div>`}</div>`;
+}
+function panelDomicilios(){
+  const L = S.domicilios || [];
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Domicilios de referencia</b><span class="lbl">dato restringido: lo ven solo quienes tienen acceso al escritorio, nunca los ejecutivos · sirve para la alerta «en el domicilio»</span></div>
+    ${S.domErr ? `<div class="vacio">Todavía no están habilitados (${esc(S.domErr)}).</div>` : `<table class="datos"><thead><tr><th>Ejecutivo</th><th>Etiqueta</th><th>Punto</th><th>Exactitud</th><th>Nota</th><th></th></tr></thead><tbody>${L.map(d => `<tr><td>${esc(d.ejecutivo)}</td><td>${esc(d.etiqueta || "—")}</td><td><a href="${gmaps(d.lat, d.lng)}" target="_blank" rel="noopener">${d.lat.toFixed(5)}, ${d.lng.toFixed(5)} ↗</a></td><td>${esc(d.exactitud)}</td><td>${esc(d.nota || "")}</td><td class="n"><button class="btn q" data-dom-borrar="${d.id}">Borrar</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">Todavía no hay domicilios de referencia.</td></tr>`}</tbody></table>
+    <div class="dom-form"><select id="domEj" aria-label="Ejecutivo">${S.ejecutivos.map(e => `<option value="${esc(e.correo)}">${esc(e.nombre)}</option>`).join("")}</select>
+      <input id="domEt" placeholder="Etiqueta (opcional)" aria-label="Etiqueta"><input id="domLat" placeholder="Latitud, ej. -12.0931" aria-label="Latitud" inputmode="decimal"><input id="domLng" placeholder="Longitud, ej. -77.0465" aria-label="Longitud" inputmode="decimal">
+      <select id="domEx" aria-label="Exactitud"><option value="aproximado">Aproximado (calle o zona)</option><option value="exacto">Exacto</option></select><input id="domNota" placeholder="Nota (opcional)" aria-label="Nota" maxlength="300">
+      <button class="btn" data-dom-guardar>Guardar domicilio</button></div>
+    <div class="atajos">Para el punto exacto: en Google Maps, clic derecho sobre el lugar y «copiar coordenadas». Los domicilios se cargan aquí, nunca en un archivo del repositorio.</div>`}</div>`;
+}
+function nuevoMapaUb(el, clave){
+  const m = L.map(el, { zoomControl:true, scrollWheelZoom:false, zoomSnap:.25, preferCanvas:false }); S[clave] = m;
+  m.setView([-12.06, -77.03], 11); m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:.55, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
+  return m;
+}
+const cuadrado = c => L.divIcon({ className:"", iconSize:[10, 10], iconAnchor:[5, 5], html:`<div style="width:10px;height:10px;background:#0C1137;border:2px solid #fff;box-shadow:0 0 0 1px #0C1137"></div>` });
+function montarMapaUbicacion(el){
+  if (!window.L){ el.innerHTML = `<div class="vacio" style="padding:22px">No se pudo cargar el mapa.</div>`; return; }
+  const m = nuevoMapaUb(el, "_mapa"), pts = [], selId = S.uSel;
+  S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null && (!S.uCl || claseDist(v) === S.uCl)).forEach(v => {
+    const c = claseDist(v), r = puntoRef(v), es = v.id === selId; pts.push([v.lat, v.lng]);
+    if (r){ pts.push([r.lat, r.lng]); L.polyline([[v.lat, v.lng], [r.lat, r.lng]], { color:COL_UBIC[c], weight:es ? 4 : 2, opacity:es ? 1 : .8 }).addTo(m); L.marker([r.lat, r.lng], { icon:cuadrado() }).addTo(m).bindTooltip(esc(v.comercio) + " · punto del comercio", { direction:"top" }); }
+    L.circleMarker([v.lat, v.lng], { radius:es ? 8 : 5, color:"#fff", weight:es ? 3 : 1.5, fillColor:COL_UBIC[c], fillOpacity:1 }).addTo(m)
+      .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}<br>${v.distancia_m == null ? "sin punto de referencia" : mDist(v.distancia_m) + " del comercio"}`, { direction:"top" })
+      .on("click", () => { S.uSel = S.uSel === v.id ? null : v.id; pintar(); }); });
+  const sv = selId ? S.act.find(v => v.id === selId) : null;
+  if (sv){ const q = [[sv.lat, sv.lng]], r = puntoRef(sv); if (r) q.push([r.lat, r.lng]); m.fitBounds(L.latLngBounds(q), { padding:[60, 60], maxZoom:18, animate:false }); }
+  else if (pts.length){ const q = (a, f) => a[Math.min(a.length - 1, Math.max(0, Math.floor(a.length * f)))], la = pts.map(p => p[0]).sort((a, b) => a - b), lo = pts.map(p => p[1]).sort((a, b) => a - b);
+    m.fitBounds([[q(la, .02), q(lo, .02)], [q(la, .98), q(lo, .98)]], { padding:[30, 30], maxZoom:15, animate:false }); }
+}
+function montarMapaAlerta(el){
+  if (!window.L || !S.alSel){ return; }
+  const m = nuevoMapaUb(el, "_mapa2"), pts = [], it = [];
+  if (S.alSel.t === "g"){ const g = alertasMismoPunto()[S.alSel.i]; if (g) g.visitas.forEach(v => it.push({ v, r:puntoRef(v) })); }
+  else { const o = alertasDomicilio()[S.alSel.i]; if (o){ it.push({ v:o.v, r:puntoRef(o.v) }); pts.push([o.d.lat, o.d.lng]); L.circle([o.d.lat, o.d.lng], { radius:150, color:"#3B43FB", weight:1.5, fillOpacity:.15 }).addTo(m); L.circle([o.d.lat, o.d.lng], { radius:500, color:"#3B43FB", weight:1, fillOpacity:.04, dashArray:"4 4" }).addTo(m);
+      L.circleMarker([o.d.lat, o.d.lng], { radius:5, color:"#fff", weight:2, fillColor:"#3B43FB", fillOpacity:1 }).addTo(m).bindTooltip("Domicilio de referencia", { direction:"top" }); } }
+  it.forEach(({ v, r }) => { pts.push([v.lat, v.lng]); if (r){ pts.push([r.lat, r.lng]); L.polyline([[v.lat, v.lng], [r.lat, r.lng]], { color:"#F86F35", weight:2, dashArray:"5 4" }).addTo(m); L.marker([r.lat, r.lng], { icon:cuadrado() }).addTo(m).bindTooltip(esc(v.comercio) + " · comercio", { direction:"top" }); }
+    L.circleMarker([v.lat, v.lng], { radius:7, color:"#fff", weight:2, fillColor:"#F86F35", fillOpacity:1 }).addTo(m).bindTooltip(`<b>${esc(v.comercio)}</b><br>${hh(v.visitado_en)} · ${v.distancia_m == null ? "sin punto" : mDist(v.distancia_m) + " del comercio"}`, { direction:"top" }); });
+  if (pts.length) m.fitBounds(L.latLngBounds(pts), { padding:[50, 50], maxZoom:S.alSel.t === "g" ? 19 : 15, animate:false });
+}
+async function guardarDomicilio(){
+  if (S._domGuardando) return;
+  const num = id => Number(String(document.getElementById(id).value).replace(",", ".").trim());
+  const a = { p_correo:document.getElementById("domEj").value, p_etiqueta:document.getElementById("domEt").value, p_lat:num("domLat"), p_lng:num("domLng"), p_exactitud:document.getElementById("domEx").value, p_nota:document.getElementById("domNota").value };
+  if (!Number.isFinite(a.p_lat) || !Number.isFinite(a.p_lng) || document.getElementById("domLat").value.trim() === "" || document.getElementById("domLng").value.trim() === ""){ toast("Escribe la latitud y la longitud como números, por ejemplo -12.0931 y -77.0465."); return; }
+  S._domGuardando = true;
+  const { error } = await sb.rpc("v2_guardar_domicilio", a);
+  S._domGuardando = false;
+  if (error){ toast(error.message); return; }
+  toast("Domicilio guardado."); S.domicilios = null; cargarDomicilios(true);
+}
+async function borrarDomicilio(id){
+  if (!confirm("¿Borrar este domicilio de referencia? Quedará anotado quién y cuándo.")) return;
+  const { error } = await sb.rpc("v2_borrar_domicilio", { p_id:Number(id) });
+  if (error){ toast(error.message); return; }
+  toast("Domicilio borrado."); S.domicilios = null; cargarDomicilios(true);
+}
+document.addEventListener("keydown", ev => { if (ev.key !== "Enter" && ev.key !== " ") return; const t = ev.target.closest && ev.target.closest("tr[data-usel],tr[data-alsel]"); if (t && ev.target === t){ ev.preventDefault(); t.click(); } });
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-uper],[data-ucl],[data-usel],[data-altab],[data-alniv],[data-alsel],[data-dom-guardar],[data-dom-borrar]"); if (!t) return;
+  if (t.dataset.uper){ const id = t.dataset.uper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.uPer = id; S.uSel = null; S.alSel = null; S.uCl = ""; pintar(); return; }
+  if (t.dataset.ucl !== undefined){ S.uCl = t.dataset.ucl; S.uSel = null; pintar(); return; }
+  if (t.dataset.usel){ S.uSel = S.uSel === t.dataset.usel ? null : t.dataset.usel; pintar(); return; }
+  if (t.dataset.altab){ S.alTab = t.dataset.altab; S.alSel = null; pintar(); return; }
+  if (t.dataset.alniv){ S.alNivel = t.dataset.alniv; S.alSel = null; pintar(); return; }
+  if (t.dataset.alsel){ const [k, i] = t.dataset.alsel.split("|"), o = S.alSel; S.alSel = o && o.t === k && o.i === Number(i) ? null : { t:k, i:Number(i) }; pintar(); return; }
+  if (t.hasAttribute("data-dom-guardar")){ guardarDomicilio(); return; }
+  if (t.dataset.domBorrar){ borrarDomicilio(t.dataset.domBorrar); }
+});
 /* =========================================================================
    Directorio · vista para directorio: cobertura, contacto y dirección errada, con selector de periodo (P1 a P5).
    Los periodos cerrados no se tocan: se leen con sus mismas funciones. Reactivados e incentivo solo existen en los cerrados (los informa BBVA).
@@ -1844,9 +2026,10 @@ function leyendaPuntos(){
   return `<span><i class="pto"></i>visita (color del ejecutivo)</span>`;
 }
 const mapaEnCurso = () => !S.mPer || !S.periodo || S.mPer === S.periodo.id;
-function conPeriodoMapa(fn){
-  const p = (S.periodos || []).find(x => x.id === S.mPer);
-  if (!p || mapaEnCurso()) return fn();
+function conPeriodoMapa(fn){ return conPeriodoId(S.mPer, fn); }
+function conPeriodoId(id, fn){
+  const p = (S.periodos || []).find(x => x.id === id);
+  if (!p || !id || (S.periodo && id === S.periodo.id)) return fn();
   const d = datosPeriodo(p); if (d.cargando || d.err) return fn();
   const g = { act:S.act, base:S.base, baseMap:S.baseMap, hayOrigen:S.hayOrigen };
   Object.assign(S, { act:d.act, base:d.base, baseMap:d.baseMap, hayOrigen:d.hayOrigen });
@@ -2700,7 +2883,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","validacion","bloques","rutas","equipo","mapa","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","validacion","bloques","rutas","equipo","mapa","ubicacion","feedback","porque","auditoria","cargas","indicadores"].includes(h)) S.vista = h; } catch(e){}
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
   sb.auth.onAuthStateChange((ev, ses) => { if (ev === "SIGNED_OUT"){ S.sesion = null; S.yo = null; pintar(); } else if (ses) S.sesion = ses; });

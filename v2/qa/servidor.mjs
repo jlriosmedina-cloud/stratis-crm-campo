@@ -1020,6 +1020,35 @@ caso('11/11: v2_mi_base devuelve los celulares adicionales del comercio y no los
   assert.equal(sin.contacto_celular2, null);
   await falla(como(null, 'select * from public.v2_mi_base()'), /permission denied/);
 });
+// 26/11: domicilios de los ejecutivos como referencia de seguimiento: dato restringido al analista del escritorio.
+caso('26/11: domicilios de referencia: solo el analista del escritorio los guarda y los lee; sin acceso directo a la tabla; borrado lógico', async () => {
+  const id = (await como(ANA, `select public.v2_guardar_domicilio($1, 'Domicilio de prueba', -12.0931, -77.0465, 'aproximado', 'Nota de prueba') id`, [EJ])).rows[0].id;
+  assert.ok(id, 'no devolvió el id');
+  const l = (await como(ANA, 'select * from public.v2_domicilios()')).rows;
+  assert.equal(l.length, 1); assert.equal(l[0].correo, EJ); assert.equal(l[0].ejecutivo, 'Ejecutivo Prueba'); assert.equal(l[0].exactitud, 'aproximado'); assert.equal(l[0].creado_por, ANA);
+  // el ejecutivo, el manager sin acceso al escritorio y los anónimos no ven ni guardan nada
+  await falla(como(EJ, 'select * from public.v2_domicilios()'), /Solo el analista/);
+  await falla(como(MAN, 'select * from public.v2_domicilios()'), /Solo el analista/);
+  await falla(como(EJ, `select public.v2_guardar_domicilio($1, 'x', -12.09, -77.04)`, [EJ]), /Solo el analista/);
+  await falla(como(null, 'select * from public.v2_domicilios()'), /permission denied/);
+  // la tabla no se toca directo, ni siquiera el analista: RLS sin políticas (no ve ninguna fila y no puede escribir)
+  assert.equal((await como(ANA, 'select * from public.v2_domicilios_ejecutivos')).rows.length, 0, 'el analista leyó la tabla directo');
+  assert.equal((await como(EJ, 'select * from public.v2_domicilios_ejecutivos')).rows.length, 0, 'el ejecutivo leyó la tabla directo');
+  await falla(como(ANA, `insert into public.v2_domicilios_ejecutivos(correo, lat, lng, creado_por) values ('${EJ}', -12, -77, 'x')`), /row-level security/);
+  await falla(como(null, 'select * from public.v2_domicilios_ejecutivos'), /permission denied/);
+  // validaciones: ejecutivo activo, coordenadas en el Perú y exactitud conocida
+  await falla(como(ANA, `select public.v2_guardar_domicilio($1, 'x', -12.09, -77.04)`, [MAN]), /ejecutivo activo/);
+  await falla(como(ANA, `select public.v2_guardar_domicilio($1, 'x', -12.09, -77.04)`, [INA]), /ejecutivo activo/);
+  await falla(como(ANA, `select public.v2_guardar_domicilio($1, 'x', -77.04, -12.09)`, [EJ]), /no están en el Perú/);
+  await falla(como(ANA, `select public.v2_guardar_domicilio($1, 'x', -12.09, -77.04, 'cerca')`, [EJ]), /exactitud/);
+  // borrado lógico: deja de verse, pero la fila queda con quién y cuándo
+  await como(ANA, 'select public.v2_borrar_domicilio($1)', [id]);
+  assert.equal((await como(ANA, 'select * from public.v2_domicilios()')).rows.length, 0);
+  const f = (await db.query('select borrado_por, borrado_en from v2_domicilios_ejecutivos where id = $1', [id])).rows[0];
+  assert.equal(f.borrado_por, ANA); assert.ok(f.borrado_en);
+  await falla(como(ANA, 'select public.v2_borrar_domicilio($1)', [id]), /No se encontró/);
+  await falla(como(EJ, 'select public.v2_borrar_domicilio($1)', [id]), /Solo el analista/);
+});
 let fallas = 0;
 for (const [n, fn] of CASOS){
   try { await fn(); console.log(`ok  ${n}`); }

@@ -586,6 +586,52 @@ await prueba('Mapa de distritos: selector de periodo, puntos por hora, filtros d
   assert.equal(await filas(), 1, 'el periodo cerrado tiene una sola visita');
   await p.evaluate(() => { const fx = window.__FX; fx.rpc.v2_actividad = fx._act; fx.rpc.v2_mi_base = fx._base2; fx.tablas.v2_periodos = { id: 'PRUEBA', ini: '2026-01-01', fin: '2099-12-31' }; S.act = fx._actS; S.periodos = null; S.dirDatos = null; S.mPer = null; S.mColor = 'ej'; S.vista = 'validacion'; pintar(); });
 });
+await prueba('Ubicación (26/11): cercanía al comercio, alertas «mismo punto» y «domicilio», validación y domicilios de referencia', async () => {
+  const HOME = [{ id: 1, correo: EJECUTIVO.correo, ejecutivo: EJECUTIVO.nombre, etiqueta: 'Casa de prueba', lat: -12.0931, lng: -77.0465, exactitud: 'aproximado', nota: null, creado_por: ANALISTA.correo, creado_en: `${hoy}T10:00:00Z` }];
+  // visita lejana (comercio a 2 km) registrada en el domicilio; una anulada con motivo; dos comercios distintos en el mismo punto, uno a 700 m de su punto
+  const lejos = visita(1, { id: '00000000-0000-0000-0000-0000000000d1', customer_id: '00000009', comercio: 'Comercio Prueba 9', distancia_m: 2000, visitado_en: `${hoy}T22:00:00Z`, recibido_en: `${hoy}T22:00:30Z`, lat: -12.0932, lng: -77.0466 });
+  const mp1 = visita(1, { id: '00000000-0000-0000-0000-0000000000d2', customer_id: '00000010', comercio: 'Comercio Prueba 10', distancia_m: 700, visitado_en: `${hoy}T22:10:00Z`, recibido_en: `${hoy}T22:10:30Z`, lat: -12.0932, lng: -77.0466 });
+  const anul = visita(1, { id: '00000000-0000-0000-0000-0000000000d3', customer_id: '00000011', comercio: 'Comercio Prueba 11', estado_anul: 'anulada', anul_motivo: 'Visita duplicada de prueba', visitado_en: `${hoy}T22:20:00Z`, recibido_en: `${hoy}T22:20:30Z` });
+  await p.evaluate(({ h, l, m, a }) => { const fx = window.__FX; fx._actU = S.act; fx.rpc.v2_domicilios = h; S.act = S.act.concat([l, m, a]); S.domicilios = null; S.domErr = ''; S.uPer = null; S.uCl = ''; S.uSel = null; S.alSel = null; S.alTab = 'pt'; S.alNivel = 'rev'; S.vista = 'ubicacion'; elegirEj('todos'); pintar(); },
+    { h: HOME, l: lejos, m: mp1, a: anul });
+  await p.waitForTimeout(600);
+  const tile = async k => (await p.locator('.tile', { hasText: k }).first().innerText()).replace(/\s+/g, ' ');
+  const esp = await p.evaluate(() => { const c = { ok: 0, med: 0, mal: 0, no: 0 }; S.act.filter(v => v.estado_anul !== 'anulada' && v.lat != null).forEach(v => { c[claseDist(v)]++; }); return c; });
+  assert.match(await tile('En el comercio'), new RegExp('En el comercio ' + esp.ok + ' de', 'i'), 'contador «En el comercio»: ' + await tile('En el comercio'));
+  assert.ok(esp.mal >= 2, 'debían quedar al menos 2 visitas lejos'); assert.match(await tile('Lejos'), new RegExp('Lejos ' + esp.mal + ' de', 'i'), 'contador «Lejos»');
+  // la lista va de la más lejana a la más cercana
+  const primera = await p.locator('tr[data-usel]').first().innerText(); assert.match(primera, /Comercio Prueba 9/, 'la más lejana debe ir primero: ' + primera);
+  // alertas «mismo punto»: el grupo con un comercio a 700 m es de nivel alta
+  const nivelPt = await p.evaluate(() => alertasMismoPunto().map(g => g.nivel)); assert.ok(nivelPt.includes('alta'), 'falta la alerta alta de «mismo punto»: ' + nivelPt);
+  await p.click('[data-altab="pt"]'); await p.waitForTimeout(200);
+  assert.ok(/Comercio Prueba 10/.test(await p.locator('#contenido').innerText()), 'la alerta de mismo punto no lista los comercios');
+  // alertas «domicilio»: la visita lejana marcada en el domicilio es alta (a menos de 150 m del domicilio y comercio a 2 km)
+  const dom = await p.evaluate(() => alertasDomicilio().map(o => [o.v.comercio, o.nivel, o.m]));
+  assert.ok(dom.some(x => x[0] === 'Comercio Prueba 9' && x[1] === 'alta'), 'falta la alerta de domicilio alta: ' + JSON.stringify(dom));
+  assert.ok(!dom.some(x => x[0] === 'Comercio Prueba 1'), 'una visita con el comercio cerca no es alerta de domicilio');
+  await p.click('[data-altab="dom"]'); await p.waitForTimeout(250);
+  assert.ok(/Comercio Prueba 9/.test(await p.locator('#contenido').innerText()), 'la pestaña de domicilio no lista la visita'); await p.click('[data-alsel^="d|"]'); await p.waitForTimeout(400);
+  assert.equal(await p.locator('#mapaAlerta').count(), 1, 'no abrió el mapa de la alerta');
+  if (process.env.CAPTURAS) await p.screenshot({ path: path.join(process.env.CAPTURAS, 'ubicacion.png'), fullPage: true });
+  // validación, plazo y anulaciones
+  assert.ok(/Anulaciones y su motivo/.test(await p.locator('#contenido').innerText()) && /Visita duplicada de prueba/.test(await p.locator('#contenido').innerText()), 'falta la anulación con su motivo');
+  // domicilios: se guardan con coordenadas numéricas y se borran con confirmación; sin números no se llama
+  await p.fill('#domLat', 'abc'); await p.fill('#domLng', '-77.05'); await p.evaluate(() => { window.__llamadas.length = 0; });
+  await p.click('[data-dom-guardar]'); await p.waitForTimeout(200);
+  assert.equal(await p.evaluate(() => window.__llamadas.filter(l => l[0] === 'v2_guardar_domicilio').length), 0, 'no debe guardar con una latitud que no es número');
+  await p.fill('#domLat', '-12,1'); await p.fill('#domEt', 'Nuevo'); await p.evaluate(() => { window.__FX.rpc.v2_guardar_domicilio = 5; });
+  await p.click('[data-dom-guardar]'); await p.waitForTimeout(400);
+  const g = await p.evaluate(() => window.__llamadas.find(l => l[0] === 'v2_guardar_domicilio'));
+  assert.ok(g && g[1].p_lat === -12.1 && g[1].p_lng === -77.05 && g[1].p_correo === 'ejecutivo.prueba@ejemplo.com' && g[1].p_exactitud === 'aproximado', 'argumentos de guardar: ' + JSON.stringify(g));
+  p.once('dialog', d => d.accept().catch(() => {})); await p.evaluate(() => { window.__FX.rpc.v2_borrar_domicilio = null; });
+  await p.click('[data-dom-borrar="1"]'); await p.waitForTimeout(400);
+  assert.deepEqual(await p.evaluate(() => window.__llamadas.find(l => l[0] === 'v2_borrar_domicilio')), ['v2_borrar_domicilio', { p_id: 1 }]);
+  // si la migración todavía no está aplicada, la vista avisa y el resto funciona
+  await p.evaluate(() => { window.__FX.rpc.v2_domicilios = () => ({ __error: 'function public.v2_domicilios() does not exist' }); S.domicilios = null; S.domErr = ''; S.alSel = null; S.alTab = 'dom'; pintar(); }); await p.waitForTimeout(500);
+  assert.match(await p.locator('#contenido').innerText(), /todavía no están habilitados/, 'debe avisar que los domicilios no están habilitados');
+  assert.match(await tile('En el comercio'), /En el comercio/i, 'el resto de la vista debe seguir funcionando');
+  await p.evaluate(() => { const fx = window.__FX; S.act = fx._actU; delete fx.rpc.v2_domicilios; delete fx.rpc.v2_guardar_domicilio; delete fx.rpc.v2_borrar_domicilio; S.domicilios = null; S.domErr = ''; S.alSel = null; S.alTab = 'pt'; S.vista = 'validacion'; pintar(); });
+});
 await prueba('rutas: la recomendada frente a la del ejecutivo, por correo y ruta, con la ruta de hoy y el historial', async () => {
   // Los dos ejecutivos tienen una «Ruta 01 · Lima» y una «Ruta 99 · Por ubicar»: nunca se mezclan
   const E2 = 'ejecutivo2.prueba@ejemplo.com', R1 = 'Ruta 01 · Lima', R99 = 'Ruta 99 · Por ubicar', en = '2026-10-21T15:00:00Z';
