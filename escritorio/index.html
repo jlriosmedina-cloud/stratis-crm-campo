@@ -561,6 +561,36 @@ table.datos tr.on td{background:var(--azul-t)}
 .top .btn{padding:6px 10px}
 .barrita{position:relative}
 .barrita .esp{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
+/* Mapa único (26/11): mapa a la izquierda y panel a la derecha; con el menú lateral, debajo de 1240 px de pantalla pasa a una sola columna */
+.mu-barra{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;margin-bottom:12px}
+.mu-g{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.mu-g>small{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-right:2px}
+.mu-g .chip i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.mu-g .tog{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;cursor:pointer}
+.gris{width:10px;height:10px;border-radius:50%;background:#9aa3b8;display:inline-block}
+.mu-main{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(380px,1fr);gap:14px;margin-bottom:6px;align-items:start}
+.mu-mapa-card{display:flex;flex-direction:column;margin:0;position:sticky;top:0}   /* el mapa acompaña mientras se recorre el cuadro de la derecha */
+.mu-ley{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 12px;border-top:1px solid var(--linea);font-size:12px}
+.mu-ley span{display:inline-flex;align-items:center;gap:6px}.mu-ley i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.mu-ley i.pto{background:var(--azul);border:2px solid #fff;box-shadow:0 0 0 1px var(--azul)}.mu-ley i.aro{border:2px solid #D6455D;background:none}
+.mu-panel{display:flex;flex-direction:column;margin:0}   /* el cuadro sale completo: sin tope de alto ni scroll interno */
+.mu-mapa-card #mapaUnico{height:clamp(300px,44vh,380px)}
+.mu-tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--linea);overflow:auto;flex:none}
+.mu-tabs .tab{border:0;background:none;padding:8px 11px;font-weight:700;font-size:12.5px;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.mu-tabs .tab.on{color:var(--azul-txt);border-color:var(--azul)}
+.mu-tabs .tab em{font-style:normal;background:var(--hover);border-radius:99px;padding:1px 7px;font-size:11px;margin-left:5px;color:var(--texto)}
+.mu-tabs .tab.al em{background:rgba(214,69,93,.16);color:var(--rojo-txt,#d6455d)}
+.mu-cuerpo{overflow:visible}
+
+.mu-sub{padding:8px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--linea);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mu-f{cursor:pointer}.mu-f:hover{background:var(--hover)}.mu-f.on{background:rgba(59,67,251,.1)}
+.mu-rombo{width:14px;height:14px;background:#fff;border:3px solid var(--ink);transform:rotate(45deg)}
+.mu-det{margin:0 0 12px;border:1px solid var(--linea);border-radius:12px;background:var(--tarjeta)}
+.mu-det>summary{padding:11px 14px;font-weight:700;cursor:pointer}.mu-det>summary small{font-weight:600;color:var(--muted);margin-left:6px}
+.mu-det[open]>summary{border-bottom:1px solid var(--linea)}.mu-det>.panel{border:0;margin:0}
+@media (max-width:1240px){.mu-main{grid-template-columns:1fr}.mu-mapa-card{position:static}}
+.mu-cuerpo .datos th,.mu-cuerpo .datos td{padding-left:7px;padding-right:7px}
+.mu-cuerpo .datos th{letter-spacing:.04em;font-size:10px}
+.mu-cuerpo .datos .barrita{min-width:50px}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -576,7 +606,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "e7fca5";
+const BUILD = "df75a6";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -958,10 +988,9 @@ const VISTAS = [
   ["directorio","Directorio", ICON.ind, null],
   ["resumen","Resumen", ICON.bloques, null],
   ["equipo","Equipo", ICON.equipo, null],
-  ["mapa","Mapa de calor", ICON.mapa, null],
+  ["mapa","Mapa", ICON.mapa, null],
   ["bloques","Cartera", ICON.bloques, null],
   ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
-  ["ubicacion","Ubicación", ICON.mapa, null],
   ["tiempos","Tiempos", ICON.aud, null],
   ["cierres","Cierres", ICON.cierre, null],
   ["reporte","Reporte", ICON.cola, null],
@@ -1017,7 +1046,8 @@ function pintar(){
               directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
               equipo:["Equipo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
               ubicacion:["Ubicación y alertas de registro","¿Se registraron las visitas en el comercio? Qué tan lejos quedó cada registro, comercios registrados en el mismo punto, visitas marcadas cerca del domicilio del ejecutivo, y la validación y las anulaciones. Avisa, no bloquea."],
-              mapa:["Mapa de calor","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
+              mapa:["Mapa","Distribución por distrito, visitas, comercios por visitar, distancia del registro al comercio y alertas, todo en un solo mapa."],
+              mapa_dist:["Mapa de calor","Lima Metropolitana y Callao: qué distritos trabaja cada ejecutivo y cómo va la gestión en cada uno. Haz clic en un distrito para ver su detalle."],
               feedback:["Feedback de la visita","Lo que el comercio le dijo al ejecutivo y qué le ofreció, en el árbol de feedback (los 11 tipos de BBVA más los agregados por Stratis). Marcado por el ejecutivo desde el 24/09; las visitas anteriores, inferidas del comentario."],
               porque:["Por qué sí / por qué no","Por qué tenemos éxito en unas visitas y en otras no: el resultado de cada comercio por su última visita, qué convenció a los que dijeron que sí y qué frenó a los demás."],
               auditoria:["Modo auditoría","Trazabilidad de cada registro, patrones por ejecutivo y cruce con la data de BBVA."],
@@ -1033,12 +1063,13 @@ function pintar(){
   $("#btnTema").innerHTML = temaActual() === "dark" ? `${ICON.sol} Claro` : `${ICON.luna} Oscuro`;
   if (S._mapa){ try { S._mapa.off(); S._mapa.stop && S._mapa.stop(); S._mapa.remove(); } catch(e){} S._mapa = null; }
   if (S._mapa2){ try { S._mapa2.off(); S._mapa2.stop && S._mapa2.stop(); S._mapa2.remove(); } catch(e){} S._mapa2 = null; }
+  if (S._mapaUnico){ try { S._mapaUnico.off(); S._mapaUnico.stop && S._mapaUnico.stop(); S._mapaUnico.remove(); } catch(e){} S._mapaUnico = null; }
   const ae = document.activeElement, foco = ae && ae.id && c.contains(ae) ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const campos = {}; ["mSel","mNota","qTraza"].forEach(id => { const el = document.getElementById(id); if (el) campos[id] = el.value; });
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "mapa" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "mapa_dist" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -1046,6 +1077,7 @@ function pintar(){
   despuesDePintar();
 }
 function despuesDePintar(){ const el = document.getElementById("mapaVisita"); if (el) montarMapa(el); const md = document.getElementById("mapaDist"); if (md) conPeriodoMapa(() => montarMapaDistritos(md));
+  const mun = document.getElementById("mapaUnico"); if (mun) muPeriodo(() => conEj(() => montarMapaUnico(mun)));
   const mu = document.getElementById("mapaUbic"); if (mu) conPeriodoId(S.uPer, () => montarMapaUbicacion(mu));
   const ma = document.getElementById("mapaAlerta"); if (ma) conPeriodoId(S.uPer, () => montarMapaAlerta(ma)); }
 function cascaron(){
@@ -1461,7 +1493,7 @@ function panelDomicilios(){
   const L = S.domicilios || [];
   return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Domicilios de referencia</b><span class="lbl">dato restringido: lo ven solo quienes tienen acceso al escritorio, nunca los ejecutivos · sirve para la alerta «en el domicilio»</span></div>
     ${S.domErr ? `<div class="vacio">Todavía no están habilitados (${esc(S.domErr)}).</div>` : `<table class="datos"><thead><tr><th>Ejecutivo</th><th>Etiqueta</th><th>Punto</th><th>Exactitud</th><th>Nota</th><th></th></tr></thead><tbody>${L.map(d => `<tr><td>${esc(d.ejecutivo)}</td><td>${esc(d.etiqueta || "—")}</td><td><a href="${gmaps(d.lat, d.lng)}" target="_blank" rel="noopener">${d.lat.toFixed(5)}, ${d.lng.toFixed(5)} ↗</a></td><td>${esc(d.exactitud)}</td><td>${esc(d.nota || "")}</td><td class="n"><button class="btn q" data-dom-borrar="${d.id}">Borrar</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">Todavía no hay domicilios de referencia.</td></tr>`}</tbody></table>
-    <div class="dom-form"><select id="domEj" aria-label="Ejecutivo">${S.ejecutivos.map(e => `<option value="${esc(e.correo)}">${esc(e.nombre)}</option>`).join("")}</select>
+    <div class="dom-form"><select id="domEj" aria-label="Ejecutivo">${(S.muTodos || S.ejecutivos).map(e => `<option value="${esc(e.correo)}">${esc(e.nombre)}</option>`).join("")}</select>
       <input id="domEt" placeholder="Etiqueta (opcional)" aria-label="Etiqueta"><input id="domLat" placeholder="Latitud, ej. -12.0931" aria-label="Latitud" inputmode="decimal"><input id="domLng" placeholder="Longitud, ej. -77.0465" aria-label="Longitud" inputmode="decimal">
       <select id="domEx" aria-label="Exactitud"><option value="aproximado">Aproximado (calle o zona)</option><option value="exacto">Exacto</option></select><input id="domNota" placeholder="Nota (opcional)" aria-label="Nota" maxlength="300">
       <button class="btn" data-dom-guardar>Guardar domicilio</button></div>
@@ -2735,6 +2767,132 @@ function conPeriodoId(id, fn){
   Object.assign(S, { act:d.act, base:d.base, baseMap:d.baseMap, hayOrigen:d.hayOrigen });
   try { return fn(); } finally { Object.assign(S, g); }
 }
+/* =========================================================================
+   Mapa único (26/11/2026): reemplaza «Mapa de calor» y «Ubicación». Un solo mapa con la distribución por distrito, las visitas, los comercios por
+   visitar (puntos grises), la distancia del registro al comercio y las alertas. Solo lectura: las señales avisan, no bloquean ni descartan visitas.
+   Sigue el periodo elegido arriba (S.dirPer) y el ejecutivo del selector (S.ej).
+   ========================================================================= */
+const MU_MODOS = [["ej", "Ejecutivo"], ["cob", "Cobertura"], ["err", "Dirección errada"]];
+const esErr = v => v.con === "Nadie" && v.motivo === "Dirección errada";
+function muStats(){
+  const m = {}, get = k => m[k] ||= { k, asig:0, vis:new Set(), reg:0, con:0, err:0, porEj:{} };
+  S.base.forEach(c => { if (!c.distrito || !c.correo || (S.hayOrigen && c.origen !== "base_nueva")) return; const o = get(c.distrito); o.asig++; o.porEj[c.correo] = (o.porEj[c.correo] || 0) + 1; });
+  S.act.forEach(v => { if (v.estado_anul === "anulada") return; const o = get(v.distrito || "SIN DISTRITO"); o.reg++; if (v.con !== "Nadie") o.con++; if (esErr(v)) o.err++;
+    if (v.lat != null && !v.fuera_plazo && sumaMeta(v.customer_id)) o.vis.add(v.customer_id); });
+  Object.values(m).forEach(o => { o.v = o.vis.size; o.cob = o.asig ? o.v / o.asig : null; o.pcon = o.reg ? o.con / o.reg : null; o.perr = o.reg ? o.err / o.reg : null; o.ej = Object.entries(o.porEj).sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || null; });
+  return m;
+}
+const nomDis = k => { const g = (S.geo || []).find(x => x.clave === k); return g ? g.nombre : String(k || "").toLowerCase().replace(/(^|\s)(\S)/g, (a, b, c) => b + c.toUpperCase()); };
+const muRampa = c => c == null || c === 0 ? "#E4E8FB" : c < .25 ? "#B7C0F5" : c < .5 ? "#7F8CEF" : c < .75 ? "#4F5CF3" : "#1b1f8f";
+const muRampaErr = c => c == null || c === 0 ? "#E4E8FB" : c < .1 ? "#FBD5B8" : c < .25 ? "#F7A66B" : c < .5 ? "#F86F35" : "#B4491B";
+function muPeriodo(fn){ cargarPeriodos(); return conPeriodoId(S.dirPer, fn); }
+function vistaMapaUnico(){
+  cargarGeo(); cargarDomicilios(); S.muTodos = S.ejecutivos;   // la lista completa, antes de filtrar por ejecutivo
+  const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), per = L.find(p => p.id === S.dirPer) || null, cur = S.periodo && S.periodo.id, enCurso = !per || per.id === cur;
+  if (per && !enCurso){ const d = datosPeriodo(per);
+    if (d.cargando) return `<div class="panel"><div class="vacio"><span class="spin"></span> Leyendo el periodo ${esc(per.id)}…</div></div>`;
+    if (d.err) return `<div class="panel"><div class="vacio">No se pudo leer el periodo: ${esc(d.err)}<br><button class="btn" data-dirper="${esc(per.id)}" style="margin-top:10px">Reintentar</button></div></div>`; }
+  return muPeriodo(() => conEj(() => cuerpoMapaUnico(enCurso)));
+}
+function cuerpoMapaUnico(enCurso){
+  const modo = S.muModo || "ej", tab = S.muTab || "dis", vs = S.act.filter(v => v.estado_anul !== "anulada");
+  const ejs = `<div class="mu-g"><small>Ejecutivo</small><button class="chip ${S.ej === "todos" ? "on" : ""}" data-mu-ej="todos">Equipo completo</button>${S.muTodos.map(e => `<button class="chip ${S.ej === e.correo ? "on" : ""}" data-mu-ej="${esc(e.correo)}"><i style="background:${e.color}"></i>${esc(nombreCorto(e.nombre))}</button>`).join("")}</div>`;
+  const mod = `<div class="mu-g"><small>Colorear distritos por</small>${MU_MODOS.map(([k, t]) => `<button class="chip ${modo === k ? "on" : ""}" data-mu-modo="${k}">${t}</button>`).join("")}</div>`;
+  const cap = enCurso ? `<div class="mu-g"><small>Capas</small><label class="tog"><input type="checkbox" id="muVis" ${S.muVis !== false ? "checked" : ""}> Visitas</label><label class="tog"><input type="checkbox" id="muPen" ${S.muPen !== false ? "checked" : ""}> <i class="gris"></i> Por visitar (${porVisitarMapa().length})</label><label class="tog"><input type="checkbox" id="muAle" ${S.muAle !== false ? "checked" : ""}> Alertas</label></div>` : "";
+  const lejos = vs.filter(v => v.lat != null && (v.distancia_m || 0) > REGLA.lejos).length, alt = alertasMismoPunto().filter(g => g.nivel !== "info").length;
+  const nAl = alt + (S.domErr ? 0 : alertasDomicilio().length), nErr = vs.filter(esErr).length;
+  const T = [["dis", "Distritos", ""], ["reg", "Registros", enCurso ? vs.length : ""], ["ale", "Alertas", enCurso ? nAl : "", "al"], ["sin", "Sin ubicar", enCurso ? nErr : ""]];
+  const tabs = T.map(([k, t, n, c]) => `<button class="tab ${tab === k ? "on" : ""} ${c || ""}" data-mu-tab="${k}">${t}${n !== "" ? `<em>${n}</em>` : ""}</button>`).join("");
+  return `<div class="mu-barra">${ejs}${mod}${cap}</div>
+  <div class="mu-main">
+    <div class="panel mu-mapa-card">${enCurso ? "" : `<div class="aviso" style="margin:0;border-radius:0">Periodo cerrado: se ve la distribución por distrito tal como quedó. Las visitas, los puntos por visitar y las alertas son del periodo en curso.</div>`}
+      ${S.geoErr ? `<div class="vacio" style="padding:30px">No se pudieron cargar los límites de los distritos: ${esc(S.geoErr)}</div>` : !S.geo ? `<div class="vacio" style="padding:30px"><span class="spin"></span> Cargando el mapa…</div>` : `<div id="mapaUnico" class="mapa-dist"></div>`}
+      <div class="mu-ley">${muLeyenda(modo, enCurso)}</div></div>
+    <div class="panel mu-panel"><div class="mu-tabs">${tabs}</div><div class="mu-cuerpo">${muPanel(tab, enCurso)}</div></div>
+  </div>
+  <div class="muted" style="font-size:12px;margin:8px 2px 14px">Toca una fila para verla en el mapa: se dibuja el punto donde se registró y la línea hasta el comercio. Las alertas avisan, no bloquean ni descartan visitas. Lejos: más de ${REGLA.lejos} m del comercio · Cerca: ${REGLA.cerca} a ${REGLA.lejos} m.</div>
+  <details class="mu-det"><summary>Validación, plazo y anulaciones</summary>${panelValidacion()}</details>
+  <details class="mu-det"><summary>Domicilios de referencia <small>dato restringido</small></summary>${panelDomicilios()}</details>`;
+}
+function muLeyenda(modo, enCurso){
+  const li = (c, t, r) => `<span><i style="background:${c};${r ? "border-radius:3px" : ""}"></i>${t}</span>`;
+  const m = modo === "ej" ? S.muTodos.map(e => li(e.color, nombreCorto(e.nombre) + " (distritos)", true)).join("") : modo === "cob" ? [["#E4E8FB", "0 %"], ["#B7C0F5", "1–24 %"], ["#7F8CEF", "25–49 %"], ["#4F5CF3", "50–74 %"], ["#1b1f8f", "75 % o más"]].map(([c, t]) => li(c, t, true)).join("") : [["#FBD5B8", "menos de 10 %"], ["#F7A66B", "10–24 %"], ["#F86F35", "25–49 %"], ["#B4491B", "50 % o más"]].map(([c, t]) => li(c, t, true)).join("");
+  return m + (enCurso ? `<span><i class="pto"></i>visita (color del ejecutivo)</span><span><i class="gris"></i>comercio por visitar</span><span><i class="aro"></i>alerta</span>` : "");
+}
+function muPanel(tab, enCurso){
+  const av = c => AVATAR(ejDe(c)), pcx = x => x == null ? "—" : Math.round(x * 100) + " %";
+  if (tab === "dis"){
+    const st = muStats(), L = Object.values(st).filter(o => o.asig && o.k !== "SIN DISTRITO").sort((a, b) => b.asig - a.asig);
+    return `<table class="datos"><thead><tr><th>Distrito</th><th class="n">Asig.</th><th class="n">Visit.</th><th>Cobertura</th><th class="n">Contacto</th><th class="n">Dir. err.</th></tr></thead><tbody>${L.map(o => `<tr class="mu-f ${S.muDis === o.k ? "on" : ""}" data-mu-dis="${esc(o.k)}" tabindex="0"><td><span class="ej">${o.ej ? av(o.ej) : ""}<b>${esc(nomDis(o.k))}</b></span></td><td class="n num">${o.asig}</td><td class="n num">${o.v}</td><td>${pcx(o.cob)}<div class="barrita"><i style="width:${Math.round((o.cob || 0) * 100)}%"></i></div></td><td class="n num">${pcx(o.pcon)}</td><td class="n num">${pcx(o.perr)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Sin comercios asignados.</td></tr>`}</tbody></table>`;
+  }
+  if (!enCurso) return `<div class="vacio" style="padding:26px">Este detalle es del periodo en curso. Elige el periodo en curso arriba para verlo.</div>`;
+  const vs = S.act.filter(v => v.estado_anul !== "anulada");
+  if (tab === "reg"){
+    const f = S.muFil || "", con = vs.filter(v => v.lat != null), base = vs.map(v => ({ v, c: v.lat == null ? "no" : claseDist(v) })), cnt = k => base.filter(x => !k || x.c === k).length;
+    const L = base.filter(x => !f || x.c === f).sort((a, b) => (b.v.distancia_m == null ? -1 : b.v.distancia_m) - (a.v.distancia_m == null ? -1 : a.v.distancia_m));
+    return `<div class="mu-sub">${[["", "Todas"], ["ok", "En el comercio"], ["med", "Cerca"], ["mal", "Lejos"], ["no", "Sin referencia"]].map(([k, t]) => `<button class="chip ${f === k ? "on" : ""}" data-mu-fil="${k}">${t} · ${cnt(k)}</button>`).join("")}</div>
+      <table class="datos"><thead><tr><th>Cuándo</th><th>Comercio</th><th class="n">Distancia</th></tr></thead><tbody>${L.map(({ v, c }) => `<tr class="mu-f ${S.muSel && S.muSel.t === "v" && S.muSel.id === v.id ? "on" : ""}" data-mu-v="${esc(v.id)}" tabindex="0"><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}<div>${av(v.correo)}</div></td><td><b>${esc(v.comercio)}</b><small class="muted" style="display:block">${esc(v.distrito || "")}</small></td><td class="n"><span class="pill ${c === "ok" ? "p-ok" : c === "med" ? "p-md" : c === "mal" ? "p-mal" : "p-no"}">${v.lat == null || v.distancia_m == null ? "sin referencia" : mDist(v.distancia_m)}</span></td></tr>`).join("") || `<tr><td colspan="3" class="muted">Nada con este filtro.</td></tr>`}</tbody></table>`;
+  }
+  if (tab === "ale"){
+    const gs = alertasMismoPunto().map((g, i) => ({ g, i })).filter(({ g }) => g.nivel !== "info"), dm = S.domErr ? [] : alertasDomicilio();
+    return `<div class="mu-sub"><b>Comercios en el mismo punto</b> · distintos comercios a 30 m o menos, el mismo día</div>
+      <table class="datos"><tbody>${gs.map(({ g, i }) => `<tr class="mu-f ${S.muSel && S.muSel.t === "g" && S.muSel.id === i ? "on" : ""}" data-mu-g="${i}" tabindex="0"><td>${fISO(iso(g.visitas[0].visitado_en))} ${hh(g.visitas[0].visitado_en)}<div>${av(g.visitas[0].correo)}</div></td><td>${[...new Set(g.visitas.map(v => v.comercio))].map(esc).join(" · ")}<small class="muted" style="display:block">${g.visitas.length} registros juntos</small></td><td class="n"><span class="pill ${g.nivel === "alta" ? "p-mal" : "p-md"}">${NIVEL_TXT[g.nivel][0]}</span></td></tr>`).join("") || `<tr><td class="muted">Ninguna.</td></tr>`}</tbody></table>
+      <div class="mu-sub" style="border-top:1px solid var(--linea)"><b>Registros cerca del domicilio del ejecutivo</b> · con el comercio lejos (dato restringido)</div>
+      ${S.domErr ? `<div class="vacio" style="padding:14px">Los domicilios de referencia todavía no están habilitados.</div>` : `<table class="datos"><thead><tr><th>Cuándo</th><th>Comercio</th><th class="n">Cerca del domicilio</th><th class="n">De la dirección real</th></tr></thead><tbody>${dm.map(o => `<tr class="mu-f ${S.muSel && S.muSel.t === "v" && S.muSel.id === o.v.id ? "on" : ""}" data-mu-v="${esc(o.v.id)}" tabindex="0"><td>${fISO(iso(o.v.visitado_en))} ${hh(o.v.visitado_en)}<div>${av(o.v.correo)}</div></td><td><b>${esc(o.v.comercio)}</b></td><td class="n"><span class="pill p-md">a ${mDist(o.m)}</span></td><td class="n"><span class="pill p-mal">a ${mDist(o.v.distancia_m)}</span></td></tr>`).join("") || `<tr><td colspan="4" class="muted">${(S.domicilios || []).length ? "Ninguna." : "Todavía no hay domicilios de referencia cargados."}</td></tr>`}</tbody></table>`}`;
+  }
+  const L = vs.filter(esErr).sort((a, b) => D(b.visitado_en) - D(a.visitado_en));
+  return `<div class="mu-sub">Visitas en las que no se ubicó el comercio en la dirección cargada</div><table class="datos"><thead><tr><th>Cuándo</th><th>Comercio</th><th>Distrito</th></tr></thead><tbody>${L.map(v => `<tr class="mu-f ${S.muSel && S.muSel.t === "v" && S.muSel.id === v.id ? "on" : ""}" data-mu-v="${esc(v.id)}" tabindex="0"><td>${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}<div>${av(v.correo)}</div></td><td><b>${esc(v.comercio)}</b></td><td>${esc(v.distrito || "—")}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Ninguna.</td></tr>`}</tbody></table>`;
+}
+function montarMapaUnico(el){
+  if (!window.L || !S.geo) return;
+  const modo = S.muModo || "ej", st = muStats(), oscuro = temaActual() === "dark", enCurso = !S.dirPer || !S.periodo || S.dirPer === S.periodo.id;
+  const m = L.map(el, { zoomControl:true, scrollWheelZoom:false, zoomSnap:.25, preferCanvas:false });
+  m.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, opacity:oscuro ? .55 : .5, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' }).addTo(m);
+  const borde = colorCss("var(--tarjeta)"), pts = [];
+  const zoomFill = () => { const z = m.getZoom(); m.eachLayer(g => { if (g.eachLayer) g.eachLayer(q => { if (q.options && q.options._base != null) q.setStyle({ fillOpacity: z >= 14 ? Math.min(q.options._base, .1) : q.options._base }); }); }); };
+  S.geo.forEach(g => { const o = st[g.clave], tiene = !!(o && o.asig), base = tiene ? (modo === "ej" ? .34 : .72) : .03;
+    const fill = !tiene ? "#ffffff" : modo === "ej" ? colorCss(ejDe(o.ej).color) : modo === "cob" ? muRampa(o.cob) : muRampaErr(o.perr);
+    const capa = L.geoJSON({ type:"Feature", geometry:g.geometria }, { style:{ color:tiene ? borde : colorCss("var(--muted)"), weight:tiene ? 1.4 : .7, opacity:tiene ? 1 : .5, fillColor:fill, fillOpacity:base, _base:base } }).addTo(m);
+    capa.bindTooltip(`<b>${esc(g.nombre)}</b>${tiene ? `<br>${o.asig} asignados · ${o.v} visitados · ${Math.round((o.cob || 0) * 100)} % cobertura` : "<br>sin comercios asignados"}`, { sticky:true });
+    capa.on("click", () => { S.muTab = "dis"; S.muDis = g.clave; S.muVista = null; S.muEnfocar = g.clave; pintar(); });
+    if (tiene && modo !== "ej") L.marker(capa.getBounds().getCenter(), { interactive:false, icon:L.divIcon({ className:"lbl-dist", iconSize:null, html:`<span>${Math.round(((modo === "cob" ? o.cob : o.perr) || 0) * 100)} %</span>` }) }).addTo(m);
+    if (S.muEnfocar === g.clave){ m.fitBounds(capa.getBounds(), { padding:[30, 30], maxZoom:14, animate:false }); S.muEnfocar = null; S.muVista = { c:[m.getCenter().lat, m.getCenter().lng], z:m.getZoom() }; } });
+  const vs = S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null);
+  if (enCurso){
+    if (S.muPen !== false) porVisitarMapa().forEach(c => L.circleMarker([c.geo_lat, c.geo_lng], { radius:3, color:"transparent", weight:0, fillColor:"#9aa3b8", fillOpacity:.8 })
+      .bindTooltip(`<b>${esc(c.nombre_comercial || c.razon_social)}</b><br>${esc(nombreCorto((ejDe(c.correo) || {}).nombre))} · por visitar${c.distrito ? " · " + esc(c.distrito) : ""}`, { className:"etq-mapa", direction:"top", offset:[0, -3] }).addTo(m));
+    if (S.muVis !== false) vs.forEach(v => L.circleMarker([v.lat, v.lng], { radius:5, color:borde, weight:1.5, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 })
+      .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}<br>${v.distancia_m != null ? "a " + mDist(v.distancia_m) + " del comercio" : "sin referencia"}`, { className:"etq-mapa", direction:"top", offset:[0, -4] })
+      .on("click", () => { S.muTab = "reg"; S.muSel = { t:"v", id:v.id }; pintar(); }).addTo(m));
+    if (S.muAle !== false){
+      alertasMismoPunto().filter(g => g.nivel !== "info").forEach(g => g.visitas.forEach(v => L.circleMarker([v.lat, v.lng], { radius:9, color:"#D6455D", weight:2, fill:false, interactive:false }).addTo(m)));
+      vs.filter(v => (v.distancia_m || 0) > REGLA.lejos).forEach(v => L.circleMarker([v.lat, v.lng], { radius:8, color:"#D6455D", weight:2, dashArray:"3 3", fill:false, interactive:false }).addTo(m)); }
+    const sel = S.muSel, lista = !sel ? [] : sel.t === "g" ? ((alertasMismoPunto()[sel.id] || {}).visitas || []) : S.act.filter(v => v.id === sel.id);
+    lista.forEach(v => { if (v.lat == null) return; const p = [v.lat, v.lng], r = puntoRef(v); pts.push(p);
+      L.circleMarker(p, { radius:8, color:colorCss("var(--ink)"), weight:3, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 }).addTo(m);
+      if (r){ pts.push([r.lat, r.lng]); L.polyline([p, [r.lat, r.lng]], { color:colorCss("var(--ink)"), weight:2, dashArray:"5 5" }).addTo(m);
+        L.marker([r.lat, r.lng], { icon:L.divIcon({ className:"", html:`<div class="mu-rombo"></div>`, iconSize:[14, 14], iconAnchor:[7, 7] }) }).bindTooltip(`Comercio: ${esc(v.comercio)}`).addTo(m); } });
+  }
+  if (pts.length){ m.fitBounds(L.latLngBounds(pts).pad(.5), { maxZoom:15, animate:false }); }
+  else if (S.muVista) m.setView(S.muVista.c, S.muVista.z);
+  else { const todos = enCurso ? [...vs.map(v => [v.lat, v.lng]), ...porVisitarMapa().map(c => [c.geo_lat, c.geo_lng])] : []; if (todos.length > 3) m.fitBounds(L.latLngBounds(todos).pad(-.05), { padding:[10, 10], maxZoom:12, animate:false }); else m.setView([-12.06, -77.03], 11); }
+  m.on("zoomend", zoomFill); zoomFill();
+  m.on("moveend", () => { if (!S.muSel) S.muVista = { c:[m.getCenter().lat, m.getCenter().lng], z:m.getZoom() }; });
+  S._mapaUnico = m;
+}
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("[data-mu-ej],[data-mu-modo],[data-mu-tab],[data-mu-dis],[data-mu-fil],[data-mu-v],[data-mu-g]"); if (!t) return; const d = t.dataset;
+  if (d.muEj !== undefined){ S.muSel = null; S.muVista = null; elegirEj(d.muEj); return; }
+  if (d.muModo){ S.muModo = d.muModo; pintar(); return; }
+  if (d.muTab){ S.muTab = d.muTab; pintar(); return; }
+  if (d.muDis){ S.muDis = d.muDis; S.muEnfocar = d.muDis; S.muSel = null; pintar(); return; }
+  if (d.muFil !== undefined){ S.muFil = d.muFil; pintar(); return; }
+  if (d.muV){ S.muSel = { t:"v", id:d.muV }; pintar(); return; }
+  if (d.muG !== undefined){ S.muSel = { t:"g", id:+d.muG }; pintar(); return; }
+});
+document.addEventListener("change", ev => { const i = ev.target.id; if (i === "muVis") S.muVis = ev.target.checked; else if (i === "muPen") S.muPen = ev.target.checked; else if (i === "muAle") S.muAle = ev.target.checked; else return; pintar(); });
+
 function vistaMapa(){
   cargarPeriodos();
   const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), cur = S.periodo && S.periodo.id, sel = L.find(p => p.id === S.mPer) || null;
@@ -3604,7 +3762,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","equipo","mapa","ubicacion","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","equipo","mapa","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
   if (/type=recovery/.test(location.hash)) S.nuevaClave = {};   // llega por el enlace del correo de recuperación
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
