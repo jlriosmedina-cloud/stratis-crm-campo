@@ -544,7 +544,6 @@ table.datos tr.on td{background:var(--azul-t)}
 .cab-kpis .ck span{font-size:12px;opacity:.78}
 .cab-kpis .ck.or b{color:var(--naranja)}.cab-kpis .ck.vd b{color:var(--verde)}
 .cab-kpis .ck-per{margin-left:auto;font-size:12px;opacity:.7}
-.cab-kpis .ck-sel{margin-left:auto;display:flex;gap:4px;background:rgba(255,255,255,.1);border-radius:10px;padding:3px;flex-wrap:wrap}
 .cab-kpis .ck-sel .chip{background:none;border:0;color:#fff;opacity:.75;padding:5px 10px;border-radius:8px;font-weight:700;font-size:12.5px}
 .cab-kpis .ck-sel .chip.on{background:#fff;color:var(--navy);opacity:1}
 /* Tiempos y Reporte (prototipo 4.0) */
@@ -573,7 +572,7 @@ table.datos tr.on td{background:var(--azul-t)}
 .mu-ley span{display:inline-flex;align-items:center;gap:6px}.mu-ley i{width:10px;height:10px;border-radius:50%;display:inline-block}
 .mu-ley i.pto{background:var(--azul);border:2px solid #fff;box-shadow:0 0 0 1px var(--azul)}.mu-ley i.aro{border:2px solid #D6455D;background:none}
 .mu-panel{display:flex;flex-direction:column;margin:0}   /* el cuadro sale completo: sin tope de alto ni scroll interno */
-.mu-mapa-card #mapaUnico{height:clamp(300px,44vh,380px)}
+.mu-mapa-card #mapaUnico{height:clamp(420px,64vh,620px)}
 .mu-tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--linea);overflow:auto;flex:none}
 .mu-tabs .tab{border:0;background:none;padding:8px 11px;font-weight:700;font-size:12.5px;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
 .mu-tabs .tab.on{color:var(--azul-txt);border-color:var(--azul)}
@@ -591,6 +590,19 @@ table.datos tr.on td{background:var(--azul-t)}
 .mu-cuerpo .datos th,.mu-cuerpo .datos td{padding-left:7px;padding-right:7px}
 .mu-cuerpo .datos th{letter-spacing:.04em;font-size:10px}
 .mu-cuerpo .datos .barrita{min-width:50px}
+.negro{width:10px;height:10px;border-radius:50%;background:#0B0F26;border:1px solid #fff;box-shadow:0 0 0 1px #0B0F26;display:inline-block}
+:root[data-theme="dark"] .negro{background:#fff;border-color:#0B0F26;box-shadow:0 0 0 1px #fff}
+.cab-kpis .ck-sel{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;opacity:.95;background:none;padding:0}
+.cab-kpis .ck-sel select{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:9px;padding:6px 10px;font-weight:700}
+.cab-kpis .ck-sel select option{color:#1b2340}
+.graf-acu{display:block;width:100%;max-width:1000px;height:auto;margin:0 auto}
+/* Tiempos: mapa de calor más ordenado */
+.tiempos{table-layout:fixed}
+.tiempos th,.tiempos td{padding:6px 4px}
+.tiempos th.n{text-align:center;font-size:10px;letter-spacing:.02em}
+.tiempos td.n{text-align:center}
+.tiempos th:first-child,.tiempos td:first-child{width:170px;text-align:left}
+.tiempos td .cel{display:grid;place-items:center;width:100%;min-width:0;height:34px;border-radius:8px;font-weight:700}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -606,7 +618,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "547c08";
+const BUILD = "8f6bd4";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -992,7 +1004,7 @@ const VISTAS = [
   ["resumen","Resumen", ICON.bloques, null],
   ["equipo","Equipo", ICON.equipo, null],
   ["mapa","Mapa", ICON.mapa, null],
-  ["bloques","Cartera", ICON.bloques, null],
+  ["cartera","Cartera", ICON.bloques, null],
   ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["tiempos","Tiempos", ICON.aud, null],
   ["cierres","Cierres", ICON.cierre, null],
@@ -1022,7 +1034,7 @@ function cabKpis(){
   let T = null; try { const d = datosPeriodo(per); if (d && !d.cargando && !d.err && d.act) T = statsDir(d); } catch(e){}
   const it = (n, t, cls) => `<div class="ck ${cls || ""}"><b class="num">${n}</b><span>${t}</span></div>`;
   // el selector manda sobre Directorio, Mapa de calor y Ubicación (cada una guardaba su periodo; ahora se cambian juntos)
-  const sel = L.length > 1 ? `<div class="ck-sel" role="group" aria-label="Periodo">${L.map(p => `<button class="chip ${p.id === per.id ? "on" : ""}" data-dirper="${esc(p.id)}" data-mper="${esc(p.id)}" data-uper="${esc(p.id)}" aria-pressed="${p.id === per.id}" title="${esc(pRango(p))}">${esc(pNom(p))} · ${esc(pRango(p))}${p.id === cur ? " · en curso" : ""}</button>`).join("")}</div>` : `<span class="ck-per">Periodo ${esc(pNom(per))}</span>`;
+  const sel = L.length > 1 ? `<label class="ck-sel">Periodo <select id="cabPer" aria-label="Periodo">${L.map(p => `<option value="${esc(p.id)}" ${p.id === per.id ? "selected" : ""}>${esc(pNom(p))} · ${esc(pRango(p))}${p.id === cur ? " · en curso" : ""}</option>`).join("")}</select></label>` : `<span class="ck-per">Periodo ${esc(pNom(per))}</span>`;
   k.innerHTML = it(T ? T.asig : "…", "cartera asignada") + it(T ? T.vis : "…", "visitados únicos", "or") + it(T ? T.reg : "…", "visitas realizadas", "vd") + it(T ? T.con : "…", "con contacto") + it("—", "reactivados BBVA · sin corte") + sel;
 }
 function pintar(){
@@ -1044,7 +1056,8 @@ function pintar(){
               tiempos:["Consulta de tiempos","A qué hora registra visitas cada ejecutivo: por día, acumulado del periodo, por franjas y el detalle de los registros."],
               reporte:["Reporte de gestión del equipo","Resumen del periodo, gestión por ejecutivo con su ventana de trabajo y las franjas del día."],
               validacion:["Actividad","Las visitas se aceptan como las registra el ejecutivo, sin validar la dirección. Si ves algo puntual puedes observarla (el ejecutivo la ve «en revisión» y la corrige) o anularla (deja de contar)."],
-              bloques:["Cartera","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
+              cartera:["Cartera","Los comercios del periodo con su última visita y lo que sigue: visitar, volver a visitar o validar la dirección."],
+              bloques:["Base y bloques","El periodo en dos bloques quincenales: avance por bloque y por periodo, la base anterior, la calidad de ubicación y el potencial de la competencia que se asignó, visitó y reactivó."],
               rutas:["Rutas del ejecutivo","La ruta recomendada frente a la que cada ejecutivo arma en su celular: cuántos comercios movió, su ruta de hoy y el historial de cambios de cada comercio."],
               directorio:["Directorio","Cobertura, contacto y dirección errada de cada periodo, por ejecutivo y por distrito. Elige el periodo arriba: los cerrados se leen tal como quedaron."],
               equipo:["Equipo","Comercios visitados por día contra la meta diaria, y cómo terminó cada gestión. Haz clic en un día para ver sus visitas."],
@@ -1072,7 +1085,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "mapa_dist" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "validacion" ? vistaValidacion() : S.vista === "cartera" ? vistaCartera() : S.vista === "bloques" ? vistaBloques() : S.vista === "rutas" ? vistaRutas() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "mapa_dist" ? vistaMapa() : S.vista === "ubicacion" ? vistaUbicacion() : S.vista === "feedback" ? vistaFeedback() : S.vista === "porque" ? vistaPorQue() : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -1669,11 +1682,12 @@ function vistaResumen(){
   const hastaHoy = H.hastaHoy || 0, ritmo = hastaHoy ? T.vis / hastaHoy : null, metaDia = H.total ? meta / H.total : null;
   const tile = (v, t, sub) => `<div class="tile"><div class="v num">${v}${sub ? ` <small class="muted">${sub}</small>` : ""}</div><div class="d">${t}</div></div>`;
   const kp = `<div class="resumen">${tile(T.asig, "cartera asignada")}${tile(T.vis, "comercios visitados" + (meta ? ` · ${Math.round(T.vis * 100 / meta)} % de la meta` : ""), "/ " + meta)}${tile(hastaHoy, "días hábiles transcurridos", "de " + H.total)}${tile(ritmo == null ? "—" : ritmo.toFixed(1).replace(".", ","), "ritmo por día" + (metaDia ? ` · meta ${metaDia.toFixed(1).replace(".", ",")} por día` : ""))}${tile(T.reg, "visitas realizadas (incluye sin contacto)")}${tile(T.con, "visitas con contacto")}${tile("—", "reactivados BBVA · sin corte conectado")}</div>`;
+  const esp = esperadoA(metaEj, hoy);
   const filas = S.ejecutivos.map(e => { const t = statsDir(T0, e.correo);
-    return `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td class="n num">—</td></tr>`; }).join("");
+    return `<tr><td><span class="ej">${AVATAR(e)}${esc(e.nombre)}</span></td><td class="n num">${t.asig}</td><td class="n num">${t.vis}</td><td class="n num">${t.reg}</td><td class="n num">${t.con}</td><td><b>${t.vis}</b><span class="muted"> / ${metaEj}</span><span class="muted"> · esperado ${Math.round(esp)}</span><div class="barrita"><i style="width:${Math.min(100, Math.round(t.vis * 100 / metaEj))}%"></i><u style="left:${Math.min(100, Math.round(esp * 100 / metaEj))}%" title="dónde debería ir hoy"></u></div></td><td class="n num">—</td></tr>`; }).join("");
   const hoyN = vivas().filter(v => iso(v.visitado_en) === hoy).length;
   return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión del equipo${S.periodo ? " · " + esc(pNom(S.periodo)) : ""}</b><span class="lbl">cada cifra sale de las visitas con GPS del CRM</span></div><div style="padding:10px">${kp}</div></div>
-  <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión por ejecutivo</b></div><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Reactivados BBVA</th></tr></thead><tbody>${filas}</tbody></table></div>
+  <div class="panel" style="margin-bottom:16px"><div class="barra"><b>Gestión por ejecutivo</b></div><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th>Avance de comercios nuevos contra lo esperado</th><th class="n">Reactivados BBVA</th></tr></thead><tbody>${filas}</tbody></table></div>
   ${S.periodo && hoy >= S.periodo.ini && hoy <= S.periodo.fin ? `<div class="panel"><div class="barra"><b>Hoy · ${fISO(hoy)}</b></div><div style="padding:10px"><div class="resumen">${tile(hoyN, "visitas registradas hoy")}</div><div class="muted" style="font-size:12px;margin-top:8px">El incentivo y los reactivados de cada periodo están en Cierres.</div></div></div>` : ""}`;
 }
 function vistaTiempos(){
@@ -1714,6 +1728,27 @@ function vistaReporte(){
     <h3 style="margin:6px 0">1 · Resumen del periodo</h3><div class="resumen">${kpi("Visitas", T.reg, T.vis + " comercios distintos")}${kpi("Con contacto", T.con, (T.reg ? Math.round(T.con * 100 / T.reg) : 0) + " % de las visitas")}${kpi("Ventana acumulada", minTxt(ventanaTot || null), jj.length + " días-ejecutivo con gestión")}</div>
     <h3 style="margin:16px 0 6px">2 · Gestión por ejecutivo</h3><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Asignados</th><th class="n">Visitados únicos</th><th class="n">Visitas</th><th class="n">Con contacto</th><th class="n">Días</th><th class="n">Ventana acumulada</th><th class="n">Ventana diaria</th><th class="n">Inicio prom.</th><th class="n">Cierre prom.</th></tr></thead><tbody>${filas}</tbody></table></div><div class="muted" style="font-size:12px;margin-top:6px">Ventana, inicio y cierre promedio cuentan solo los días con dos o más visitas.</div>
     <h3 style="margin:16px 0 6px">3 · Franjas del día</h3>${barrasFranjas()}</div></div>`;
+}
+/* Avance acumulado contra lo esperado (26/11): cuántos comercios nuevos lleva cada ejecutivo y dónde debería ir hoy según la meta (la línea naranja sube día hábil a día hábil). */
+function esperadoA(metaEj, iso0){
+  const p = S.periodo; if (!p) return 0; const H = habiles(); if (!H.total) return 0;
+  let n = 0; const d = new Date(p.ini + "T12:00:00Z");
+  while (d.toISOString().slice(0, 10) <= iso0){ const s2 = d.toISOString().slice(0, 10), dow = d.getUTCDay(); if (dow >= 1 && dow <= 5 && !FERIADOS.includes(s2)) n++; d.setUTCDate(d.getUTCDate() + 1); }
+  return Math.min(metaEj, metaEj * n / H.total);
+}
+function graficoAcumulado(filas, metaEj){
+  const p = S.periodo; if (!p) return "";
+  const dias = [], hab = [], Ht = habiles().total; { const d = new Date(p.ini + "T12:00:00Z"); let n = 0; while (d.toISOString().slice(0, 10) <= p.fin && dias.length < 70){ const s2 = d.toISOString().slice(0, 10), dow = d.getUTCDay(); if (dow >= 1 && dow <= 5 && !FERIADOS.includes(s2)) n++; dias.push(s2); hab.push(n); d.setUTCDate(d.getUTCDate() + 1); } }
+  const hoy = hoyISO(), W = 1000, Hc = 250, pl = 38, pr = 16, pt = 14, pb = 30, ymax = Math.ceil(metaEj * 1.08 / 20) * 20;
+  const x = i => pl + (W - pl - pr) * (dias.length > 1 ? i / (dias.length - 1) : 0), y = v => pt + (Hc - pt - pb) * (1 - v / ymax);
+  const rej = [0, .25, .5, .75, 1].map(f => { const v = Math.round(metaEj * f); return `<line x1="${pl}" y1="${y(v).toFixed(1)}" x2="${W - pr}" y2="${y(v).toFixed(1)}" stroke="var(--linea)" stroke-dasharray="2 4"/><text x="${pl - 6}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${v}</text>`; }).join("");
+  const ej = dias.map((d, i) => `${i % 7 === 0 || d === p.fin ? `<text x="${x(i).toFixed(1)}" y="${Hc - 10}" text-anchor="middle" font-size="10" fill="var(--muted)">${fISO(d)}</text>` : ""}`).join("");
+  const esp = dias.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(Ht ? Math.min(metaEj, metaEj * hab[i] / Ht) : 0).toFixed(1)}`).join(" ");
+  const lineas = filas.map(f => { let acu = 0; const pts = []; dias.forEach((d, i) => { if (d > hoy) return; const o = f.porDia[d]; acu += o ? o.nuevas : 0; pts.push([x(i), y(acu), acu]); });
+    const last = pts[pts.length - 1]; if (!last) return "";
+    return `<path d="${pts.map((q, i) => (i ? "L" : "M") + q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ")}" fill="none" stroke="${f.e.color}" stroke-width="2.4" stroke-linejoin="round"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4" fill="${f.e.color}" stroke="var(--tarjeta)" stroke-width="1.5"><title>${esc(f.e.nombre)}: ${last[2]} comercios nuevos</title></circle>`; }).join("");
+  const hi = dias.indexOf(hoy);
+  return `<svg class="graf-acu" viewBox="0 0 ${W} ${Hc}" role="img" aria-label="Comercios nuevos acumulados por ejecutivo contra lo esperado">${rej}${ej}${hi >= 0 ? `<line x1="${x(hi).toFixed(1)}" y1="${pt}" x2="${x(hi).toFixed(1)}" y2="${Hc - pb}" stroke="var(--muted)" stroke-dasharray="3 3"/>` : ""}<path d="${esp}" fill="none" stroke="var(--naranja)" stroke-width="2.4" stroke-dasharray="7 5"/>${lineas}</svg>`;
 }
 function equipoPeriodo(){ return conPeriodoElegido(vistaEquipo); }
 function vistaEquipo(){
@@ -1778,10 +1813,15 @@ function vistaEquipo(){
     <div class="tile"><div class="k">Revisitas</div><div class="v num">${T.rev}</div><div class="d">${T.avance} lograron avance (contacto o decisión)</div></div>
   </div>
   <div class="panel" style="margin-bottom:16px">
+    <div class="barra"><b>Avance acumulado contra lo esperado</b><span class="lbl">comercios nuevos que lleva cada ejecutivo · la línea naranja punteada es dónde debería ir cada día según la meta de ${metaEj}</span>
+      <div class="der leyenda-ej"><span><i class="meta"></i>esperado a la fecha</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))} · ${f.com}</span>`).join("")}</div></div>
+    <div style="padding:8px 14px 10px">${graficoAcumulado(filas, metaEj)}</div>
+  </div>
+  <details class="mu-det"><summary>Comercios nuevos por día y por ejecutivo</summary><div class="panel" style="margin:0">
     <div class="barra"><b>Comercios nuevos por día y por ejecutivo</b><span class="lbl">solo visitas con ubicación, no anuladas y registradas a tiempo; un comercio es nuevo la primera vez que se visita en el periodo · la parte clara de cada barra son las revisitas</span>
       <div class="der leyenda-ej"><span><i class="meta"></i>meta diaria · ${Math.round(metaDia)} por ejecutivo</span>${filas.map(f => `<span><i style="background:${f.e.color}"></i>${esc(nombreCorto(f.e.nombre))}</span>`).join("")}</div></div>
     <div style="padding:6px 12px 2px;overflow-x:auto">${grafico}</div>
-  </div>
+  </div></details>
   <div class="panel" style="margin-bottom:16px">
     <div class="barra"><b>Resumen por ejecutivo</b><span class="lbl">comercios nuevos, ritmo contra la meta, revisitas, contacto y estado de validación</span></div>
     <table class="datos eq-res">
@@ -1798,7 +1838,7 @@ function vistaEquipo(){
         <td class="n num">${sum("contacto")}<span class="muted"> / ${T.reg}</span></td><td class="n num">${sum("comContacto")}</td><td class="n num">${sum("consumos")}</td><td class="n num">${sum("tarde")}</td>
         <td><span class="mini-estados"><span class="pill val">${sum("val")}</span><span class="pill pend">${sum("pend")}</span></span></td></tr></tbody></table>
   </div>
-  <div class="eq-2">
+  <details class="mu-det"><summary>Detalle por día y revisitas</summary><div class="eq-2" style="padding:10px">
     <div class="panel">
       <div class="barra"><b>Por día</b><span class="lbl">comercios nuevos de cada día (las revisitas, aparte) · verde: llegó a la meta diaria (${Math.round(metaDia)}) · ámbar: más de la mitad · naranja: menos de la mitad · el punto naranja marca visitas por validar</span></div>
       <div class="eq-dias"><table class="datos matriz"><thead><tr><th>Día</th>${filas.map(f => `<th class="dia">${esc(nombreCorto(f.e.nombre))}</th>`).join("")}<th class="dia">Equipo</th></tr></thead><tbody>${filasDia}</tbody></table></div>
@@ -1807,7 +1847,7 @@ function vistaEquipo(){
       <div class="barra"><b>Revisitas: qué gestión hicieron</b><span class="lbl">${T.rev} en el periodo · el resultado de la visita anterior y el de la revisita</span></div>
       <div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th></tr></thead><tbody>${todasRev.map(filaRev).join("") || `<tr><td colspan="4" class="muted">Todavía no hay revisitas en el periodo.</td></tr>`}</tbody></table></div>
     </div>
-  </div>
+  </div></details>
   <div class="panel"><div class="atajos">Comercios nuevos = comercios distintos con una visita válida que se hace por primera vez en el periodo, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono). Revisita = una visita posterior a un comercio ya visitado en el periodo: no suma a la meta, pero se registra con su resultado; «avanzó» es pasar de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos». Ritmo = comercios nuevos ÷ días hábiles corridos (contando hoy); los feriados no cuentan. Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman. Validación: validadas · por validar · observadas · anuladas.</div></div>`;
 }
 
@@ -2015,10 +2055,10 @@ function vistaRutas(){
    histórico y el detalle de un periodo (con el cuadre: visitados y con contacto se vuelven a contar); con un ejecutivo
    elegido, su evolutivo. Los porcentajes se tapan con el ojo de privacidad. */
 async function cargarCierres(){
-  if (S.cierres) return;
+  if (S.cierres && (!S.cierres.err || Date.now() - (S.cierres.t || 0) < 4000)) return;   // una lectura que falló se vuelve a pedir
   S.cierres = { cargando:true, l:[], cuadre:{} };
   const { data, error } = await sb.rpc("v2_cierres_equipo");
-  S.cierres = error ? { err:error.message, l:[], cuadre:{} } : { l:data || [], cuadre:{} };
+  S.cierres = error ? { err:error.message, l:[], cuadre:{}, t:Date.now() } : { l:data || [], cuadre:{} };
   pintar();
 }
 async function cargarCuadre(per){
@@ -2035,7 +2075,7 @@ function vistaCierres(){
   cargarCierres();
   const C = S.cierres || { cargando:true, l:[] };
   if (C.cargando) return `<div class="panel"><div class="vacio">Leyendo los cierres…</div></div>`;
-  if (C.err) return `<div class="panel"><div class="vacio">No se pudieron leer los cierres: ${esc(C.err)}</div></div>`;
+  if (C.err) return `<div class="panel"><div class="vacio">No se pudieron leer los cierres: ${esc(C.err)}<br><button class="btn" data-reintentar-cierres style="margin-top:10px">Reintentar</button></div></div>`;
   if (!C.l.length) return `<div class="panel"><div class="vacio">Todavía no hay periodos cerrados cargados.</div></div>`;
   const pers = [...new Map(C.l.map(r => [r.periodo, r])).values()].sort((a, b) => String(a.ini).localeCompare(String(b.ini)));
   const enCurso = S.periodo && !pers.some(p => p.periodo === S.periodo.id) ? S.periodo : null;
@@ -2789,6 +2829,21 @@ const nomDis = k => { const g = (S.geo || []).find(x => x.clave === k); return g
 const muRampa = c => c == null || c === 0 ? "#E4E8FB" : c < .25 ? "#B7C0F5" : c < .5 ? "#7F8CEF" : c < .75 ? "#4F5CF3" : "#1b1f8f";
 const muRampaErr = c => c == null || c === 0 ? "#E4E8FB" : c < .1 ? "#FBD5B8" : c < .25 ? "#F7A66B" : c < .5 ? "#F86F35" : "#B4491B";
 function muPeriodo(fn){ cargarPeriodos(); return conPeriodoId(S.dirPer, fn); }
+/* Cartera (26/11): los comercios del periodo con su última visita y su próxima acción. Solo lectura. */
+const CAR_EST = [["", "Todos los estados"], ["por", "Por visitar"], ["vis", "Visitados"], ["con", "Con contacto"], ["sin", "Sin contacto"], ["err", "No se encontró el comercio"]];
+function vistaCartera(){
+  const ult = {}; S.act.filter(v => v.estado_anul !== "anulada").sort((x, y) => D(x.visitado_en) - D(y.visitado_en)).forEach(v => { ult[v.customer_id] = v; });
+  const q = norm0(S.carQ || ""), est = S.carEst || "";
+  const filas = S.base.filter(c => c.correo && (!S.hayOrigen || c.origen === "base_nueva")).map(c => { const v = ult[c.customer_id]; return { c, v, k: !v ? "por" : esErr(v) ? "err" : v.con === "Nadie" ? "sin" : "con" }; });
+  const L = filas.filter(r => (!est || (est === "vis" ? r.k !== "por" : r.k === est)) && (!q || norm0(r.c.nombre_comercial + " " + r.c.razon_social + " " + (r.c.distrito || "")).includes(q)));
+  const prox = r => r.k === "por" ? "Visitar" : r.k === "err" ? "Validar dirección" : r.k === "sin" ? "Volver a visitar" : "—";
+  const cuerpo = L.map(r => { const ej = ejDe(r.c.correo);
+    return `<tr><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(r.c.nombre_comercial || r.c.razon_social)}</b></td><td>${esc(r.c.distrito || "—")}</td><td>${r.v ? fISO(iso(r.v.visitado_en)) : "—"}</td><td>${r.v ? `<span class="pill ${r.k === "con" ? "p-ok" : r.k === "err" ? "p-md" : "p-no"}">${esc(comoFue(r.v)[0])}</span>` : "—"}</td><td>${prox(r)}</td></tr>`; }).join("");
+  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Comercios del periodo · ${L.length} de ${filas.length}</b><span class="lbl">${filas.filter(r => r.k !== "por").length} con visita · ${filas.filter(r => r.k === "por").length} por visitar</span>
+      <div class="der"><input class="sel" id="carQ" type="search" placeholder="Buscar comercio o distrito" value="${esc(S.carQ || "")}" aria-label="Buscar"><select class="sel" id="carEst" aria-label="Estado">${CAR_EST.map(([k, t]) => `<option value="${k}" ${est === k ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+    <div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Última visita</th><th>Resultado</th><th>Próxima acción</th></tr></thead><tbody>${cuerpo || `<tr><td colspan="6" class="muted">Ningún comercio con estos filtros.</td></tr>`}</tbody></table></div></div>`;
+}
+const norm0 = s => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function vistaMapaUnico(){
   cargarGeo(); cargarDomicilios(); S.muTodos = S.ejecutivos;   // la lista completa, antes de filtrar por ejecutivo
   const L = (S.periodos || []).filter(p => String(p.ini) <= hoyISO()), per = L.find(p => p.id === S.dirPer) || null, cur = S.periodo && S.periodo.id, enCurso = !per || per.id === cur;
@@ -2799,9 +2854,9 @@ function vistaMapaUnico(){
 }
 function cuerpoMapaUnico(enCurso){
   const modo = S.muModo || "ej", tab = S.muTab || "dis", vs = S.act.filter(v => v.estado_anul !== "anulada");
-  const ejs = `<div class="mu-g"><small>Ejecutivo</small><button class="chip ${S.ej === "todos" ? "on" : ""}" data-mu-ej="todos">Equipo completo</button>${S.muTodos.map(e => `<button class="chip ${S.ej === e.correo ? "on" : ""}" data-mu-ej="${esc(e.correo)}"><i style="background:${e.color}"></i>${esc(nombreCorto(e.nombre))}</button>`).join("")}</div>`;
+  const ejs = `<div class="mu-g"><small>Ejecutivo</small><select class="sel" id="muEj" aria-label="Ejecutivo"><option value="todos">Equipo completo</option>${S.muTodos.map(e => `<option value="${esc(e.correo)}" ${S.ej === e.correo ? "selected" : ""}>${esc(e.nombre)}</option>`).join("")}</select></div>`;
   const mod = `<div class="mu-g"><small>Colorear distritos por</small>${MU_MODOS.map(([k, t]) => `<button class="chip ${modo === k ? "on" : ""}" data-mu-modo="${k}">${t}</button>`).join("")}</div>`;
-  const cap = enCurso ? `<div class="mu-g"><small>Capas</small><label class="tog"><input type="checkbox" id="muVis" ${S.muVis !== false ? "checked" : ""}> Visitas</label><label class="tog"><input type="checkbox" id="muPen" ${S.muPen !== false ? "checked" : ""}> <i class="gris"></i> Por visitar (${porVisitarMapa().length})</label><label class="tog"><input type="checkbox" id="muAle" ${S.muAle !== false ? "checked" : ""}> Alertas</label></div>` : "";
+  const cap = enCurso ? `<div class="mu-g"><small>Capas</small><label class="tog"><input type="checkbox" id="muVis" ${S.muVis !== false ? "checked" : ""}> Visitas</label><label class="tog"><input type="checkbox" id="muPen" ${S.muPen !== false ? "checked" : ""}> <i class="negro"></i> Por visitar (${porVisitarMapa().length})</label><label class="tog"><input type="checkbox" id="muAle" ${S.muAle !== false ? "checked" : ""}> Alertas</label></div>` : "";
   const lejos = vs.filter(v => v.lat != null && (v.distancia_m || 0) > REGLA.lejos).length, alt = alertasMismoPunto().filter(g => g.nivel !== "info").length;
   const nAl = alt + (S.domErr ? 0 : alertasDomicilio().length), nErr = vs.filter(esErr).length;
   const T = [["dis", "Distritos", ""], ["reg", "Registros", enCurso ? vs.length : ""], ["ale", "Alertas", enCurso ? nAl : "", "al"], ["sin", "Sin ubicar", enCurso ? nErr : ""]];
@@ -2820,7 +2875,7 @@ function cuerpoMapaUnico(enCurso){
 function muLeyenda(modo, enCurso){
   const li = (c, t, r) => `<span><i style="background:${c};${r ? "border-radius:3px" : ""}"></i>${t}</span>`;
   const m = modo === "ej" ? S.muTodos.map(e => li(e.color, nombreCorto(e.nombre) + " (distritos)", true)).join("") : modo === "cob" ? [["#E4E8FB", "0 %"], ["#B7C0F5", "1–24 %"], ["#7F8CEF", "25–49 %"], ["#4F5CF3", "50–74 %"], ["#1b1f8f", "75 % o más"]].map(([c, t]) => li(c, t, true)).join("") : [["#FBD5B8", "menos de 10 %"], ["#F7A66B", "10–24 %"], ["#F86F35", "25–49 %"], ["#B4491B", "50 % o más"]].map(([c, t]) => li(c, t, true)).join("");
-  return m + (enCurso ? `<span><i class="pto"></i>visita (color del ejecutivo)</span><span><i class="gris"></i>comercio por visitar</span><span><i class="aro"></i>alerta</span>` : "");
+  return m + (enCurso ? `<span><i class="pto"></i>visita (color del ejecutivo)</span><span><i class="negro"></i>comercio por visitar</span><span><i class="aro"></i>alerta</span>` : "");
 }
 function muPanel(tab, enCurso){
   const av = c => AVATAR(ejDe(c)), pcx = x => x == null ? "—" : Math.round(x * 100) + " %";
@@ -2864,7 +2919,7 @@ function montarMapaUnico(el){
     if (S.muEnfocar === g.clave){ m.fitBounds(capa.getBounds(), { padding:[30, 30], maxZoom:14, animate:false }); S.muEnfocar = null; S.muVista = { c:[m.getCenter().lat, m.getCenter().lng], z:m.getZoom() }; } });
   const vs = S.act.filter(v => v.estado_anul !== "anulada" && v.lat != null);
   if (enCurso){
-    if (S.muPen !== false) porVisitarMapa().forEach(c => L.circleMarker([c.geo_lat, c.geo_lng], { radius:3, color:"transparent", weight:0, fillColor:"#9aa3b8", fillOpacity:.8 })
+    if (S.muPen !== false) porVisitarMapa().forEach(c => L.circleMarker([c.geo_lat, c.geo_lng], { radius:3.5, color:"#ffffff", weight:.6, fillColor:"#0B0F26", fillOpacity:.9 })
       .bindTooltip(`<b>${esc(c.nombre_comercial || c.razon_social)}</b><br>${esc(nombreCorto((ejDe(c.correo) || {}).nombre))} · por visitar${c.distrito ? " · " + esc(c.distrito) : ""}`, { className:"etq-mapa", direction:"top", offset:[0, -3] }).addTo(m));
     if (S.muVis !== false) vs.forEach(v => L.circleMarker([v.lat, v.lng], { radius:5, color:borde, weight:1.5, fillColor:colorCss(ejDe(v.correo).color), fillOpacity:1 })
       .bindTooltip(`<b>${esc(v.comercio)}</b><br>${esc(ejDe(v.correo).nombre)} · ${fISO(iso(v.visitado_en))} ${hh(v.visitado_en)}<br>${v.distancia_m != null ? "a " + mDist(v.distancia_m) + " del comercio" : "sin referencia"}`, { className:"etq-mapa", direction:"top", offset:[0, -4] })
@@ -3766,7 +3821,7 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","bloques","equipo","mapa","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","cartera","bloques","equipo","mapa","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
   if (/type=recovery/.test(location.hash)) S.nuevaClave = {};   // llega por el enlace del correo de recuperación
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
@@ -3778,5 +3833,12 @@ document.addEventListener("click", ev => { const m = ev.target.closest("[data-mp
 const numPE = x => Number(x || 0).toLocaleString("de-DE");   // punto de miles y coma decimal, como el Excel de Jose
 document.addEventListener("click", ev => { const t = ev.target.closest("[data-ttab]"); if (!t) return; S.tTab = t.dataset.ttab; pintar(); });
 document.addEventListener("change", ev => { if (ev.target.id === "tDia" && ev.target.value){ S.tDia = ev.target.value; pintar(); } });
+document.addEventListener("change", ev => { if (ev.target.id !== "cabPer") return; const id = ev.target.value;
+  if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id];
+  S.dirPer = id; S.mPer = id; S.uPer = id; S.mDist = null; S.mVista = null; S.mEnfocar = null; S.mDia = ""; S.mFr = ""; S.muSel = null; S.muVista = null; S.uSel = null; S.alSel = null;
+  if (S.periodo && id !== S.periodo.id) S.mRango = "periodo"; pintar(); });
+document.addEventListener("change", ev => { if (ev.target.id !== "muEj") return; S.muSel = null; S.muVista = null; elegirEj(ev.target.value); });
+document.addEventListener("change", ev => { const i = ev.target.id; if (i === "carEst") S.carEst = ev.target.value; else if (i === "carQ") S.carQ = ev.target.value; else return; pintar(); });
+document.addEventListener("click", ev => { if (!ev.target.closest("[data-reintentar-cierres]")) return; if (S.cierres) S.cierres.t = 0; cargarCierres(); pintar(); });
 </script>
 </body></html>
