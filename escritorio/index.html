@@ -338,16 +338,16 @@ table.datos tr.err td{background:var(--rojo-t)}
 </style>
 <style>table.cola td.sn{white-space:normal;max-width:220px} table.cola td.sn .senal{white-space:nowrap} table.cola .sn-l{margin-top:3px} @media (max-width:1500px){ table.cola .ej-n{display:none} .split{grid-template-columns:minmax(0,1fr) 340px} table.cola{min-width:0} table.cola td,table.cola th{padding-left:7px;padding-right:7px} .res small,.com b,.com small{max-width:130px} }
 /* ---------- Mapa de distritos ---------- */
-.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:440px}
+.mapa-dist-wrap{display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:300px}
 .mapa-dist-col{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--linea)}
-.mapa-dist{height:440px;width:100%;background:var(--suelo)}   /* un solo alto para todos los mapas del escritorio */
+.mapa-dist{height:clamp(280px,40vh,360px);width:100%;background:var(--suelo)}   /* un solo alto para todos los mapas del escritorio */
 :root[data-theme="dark"] .mapa-dist .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.8) contrast(.9)}
 .md-leyenda{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-top:1px solid var(--linea);font-size:12px}
 .md-leyenda b{color:var(--ink)}
 .md-leyenda .leyenda-ej span:first-child{color:inherit;font-weight:400}
 .md-leyenda .leyenda-ej i{width:14px;height:10px;border-radius:2px}
 .md-leyenda .leyenda-ej i.pto{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 1.5px var(--tarjeta)}
-.md-lado{min-width:0;display:flex;flex-direction:column;max-height:440px;overflow:auto}
+.md-lado{min-width:0;display:flex;flex-direction:column;max-height:clamp(280px,40vh,360px);overflow:auto}
 .md-cuerpo{padding:12px;display:flex;flex-direction:column;gap:10px}
 .md-cuerpo h3{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
 .md-ej{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--ink)}
@@ -576,7 +576,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "466e03";
+const BUILD = "e7fca5";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
