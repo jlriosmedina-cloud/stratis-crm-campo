@@ -659,6 +659,16 @@ await prueba('Comercios aparte de la base (26/11): se ven aparte, no suman y el 
   assert.equal(r.hay, true); assert.equal(r.origen, 'base_anterior'); assert.equal(r.suma, false, 'no debe sumar a la meta'); assert.ok(r.otros, 'el resto debe quedar con origen');
   assert.equal(r.cartera, r.esperada, 'la cartera debe quedar sin el comercio aparte'); assert.ok(r.sinFuncion, 'sin la función no debe cambiar nada');
 });
+await prueba('Cargas (26/11): el modelo de reactivados de Jose (RUC, Reactivado, Fecha_Reactivacion) se lee sin Gestion_Con_Contacto', async () => {
+  const r = await p.evaluate(() => { const c = S.base.find(x => x.correo).customer_id; const v = validarBBVA(['RUC', 'Reactivado', 'Fecha_Reactivacion'], [[c, 'Si', '2026-11-23'], ['00000099', 'No', ''], [c, 'Si', '23/11/2026'], ['00000098', 'Si', '11/23/26'], ['00000097', 'Si', 'ayer']]);
+    return { faltan: v.faltan, fr: v.res.map(x => x.fr), errFecha: v.res.map(x => x.err.some(e => /fecha de reactivación/.test(e))), gc: v.res[0].gc }; });
+  const inv = await p.evaluate(() => { const c = S.base.find(x => x.correo).customer_id, v = validarBBVA(['RUC', 'Reactivado', 'Fecha_Reactivacion'], [[c, 'Si', '2/30/26']]); return v.res[0].err.filter(e => /fecha de reactivación/.test(e)).length; }); assert.equal(inv, 1, 'una fecha que no existe se rechaza en la vista previa');
+  const env = await p.evaluate(() => { const c = S.base.find(x => x.correo).customer_id; S.carga = { tipo: 'resultados_bbva', archivo: 'x.xlsx', corte: hoyISO(), filas: validarBBVA(['RUC', 'Reactivado'], [[c, 'Si']]) }; window.__llamadas.length = 0; return null; });
+  await p.evaluate(() => { window.__FX.rpc.v2_cargar_resultados_bbva = () => ({ cargadas: 1, rechazadas: 0, reactivados: 1, con_contacto: 0, detalle: [], corte: hoyISO(), carga_id: 1 }); return cargarBBVA(); }); await p.waitForTimeout(300);
+  const env2 = await p.evaluate(() => window.__llamadas.find(l => l[0] === 'v2_cargar_resultados_bbva')); assert.ok(env2 && !('gestion_con_contacto' in env2[1].p_filas[0]), 'sin la columna, no debe enviar la gestión: la calcula el servidor'); await p.evaluate(() => { delete window.__FX.rpc.v2_cargar_resultados_bbva; S.carga = { tipo: 'diario' }; S.vista = 'directorio'; pintar(); });
+  assert.deepEqual(r.faltan, [], 'no debe exigir Gestion_Con_Contacto'); assert.deepEqual(r.fr, ['2026-11-23', '', '2026-11-23', '2026-11-23', '']);
+  assert.deepEqual(r.errFecha, [false, false, false, false, true], 'solo la fecha «ayer» es inválida'); assert.equal(typeof r.gc, 'boolean');
+});
 await prueba('Seguimiento (26/11): check-ins contra los reactivados de BBVA, con y sin lista', async () => {
   await p.evaluate(() => { delete window.__FX.tablas.v2_cortes_bbva; delete window.__FX.tablas.v2_resultados_bbva; S.reac = null; S.segs = null; S.dirPer = null; S.vista = 'seguimiento'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(600);
   assert.match(await p.locator('#contenido').innerText(), /Todavía no hay una lista de reactivados/, 'sin corte debe avisar qué cargar');

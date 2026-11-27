@@ -1639,12 +1639,16 @@ function idDeBBVA(bruto){
   return a || b ? { cid:a || b, doc:k } : { doc:k, err:"no está en la base" };
 }
 /* ---------- Resultados de BBVA (29/09): el Excel mínimo que Jose arma desde el entorno de BBVA ---------- */
-const COLS_BBVA = ["customer_id", "gestion_con_contacto", "reactivado", "facturado"];
+const COLS_BBVA = ["customer_id", "gestion_con_contacto", "reactivado", "facturado", "fecha_reactivacion"];
 const FORMATO_BBVA = { customer_id:"RUC (11 dígitos), DNI o Customer ID de BBVA; si Excel quitó los ceros de la izquierda, se completan", gestion_con_contacto:"Si o No",
-  reactivado:"Si, No o En proceso", facturado:"monto en soles del comercio (opcional; también puedes poner solo el total al cargar)" };
+  reactivado:"Si, No o En proceso", facturado:"monto en soles del comercio (opcional; también puedes poner solo el total al cargar)", fecha_reactivacion:"fecha en que BBVA reporta la reactivación (opcional)" };
 const ALIAS_BBVA = { customer_id:["customer_id", "customer id", "customerid", "cid", "cliente", "codigo", "código", "id", "documento", "documento_bbva2", "ruc", "dni", "nro_documento", "nro documento", "numero_documento", "ruc_dni", "ruc/dni"],
   gestion_con_contacto:["gestion_con_contacto", "gestión con contacto", "gestion con contacto", "contacto", "gestion", "gestión"],
-  reactivado:["reactivado", "reactivo", "reactivó", "cuenta", "consumio", "consumió", "consumo"], facturado:["facturado", "facturacion", "facturación", "monto", "monto facturado", "importe", "vol", "volumen"] };
+  reactivado:["reactivado", "reactivo", "reactivó", "cuenta", "consumio", "consumió", "consumo"], facturado:["facturado", "facturacion", "facturación", "monto", "monto facturado", "importe", "vol", "volumen"],
+  fecha_reactivacion:["fecha_reactivacion", "fecha reactivacion", "fecha de reactivacion", "fecha_react", "reactivado_el", "fecha reactivación", "fecha de reactivación"] };
+// Fecha del archivo: AAAA-MM-DD, DD/MM/AAAA, serie de Excel o m/d/aa (el formato por defecto de Excel). Vacía = ""; no válida = null.
+const fechaReac = v => { const s = String(v ?? "").trim(); if (!s) return ""; let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/); if (m){ const mm = +m[1] > 12 ? +m[2] : +m[1], dd = +m[1] > 12 ? +m[1] : +m[2]; const f2 = `20${m[3]}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`; return isNaN(Date.parse(f2)) || new Date(f2 + "T12:00:00Z").getUTCDate() !== dd ? null : f2; }
+  const f = fechaNorm(s); return /^\d{4}-\d{2}-\d{2}$/.test(f) && !isNaN(Date.parse(f)) ? f : null; };
 const siNo = v => { const t = String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); return ["si", "s", "1", "true", "x"].includes(t) ? true : ["no", "n", "0", "false", ""].includes(t) ? false : null; };
 const reacNorm = v => { const t = String(v ?? "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); return t === "en proceso" || t === "proceso" ? "En proceso" : siNo(v) === true ? "Si" : siNo(v) === false && t !== "" ? "No" : null; };
 // Sugerencia para un ID que no está en la base: el de la base que difiere en un dígito, o al que le falta uno
@@ -1657,18 +1661,21 @@ function idParecido(cid){
 }
 function validarBBVA(cab, filas){
   const ix = {}; COLS_BBVA.forEach(col => { ix[col] = cab.findIndex(h => ALIAS_BBVA[col].map(normalizar).includes(normalizar(h))); });
-  const faltan = COLS_BBVA.filter(c => c !== "facturado" && ix[c] < 0), vistos = new Set(), res = [];
+  const faltan = COLS_BBVA.filter(c => !["facturado", "gestion_con_contacto", "fecha_reactivacion"].includes(c) && ix[c] < 0), vistos = new Set(), res = [];
   filas.forEach((f, n) => { const err = [];
     const bruto = String(f[ix.customer_id] ?? "").trim().replace(/[.,]0+$/, ""), id = idDeBBVA(bruto), cid = id.cid || id.doc || bruto, doc = id.doc || null;
-    const gc = siNo(f[ix.gestion_con_contacto]), re = reacNorm(f[ix.reactivado]);
+    // sin columna de gestión, la calcula el CRM con sus visitas (aquí para la vista previa; el servidor la vuelve a calcular)
+    const gc = ix.gestion_con_contacto < 0 ? S.act.some(v => v.customer_id === (idDeBBVA(String(f[ix.customer_id] ?? "").trim().replace(/[.,]0+$/, "")).cid) && v.estado_anul !== "anulada" && v.con !== "Nadie") : siNo(f[ix.gestion_con_contacto]), re = reacNorm(f[ix.reactivado]);
+    const fr = ix.fecha_reactivacion >= 0 ? fechaReac(f[ix.fecha_reactivacion]) : "";
     const fac = ix.facturado >= 0 ? String(f[ix.facturado] ?? "").trim().replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".") : "";
     let sug = null;
     if (id.err){ err.push("documento o customer_id " + id.err); if (/^\d{8}$/.test(cid) && !id.cid) sug = idParecido(cid); }
     if (gc === null) err.push("gestion_con_contacto no es Si o No");
     if (!re) err.push("reactivado no es Si, No o En proceso");
+    if (fr === null) err.push("fecha de reactivación no válida (usa AAAA-MM-DD o DD/MM/AAAA)");
     if (fac !== "" && !/^\d+(\.\d+)?$/.test(fac)) err.push("facturado no es un monto");
     if (vistos.has(cid)) err.push("comercio repetido en el archivo"); vistos.add(cid);
-    res.push({ n:n + 2, bruto, cid, doc, gc, re, fac, sug, err }); });
+    res.push({ n:n + 2, bruto, cid, doc, gc, re, fac, fr: fr || "", sug, err }); });
   return { faltan, ix, cab, res, ok:res.filter(r => !r.err.length).length };
 }
 // Primera visita válida (con ubicación, a tiempo, no anulada) de cada comercio en el periodo, hasta la fecha C
@@ -1721,7 +1728,8 @@ async function cargarBBVA(){
   if (!c.corte || c.corte > hoyISO()){ toast("Indica la fecha de corte de la data de BBVA (no puede ser futura)."); return; }
   const total = String(c.facturadoTotal || "").replace(/[S\/\s]/g, "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".");
   if (total !== "" && !/^\d+(\.\d+)?$/.test(total)){ toast("El total facturado no es un monto."); return; }
-  const filas = v.res.filter(r => !r.err.length).map(r => ({ documento:r.doc, customer_id:r.cid, gestion_con_contacto:r.gc, reactivado:r.re, facturado:r.fac === "" ? null : r.fac }));
+  const conGestion = v.ix.gestion_con_contacto >= 0;   // sin esa columna, el servidor la calcula con las visitas del periodo hasta el corte
+  const filas = v.res.filter(r => !r.err.length).map(r => ({ documento:r.doc, customer_id:r.cid, ...(conGestion ? { gestion_con_contacto:r.gc } : {}), reactivado:r.re, facturado:r.fac === "" ? null : r.fac, ...(r.fr ? { fecha_reactivacion:r.fr } : {}) }));
   S.ocupado = true; pintar();
   try {
     const { data, error } = await sb.rpc("v2_cargar_resultados_bbva", { p_archivo:c.archivo, p_corte:c.corte, p_filas:filas, p_facturado_total:total === "" ? null : total,
@@ -1881,14 +1889,16 @@ async function cargarReactivados(per){
     if (k && k.error) throw k.error;
     const corte = k && k.data && k.data[0] ? k.data[0].corte : null;
     if (!corte){ S.reac[per] = { corte:null, ids:new Set() }; pintar(); return; }
-    const ids = new Set();   // por tramos de 1.000 con orden fijo (tope de la API)
+    const ids = new Set(), fechas = {};   // por tramos de 1.000 con orden fijo (tope de la API)
+    let cols = "customer_id,fecha_reactivacion";
     for (let i = 0; ; i += 1000){
-      const r = await sb.from("v2_resultados_bbva").select("customer_id").eq("corte", corte).eq("reactivado", "Si").order("customer_id").range(i, i + 999);
+      let r = await sb.from("v2_resultados_bbva").select(cols).eq("corte", corte).eq("reactivado", "Si").order("customer_id").range(i, i + 999);
+      if (r && r.error && cols.includes("fecha_reactivacion")){ cols = "customer_id"; r = await sb.from("v2_resultados_bbva").select(cols).eq("corte", corte).eq("reactivado", "Si").order("customer_id").range(i, i + 999); }   // aún sin la columna de fecha
       if (r && r.error) throw r.error;
-      const d = (r && r.data) || []; d.forEach(x => ids.add(x.customer_id));
+      const d = (r && r.data) || []; d.forEach(x => { ids.add(x.customer_id); if (x.fecha_reactivacion) fechas[x.customer_id] = String(x.fecha_reactivacion).slice(0, 10); });
       if (d.length < 1000) break;
     }
-    S.reac[per] = { corte, ids };
+    S.reac[per] = { corte, ids, fechas };
   } catch(e){ S.reac[per] = { error: (e && e.message) || "No se pudo leer" }; }
   pintar();
 }
@@ -1900,21 +1910,21 @@ function vistaSeguimiento(){
   // caso de seguimiento: la última visita quedó abierta (sin contacto, «aún no decide» o quedaron en volver)
   const esCaso = v => v && (v.con === "Nadie" ? v.motivo !== "Dirección errada" : (v.que === "Reagendada" || v.decision === "Aún no decide"));
   const segDe = {}; sg.forEach(r => { (segDe[r.customer_id] ||= []).push(r); });
-  const hayCorte = !!(rv && rv.corte), ids = hayCorte ? rv.ids : new Set(), enBase = new Set(base.map(c => c.customer_id)), fuera = hayCorte ? [...ids].filter(id => !enBase.has(id)).length : 0, corteTxt = hayCorte ? fISO(rv.corte) : null;
+  const hayCorte = !!(rv && rv.corte), ids = hayCorte ? rv.ids : new Set(), refDe = cid => (hayCorte && rv.fechas && rv.fechas[cid]) || (hayCorte ? rv.corte : ""), enBase = new Set(base.map(c => c.customer_id)), fuera = hayCorte ? [...ids].filter(id => !enBase.has(id)).length : 0, corteTxt = hayCorte ? fISO(rv.corte) : null;
   const filas = S.ejecutivos.map(e => {
     const mios = base.filter(c => c.correo === e.correo), casos = mios.filter(c => esCaso(ult[c.customer_id])), conSeg = casos.filter(c => (segDe[c.customer_id] || []).some(r => r.correo === e.correo)).length;
-    const reac = mios.filter(c => ids.has(c.customer_id)), reacSeg = reac.filter(c => (segDe[c.customer_id] || []).some(r => r.correo === e.correo && iso(r.hecho_en) <= rv.corte)).length;
+    const reac = mios.filter(c => ids.has(c.customer_id)), reacSeg = reac.filter(c => (segDe[c.customer_id] || []).some(r => r.correo === e.correo && iso(r.hecho_en) <= refDe(c.customer_id))).length;
     return { e, casos:casos.length, conSeg, checkins:sg.filter(r => r.correo === e.correo).length, reac:reac.length, reacSeg, reacSin:reac.length - reacSeg };
   });
   const T = filas.reduce((a, f) => { ["casos", "conSeg", "checkins", "reac", "reacSeg", "reacSin"].forEach(k => { a[k] += f[k]; }); return a; }, { casos:0, conSeg:0, checkins:0, reac:0, reacSeg:0, reacSin:0 });
   const pc = (a, b) => b ? Math.round(a * 100 / b) + " %" : "—";
   const tile = (k, v, d, cls) => `<div class="tile ${cls || ""}"><div class="k">${k}</div><div class="v num">${v}</div><div class="d">${d}</div></div>`;
-  const aviso = rv === undefined || rv === null ? `<div class="aviso">Leyendo los reactivados de BBVA…</div>` : rv.error ? `<div class="aviso mal">No se pudo leer la lista de reactivados: ${esc(rv.error)} <button class="btn" data-reac-reintentar="${esc(perId)}" style="margin-left:8px">Reintentar</button></div>` : !hayCorte ? `<div class="aviso warn"><b>Todavía no hay una lista de reactivados dentro de este periodo.</b> Cuando cargues los comercios reactivados en <b>Cargas</b> (resultados de reactivación, por documento), este cuadro los cruza con los check-ins de cada ejecutivo. Mientras tanto ves los check-ins y los casos abiertos.</div>` : `<div class="aviso ok">Reactivados según BBVA al corte del <b>${corteTxt}</b>. «Con check-in» = el ejecutivo registró un seguimiento del comercio antes o el día del corte.${fuera ? ` ${fuera} reactivado${fuera === 1 ? "" : "s"} de la lista no ${fuera === 1 ? "está" : "están"} en la base nueva de este periodo y no se cruza${fuera === 1 ? "" : "n"}.` : ""}</div>`;
+  const aviso = rv === undefined || rv === null ? `<div class="aviso">Leyendo los reactivados de BBVA…</div>` : rv.error ? `<div class="aviso mal">No se pudo leer la lista de reactivados: ${esc(rv.error)} <button class="btn" data-reac-reintentar="${esc(perId)}" style="margin-left:8px">Reintentar</button></div>` : !hayCorte ? `<div class="aviso warn"><b>Todavía no hay una lista de reactivados dentro de este periodo.</b> Cuando cargues los comercios reactivados en <b>Cargas</b> (resultados de reactivación, por documento), este cuadro los cruza con los check-ins de cada ejecutivo. Mientras tanto ves los check-ins y los casos abiertos.</div>` : `<div class="aviso ok">Reactivados según BBVA al corte del <b>${corteTxt}</b>. «Con check-in» = el ejecutivo registró un seguimiento del comercio antes o el día de su reactivación (si el archivo no trae la fecha, hasta el corte).${fuera ? ` ${fuera} reactivado${fuera === 1 ? "" : "s"} de la lista no ${fuera === 1 ? "está" : "están"} en la base nueva de este periodo y no se cruza${fuera === 1 ? "" : "n"}.` : ""}</div>`;
   const tiles = `<div class="resumen" style="margin-bottom:14px">${tile("Casos para seguimiento", T.casos, "visita sin contacto, «aún no decide» o quedaron en volver")}${tile("Con check-in", T.conSeg + '<small> / ' + T.casos + '</small>', pc(T.conSeg, T.casos) + " de los casos tiene un seguimiento registrado", T.casos && T.conSeg < T.casos ? "warn" : "ok")}${tile("Check-ins del periodo", T.checkins, "llamada, WhatsApp o correo")}${tile("Reactivados BBVA", hayCorte ? T.reac : "—", hayCorte ? `al corte del ${corteTxt}` : "sin lista cargada")}${tile("Reactivados con check-in", hayCorte ? T.reacSeg + '<small> / ' + T.reac + '</small>' : "—", hayCorte ? pc(T.reacSeg, T.reac) + " tuvo gestión del ejecutivo" : "se calcula con la lista", hayCorte && T.reacSin ? "warn" : "")}${tile("Reactivados sin check-in", hayCorte ? T.reacSin : "—", hayCorte ? "reactivaron sin un seguimiento registrado" : "se calcula con la lista")}</div>`;
   const tEj = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Check-ins por ejecutivo</b><span class="lbl">casos abiertos, cuántos tienen seguimiento y, con la lista de BBVA, cuántos reactivados tuvieron gestión</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Casos</th><th class="n">Con check-in</th><th class="n">Cobertura</th><th class="n">Check-ins</th><th class="n">Reactivados</th><th class="n">Con check-in</th><th class="n">Sin check-in</th></tr></thead><tbody>${filas.map(f => `<tr><td><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></td><td class="n num">${f.casos}</td><td class="n num">${f.conSeg}</td><td class="n num">${pc(f.conSeg, f.casos)}</td><td class="n num">${f.checkins}</td><td class="n num">${hayCorte ? f.reac : "—"}</td><td class="n num">${hayCorte ? f.reacSeg : "—"}</td><td class="n num">${hayCorte ? f.reacSin : "—"}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">Sin ejecutivos.</td></tr>`}</tbody></table></div></div>`;
-  const lista = hayCorte ? base.filter(c => ids.has(c.customer_id)).map(c => { const v = ult[c.customer_id], l = (segDe[c.customer_id] || []).filter(r => r.correo === c.correo).sort((a, b) => D(b.hecho_en) - D(a.hecho_en)), antes = l.filter(r => iso(r.hecho_en) <= rv.corte); return { c, v, l, antes }; }).sort((a, b) => a.antes.length - b.antes.length || String(a.c.nombre_comercial).localeCompare(String(b.c.nombre_comercial))) : [];
-  const tRea = hayCorte ? `<div class="panel"><div class="barra"><b>Comercios reactivados · ${lista.length}</b><span class="lbl">primero los que reactivaron sin check-in registrado</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Última visita</th><th>Check-ins</th><th>Último check-in</th><th>¿Gestión antes del corte?</th></tr></thead><tbody>${lista.slice(0, 300).map(({ c, v, l, antes }) => { const ej = ejDe(c.correo), u = l[0];
-    return `<tr><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(c.nombre_comercial || c.razon_social || c.customer_id)}</b><small class="muted" style="display:block">${esc(c.distrito || "—")}</small></td><td>${v && !isNaN(D(v.visitado_en)) ? fISO(iso(v.visitado_en)) + `<small class="muted" style="display:block">${esc(comoFue(v)[0])}</small>` : "—"}</td><td class="n num">${l.length}</td><td>${u ? fISO(iso(u.hecho_en)) + " · " + esc(u.canal) + `<small class="muted" style="display:block">${esc(u.resultado)}</small>` : "—"}</td><td>${antes.length ? `<span class="pill p-ok">Sí</span>` : l.length ? `<span class="pill p-md">Solo después del corte</span>` : `<span class="pill p-no">Sin check-in</span>`}</td></tr>`; }).join("") || `<tr><td colspan="6" class="muted">Ningún comercio de la base está en la lista de reactivados.</td></tr>`}</tbody></table></div></div>` : "";
+  const lista = hayCorte ? base.filter(c => ids.has(c.customer_id)).map(c => { const v = ult[c.customer_id], l = (segDe[c.customer_id] || []).filter(r => r.correo === c.correo).sort((a, b) => D(b.hecho_en) - D(a.hecho_en)), antes = l.filter(r => iso(r.hecho_en) <= refDe(c.customer_id)); return { c, v, l, antes, ref: rv.fechas && rv.fechas[c.customer_id] }; }).sort((a, b) => a.antes.length - b.antes.length || String(a.c.nombre_comercial).localeCompare(String(b.c.nombre_comercial))) : [];
+  const tRea = hayCorte ? `<div class="panel"><div class="barra"><b>Comercios reactivados · ${lista.length}</b><span class="lbl">primero los que reactivaron sin check-in registrado · fecha de reactivación según tu archivo</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Última visita</th><th>Check-ins</th><th>Último check-in</th><th>Reactivó</th><th>¿Gestión antes de reactivar?</th></tr></thead><tbody>${lista.slice(0, 300).map(({ c, v, l, antes, ref }) => { const ej = ejDe(c.correo), u = l[0];
+    return `<tr><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(c.nombre_comercial || c.razon_social || c.customer_id)}</b><small class="muted" style="display:block">${esc(c.distrito || "—")}</small></td><td>${v && !isNaN(D(v.visitado_en)) ? fISO(iso(v.visitado_en)) + `<small class="muted" style="display:block">${esc(comoFue(v)[0])}</small>` : "—"}</td><td class="n num">${l.length}</td><td>${u ? fISO(iso(u.hecho_en)) + " · " + esc(u.canal) + `<small class="muted" style="display:block">${esc(u.resultado)}</small>` : "—"}</td><td>${ref ? fISO(ref) : `<span class="muted">al corte</span>`}</td><td>${antes.length ? `<span class="pill p-ok">Sí</span>` : l.length ? `<span class="pill p-md">Solo después de reactivar</span>` : `<span class="pill p-no">Sin check-in</span>`}</td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">Ningún comercio de la base está en la lista de reactivados.</td></tr>`}</tbody></table></div></div>` : "";
   return aviso + tiles + tEj + tRea;
 }
 /* Mi avance (vista del ejecutivo): sus pendientes y, debajo, su avance contra la meta (la misma pantalla de Equipo, con un solo ejecutivo). */

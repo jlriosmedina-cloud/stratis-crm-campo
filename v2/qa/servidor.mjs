@@ -831,6 +831,23 @@ caso('cargas por documento: RUC, DNI sin el cero inicial y Customer ID llegan al
   await falla(como(null, `select public.v2_comercio_de_id('20999999992')`), /permission denied/);
   await falla(como(ANA, `select public.v2_comercio_de_fila('{}'::jsonb)`), /permission denied/);
 });
+caso('resultados de BBVA con fecha de reactivación: la gestión con contacto se calcula si el archivo no la trae y la fecha no puede pasar del corte', async () => {
+  const [c1, c2, c3, c4] = [await nuevoComercio(971), await nuevoComercio(972), await nuevoComercio(973), await nuevoComercio(974)];
+  await visitaPasada(c1, 6, 'Dueño', { que: 'Reunión concretada' });
+  const corte = await diaMas(-1), fecha = await diaMas(-3);
+  const r = (await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb) r`, [corte, JSON.stringify([
+    { customer_id: c1, reactivado: 'Si', fecha_reactivacion: fecha },
+    { customer_id: c2, reactivado: 'Si' },
+    { customer_id: c3, reactivado: 'Si', fecha_reactivacion: await diaMas(0) },
+    { customer_id: c4, reactivado: 'Si', fecha_reactivacion: '23/11/2026' }])])).rows[0].r;
+  assert.equal(r.cargadas, 2); assert.equal(r.rechazadas, 2);
+  assert.match(r.detalle.map(d => d.motivo).join(' | '), /posterior al corte.*AAAA-MM-DD/);
+  const f = (await db.query(`select customer_id, gestion_con_contacto g, to_char(fecha_reactivacion, 'YYYY-MM-DD') f from v2_resultados_bbva where corte = $1 order by customer_id`, [corte])).rows;
+  assert.deepEqual(f.map(x => [x.customer_id, x.g, x.f]), [[c1, true, fecha], [c2, false, null]]);
+  // si el archivo trae la gestión, se respeta tal cual
+  await como(ANA, `select public.v2_cargar_resultados_bbva('prueba.xlsx', $1::date, $2::jsonb)`, [corte, JSON.stringify([{ customer_id: c2, reactivado: 'Si', gestion_con_contacto: true }])]);
+  assert.equal((await db.query(`select gestion_con_contacto g from v2_resultados_bbva where corte = $1 and customer_id = $2`, [corte, c2])).rows[0].g, true);
+});
 caso('avance con la base 2026-11: base y visitados solo con la base nueva; los reactivados de la base anterior sí cuentan', async () => {
   const av = async () => { const r = (await como(ANA, `select correo, base, visitados, reactivados from public.v2_avance('2099-01') where correo = $1`, [EJ])).rows[0]; return [r.base, r.visitados, r.reactivados]; };
   const [c1, c2] = [await nuevoComercio(151), await nuevoComercio(152)];
