@@ -645,3 +645,18 @@ table.datos tr.on td{background:var(--azul-t)}
 .cab-kpis .ck.or b,.cab-kpis .ck.vd b{color:#fff}
 .cab-kpis .ck span{font-size:11.5px;letter-spacing:.01em}
 .rail .nav button{gap:12px}
+
+/* Segunda tanda visual (26/11): un solo scroll en listas largas, ayuda plegable y barras con más presencia */
+.contenido>.panel-llena{display:flex;flex-direction:column;height:100%;min-height:320px;margin-bottom:0}
+.panel-llena .eq-dias.llena{flex:1;min-height:0;max-height:none;overflow:auto}
+.tabla-wrap{max-height:max(260px,calc(100vh - 430px))}
+.ficha .cuerpo{max-height:max(260px,calc(100vh - 380px))}
+.ayuda{background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;margin-top:14px}
+.ayuda>summary{cursor:pointer;list-style:none;padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--texto);display:flex;align-items:center;gap:8px}
+.ayuda>summary::-webkit-details-marker{display:none}
+.ayuda>summary::before{content:"?";display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);color:var(--muted);font-size:11px;font-weight:800}
+.ayuda[open]>summary{border-bottom:1px solid var(--linea)}
+.ayuda-txt{padding:10px 14px 12px;font-size:12px;line-height:1.55;color:var(--muted)}
+.datos td .barrita{height:6px;margin-top:5px}
+.datos td.n.num{font-weight:500}
+@media (max-width:1100px){.contenido>.panel-llena{height:auto}.panel-llena .eq-dias.llena{max-height:60vh}}

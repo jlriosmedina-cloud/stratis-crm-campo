@@ -672,6 +672,15 @@ await prueba('Tiempos · Resumen diario rediseñado (26/11): una tarjeta por eje
   assert.equal(await p.evaluate(() => S.tDia), d0, 'el día debe volver');
   await p.evaluate(() => { S.vista = 'directorio'; pintar(); });
 });
+await prueba('Segunda tanda visual (26/11): Cartera con un solo scroll y notas de método en «Cómo se calcula» plegable', async () => {
+  await p.setViewportSize({ width: 1440, height: 760 });
+  const r = await p.evaluate(() => { const b0 = S.base.find(c => c.correo), g = S.base; S.base = g.concat(Array.from({ length: 220 }, (_, i) => ({ ...b0, customer_id: 'X' + i, nombre_comercial: 'Relleno ' + i }))); S.vista = 'cartera'; elegirEj('todos'); pintar();
+    const c = document.querySelector('#contenido'), t = document.querySelector('.eq-dias.llena'), o = { pagina: c.scrollHeight - c.clientHeight, tabla: t.scrollHeight - t.clientHeight }; S.base = g; return o; });
+  assert.ok(r.pagina <= 2, 'la página no debe desplazarse además de la tabla: ' + JSON.stringify(r)); assert.ok(r.tabla > 100, 'la tabla sí debe desplazarse');
+  for (const [v, tab] of [['directorio'], ['tiempos'], ['equipo']]) { await p.evaluate(x => { S.vista = x; pintar(); }, v); await p.waitForTimeout(300);
+    assert.equal(await p.locator('details.ayuda').count(), 1, 'falta «Cómo se calcula» en ' + v); assert.equal(await p.locator('details.ayuda[open]').count(), 0, 'debe estar plegado en ' + v); }
+  await p.click('details.ayuda > summary'); assert.match(await p.locator('.ayuda-txt').innerText(), /Comercios nuevos/); await p.evaluate(() => { S.vista = 'directorio'; pintar(); });
+});
 await prueba('Vista del ejecutivo (26/11): interruptor, menú de 4 pestañas, un solo ejecutivo y vuelta a supervisión', async () => {
   await p.evaluate(() => { S.modo = 'sup'; S.vista = 'directorio'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(300);
   assert.equal(await p.locator('#btnModo').innerText(), 'Ver como ejecutivo');

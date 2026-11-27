@@ -655,6 +655,21 @@ table.datos tr.on td{background:var(--azul-t)}
 .cab-kpis .ck.or b,.cab-kpis .ck.vd b{color:#fff}
 .cab-kpis .ck span{font-size:11.5px;letter-spacing:.01em}
 .rail .nav button{gap:12px}
+
+/* Segunda tanda visual (26/11): un solo scroll en listas largas, ayuda plegable y barras con más presencia */
+.contenido>.panel-llena{display:flex;flex-direction:column;height:100%;min-height:320px;margin-bottom:0}
+.panel-llena .eq-dias.llena{flex:1;min-height:0;max-height:none;overflow:auto}
+.tabla-wrap{max-height:max(260px,calc(100vh - 430px))}
+.ficha .cuerpo{max-height:max(260px,calc(100vh - 380px))}
+.ayuda{background:var(--tarjeta);border:1px solid var(--linea);border-radius:12px;margin-top:14px}
+.ayuda>summary{cursor:pointer;list-style:none;padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--texto);display:flex;align-items:center;gap:8px}
+.ayuda>summary::-webkit-details-marker{display:none}
+.ayuda>summary::before{content:"?";display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);color:var(--muted);font-size:11px;font-weight:800}
+.ayuda[open]>summary{border-bottom:1px solid var(--linea)}
+.ayuda-txt{padding:10px 14px 12px;font-size:12px;line-height:1.55;color:var(--muted)}
+.datos td .barrita{height:6px;margin-top:5px}
+.datos td.n.num{font-weight:500}
+@media (max-width:1100px){.contenido>.panel-llena{height:auto}.panel-llena .eq-dias.llena{max-height:60vh}}
 </style>
 </head><body>
 <div id="app"><div class="cargando"><span class="spin"></span>Cargando…</div></div>
@@ -670,7 +685,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "793dbb";
+const BUILD = "8208c6";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1610,7 +1625,7 @@ function vistaDirectorio(){
     <table class="datos"><thead><tr><th>Distrito</th><th class="n">Asignados</th><th class="n">Visitados</th><th class="n">Cobertura</th><th class="n">Contacto</th><th class="n">Dirección errada</th></tr></thead>
     <tbody>${ds.map(([k, o]) => `<tr><td><b>${esc(k)}</b></td><td class="n num">${o.asig}</td><td class="n num">${o.vis.size}</td><td class="n num">${pc(o.asig ? o.vis.size / o.asig : null)}${barra(o.asig ? o.vis.size / o.asig : 0)}</td>
       <td class="n num">${pc(o.reg ? o.con / o.reg : null)}</td><td class="n num">${pc(o.reg ? o.err / o.reg : null)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">Sin comercios asignados.</td></tr>`}</tbody></table></div>`;
-  return chips + kp + tEj + tDis + `<div class="panel"><div class="atajos">Cobertura = comercios distintos con una visita válida ÷ comercios asignados (en un periodo por bloques, solo la base nueva). Contacto = visitas en que habló con alguien ÷ visitas. Dirección errada = visitas donde no se ubicó el comercio ÷ visitas. Los reactivados y el incentivo los define BBVA y se muestran solo en los periodos cerrados; en el periodo en curso quedan «—». Los periodos cerrados se leen tal como quedaron: no se modifican.</div></div>`;
+  return chips + kp + tEj + tDis + `<details class="ayuda"><summary>Cómo se calcula</summary><div class="ayuda-txt">Cobertura = comercios distintos con una visita válida ÷ comercios asignados (en un periodo por bloques, solo la base nueva). Contacto = visitas en que habló con alguien ÷ visitas. Dirección errada = visitas donde no se ubicó el comercio ÷ visitas. Los reactivados y el incentivo los define BBVA y se muestran solo en los periodos cerrados; en el periodo en curso quedan «—». Los periodos cerrados se leen tal como quedaron: no se modifican.</div></details>`;
 }
 
 // Equipo con el periodo que se eligió arriba: en un periodo cerrado se leen sus visitas y su base, y los días y la meta salen de ese periodo.
@@ -1697,7 +1712,7 @@ function vistaTiempos(){
     const l = vs.slice().sort((a, b) => D(a.visitado_en) - D(b.visitado_en));
     cuerpo = `<div class="panel"><div class="barra"><b>Detalle de registros · ${fISO(dia)}</b><span class="lbl">${l.length} visitas, por hora</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Resultado</th></tr></thead><tbody>${l.map(v => `<tr><td class="num">${hh(v.visitado_en)}</td><td><span class="ej">${AVATAR(ejDe(v.correo))}${esc(nombreCorto(ejDe(v.correo).nombre))}</span></td><td>${esc(v.comercio)}</td><td>${esc(v.distrito || "—")}</td><td>${esc(v.con === "Nadie" ? "Sin contacto" : "Con contacto")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Sin visitas ese día.</td></tr>`}</tbody></table></div></div>`;
   }
-  return ctl + cuerpo + `<div class="panel"><div class="atajos">Los intervalos no representan inactividad. La ventana (primera a última visita del día) no equivale a horas efectivas de trabajo. Con menos de dos visitas no se calculan ventana ni intervalos. Hora Perú.</div></div>`;
+  return ctl + cuerpo + `<details class="ayuda"><summary>Cómo se calcula</summary><div class="ayuda-txt">Los intervalos no representan inactividad. La ventana (primera a última visita del día) no equivale a horas efectivas de trabajo. Con menos de dos visitas no se calculan ventana ni intervalos. Hora Perú.</div></details>`;
 }
 function barrasFranjas(){
   const fil = S.ejecutivos.map(e => { const l = vivas().filter(v => v.correo === e.correo), n = l.length; return { e, n, p:FRANJAS_REP.map(([, a, b]) => n ? l.filter(v => { const m = horaMin(v); return m >= a && m < b; }).length * 100 / n : 0) }; });
@@ -1845,7 +1860,7 @@ function vistaEquipo(){
       <div class="eq-dias"><table class="datos"><thead><tr><th>Cuándo</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th></tr></thead><tbody>${todasRev.map(filaRev).join("") || `<tr><td colspan="4" class="muted">Todavía no hay revisitas en el periodo.</td></tr>`}</tbody></table></div>
     </div>
   </div></details>
-  <div class="panel"><div class="atajos">Comercios nuevos = comercios distintos con una visita válida que se hace por primera vez en el periodo, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono). Revisita = una visita posterior a un comercio ya visitado en el periodo: no suma a la meta, pero se registra con su resultado; «avanzó» es pasar de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos». Ritmo = comercios nuevos ÷ días hábiles corridos (contando hoy); los feriados no cuentan. Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman. Validación: validadas · por validar · observadas · anuladas.</div></div>`;
+  <details class="ayuda"><summary>Cómo se calcula</summary><div class="ayuda-txt">Comercios nuevos = comercios distintos con una visita válida que se hace por primera vez en el periodo, con o sin contacto (el indicador contra ${metaEj}); en un periodo por bloques suma solo la base nueva (igual que el bono). Revisita = una visita posterior a un comercio ya visitado en el periodo: no suma a la meta, pero se registra con su resultado; «avanzó» es pasar de sin contacto a hablar con alguien, o de «aún no decide» a «realizará consumos». Ritmo = comercios nuevos ÷ días hábiles corridos (contando hoy); los feriados no cuentan. Necesita = lo que falta para ${metaEj} ÷ días hábiles que quedan. Visitas con contacto = visitas en que habló con dueño o tercero, sobre todas sus visitas. Fuera de plazo = visitas que llegaron después del siguiente día hábil: se ven, pero no suman. Validación: validadas · por validar · observadas · anuladas.</div></details>`;
 }
 
 /* =========================================================================
@@ -2553,9 +2568,9 @@ function vistaCartera(){
   const prox = r => r.k === "por" ? "Visitar" : r.k === "err" ? "Validar dirección" : r.k === "sin" ? "Volver a visitar" : "—";
   const cuerpo = L.map(r => { const ej = ejDe(r.c.correo);
     return `<tr><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(r.c.nombre_comercial || r.c.razon_social)}</b></td><td>${esc(r.c.distrito || "—")}</td><td>${r.v ? fISO(iso(r.v.visitado_en)) : "—"}</td><td>${r.v ? `<span class="pill ${r.k === "con" ? "p-ok" : r.k === "err" ? "p-md" : "p-no"}">${esc(comoFue(r.v)[0])}</span>` : "—"}</td><td>${prox(r)}</td></tr>`; }).join("");
-  return `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Comercios del periodo · ${L.length} de ${filas.length}</b><span class="lbl">${filas.filter(r => r.k !== "por").length} con visita · ${filas.filter(r => r.k === "por").length} por visitar</span>
+  return `<div class="panel panel-llena"><div class="barra"><b>Comercios del periodo · ${L.length} de ${filas.length}</b><span class="lbl">${filas.filter(r => r.k !== "por").length} con visita · ${filas.filter(r => r.k === "por").length} por visitar</span>
       <div class="der"><input class="sel" id="carQ" type="search" placeholder="Buscar comercio o distrito" value="${esc(S.carQ || "")}" aria-label="Buscar"><select class="sel" id="carEst" aria-label="Estado">${CAR_EST.map(([k, t]) => `<option value="${k}" ${est === k ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
-    <div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Última visita</th><th>Resultado</th><th>Próxima acción</th></tr></thead><tbody>${cuerpo || `<tr><td colspan="6" class="muted">Ningún comercio con estos filtros.</td></tr>`}</tbody></table></div></div>`;
+    <div class="eq-dias llena"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Distrito</th><th>Última visita</th><th>Resultado</th><th>Próxima acción</th></tr></thead><tbody>${cuerpo || `<tr><td colspan="6" class="muted">Ningún comercio con estos filtros.</td></tr>`}</tbody></table></div></div>`;
 }
 const norm0 = s => String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function vistaMapaUnico(){
