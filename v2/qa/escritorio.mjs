@@ -535,7 +535,7 @@ await prueba('10/11: la base de más de 1.000 filas se lee por tramos y no se pi
   assert.ok(r.ultimo && r.primero, 'faltan el primero o el último comercio');
 });
 await prueba('Menú (26/11): orden del prototipo 4.0, entrada en Directorio franja de cifras y sin menú de reportes', async () => {
-  assert.deepEqual(await p.evaluate(() => VISTAS.filter(v => v[0] !== '--').map(v => v[0]).slice(0, 9)), ['directorio', 'resumen', 'equipo', 'mapa', 'cartera', 'validacion', 'tiempos', 'cierres', 'reporte'], 'orden del menú');
+  assert.deepEqual(await p.evaluate(() => VISTAS.filter(v => v[0] !== '--').map(v => v[0]).slice(0, 10)), ['directorio', 'resumen', 'equipo', 'mapa', 'cartera', 'seguimiento', 'validacion', 'tiempos', 'cierres', 'reporte'], 'orden del menú');
   assert.equal(await p.locator('#cabKpis .ck').count(), 6, 'la franja de cifras del periodo debe tener 6 datos');
   assert.match(await p.locator('#cabKpis').innerText(), /cartera asignada[\s\S]*visitados únicos[\s\S]*visitas realizadas[\s\S]*con contacto[\s\S]*reactivados BBVA/, 'textos de la franja');
   assert.equal(await p.locator('details.mas').count(), 0, 'ya no hay menú de reportes');
@@ -658,6 +658,18 @@ await prueba('Comercios aparte de la base (26/11): se ven aparte, no suman y el 
     delete fx.rpc.v2_apartes; await cargarBase(); return a; });
   assert.equal(r.hay, true); assert.equal(r.origen, 'base_anterior'); assert.equal(r.suma, false, 'no debe sumar a la meta'); assert.ok(r.otros, 'el resto debe quedar con origen');
   assert.equal(r.cartera, r.esperada, 'la cartera debe quedar sin el comercio aparte'); assert.ok(r.sinFuncion, 'sin la función no debe cambiar nada');
+});
+await prueba('Seguimiento (26/11): check-ins contra los reactivados de BBVA, con y sin lista', async () => {
+  await p.evaluate(() => { delete window.__FX.tablas.v2_cortes_bbva; delete window.__FX.tablas.v2_resultados_bbva; S.reac = null; S.segs = null; S.dirPer = null; S.vista = 'seguimiento'; elegirEj('todos'); pintar(); }); await p.waitForTimeout(600);
+  assert.match(await p.locator('#contenido').innerText(), /Todavía no hay una lista de reactivados/, 'sin corte debe avisar qué cargar');
+  assert.match(await p.locator('#contenido').innerText(), /Check-ins por ejecutivo/);
+  const r = await p.evaluate(() => { const c = S.base.find(x => x.correo); const hoy = hoyISO(); window.__FX.tablas.v2_cortes_bbva = [{ corte: hoy }]; window.__FX.tablas.v2_resultados_bbva = [{ corte: hoy, customer_id: c.customer_id, reactivado: 'Si' }];
+    window.__FX.tablas.v2_seguimientos = [{ customer_id: c.customer_id, correo: c.correo, canal: 'Llamada', resultado: 'Respondió: va a usar el POS', nota: '', hecho_en: new Date().toISOString() }]; S.reac = null; S.segs = null; pintar(); return { cid: c.customer_id, correo: c.correo }; });
+  await p.waitForTimeout(800);
+  const t = (await p.locator('#contenido').innerText()).replace(/\s+/g, ' ');
+  assert.match(t, /Reactivados según BBVA al corte/, 'con corte debe mostrar la lista'); assert.match(t, /Comercios reactivados · 1/);
+  assert.equal(await p.locator('.pill.p-ok', { hasText: 'Sí' }).count(), 1, 'el reactivado con check-in debe salir con «Sí»');
+  await p.evaluate(() => { delete window.__FX.tablas.v2_cortes_bbva; delete window.__FX.tablas.v2_resultados_bbva; delete window.__FX.tablas.v2_seguimientos; S.reac = null; S.segs = null; S.vista = 'directorio'; pintar(); });
 });
 await prueba('Tiempos · Resumen diario rediseñado (26/11): una tarjeta por ejecutivo más la del equipo, y día anterior/siguiente', async () => {
   const d0 = await p.evaluate(() => { S.vista = 'tiempos'; S.tTab = 'dia'; S.tDia = iso(S.act[0].visitado_en); elegirEj('todos'); pintar(); return S.tDia; }); await p.waitForTimeout(400);

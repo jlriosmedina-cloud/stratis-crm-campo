@@ -685,7 +685,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "eaf9fd";
+const BUILD = "9b0fab";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1069,6 +1069,7 @@ const VISTAS = [
   ["equipo","Equipo", ICON.equipo, null],
   ["mapa","Mapa", ICON.mapa, null],
   ["cartera","Cartera", ICON.cartera, null],
+  ["seguimiento","Seguimiento", ICON.fb, null],
   ["validacion","Actividad", ICON.cola, () => S.act.filter(v => v.estado_anul === "pendiente" || estadoDe(v) === "pend").length + (S.retenidas || []).length],
   ["tiempos","Tiempos", ICON.aud, null],
   ["cierres","Cierres", ICON.cierre, null],
@@ -1122,6 +1123,7 @@ function pintar(){
   cabKpis();
   const c = $("#contenido");
   const T = { miavance:["Mi avance","Cómo va el ejecutivo elegido contra su meta del periodo y qué le queda pendiente. Es la pantalla tal como la ve él."],
+              seguimiento:["Seguimiento","Qué hace cada ejecutivo para que los comercios visitados se reactiven: sus check-ins contra los comercios que BBVA reporta reactivados."],
               resumen:["Resumen de gestión","Cartera, visitas y contacto del equipo en el periodo, y cómo va cada ejecutivo."],
               tiempos:["Consulta de tiempos","A qué hora registra visitas cada ejecutivo: por día, acumulado del periodo, por franjas y el detalle de los registros."],
               reporte:["Reporte de gestión del equipo","Resumen del periodo, gestión por ejecutivo con su ventana de trabajo y las franjas del día."],
@@ -1150,7 +1152,7 @@ function pintar(){
   const mismo = S._pinto && S._pinto.vista === S.vista && S._pinto.sel === S.sel && S._pinto.tab === S.tab;
   const scrolls = mismo ? [".tabla-wrap",".ficha .cuerpo",".lista",".contenido"].map(q => { const el = c.querySelector(q) || (q === ".contenido" ? c : null); return [q, el ? el.scrollTop : 0]; }) : [];
   // Las cargas son de todo el equipo: ahí no se filtra por ejecutivo
-  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "miavance" ? vistaMiAvance() : S.vista === "validacion" ? vistaValidacion() : S.vista === "cartera" ? vistaCartera() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
+  c.innerHTML = S.vista === "cargas" ? vistaCargas() : S.vista === "directorio" ? vistaDirectorio() : S.vista === "mapa" ? vistaMapaUnico() : conEj(() => S.vista === "miavance" ? vistaMiAvance() : S.vista === "seguimiento" ? conPeriodoElegido(vistaSeguimiento) : S.vista === "validacion" ? vistaValidacion() : S.vista === "cartera" ? vistaCartera() : S.vista === "equipo" ? equipoPeriodo() : S.vista === "resumen" ? conPeriodoElegido(vistaResumen) : S.vista === "tiempos" ? conPeriodoElegido(vistaTiempos) : S.vista === "reporte" ? conPeriodoElegido(vistaReporte) : S.vista === "auditoria" ? vistaAuditoria() : S.vista === "cierres" ? vistaCierres() : vistaIndicadores());
   Object.entries(campos).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.value !== v && !(id === "mSel" && ![...el.options].some(o => o.value === v))) el.value = v; });
   scrolls.forEach(([q, t]) => { const el = q === ".contenido" ? c : c.querySelector(q); if (el) el.scrollTop = t; });
   if (foco){ const el = document.getElementById(foco.id); if (el){ el.focus(); try { if (foco.s != null) el.setSelectionRange(foco.s, foco.e); } catch(e){} } }
@@ -2547,6 +2549,52 @@ const muRampaErr = c => c == null || c === 0 ? "#E4E8FB" : c < .1 ? "#FBD5B8" : 
 function muPeriodo(fn){ cargarPeriodos(); return conPeriodoId(S.dirPer, fn); }
 /* Cartera (26/11): los comercios del periodo con su última visita y su próxima acción. Solo lectura. */
 const CAR_EST = [["", "Todos los estados"], ["por", "Por visitar"], ["vis", "Visitados"], ["con", "Con contacto"], ["sin", "Sin contacto"], ["err", "No se encontró el comercio"]];
+/* Seguimiento (26/11, check-in): cruza lo que registra cada ejecutivo (v2_seguimientos) con los comercios que BBVA reporta reactivados (último corte del
+   periodo en v2_resultados_bbva). Solo lee; no cambia la visita, el estado ni el bono. Sin corte de reactivados, muestra los check-ins y avisa qué cargar. */
+async function cargarReactivados(per){
+  S.reac ||= {}; if (!per || S.reac[per] !== undefined) return; S.reac[per] = null;
+  const p = (S.periodos || []).find(x => x.id === per) || S.periodo; if (!p){ S.reac[per] = { corte:null, ids:new Set() }; return; }
+  try {
+    const k = await sb.from("v2_cortes_bbva").select("corte").gte("corte", p.ini).lte("corte", p.fin).order("corte", { ascending:false }).limit(1);
+    if (k && k.error) throw k.error;
+    const corte = k && k.data && k.data[0] ? k.data[0].corte : null;
+    if (!corte){ S.reac[per] = { corte:null, ids:new Set() }; pintar(); return; }
+    const ids = new Set();   // por tramos de 1.000 con orden fijo (tope de la API)
+    for (let i = 0; ; i += 1000){
+      const r = await sb.from("v2_resultados_bbva").select("customer_id").eq("corte", corte).eq("reactivado", "Si").order("customer_id").range(i, i + 999);
+      if (r && r.error) throw r.error;
+      const d = (r && r.data) || []; d.forEach(x => ids.add(x.customer_id));
+      if (d.length < 1000) break;
+    }
+    S.reac[per] = { corte, ids };
+  } catch(e){ S.reac[per] = { error: (e && e.message) || "No se pudo leer" }; }
+  pintar();
+}
+function vistaSeguimiento(){
+  const perId = S.dirPer || (S.periodo || {}).id; cargarSegs(perId); cargarReactivados(perId);
+  const sg = (S.segs && S.segs[perId]) || [], rv = S.reac && S.reac[perId];
+  const ult = {}; S.act.filter(v => v.estado_anul !== "anulada").sort((x, y) => D(x.visitado_en) - D(y.visitado_en)).forEach(v => { ult[v.customer_id] = v; });
+  const base = S.base.filter(c => c.correo && (!S.hayOrigen || c.origen === "base_nueva"));
+  // caso de seguimiento: la última visita quedó abierta (sin contacto, «aún no decide» o quedaron en volver)
+  const esCaso = v => v && (v.con === "Nadie" ? v.motivo !== "Dirección errada" : (v.que === "Reagendada" || v.decision === "Aún no decide"));
+  const segDe = {}; sg.forEach(r => { (segDe[r.customer_id] ||= []).push(r); });
+  const hayCorte = !!(rv && rv.corte), ids = hayCorte ? rv.ids : new Set(), enBase = new Set(base.map(c => c.customer_id)), fuera = hayCorte ? [...ids].filter(id => !enBase.has(id)).length : 0, corteTxt = hayCorte ? fISO(rv.corte) : null;
+  const filas = S.ejecutivos.map(e => {
+    const mios = base.filter(c => c.correo === e.correo), casos = mios.filter(c => esCaso(ult[c.customer_id])), conSeg = casos.filter(c => (segDe[c.customer_id] || []).some(r => r.correo === e.correo)).length;
+    const reac = mios.filter(c => ids.has(c.customer_id)), reacSeg = reac.filter(c => (segDe[c.customer_id] || []).some(r => r.correo === e.correo && iso(r.hecho_en) <= rv.corte)).length;
+    return { e, casos:casos.length, conSeg, checkins:sg.filter(r => r.correo === e.correo).length, reac:reac.length, reacSeg, reacSin:reac.length - reacSeg };
+  });
+  const T = filas.reduce((a, f) => { ["casos", "conSeg", "checkins", "reac", "reacSeg", "reacSin"].forEach(k => { a[k] += f[k]; }); return a; }, { casos:0, conSeg:0, checkins:0, reac:0, reacSeg:0, reacSin:0 });
+  const pc = (a, b) => b ? Math.round(a * 100 / b) + " %" : "—";
+  const tile = (k, v, d, cls) => `<div class="tile ${cls || ""}"><div class="k">${k}</div><div class="v num">${v}</div><div class="d">${d}</div></div>`;
+  const aviso = rv === undefined || rv === null ? `<div class="aviso">Leyendo los reactivados de BBVA…</div>` : rv.error ? `<div class="aviso mal">No se pudo leer la lista de reactivados: ${esc(rv.error)} <button class="btn" data-reac-reintentar="${esc(perId)}" style="margin-left:8px">Reintentar</button></div>` : !hayCorte ? `<div class="aviso warn"><b>Todavía no hay una lista de reactivados dentro de este periodo.</b> Cuando cargues los comercios reactivados en <b>Cargas</b> (resultados de reactivación, por documento), este cuadro los cruza con los check-ins de cada ejecutivo. Mientras tanto ves los check-ins y los casos abiertos.</div>` : `<div class="aviso ok">Reactivados según BBVA al corte del <b>${corteTxt}</b>. «Con check-in» = el ejecutivo registró un seguimiento del comercio antes o el día del corte.${fuera ? ` ${fuera} reactivado${fuera === 1 ? "" : "s"} de la lista no ${fuera === 1 ? "está" : "están"} en la base nueva de este periodo y no se cruza${fuera === 1 ? "" : "n"}.` : ""}</div>`;
+  const tiles = `<div class="resumen" style="margin-bottom:14px">${tile("Casos para seguimiento", T.casos, "visita sin contacto, «aún no decide» o quedaron en volver")}${tile("Con check-in", T.conSeg + '<small> / ' + T.casos + '</small>', pc(T.conSeg, T.casos) + " de los casos tiene un seguimiento registrado", T.casos && T.conSeg < T.casos ? "warn" : "ok")}${tile("Check-ins del periodo", T.checkins, "llamada, WhatsApp o correo")}${tile("Reactivados BBVA", hayCorte ? T.reac : "—", hayCorte ? `al corte del ${corteTxt}` : "sin lista cargada")}${tile("Reactivados con check-in", hayCorte ? T.reacSeg + '<small> / ' + T.reac + '</small>' : "—", hayCorte ? pc(T.reacSeg, T.reac) + " tuvo gestión del ejecutivo" : "se calcula con la lista", hayCorte && T.reacSin ? "warn" : "")}${tile("Reactivados sin check-in", hayCorte ? T.reacSin : "—", hayCorte ? "reactivaron sin un seguimiento registrado" : "se calcula con la lista")}</div>`;
+  const tEj = `<div class="panel" style="margin-bottom:16px"><div class="barra"><b>Check-ins por ejecutivo</b><span class="lbl">casos abiertos, cuántos tienen seguimiento y, con la lista de BBVA, cuántos reactivados tuvieron gestión</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th class="n">Casos</th><th class="n">Con check-in</th><th class="n">Cobertura</th><th class="n">Check-ins</th><th class="n">Reactivados</th><th class="n">Con check-in</th><th class="n">Sin check-in</th></tr></thead><tbody>${filas.map(f => `<tr><td><span class="ej">${AVATAR(f.e)}${esc(f.e.nombre)}</span></td><td class="n num">${f.casos}</td><td class="n num">${f.conSeg}</td><td class="n num">${pc(f.conSeg, f.casos)}</td><td class="n num">${f.checkins}</td><td class="n num">${hayCorte ? f.reac : "—"}</td><td class="n num">${hayCorte ? f.reacSeg : "—"}</td><td class="n num">${hayCorte ? f.reacSin : "—"}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">Sin ejecutivos.</td></tr>`}</tbody></table></div></div>`;
+  const lista = hayCorte ? base.filter(c => ids.has(c.customer_id)).map(c => { const v = ult[c.customer_id], l = (segDe[c.customer_id] || []).filter(r => r.correo === c.correo).sort((a, b) => D(b.hecho_en) - D(a.hecho_en)), antes = l.filter(r => iso(r.hecho_en) <= rv.corte); return { c, v, l, antes }; }).sort((a, b) => a.antes.length - b.antes.length || String(a.c.nombre_comercial).localeCompare(String(b.c.nombre_comercial))) : [];
+  const tRea = hayCorte ? `<div class="panel"><div class="barra"><b>Comercios reactivados · ${lista.length}</b><span class="lbl">primero los que reactivaron sin check-in registrado</span></div><div class="eq-dias"><table class="datos"><thead><tr><th>Ejecutivo</th><th>Comercio</th><th>Última visita</th><th>Check-ins</th><th>Último check-in</th><th>¿Gestión antes del corte?</th></tr></thead><tbody>${lista.slice(0, 300).map(({ c, v, l, antes }) => { const ej = ejDe(c.correo), u = l[0];
+    return `<tr><td><span class="ej">${AVATAR(ej)}${esc(nombreCorto(ej.nombre))}</span></td><td><b>${esc(c.nombre_comercial || c.razon_social || c.customer_id)}</b><small class="muted" style="display:block">${esc(c.distrito || "—")}</small></td><td>${v && !isNaN(D(v.visitado_en)) ? fISO(iso(v.visitado_en)) + `<small class="muted" style="display:block">${esc(comoFue(v)[0])}</small>` : "—"}</td><td class="n num">${l.length}</td><td>${u ? fISO(iso(u.hecho_en)) + " · " + esc(u.canal) + `<small class="muted" style="display:block">${esc(u.resultado)}</small>` : "—"}</td><td>${antes.length ? `<span class="pill p-ok">Sí</span>` : l.length ? `<span class="pill p-md">Solo después del corte</span>` : `<span class="pill p-no">Sin check-in</span>`}</td></tr>`; }).join("") || `<tr><td colspan="6" class="muted">Ningún comercio de la base está en la lista de reactivados.</td></tr>`}</tbody></table></div></div>` : "";
+  return aviso + tiles + tEj + tRea;
+}
 /* Mi avance (vista del ejecutivo): sus pendientes y, debajo, su avance contra la meta (la misma pantalla de Equipo, con un solo ejecutivo). */
 function vistaMiAvance(){
   const e = S.ejecutivos[0]; if (!e) return `<div class="panel"><div class="vacio">No hay un ejecutivo para mostrar.</div></div>`;
@@ -3032,7 +3080,7 @@ document.addEventListener("click", async ev => {
     if (!correo){ $("#lErr").innerHTML = `<div class="aviso mal err">Escribe tu correo arriba y vuelve a tocar «¿Olvidaste tu contraseña?».</div>`; return; }
     try { await sb.auth.resetPasswordForEmail(correo, { redirectTo: location.origin + location.pathname }); } catch(e){}
     $("#lErr").innerHTML = `<div class="aviso">Si ese correo tiene acceso, te enviamos un enlace para crear tu contraseña. Dura 60 minutos.</div>`; return; }
-  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-base-bbva],[data-ir-dia],[data-mdist],#btnTema,#btnModo,[data-eje],[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
+  const t = ev.target.closest("[data-recup-validar],[data-recup-observar],[data-descartar-ret],[data-base-bbva],[data-ir-dia],[data-mdist],#btnTema,#btnModo,[data-reac-reintentar],[data-eje],[data-vista],[data-filtro],[data-sel],[data-accion],[data-cancelar],[data-confirmar],[data-tab],[data-traza],[data-copiar],[data-ir-cola],[data-ir-traza],[data-tipo],[data-salir],[data-refrescar],#elegir,#otroArchivo,#cargar,#guardarTotales,#otraCarga,#valBloque,#limpiarSel,#btnPausa");
   if (!t) return;
   if (t.hasAttribute("data-recup-validar")){ validarRecupero(t.dataset.recupValidar, true); return; }
   if (t.hasAttribute("data-recup-observar")){ validarRecupero(t.dataset.recupObservar, false); return; }
@@ -3050,6 +3098,7 @@ document.addEventListener("click", async ev => {
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
   if (t.id === "btnTema"){ cambiarTema(); return; }
   if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; elegirEj(t.dataset.irEj || "todos"); S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
+  if (t.dataset.reacReintentar){ if (S.reac) delete S.reac[t.dataset.reacReintentar]; pintar(); return; }
   if (t.id === "btnModo"){ S.sel = null; S.muSel = null; S.accion = null;
     if (S.modo !== "eje"){ S._antesEje = { vista: S.vista, ej: S.ej, filtro: S.filtro, dia: S.dia }; S.modo = "eje"; S.vista = "miavance"; }
     else { const a = S._antesEje || { vista: "directorio", ej: "todos" }; S.modo = "sup"; S.vista = a.vista; if (a.filtro) S.filtro = a.filtro; if (a.dia) S.dia = a.dia; elegirEj(a.ej); }
@@ -3115,7 +3164,7 @@ document.addEventListener("click", ev => {
   const b = ev.target.closest("[data-dirper]"); if (b){ const id = b.dataset.dirper; if (S.dirDatos && S.dirDatos[id] && S.dirDatos[id].err) delete S.dirDatos[id]; S.dirPer = id; pintar(); } });
 /* ---------- arranque ---------- */
 (async function(){
-  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","cartera","bloques","equipo","mapa","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
+  try { const h = location.hash.replace("#",""); if (["directorio","resumen","tiempos","reporte","validacion","cartera","seguimiento","bloques","equipo","mapa","cierres","cargas"].includes(h)) S.vista = h; } catch(e){}
   if (/type=recovery/.test(location.hash)) S.nuevaClave = {};   // llega por el enlace del correo de recuperación
   const { data } = await sb.auth.getSession();
   S.sesion = data.session || null;
