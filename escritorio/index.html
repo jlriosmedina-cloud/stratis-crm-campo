@@ -685,7 +685,7 @@ table.datos tr.on td{background:var(--azul-t)}
 "use strict";
 const SUPABASE_URL = "https://xwvpnagvdrjffayzsnke.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_-WtGPS_yJYllxVMR0RCDQg_kQHLHSPq";   // publicable por diseño
-const BUILD = "8208c6";
+const BUILD = "eaf9fd";
 var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, storageKey:"stratis-v2-sesion" } });
 
 /* ---------- reglas de las señales (umbrales) ---------- */
@@ -1081,8 +1081,8 @@ const VISTAS = [
 // Jose (26/11): el menú queda solo con las pestañas del prototipo; las herramientas siguen en el código y se abren por su dirección (#cargas, #rutas…).
 const NAV_VISTAS = VISTAS.slice(0, VISTAS.findIndex(v => v[0] === "--"));
 // Vista del ejecutivo (26/11): el interruptor de arriba deja la pantalla como la ve un ejecutivo (Jose y Gabriel); solo lee, no escribe nada.
-const NAV_EJE = [["avance","Mi avance",ICON.equipo],["cartera","Mi cartera",ICON.cartera],["alertas","Mis alertas",ICON.cola],["mapa","Mi mapa",ICON.mapa]];
-function claveEje(){ return S.vista === "miavance" ? "avance" : S.vista === "cartera" ? "cartera" : S.vista === "mapa" ? (S.muTab === "ale" ? "alertas" : "mapa") : ""; }
+const NAV_EJE = [["avance","Mi avance",ICON.equipo],["cartera","Mi cartera",ICON.cartera],["actividad","Mi actividad",ICON.cola],["alertas","Mis alertas",ICON.cola],["mapa","Mi mapa",ICON.mapa]];
+function claveEje(){ return S.vista === "miavance" ? "avance" : S.vista === "cartera" ? "cartera" : S.vista === "validacion" ? "actividad" : S.vista === "mapa" ? (S.muTab === "ale" ? "alertas" : "mapa") : ""; }
 function pintarNav(){
   $("#nav").innerHTML = S.modo === "eje" ? NAV_EJE.map(([k,t,i]) => `<button class="${claveEje()===k?"on":""}" data-eje="${k}">${i}${t}</button>`).join("") : NAV_VISTAS.map(([k,t,i,c]) => k === "--" ? `<div class="sec">${t}</div>` : `<button class="${S.vista===k?"on":""}" data-vista="${k}">${i}${t}${c ? `<span class="cnt">${c()}</span>` : ""}</button>`).join("");
   const p = S.periodo;
@@ -1111,7 +1111,7 @@ function pintar(){
   if (!app.querySelector(".rail")) app.innerHTML = cascaron();
   if (S.modo === "eje"){
     if (S.ej === "todos" && S.ejecutivos.length) elegirEj(S.ejecutivos[0].correo);
-    if (!["miavance","cartera","mapa"].includes(S.vista)) S.vista = "miavance";
+    if (!["miavance","cartera","validacion","mapa"].includes(S.vista)) S.vista = "miavance";
   }
   pintarNav();
   $("#vivoTxt").textContent = S.pausa ? "Actualización en pausa" : textoVivo();
@@ -1259,14 +1259,14 @@ function vistaValidacion(){
   const activas = S.act.filter(v => v.estado_anul !== "anulada"), esRev = v => v.con === "Nadie" && MOTIVOS_REVISAR.includes(v.motivo);
   const porEj = S.ejecutivos.map(e => { const l = activas.filter(v => v.correo === e.correo), n = l.filter(esRev).length; return { e, n, t:l.length, p:l.length ? Math.round(n * 100 / l.length) : 0 }; })
     .filter(x => x.t).sort((a, b) => b.p - a.p || b.n - a.n);
-  const nRev = activas.filter(esRev).length;
-  return `${panelRetenidas()}
+  const nRev = activas.filter(esRev).length, eje = S.modo === "eje";
+  return `${eje ? "" : panelRetenidas()}
   <div class="resumen">
     <div class="tile"><div class="k">Visitas hoy</div><div class="v num">${hoy.length}</div><div class="d">${S.ejecutivos.map(e => `${esc(e.ini)} ${hoy.filter(v => v.correo === e.correo).length}`).join(" · ") || "sin ejecutivos"}</div></div>
     <div class="tile ${obs.length ? "warn" : ""}"><div class="k">Observadas</div><div class="v num">${obs.length}</div><div class="d">el ejecutivo las ve «en revisión»</div></div>
     <div class="tile ${sinGps ? "bad" : "ok"}"><div class="k">Sin GPS hoy</div><div class="v num">${sinGps}</div><div class="d">sin ubicación no cuentan como visita</div></div>
     <div class="tile ${nRev ? "warn" : ""}" title="Visitas con «Zona insegura» u «Otro motivo» sobre todas las visitas no anuladas del periodo de cada ejecutivo, incluidas las sin GPS o fuera de plazo (no es la misma base que «Comercios visitados»). Cuentan como visita; solo es para revisar el comentario."><div class="k">Zona insegura u otro motivo</div><div class="v num">${nRev}</div><div class="d">${porEj.map(x => `${esc(x.e.ini)} ${x.p} %`).join(" · ") || "sin visitas"}</div></div>
-    <div class="tile ${pedidos ? "warn" : ""}"><div class="k">Pedidos de anulación</div><div class="v num">${pedidos}</div><div class="d">esperan tu decisión</div></div>
+    ${eje ? "" : `<div class="tile ${pedidos ? "warn" : ""}"><div class="k">Pedidos de anulación</div><div class="v num">${pedidos}</div><div class="d">esperan tu decisión</div></div>`}
     <div class="tile acc"><div class="k">Comercios visitados</div><div class="v num">${comerciosVis}<small> / ${metaEq}</small></div><div class="d">${cuentan} visitas en el periodo · ${validas} validadas${notaAnterior(S.act)}</div></div>
   </div>
   <div class="split">
@@ -1280,12 +1280,12 @@ function vistaValidacion(){
           <label class="lbl"><input type="checkbox" id="fSenal" ${S.soloSenal?"checked":""}> Solo con señales</label>
         </div>
       </div>
-      ${S.marcadas.size ? `<div class="barra" style="background:var(--azul-t)"><b class="num">${S.marcadas.size} seleccionadas</b><span class="lbl">en bloque solo se validan las que no tienen señales</span><div class="der"><button class="btn v" id="valBloque">${ICON.ok} Validar ${[...S.marcadas].filter(id => { const v = S.act.find(x=>x.id===id); return v && senales(v).length===0; }).length} sin señales</button><button class="btn" id="limpiarSel">Quitar selección</button></div></div>` : ""}
+      ${!eje && S.marcadas.size ? `<div class="barra" style="background:var(--azul-t)"><b class="num">${S.marcadas.size} seleccionadas</b><span class="lbl">en bloque solo se validan las que no tienen señales</span><div class="der"><button class="btn v" id="valBloque">${ICON.ok} Validar ${[...S.marcadas].filter(id => { const v = S.act.find(x=>x.id===id); return v && senales(v).length===0; }).length} sin señales</button><button class="btn" id="limpiarSel">Quitar selección</button></div></div>` : ""}
       <div class="tabla-wrap">
-      ${lista.length ? `<table class="cola"><thead><tr><th class="chk"></th><th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
+      ${lista.length ? `<table class="cola"><thead><tr>${eje ? "" : `<th class="chk"></th>`}<th>Hora</th><th>Ejecutivo</th><th>Comercio</th><th>Resultado</th><th>Señales</th>${S.filtro === "todos" ? "<th>Estado</th>" : ""}</tr></thead><tbody>
         ${lista.slice(0, 400).map(v => { const e = ejDe(v.correo), sn = senales(v); return `
         <tr class="f ${S.sel===v.id?"sel":""} ${S.nuevas.has(v.id)?"nueva":""}" data-sel="${v.id}">
-          <td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>
+          ${eje ? "" : `<td class="chk"><input type="checkbox" data-marca="${v.id}" ${S.marcadas.has(v.id)?"checked":""} ${estadoDe(v)!=="pend"?"disabled":""} aria-label="Seleccionar"></td>`}
           <td class="num"><b>${hh(v.visitado_en)}</b>${esHoy(v) ? "" : `<br><small style="color:var(--muted)">${dd(v.visitado_en)}</small>`}</td>
           <td title="${esc(e.nombre)}"><span class="ej">${AVATAR(e)}<span class="ej-n">${esc(nombreCorto(e.nombre))}</span></span></td>
           <td class="com"><b title="${esc(v.comercio)}">${esc(v.comercio)}</b><small>${esc(idTxt(v.customer_id))} · ${esc(v.distrito || "sin distrito")}</small></td>
@@ -1295,7 +1295,7 @@ function vistaValidacion(){
         </tr>`; }).join("")}
       </tbody></table>${lista.length > 400 ? `<div class="ver-mas">Se muestran 400 de ${lista.length}. Afina el filtro.</div>` : ""}` : `<div class="vacio">No hay visitas con ese filtro.${S.filtro === "pend" ? " La cola está al día." : ""}</div>`}
       </div>
-      <div class="atajos"><kbd>↑</kbd> <kbd>↓</kbd> moverse · <kbd>V</kbd> validar · <kbd>O</kbd> observar · <kbd>A</kbd> anular · <kbd>Esc</kbd> cancelar</div>
+      <div class="atajos">${eje ? "<kbd>↑</kbd> <kbd>↓</kbd> moverse entre visitas" : "<kbd>↑</kbd> <kbd>↓</kbd> moverse · <kbd>V</kbd> validar · <kbd>O</kbd> observar · <kbd>A</kbd> anular · <kbd>Esc</kbd> cancelar"}</div>
     </div>
     ${sel ? ficha(sel) : `<div class="panel ficha"><div class="vacio">Elige una visita para verla completa.</div></div>`}
   </div>`;
@@ -1380,7 +1380,7 @@ function ficha(v){
       <div class="meta">${esc(v.razon_social || "")}${v.ruc && v.ruc !== docDe(v.customer_id) ? " · RUC " + esc(v.ruc) : ""} · ${docDe(v.customer_id) ? "Doc. BBVA" : "Customer ID"} <b>${esc(docDe(v.customer_id) || v.customer_id)}</b><br>${esc(v.direccion || "sin dirección")}${v.distrito ? ", " + esc(v.distrito) : ""}${v.ruta ? ` · ${esc(v.ruta)}${v.orden ? " orden " + v.orden : ""}` : ""}${v.terminales ? ` · ${v.terminales} terminal${v.terminales>1?"es":""}` : ""}${c.estado ? ` · en el CRM: ${esc(c.estado)}` : ""}</div>
     </div>
     <div class="cuerpo">
-      ${v.estado_anul === "pendiente" ? `<div class="aviso warn"><b>${esc(nomDe(v.anul_pedida_por))} pide anular esta visita</b> (${ddhh(v.anul_pedida_en)}): «${esc(v.anul_motivo || "")}». Si la anulas, deja de contar; si rechazas el pedido, sigue contando.</div>` : ""}
+      ${v.estado_anul === "pendiente" && S.modo !== "eje" ? `<div class="aviso warn"><b>${esc(nomDe(v.anul_pedida_por))} pide anular esta visita</b> (${ddhh(v.anul_pedida_en)}): «${esc(v.anul_motivo || "")}». Si la anulas, deja de contar; si rechazas el pedido, sigue contando.</div>` : ""}
       ${k === "obs" ? `<div class="aviso warn"><b>Observada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}: ${esc(v.validacion_motivo || "")}. ${esc(v.validacion_nota || "")} El ejecutivo la ve «en revisión» en su celular${v.puede_editar ? ` y puede corregirla hasta el ${fISO(v.limite_edicion)}` : "; su plazo de corrección ya venció"}. Sigue contando hasta que decidas.</div>` : ""}
       ${k === "val" ? (v.validacion_por === "automática" || !v.validacion_por ? `<div class="aviso ok"><b>Aceptada</b> como la registró el ejecutivo.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>` : `<div class="aviso ok"><b>Validada</b> por ${esc(nomDe(v.validacion_por))} el ${ddhh(v.validacion_en)}.${v.validacion_nota ? " " + esc(v.validacion_nota) : ""}</div>`) : ""}
       ${k === "anu" ? `<div class="aviso mal"><b>Anulada</b>: ${esc(v.anul_motivo || "")}${v.anul_nota ? " · " + esc(v.anul_nota) : ""}. No cuenta.</div>` : ""}
@@ -1411,18 +1411,18 @@ function ficha(v){
       ${prev.length ? `<div><h3>Otras visitas a este comercio en el periodo</h3><div class="hist">${prev.map(p => `<div><span class="num">${ddhh(p.visitado_en)} · ${esc(nombreCorto(ejDe(p.correo).nombre))}</span><span>${esc(comoFue(p)[0])} · ${esc(comoFue(p)[1])}</span>${pill(p)}</div>`).join("")}</div></div>` : ""}
       <div><h3>Bitácora</h3>${lineaTiempo(v)}</div>
     </div>
-    <div class="motivo ${S.accion ? "on" : ""}" id="motivo">
-      ${S.accion === "obs" ? `<label for="mSel">Motivo de la observación (el ejecutivo lo ve en su celular)</label><select id="mSel">${OBS_MOTIVOS.map(m=>`<option>${m}</option>`).join("")}</select><label for="mNota">Nota para el ejecutivo</label><textarea id="mNota" rows="2" placeholder="Qué debe corregir o confirmar"></textarea><div class="fila"><button class="btn" data-cancelar>Cancelar</button><button class="btn a" data-confirmar="obs">Observar</button></div>` : ""}
-      ${S.accion === "anu" ? `<label for="mSel">Motivo de la anulación</label><select id="mSel">${ANU_MOTIVOS.map(m=>`<option>${m}</option>`).join("")}</select><label for="mNota">Nota (queda en la bitácora)</label><textarea id="mNota" rows="2"></textarea><div class="fila"><button class="btn" data-cancelar>Cancelar</button><button class="btn r" data-confirmar="anu">Anular · deja de contar</button></div>` : ""}
+    <div class="motivo ${S.accion && S.modo !== "eje" ? "on" : ""}" id="motivo">
+      ${S.modo !== "eje" && S.accion === "obs" ? `<label for="mSel">Motivo de la observación (el ejecutivo lo ve en su celular)</label><select id="mSel">${OBS_MOTIVOS.map(m=>`<option>${m}</option>`).join("")}</select><label for="mNota">Nota para el ejecutivo</label><textarea id="mNota" rows="2" placeholder="Qué debe corregir o confirmar"></textarea><div class="fila"><button class="btn" data-cancelar>Cancelar</button><button class="btn a" data-confirmar="obs">Observar</button></div>` : ""}
+      ${S.modo !== "eje" && S.accion === "anu" ? `<label for="mSel">Motivo de la anulación</label><select id="mSel">${ANU_MOTIVOS.map(m=>`<option>${m}</option>`).join("")}</select><label for="mNota">Nota (queda en la bitácora)</label><textarea id="mNota" rows="2"></textarea><div class="fila"><button class="btn" data-cancelar>Cancelar</button><button class="btn r" data-confirmar="anu">Anular · deja de contar</button></div>` : ""}
     </div>
-    <div class="acciones ${S.ocupado ? "cargando-btn" : ""}">
+    ${S.modo === "eje" ? "" : `<div class="acciones ${S.ocupado ? "cargando-btn" : ""}">
       ${puede && k !== "val" ? `<button class="btn v" data-accion="val">${ICON.ok} Validar<kbd>V</kbd></button>` : ""}
       ${puede && k !== "obs" ? `<button class="btn a" data-accion="obs">Observar<kbd>O</kbd></button>` : ""}
       ${puede && k === "obs" ? `<button class="btn" data-accion="cola">Levantar la observación</button>` : ""}
       ${puede ? `<button class="btn r" data-accion="anu">Anular<kbd>A</kbd></button>` : `<button class="btn" data-accion="rest">Restituir</button>`}
       ${v.estado_anul === "pendiente" ? `<button class="btn" data-accion="rech">Rechazar el pedido</button>` : ""}
       <button class="btn q" data-ir-traza="${v.id}" style="margin-left:auto">Ver en auditoría</button>
-    </div>
+    </div>`}
   </div>`;
 }
 function siguientePendiente(actual){
@@ -3050,11 +3050,11 @@ document.addEventListener("click", async ev => {
   if (t.id === "btnPausa"){ S.pausa = !S.pausa; pintar(); return; }
   if (t.id === "btnTema"){ cambiarTema(); return; }
   if (t.dataset.irDia){ S.vista = "validacion"; S.filtro = "todos"; S.dia = t.dataset.irDia; elegirEj(t.dataset.irEj || "todos"); S.accion = null; try { history.replaceState(null, "", "#validacion"); } catch(e){} pintar(); return; }
-  if (t.id === "btnModo"){ S.sel = null; S.muSel = null;
-    if (S.modo !== "eje"){ S._antesEje = { vista: S.vista, ej: S.ej }; S.modo = "eje"; S.vista = "miavance"; }
-    else { const a = S._antesEje || { vista: "directorio", ej: "todos" }; S.modo = "sup"; S.vista = a.vista; elegirEj(a.ej); }
+  if (t.id === "btnModo"){ S.sel = null; S.muSel = null; S.accion = null;
+    if (S.modo !== "eje"){ S._antesEje = { vista: S.vista, ej: S.ej, filtro: S.filtro, dia: S.dia }; S.modo = "eje"; S.vista = "miavance"; }
+    else { const a = S._antesEje || { vista: "directorio", ej: "todos" }; S.modo = "sup"; S.vista = a.vista; if (a.filtro) S.filtro = a.filtro; if (a.dia) S.dia = a.dia; elegirEj(a.ej); }
     pintar(); return; }
-  if (t.dataset.eje){ const k = t.dataset.eje; S.vista = k === "avance" ? "miavance" : k === "cartera" ? "cartera" : "mapa"; if (k === "alertas") S.muTab = "ale"; else if (k === "mapa") S.muTab = "dis"; S.muSel = null; S.sel = null; pintar(); return; }
+  if (t.dataset.eje){ const k = t.dataset.eje; S.vista = k === "avance" ? "miavance" : k === "cartera" ? "cartera" : k === "actividad" ? "validacion" : "mapa"; if (k === "actividad"){ S.filtro = "todos"; S.dia = "periodo"; S.accion = null; } if (k === "alertas") S.muTab = "ale"; else if (k === "mapa") S.muTab = "dis"; S.muSel = null; S.sel = null; pintar(); return; }
   if (t.dataset.vista){ S.vista = t.dataset.vista; if (t.dataset.tab) S.tab = t.dataset.tab; S.accion = null; try { history.replaceState(null, "", "#" + S.vista); } catch(e){} pintar(); return; }
   if (t.dataset.filtro){ S.filtro = t.dataset.filtro; S.sel = null; S.accion = null; pintar(); return; }
   if (t.dataset.sel){ if (ev.target.closest("input")) return; S.sel = t.dataset.sel; S.accion = null; pintar(); return; }
@@ -3104,6 +3104,7 @@ document.addEventListener("keydown", ev => {
   const l = filtradas(); const i = l.findIndex(v => v.id === S.sel);
   if (ev.key === "ArrowDown" && l[i+1]){ S.sel = l[i+1].id; S.accion = null; pintar(); ev.preventDefault(); }
   if (ev.key === "ArrowUp" && l[i-1]){ S.sel = l[i-1].id; S.accion = null; pintar(); ev.preventDefault(); }
+  if (S.modo === "eje") return;
   if (ev.key.toLowerCase() === "v" && S.sel){ const v = S.act.find(x=>x.id===S.sel); if (v && estadoDe(v) !== "anu" && estadoDe(v) !== "val") accion(S.sel, "val").then(ok => { if (ok){ toast("Validada."); if (S.filtro === "pend") siguientePendiente(S.sel); pintar(); } }); }
   if (ev.key.toLowerCase() === "o" && S.sel){ S.accion = "obs"; pintar(); $("#mSel")?.focus(); }
   if (ev.key.toLowerCase() === "a" && S.sel){ S.accion = "anu"; pintar(); $("#mSel")?.focus(); }
